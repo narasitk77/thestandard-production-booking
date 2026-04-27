@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.5.0] — 2026-04-27
+
+### Changed
+- **Authentication: Google OAuth (NextAuth.js)** replaces email-only login
+  - Google provider with `hd=thestandard.co` (Google Workspace hosted-domain hint)
+  - Server-side `signIn` callback rejects any non-`@thestandard.co` email
+  - JWT-based session strategy, 7-day expiry
+  - Sign-in page: single "Sign in with Google" button
+- **User auto-provisioning**: first sign-in creates a `User` row; `narasit.k@thestandard.co` is auto-promoted to ADMIN
+- Disabled accounts (`User.active = false`) blocked from sign-in
+- Middleware switched to `next-auth/jwt`'s `getToken`
+- All custom auth API routes (`/api/auth/login`, `/logout`, `/me`) replaced by `/api/auth/[...nextauth]`
+- `LogoutButton` now uses NextAuth's `signOut`
+
+### Required env vars (new)
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth 2.0 web client from Google Cloud Console
+- `NEXTAUTH_SECRET` — random 48+ char string
+- `NEXTAUTH_URL` — `https://production-booking-app.onrender.com`
+
+### Dependencies
+- `next-auth ^4.24.7`
+
+---
+
 ## [1.4.0] — 2026-04-27
 
 ### Added

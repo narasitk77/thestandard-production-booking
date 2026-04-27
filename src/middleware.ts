@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getToken } from 'next-auth/jwt'
 
-// Lightweight cookie presence check at the edge.
-// Full role validation happens in the route via getSession() (which uses Prisma).
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const hasSession = request.cookies.has('pb_session')
+
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
+  const hasSession = !!token?.email
 
   const isAuthRequired =
     pathname.startsWith('/admin') ||
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/upload') ||
-    pathname === '/' ||
-    pathname.startsWith('/my-bookings')
+    pathname.startsWith('/my-bookings') ||
+    pathname === '/'
 
   if (isAuthRequired && !hasSession) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    url.searchParams.set('next', pathname)
+    url.searchParams.set('callbackUrl', pathname)
     return NextResponse.redirect(url)
   }
 
