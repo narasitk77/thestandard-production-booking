@@ -44,8 +44,21 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
+# Copy Prisma CLI + tsx for migrations + seeding at startup
+COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/.bin/tsx ./node_modules/.bin/tsx
+COPY --from=builder /app/node_modules/tsx ./node_modules/tsx
+
+# Copy source files needed for seed script
+COPY --from=builder /app/src/lib/data.ts ./src/lib/data.ts
+
 # Create uploads directory
 RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
+
+# Startup script: migrate + seed + serve
+COPY --chown=nextjs:nodejs start.sh ./start.sh
+RUN chmod +x start.sh
 
 USER nextjs
 
@@ -54,4 +67,4 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+CMD ["./start.sh"]
