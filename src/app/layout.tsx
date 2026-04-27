@@ -18,8 +18,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <nav className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between text-sm">
           <span className="text-gray-600 font-medium">THE STANDARD · Production</span>
           <div className="flex gap-4">
+            <a href="/calendar" className="gf-link">Calendar</a>
             <a href="/dashboard" className="gf-link">Dashboard</a>
-            <a href="/upload" className="gf-link">Upload Footage</a>
+            <a href="/upload" className="gf-link">Upload</a>
+            <a href="/admin" className="text-[#db4437] text-sm hover:underline font-medium">Admin</a>
           </div>
         </nav>
         {children}

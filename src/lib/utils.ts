@@ -42,7 +42,8 @@ export function categoryLabel(cat: string): string {
 
 export function statusLabel(status: string): string {
   const map: Record<string, string> = {
-    PENDING: 'Pending',
+    REQUESTED: '[Requested]',
+    ASSIGNED: 'Assigned',
     CONFIRMED: 'Confirmed',
     CANCELLED: 'Cancelled',
     COMPLETED: 'Completed',
@@ -52,10 +53,11 @@ export function statusLabel(status: string): string {
 
 export function statusColor(status: string): string {
   const map: Record<string, string> = {
-    PENDING: 'bg-yellow-100 text-yellow-800',
-    CONFIRMED: 'bg-green-100 text-green-800',
-    CANCELLED: 'bg-red-100 text-red-800',
-    COMPLETED: 'bg-blue-100 text-blue-800',
+    REQUESTED: 'bg-red-100 text-red-700',
+    ASSIGNED: 'bg-yellow-100 text-yellow-700',
+    CONFIRMED: 'bg-green-100 text-green-700',
+    CANCELLED: 'bg-gray-100 text-gray-500',
+    COMPLETED: 'bg-blue-100 text-blue-700',
   }
   return map[status] ?? 'bg-gray-100 text-gray-800'
 }

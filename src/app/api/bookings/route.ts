@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateEpisodeId } from '@/lib/episode-id'
 import { getOutlet, getProgram } from '@/lib/data'
+import { appendBookingRow } from '@/lib/google-sheets'
 
 export async function GET(request: NextRequest) {
   try {
@@ -119,6 +120,7 @@ export async function POST(request: NextRequest) {
           crewRequired: crewRequired || [],
           agencyRef: agencyRef || null,
           notes: notes || null,
+          status: 'REQUESTED',
           outletId: outletDb.id,
           programId: programDb.id,
           episodes: {
@@ -138,6 +140,17 @@ export async function POST(request: NextRequest) {
       })
       return newBooking
     })
+
+    // Write to Google Sheets (non-blocking)
+    appendBookingRow({
+      ...booking,
+      shootDate: booking.shootDate,
+      createdAt: booking.createdAt,
+    }).then(rowIndex => {
+      if (rowIndex) {
+        prisma.booking.update({ where: { id: booking.id }, data: { sheetRowIndex: rowIndex } }).catch(() => {})
+      }
+    }).catch(() => {})
 
     return NextResponse.json({ booking }, { status: 201 })
   } catch (error) {

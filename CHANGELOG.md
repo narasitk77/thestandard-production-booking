@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3.0] — 2026-04-27
+
+### Added
+- **Admin Console** (`/admin`) — tab-filtered view of all bookings by status (REQUESTED / ASSIGNED / CONFIRMED / CANCELLED / COMPLETED)
+- **Admin Edit page** (`/admin/[id]`) — assign team members (videographers) by email with preset checkboxes + custom email input; admin notes; "Save & Send Email" sends Nodemailer assignment notifications
+- **Approve action** — creates a Google Calendar event (Bangkok timezone) and confirms the booking; event ID stored back to DB
+- **Google Sheets logging** — every new booking is appended to the master sheet (20 columns: IDs, dates, crew, status, calendar event ID); row index stored for later status updates
+- **Google Calendar embedding** (`/calendar`) — full-width iframe of the production calendar (Asia/Bangkok)
+- **Email notifications** — assignment email to crew + approval notification to producer via SMTP
+- **New booking status flow**: REQUESTED → ASSIGNED → CONFIRMED (CANCELLED / COMPLETED also supported)
+- Navigation links: Calendar, Dashboard, Upload, Admin added to top nav
+
+### Changed
+- Bookings now created with `status: REQUESTED` (was implicitly undefined)
+- `statusLabel()` and `statusColor()` updated for all 5 statuses
+
+### Dependencies added
+- `googleapis ^140.0.1` — Google Sheets + Calendar API
+- `nodemailer ^6.9.14` — SMTP email
+
+---
+
 ## [1.2.0] — 2026-04-27
 
 ### Changed

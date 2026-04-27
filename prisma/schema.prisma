@@ -22,7 +22,8 @@ enum Category {
 }
 
 enum BookingStatus {
-  PENDING
+  REQUESTED
+  ASSIGNED
   CONFIRMED
   CANCELLED
   COMPLETED
@@ -49,11 +50,11 @@ model Outlet {
 }
 
 model Program {
-  id       String   @id @default(cuid())
-  code     String   @db.VarChar(4)
+  id       String    @id @default(cuid())
+  code     String    @db.VarChar(4)
   name     String
   category String
-  outlet   Outlet   @relation(fields: [outletId], references: [id])
+  outlet   Outlet    @relation(fields: [outletId], references: [id])
   outletId String
   episodes Episode[]
   bookings Booking[]
@@ -63,27 +64,32 @@ model Program {
 }
 
 model Booking {
-  id              String        @id @default(cuid())
-  shootDate       DateTime      @db.Date
-  category        Category
-  shootType       ShootType
-  locationName    String?
-  callTime        String        @db.VarChar(5)
-  estimatedWrap   String?       @db.VarChar(5)
-  producer        String
-  creative        String[]
-  crewRequired    String[]
-  agencyRef       String?
-  notes           String?
-  status          BookingStatus @default(PENDING)
-  outlet          Outlet        @relation(fields: [outletId], references: [id])
-  outletId        String
-  program         Program       @relation(fields: [programId], references: [id])
-  programId       String
-  episodes        Episode[]
-  uploads         Upload[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  shootDate        DateTime      @db.Date
+  category         Category
+  shootType        ShootType
+  locationName     String?
+  callTime         String        @db.VarChar(5)
+  estimatedWrap    String?       @db.VarChar(5)
+  producer         String
+  creative         String[]
+  crewRequired     String[]
+  assignedEmails   String[]
+  agencyRef        String?
+  notes            String?
+  adminNotes       String?
+  status           BookingStatus @default(REQUESTED)
+  calendarEventId  String?
+  sheetRowIndex    Int?
+  approvedAt       DateTime?
+  outlet           Outlet        @relation(fields: [outletId], references: [id])
+  outletId         String
+  program          Program       @relation(fields: [programId], references: [id])
+  programId        String
+  episodes         Episode[]
+  uploads          Upload[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@map("bookings")
 }
