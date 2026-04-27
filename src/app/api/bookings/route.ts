@@ -45,7 +45,6 @@ export async function GET(request: NextRequest) {
           outlet: true,
           program: true,
           episodes: { orderBy: { sequence: 'asc' } },
-          uploads: true,
         },
         orderBy: [{ shootDate: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * limit,
