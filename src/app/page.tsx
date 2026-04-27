@@ -1,147 +1,409 @@
-import Link from 'next/link'
-import { OUTLETS } from '@/lib/data'
-import { ArrowRight, Film, Calendar, Upload, LayoutDashboard } from 'lucide-react'
+'use client'
 
-export default function HomePage() {
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { OUTLETS, PRODUCERS, CREW_OPTIONS } from '@/lib/data'
+
+const CATEGORIES = ['Recurring', 'Agency Job', 'Service Job', 'Internal']
+const SHOOT_TYPES = ['Studio', 'On Location', 'Remote / Online', 'Event']
+const SHOOT_TYPE_VALUES: Record<string, string> = {
+  'Studio': 'STUDIO',
+  'On Location': 'ON_LOCATION',
+  'Remote / Online': 'REMOTE_ONLINE',
+  'Event': 'EVENT',
+}
+const CATEGORY_VALUES: Record<string, string> = {
+  'Recurring': 'RECURRING',
+  'Agency Job': 'AGENCY_JOB',
+  'Service Job': 'SERVICE_JOB',
+  'Internal': 'INTERNAL',
+}
+
+export default function BookingForm() {
+  const router = useRouter()
+
+  const [outletCode, setOutletCode] = useState('')
+  const [programCode, setProgramCode] = useState('')
+  const [shootDate, setShootDate] = useState('')
+  const [category, setCategory] = useState('Recurring')
+  const [shootType, setShootType] = useState('Studio')
+  const [locationName, setLocationName] = useState('')
+  const [callTime, setCallTime] = useState('')
+  const [estimatedWrap, setEstimatedWrap] = useState('')
+  const [producer, setProducer] = useState('')
+  const [creative, setCreative] = useState('')
+  const [crew, setCrew] = useState<string[]>([])
+  const [agencyRef, setAgencyRef] = useState('')
+  const [notes, setNotes] = useState('')
+  const [epCount, setEpCount] = useState(1)
+  const [epTitles, setEpTitles] = useState<string[]>([''])
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const selectedOutlet = OUTLETS.find(o => o.code === outletCode)
+  const programs = selectedOutlet?.programs ?? []
+
+  const handleOutletChange = (code: string) => {
+    setOutletCode(code)
+    setProgramCode('')
+  }
+
+  const handleEpCountChange = (n: number) => {
+    setEpCount(n)
+    setEpTitles(prev => {
+      const next = [...prev]
+      while (next.length < n) next.push('')
+      return next.slice(0, n)
+    })
+  }
+
+  const toggleCrew = (c: string) =>
+    setCrew(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    if (!outletCode || !programCode || !shootDate || !producer) {
+      setError('Please fill in all required fields.')
+      return
+    }
+    if (epTitles.some(t => !t.trim())) {
+      setError('Please fill in all episode titles.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outletCode,
+          programCode,
+          shootDate,
+          category: CATEGORY_VALUES[category],
+          shootType: SHOOT_TYPE_VALUES[shootType],
+          locationName: locationName || null,
+          callTime,
+          estimatedWrap: estimatedWrap || null,
+          producer,
+          creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
+          crewRequired: crew,
+          agencyRef: agencyRef || null,
+          notes: notes || null,
+          episodeTitles: epTitles.map(t => t.trim()),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed')
+      router.push(`/booking/success?id=${data.booking.id}`)
+    } catch (err: any) {
+      setError(err.message)
+      setSubmitting(false)
+    }
+  }
+
+  const needsLocation = shootType !== 'Studio'
+  const isAgency = category === 'Agency Job'
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      {/* Hero */}
-      <div className="mb-10">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-brand-gold/10 text-brand-gold text-xs font-medium rounded-full mb-4">
-          <span className="w-1.5 h-1.5 rounded-full bg-brand-gold"></span>
-          Production Pipeline · Phase 1
-        </div>
-        <h1 className="text-3xl font-bold text-brand-black mb-2">
-          Production Booking
-        </h1>
-        <p className="text-brand-gray-500 max-w-xl">
-          Book a shoot once — Episode ID generates automatically.
-          ข้อมูลเดินทางได้ด้วยตัวเอง จาก Booking ถึง Folder
-        </p>
-      </div>
+    <div className="max-w-[640px] mx-auto px-4 py-8 space-y-3">
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12">
-        <Link
-          href="/dashboard"
-          className="card p-5 flex items-center gap-4 hover:border-brand-gray-300 transition-colors group"
-        >
-          <div className="p-2.5 bg-brand-gray-100 rounded-lg group-hover:bg-brand-black transition-colors">
-            <LayoutDashboard className="w-5 h-5 text-brand-gray-600 group-hover:text-white transition-colors" />
-          </div>
-          <div>
-            <div className="font-medium text-sm text-brand-black">Dashboard</div>
-            <div className="text-xs text-brand-gray-500">View all bookings</div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-brand-gray-400 ml-auto" />
-        </Link>
-
-        <Link
-          href="/upload"
-          className="card p-5 flex items-center gap-4 hover:border-brand-gray-300 transition-colors group"
-        >
-          <div className="p-2.5 bg-brand-gray-100 rounded-lg group-hover:bg-brand-black transition-colors">
-            <Upload className="w-5 h-5 text-brand-gray-600 group-hover:text-white transition-colors" />
-          </div>
-          <div>
-            <div className="font-medium text-sm text-brand-black">Upload Footage</div>
-            <div className="text-xs text-brand-gray-500">Log files by Episode ID</div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-brand-gray-400 ml-auto" />
-        </Link>
-
-        <div className="card p-5 flex items-center gap-4 bg-brand-black text-white border-brand-black">
-          <div className="p-2.5 bg-brand-gray-800 rounded-lg">
-            <Film className="w-5 h-5 text-brand-gold" />
-          </div>
-          <div>
-            <div className="font-medium text-sm">56 Programs</div>
-            <div className="text-xs text-brand-gray-400">9 Outlets registered</div>
-          </div>
+      {/* Header card */}
+      <div className="gf-header p-6">
+        <h1 className="text-3xl font-normal text-gray-800 mb-1">PRODUCTION BOOKING</h1>
+        <p className="text-sm text-gray-500">ระบบการ Booking การผลิตของ THE STANDARD</p>
+        <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-[#db4437]">
+          * Indicates required question
         </div>
       </div>
 
-      {/* Outlet grid */}
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-base font-semibold text-brand-black">Select Outlet to Book</h2>
-        <span className="text-xs text-brand-gray-400">กดปุ่ม Outlet เพื่อเริ่ม Booking</span>
-      </div>
+      {error && (
+        <div className="gf-card p-4 text-sm text-[#db4437] border-l-4 border-[#db4437]">
+          {error}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {OUTLETS.sort((a, b) => a.sort - b.sort).map((outlet) => (
-          <Link
-            key={outlet.code}
-            href={`/booking/${outlet.code.toLowerCase()}`}
-            className={`card p-6 border-2 ${outlet.borderColor} ${outlet.bgColor} hover:shadow-md transition-all group relative overflow-hidden`}
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className={`text-xs font-mono font-bold ${outlet.color} mb-1`}>{outlet.code}</div>
-                <div className="text-lg font-bold text-brand-black">{outlet.name}</div>
-                <div className="text-xs text-brand-gray-500 mt-0.5">{outlet.description}</div>
-              </div>
-              <ArrowRight className={`w-5 h-5 ${outlet.color} opacity-0 group-hover:opacity-100 transition-opacity mt-1`} />
-            </div>
+      <form onSubmit={handleSubmit} className="space-y-3">
 
-            <div className="flex items-center justify-between">
-              <div className="flex flex-wrap gap-1">
-                {outlet.programs.slice(0, 3).map(p => (
-                  <span
-                    key={p.code}
-                    className="text-xs px-2 py-0.5 bg-white/70 rounded text-brand-gray-600 font-mono"
-                  >
-                    {p.code}
-                  </span>
-                ))}
-                {outlet.programs.length > 3 && (
-                  <span className="text-xs px-2 py-0.5 bg-white/70 rounded text-brand-gray-400">
-                    +{outlet.programs.length - 3}
-                  </span>
-                )}
-              </div>
-              <span className="text-xs text-brand-gray-400">{outlet.programs.length} programs</span>
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-white/50">
-              <span className={`text-sm font-medium ${outlet.color} group-hover:underline`}>
-                Book — {outlet.name} →
-              </span>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* Episode ID explainer */}
-      <div className="mt-12 card p-6 border-2 border-brand-gold/30 bg-brand-gold/5">
-        <div className="flex items-start gap-4">
-          <div className="p-2 bg-brand-gold/10 rounded-lg">
-            <Calendar className="w-5 h-5 text-brand-gold" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-brand-black mb-1">Episode ID Format</h3>
-            <div className="font-mono text-xl font-bold text-brand-black mb-3 tracking-wider">
-              TSS–260423–EXE–01
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              {[
-                { label: 'TSS', desc: 'Outlet Code' },
-                { label: '260423', desc: 'Shoot Date (YYMMDD)' },
-                { label: 'EXE', desc: 'Program Code' },
-                { label: '01', desc: 'Episode Sequence' },
-              ].map(item => (
-                <div key={item.label} className="bg-white rounded-lg p-2 border border-brand-gray-200">
-                  <div className="font-mono font-bold text-brand-black">{item.label}</div>
-                  <div className="text-brand-gray-500">{item.desc}</div>
-                </div>
+        {/* OUTLET */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            OUTLET <span className="gf-required">*</span>
+          </label>
+          <div className="relative">
+            <select
+              className="gf-select pr-6"
+              value={outletCode}
+              onChange={e => handleOutletChange(e.target.value)}
+              required
+            >
+              <option value="">— Select Outlet —</option>
+              {OUTLETS.map(o => (
+                <option key={o.code} value={o.code}>{o.name}</option>
               ))}
-            </div>
-            <p className="text-xs text-brand-gray-500 mt-3">
-              ID ปรากฏบน Calendar event · ชื่อโฟลเดอร์ใน Drive/NAS · Airtable record —
-              ถ้ารู้ ID ก็หาทุกอย่างเจอ
-            </p>
+            </select>
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
           </div>
         </div>
-      </div>
+
+        {/* PROGRAM */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            PROGRAM <span className="gf-required">*</span>
+          </label>
+          <div className="relative">
+            <select
+              className="gf-select pr-6"
+              value={programCode}
+              onChange={e => setProgramCode(e.target.value)}
+              required
+              disabled={!outletCode}
+            >
+              <option value="">{outletCode ? '— Select Program —' : '— Select Outlet first —'}</option>
+              {programs.map(p => (
+                <option key={p.code} value={p.code}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+          </div>
+        </div>
+
+        {/* SHOOT DATE */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            SHOOT DATE <span className="gf-required">*</span>
+          </label>
+          <input
+            type="date"
+            className="gf-input"
+            value={shootDate}
+            onChange={e => setShootDate(e.target.value)}
+            min={new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
+            required
+          />
+        </div>
+
+        {/* CATEGORY */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            CATEGORY <span className="gf-required">*</span>
+          </label>
+          {CATEGORIES.map(c => (
+            <label key={c} className="gf-option">
+              <input
+                type="radio"
+                name="category"
+                value={c}
+                checked={category === c}
+                onChange={() => setCategory(c)}
+                className="accent-[#673ab7]"
+              />
+              <span className="text-sm text-gray-700">{c}</span>
+            </label>
+          ))}
+        </div>
+
+        {/* SHOOT TYPE */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            SHOOT TYPE <span className="gf-required">*</span>
+          </label>
+          {SHOOT_TYPES.map(t => (
+            <label key={t} className="gf-option">
+              <input
+                type="radio"
+                name="shootType"
+                value={t}
+                checked={shootType === t}
+                onChange={() => setShootType(t)}
+                className="accent-[#673ab7]"
+              />
+              <span className="text-sm text-gray-700">{t}</span>
+            </label>
+          ))}
+        </div>
+
+        {/* LOCATION (conditional) */}
+        {needsLocation && (
+          <div className="gf-card p-6">
+            <label className="gf-label">
+              LOCATION NAME <span className="gf-required">*</span>
+            </label>
+            <input
+              type="text"
+              className="gf-input"
+              placeholder="e.g. Grand Hyatt, Client Office, Studio B"
+              value={locationName}
+              onChange={e => setLocationName(e.target.value)}
+              required
+            />
+          </div>
+        )}
+
+        {/* TIME */}
+        <div className="gf-card p-6 grid grid-cols-2 gap-6">
+          <div>
+            <label className="gf-label">
+              CALL TIME <span className="gf-required">*</span>
+            </label>
+            <input
+              type="time"
+              className="gf-input"
+              value={callTime}
+              onChange={e => setCallTime(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="gf-label">ESTIMATED WRAP</label>
+            <input
+              type="time"
+              className="gf-input"
+              value={estimatedWrap}
+              onChange={e => setEstimatedWrap(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* NUMBER OF EPISODES */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            NUMBER OF EPISODES <span className="gf-required">*</span>
+          </label>
+          <div className="relative mb-4">
+            <select
+              className="gf-select pr-6"
+              value={epCount}
+              onChange={e => handleEpCountChange(Number(e.target.value))}
+            >
+              {Array.from({ length: 20 }, (_, i) => i + 1).map(n => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+          </div>
+          {epTitles.map((title, idx) => (
+            <div key={idx} className="mb-3">
+              <label className="text-xs text-gray-500 mb-1 block">
+                EP {idx + 1} TITLE <span className="gf-required">*</span>
+              </label>
+              <input
+                type="text"
+                className="gf-input"
+                placeholder={`Episode ${idx + 1} title`}
+                value={title}
+                onChange={e => {
+                  const next = [...epTitles]
+                  next[idx] = e.target.value
+                  setEpTitles(next)
+                }}
+                required
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* PRODUCER */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            PRODUCER <span className="gf-required">*</span>
+          </label>
+          <div className="relative">
+            <select
+              className="gf-select pr-6"
+              value={producer}
+              onChange={e => setProducer(e.target.value)}
+              required
+            >
+              <option value="">— Select Producer —</option>
+              {PRODUCERS.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+          </div>
+        </div>
+
+        {/* CREATIVE / HOST */}
+        <div className="gf-card p-6">
+          <label className="gf-label">CREATIVE / HOST</label>
+          <input
+            type="text"
+            className="gf-input"
+            placeholder="e.g. Ken, แนน  (comma separated)"
+            value={creative}
+            onChange={e => setCreative(e.target.value)}
+          />
+        </div>
+
+        {/* CREW */}
+        <div className="gf-card p-6">
+          <label className="gf-label">CREW REQUIRED</label>
+          {CREW_OPTIONS.map(c => (
+            <label key={c} className="gf-option">
+              <input
+                type="checkbox"
+                checked={crew.includes(c)}
+                onChange={() => toggleCrew(c)}
+                className="accent-[#673ab7]"
+              />
+              <span className="text-sm text-gray-700">{c}</span>
+            </label>
+          ))}
+        </div>
+
+        {/* AGENCY REF (conditional) */}
+        {isAgency && (
+          <div className="gf-card p-6">
+            <label className="gf-label">
+              AGENCY REFERENCE <span className="gf-required">*</span>
+            </label>
+            <input
+              type="text"
+              className="gf-input"
+              placeholder="e.g. QU-3108"
+              value={agencyRef}
+              onChange={e => setAgencyRef(e.target.value)}
+              required
+            />
+          </div>
+        )}
+
+        {/* NOTES */}
+        <div className="gf-card p-6">
+          <label className="gf-label">NOTES</label>
+          <textarea
+            className="gf-input resize-none"
+            rows={3}
+            placeholder="Additional notes for the coordinator..."
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+          />
+        </div>
+
+        {/* Submit */}
+        <div className="flex items-center justify-between py-2">
+          <button type="submit" disabled={submitting} className="gf-submit">
+            {submitting ? 'Submitting...' : 'Submit'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOutletCode(''); setProgramCode(''); setShootDate('')
+              setCategory('Recurring'); setShootType('Studio')
+              setLocationName(''); setCallTime(''); setEstimatedWrap('')
+              setProducer(''); setCreative(''); setCrew([])
+              setAgencyRef(''); setNotes(''); setEpCount(1); setEpTitles([''])
+            }}
+            className="text-sm text-[#673ab7] hover:underline"
+          >
+            Clear form
+          </button>
+        </div>
+
+      </form>
     </div>
   )
 }

@@ -3,45 +3,52 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --font-sans: 'Inter', system-ui, sans-serif;
-  }
-
-  html {
-    font-family: var(--font-sans);
-  }
-
-  body {
-    @apply bg-brand-gray-50 text-brand-gray-900;
-  }
+  html { font-family: 'Google Sans', Roboto, Arial, sans-serif; }
+  body { @apply bg-[#F0EBF8] min-h-screen; }
 }
 
 @layer components {
-  .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-brand-black text-white text-sm font-medium rounded-lg hover:bg-brand-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  /* Google Form card */
+  .gf-card {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden;
   }
 
-  .btn-secondary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-white text-brand-gray-700 text-sm font-medium rounded-lg border border-brand-gray-200 hover:bg-brand-gray-50 transition-colors;
+  /* Header card – red accent top bar */
+  .gf-header {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden border-t-8 border-t-[#db4437];
   }
 
-  .btn-gold {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-brand-gold text-white text-sm font-medium rounded-lg hover:bg-brand-gold-light hover:text-brand-black transition-colors;
+  /* Underline-style input */
+  .gf-input {
+    @apply w-full border-0 border-b border-gray-300 focus:border-b-2 focus:border-[#673ab7] outline-none bg-transparent py-1 text-sm text-gray-800 placeholder:text-gray-400 transition-colors;
   }
 
-  .card {
-    @apply bg-white rounded-xl border border-brand-gray-200 shadow-sm;
+  .gf-select {
+    @apply w-full border-0 border-b border-gray-300 focus:border-b-2 focus:border-[#673ab7] outline-none bg-transparent py-1 text-sm text-gray-800 transition-colors appearance-none cursor-pointer;
   }
 
-  .input {
-    @apply w-full px-3 py-2 text-sm border border-brand-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-gold focus:border-transparent placeholder:text-brand-gray-400;
+  .gf-label {
+    @apply block text-sm text-gray-700 mb-3;
   }
 
-  .label {
-    @apply block text-sm font-medium text-brand-gray-700 mb-1;
+  .gf-required {
+    @apply text-[#db4437] ml-0.5;
+  }
+
+  /* Radio / Checkbox row */
+  .gf-option {
+    @apply flex items-center gap-3 py-1.5 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded;
+  }
+
+  .gf-submit {
+    @apply px-6 py-2 bg-[#673ab7] text-white text-sm font-medium rounded hover:bg-[#512da8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .gf-link {
+    @apply text-[#1a73e8] text-sm hover:underline;
   }
 
   .episode-badge {
-    @apply inline-flex items-center px-2.5 py-1 rounded-md bg-brand-black text-white text-xs font-mono font-medium tracking-wide;
+    @apply inline-flex items-center px-2 py-0.5 rounded bg-gray-800 text-white text-xs font-mono;
   }
 }

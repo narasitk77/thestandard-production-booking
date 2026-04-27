@@ -1,99 +1,100 @@
-# THE STANDARD — Production Booking Platform
+# THE STANDARD — Production Booking
 
-> Production Pipeline: Booking → Episode ID → Calendar → Drive/NAS → Mimir
+> ระบบ Booking การผลิต | Episode ID auto-generation | Calendar Packet for Coordinator
 
-**Version**: 1.0.0 · **Phase**: 1 · **Owner**: ปุ๊ก
+**Live**: https://production-booking-app.onrender.com  
+**Version**: 1.2.0 · **Phase**: 1
 
 ---
 
-## What This Does
+## What it does
 
-Single-entry booking system that auto-generates structured Episode IDs and calendar packets for THE STANDARD video production team.
+Producer กรอก Booking ครั้งเดียว → ระบบ generate Episode ID → สร้าง Calendar Packet ให้พี่ตุ้ย copy-paste
 
-- **Menu page** — 9 outlet entry points (NWS, WLT, SPT, POP, POD, KND, LIF, TSS, AGN)
-- **Booking form** — 16 fields, conditional logic, dropdown-locked
-- **Episode ID generation** — `[OUT]-[YYMMDD]-[PROG]-[EE]` (e.g. `TSS-260423-EXE-01`)
-- **Calendar packet** — copy-paste ready for Production Coordinator (พี่ตุ้ย)
-- **Dashboard** — coordinator view of all bookings
-- **Upload platform** — footage logging by Episode ID + camera slot
+| Feature | Detail |
+|---------|--------|
+| Booking form | Google Form-style, single page, cascade dropdowns |
+| Outlets | 9 outlets (NWS, WLT, SPT, POP, POD, KND, LIF, TSS, AGN) |
+| Programs | 56 programs, dropdown filtered by outlet |
+| Episode ID | `[OUT]-[YYMMDD]-[PROG]-[EE]` e.g. `TSS-260423-EXE-01` |
+| Calendar Packet | Auto-generated, copy-paste ready for coordinator |
+| Dashboard | Search, filter by outlet/status, booking detail |
+| Upload platform | Log footage by Episode ID + camera slot |
 
-## Episode ID Format
+## Episode ID Rules
 
 ```
 TSS  -  260423  -  EXE  -  01
  │         │        │       │
-OUT    YYMMDD    PROG     Sequence
+OUT    YYMMDD    PROG    Sequence
 ```
 
-**Rules:**
 1. **Immutable** — never rename after creation
-2. **Folder-only policy** — ID on folder name, files keep original camera names
+2. **Folder-only** — ID on folder name only; files keep original camera names
 
-## Quick Start (Local)
+## Pages
+
+| URL | Description |
+|-----|-------------|
+| `/` | Booking form (Google Form style) |
+| `/booking/success` | Confirmation + Episode IDs + Calendar Packet |
+| `/dashboard` | All bookings — search, filter, manage |
+| `/dashboard/[id]` | Booking detail + status actions + upload log |
+| `/upload` | Footage upload — log files by Episode ID + camera |
+
+## Local Development
 
 ```bash
+# 1. Copy env
 cp .env.example .env
-# Edit .env with your database credentials
+# Edit DATABASE_URL
 
+# 2. Install + setup DB
 npm install
 npx prisma db push
-npm run db:seed
+npx tsx prisma/seed.ts
+
+# 3. Run
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open http://localhost:3000
 
-## Docker (Portainer)
+## Docker / Portainer
 
 ```bash
 cp .env.production .env
-# Edit .env — set POSTGRES_PASSWORD and NEXT_PUBLIC_APP_URL
+# Edit POSTGRES_PASSWORD and NEXT_PUBLIC_APP_URL
 
 docker compose up -d
 ```
 
-The `migrate` service runs automatically on first start to create tables and seed the 56 programs.
+Container auto-runs `prisma db push` + seed on every boot (idempotent).
 
-Services:
-- **app** → port 3000 (Next.js)
-- **nginx** → port 80 (reverse proxy)
-- **db** → PostgreSQL 16 (internal only)
+Services: `app` (port 3000) · `nginx` (port 80) · `db` (PostgreSQL 16, internal)
 
-## Portainer Deployment
+## Render Deployment
 
-1. In Portainer → Stacks → Add Stack
-2. Upload `docker-compose.yml` or paste its contents
-3. Add environment variables from `.env.production`
-4. Deploy
+Push to `main` → Render auto-deploys.
 
-## Project Structure
+- Web service: `srv-d7ng9kdckfvc73evd6j0`
+- PostgreSQL: `dpg-d7neua57vvec739364k0-a` (free tier — **expires 2026-05-27**)
+- Region: Singapore
 
-```
-src/
-├── app/
-│   ├── page.tsx                # Menu — 9 outlet cards
-│   ├── booking/[outlet]/       # Per-outlet booking form
-│   ├── booking/success/        # Confirmation + calendar packet
-│   ├── dashboard/              # Coordinator booking list
-│   ├── dashboard/[id]/         # Booking detail + actions
-│   ├── upload/                 # Footage upload (MVP)
-│   └── api/
-│       ├── bookings/           # CRUD + Episode ID generation
-│       └── upload/             # Multipart file upload
-├── lib/
-│   ├── data.ts                 # 9 outlets × 56 programs master data
-│   ├── episode-id.ts           # ID generator function
-│   ├── utils.ts                # Formatters + calendar packet builder
-│   └── db.ts                   # Prisma singleton
-prisma/
-│   ├── schema.prisma           # DB schema
-│   └── seed.ts                 # Seed outlets + programs
-```
+## Stack
 
-## Outlets & Programs (56 total)
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 14 · TypeScript · App Router |
+| Database | PostgreSQL 16 · Prisma ORM |
+| Styling | Tailwind CSS (Google Form aesthetic) |
+| Container | Docker · docker-compose · Nginx |
+| Hosting | Render (Singapore) |
 
-| Code | Outlet | Programs |
-|------|--------|----------|
+## Outlets & Programs
+
+| Code | Name | Programs |
+|------|------|----------|
 | NWS | News | 8 |
 | WLT | Wealth | 5 |
 | SPT | Sport | 4 |
@@ -104,20 +105,15 @@ prisma/
 | TSS | The Secret Sauce | 14 |
 | AGN | Content Agency | 3 |
 
-## Tech Stack
+## Roadmap (Phase 2+)
 
-- **Framework**: Next.js 14 (App Router, TypeScript)
-- **Database**: PostgreSQL + Prisma ORM
-- **Styling**: Tailwind CSS
-- **Container**: Docker + docker-compose
-- **Proxy**: Nginx
-
-## Phase 2+ Roadmap
-
-- [ ] Shot Log for multi-program cards (Event exception)
-- [ ] Cascade dropdown upgrade (Apps Script Web App)
-- [ ] Bulk upload + resumable upload
-- [ ] Airtable API push
-- [ ] Google Calendar event creation
-- [ ] Proxy workflow + MAM-native search
+- [ ] Airtable API push (auto-create Production Projects record)
+- [ ] Google Calendar event packet (direct API, not copy-paste)
+- [ ] Shot Log for multi-program exceptions (Event cards)
+- [ ] Bulk + resumable footage upload
+- [ ] Proxy workflow & MAM-native search
 - [ ] Delivery tracker dashboard
+
+---
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.

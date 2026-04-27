@@ -1,60 +1,28 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'] })
-
 export const metadata: Metadata = {
-  title: 'THE STANDARD — Production Booking',
-  description: 'Production Pipeline: Booking to Episode ID to Folder',
+  title: 'Production Booking — THE STANDARD',
+  description: 'ระบบ Production Booking ของ THE STANDARD',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="th">
-      <body className={inter.className}>
-        <div className="min-h-screen flex flex-col">
-          <header className="bg-brand-black text-white sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex items-center justify-between h-14">
-                <a href="/" className="flex items-center gap-3">
-                  <span className="text-brand-gold font-bold text-lg tracking-tight">THE STANDARD</span>
-                  <span className="text-brand-gray-400 text-sm hidden sm:block">Production Booking</span>
-                </a>
-                <nav className="flex items-center gap-1">
-                  <a
-                    href="/"
-                    className="px-3 py-1.5 text-sm text-brand-gray-300 hover:text-white hover:bg-brand-gray-800 rounded-md transition-colors"
-                  >
-                    Book
-                  </a>
-                  <a
-                    href="/dashboard"
-                    className="px-3 py-1.5 text-sm text-brand-gray-300 hover:text-white hover:bg-brand-gray-800 rounded-md transition-colors"
-                  >
-                    Dashboard
-                  </a>
-                  <a
-                    href="/upload"
-                    className="px-3 py-1.5 text-sm text-brand-gray-300 hover:text-white hover:bg-brand-gray-800 rounded-md transition-colors"
-                  >
-                    Upload
-                  </a>
-                </nav>
-              </div>
-            </div>
-          </header>
-          <main className="flex-1">{children}</main>
-          <footer className="bg-brand-black text-brand-gray-500 text-xs py-4 text-center">
-            <div className="max-w-7xl mx-auto px-4">
-              THE STANDARD Production Pipeline · Phase 1 · v1.0.0
-            </div>
-          </footer>
-        </div>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+      </head>
+      <body>
+        <nav className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between text-sm">
+          <span className="text-gray-600 font-medium">THE STANDARD · Production</span>
+          <div className="flex gap-4">
+            <a href="/dashboard" className="gf-link">Dashboard</a>
+            <a href="/upload" className="gf-link">Upload Footage</a>
+          </div>
+        </nav>
+        {children}
       </body>
     </html>
   )
