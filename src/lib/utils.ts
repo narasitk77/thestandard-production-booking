@@ -1,6 +1,5 @@
 import { clsx, type ClassValue } from 'clsx'
 import { format, parseISO } from 'date-fns'
-import { th } from 'date-fns/locale'
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
@@ -8,7 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatThaiDate(date: Date | string): string {
   const d = typeof date === 'string' ? parseISO(date) : date
-  return format(d, 'd MMM yyyy', { locale: th })
+  return format(d, 'd MMM yyyy')
 }
 
 export function formatDate(date: Date | string): string {
