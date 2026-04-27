@@ -65,7 +65,7 @@ export default function DashboardPage() {
         <select className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[#673ab7]"
           value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}>
           <option value="">All Status</option>
-          {['PENDING','CONFIRMED','COMPLETED','CANCELLED'].map(s =>
+          {['REQUESTED','ASSIGNED','CONFIRMED','COMPLETED','CANCELLED'].map(s =>
             <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>)}
         </select>
       </div>

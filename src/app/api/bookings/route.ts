@@ -3,17 +3,36 @@ import { prisma } from '@/lib/db'
 import { generateEpisodeId } from '@/lib/episode-id'
 import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
+import { getSession } from '@/lib/session'
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await getSession()
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') ?? '1')
     const limit = parseInt(searchParams.get('limit') ?? '20')
     const status = searchParams.get('status')
     const outlet = searchParams.get('outlet')
     const date = searchParams.get('date')
+    const scope = searchParams.get('scope') // 'mine' | 'all'
+
+    // Non-admins always restricted to their own bookings + confirmed bookings
+    const userFilter = session.role === 'ADMIN' && scope !== 'mine'
+      ? {}
+      : {
+          OR: [
+            { createdByEmail: session.email },
+            { assignedEmails: { has: session.email } },
+            ...(scope === 'mine' ? [] : [{ status: 'CONFIRMED' as const }]),
+          ],
+        }
 
     const where = {
+      ...userFilter,
       ...(status && { status: status as any }),
       ...(outlet && { outlet: { code: outlet } }),
       ...(date && { shootDate: new Date(date) }),
@@ -44,6 +63,10 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getSession()
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
     const body = await request.json()
     const {
       outletCode,
@@ -121,6 +144,7 @@ export async function POST(request: NextRequest) {
           agencyRef: agencyRef || null,
           notes: notes || null,
           status: 'REQUESTED',
+          createdByEmail: session.email,
           outletId: outletDb.id,
           programId: programDb.id,
           episodes: {

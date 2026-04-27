@@ -5,6 +5,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.4.0] — 2026-04-27
+
+### Added
+- **Authentication system** — email-based login with signed cookie session (HMAC-SHA256, 7-day expiry); only `@thestandard.co` accounts allowed
+- **Role-based access control**: `USER` and `ADMIN` roles in DB
+- **Initial admin bootstrap**: `narasit.k@thestandard.co` auto-promoted on first login
+- **Admin-only routes**: `/dashboard` and `/admin` now require `ADMIN` role (server-side guard)
+- **`/my-bookings`** — per-user view: bookings they requested or are assigned to + all CONFIRMED bookings, with tabs
+- **`/admin/permissions`** — list users, promote/demote between USER/ADMIN, enable/disable accounts, add users by email; self-demotion lockout protection
+- **Login page** at `/login` with `next=` redirect param
+- **Layout**: shows logged-in email + Sign out button; admin-only nav links hidden for non-admins
+- **Booking ownership**: `Booking.createdByEmail` captured from session; users see their own + assigned + confirmed
+- API: `POST/PATCH/GET /api/admin/users`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
+- Edge middleware redirects unauthenticated requests to `/login`
+
+### Fixed
+- **Dashboard detail page crash** — replaced legacy `card`/`btn-primary`/`text-brand-*` classes (removed in v1.2.0) with current `gf-*` design system
+- **BigInt JSON serialization** — `Upload.fileSize` now serialized as string in `GET /api/bookings/[id]` (Next.js `JSON.stringify` cannot serialize BigInt)
+- **Dashboard list status filter** — replaced obsolete `PENDING` option with `REQUESTED` / `ASSIGNED` (matches new BookingStatus enum)
+
+### Schema
+- New `User` model + `UserRole` enum
+- `Booking.createdByEmail String?` (new)
+
+### Dependencies
+- No new packages — auth uses Node's built-in `crypto.createHmac`
+
+---
+
+## [1.3.1] — 2026-04-27
+
+### Added
+- Admin assign panel: full team list (videographers, directors, sound, photographer, switcher) loaded from THE STANDARD employee directory
+- Freelance section: name + contract no. + optional email, supports unlimited freelancers per booking; saved into Admin Notes
+
+---
+
 ## [1.3.0] — 2026-04-27
 
 ### Added

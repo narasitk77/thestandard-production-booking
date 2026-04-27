@@ -20,7 +20,16 @@ export async function GET(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ booking })
+    // Serialize BigInt fileSize to string (JSON can't handle BigInt)
+    const safeBooking = {
+      ...booking,
+      uploads: booking.uploads.map(u => ({
+        ...u,
+        fileSize: u.fileSize === null ? null : u.fileSize.toString(),
+      })),
+    }
+
+    return NextResponse.json({ booking: safeBooking })
   } catch (error) {
     console.error('GET /api/bookings/[id] error:', error)
     return NextResponse.json({ error: 'Failed to fetch booking' }, { status: 500 })

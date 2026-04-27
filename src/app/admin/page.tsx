@@ -49,7 +49,12 @@ export default function AdminPage() {
       <div className="mb-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-normal text-gray-800">Admin Console</h1>
-          <Link href="/" className="gf-submit text-sm">+ New Booking</Link>
+          <div className="flex gap-2">
+            <Link href="/admin/permissions" className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">
+              Permissions
+            </Link>
+            <Link href="/" className="gf-submit text-sm">+ New Booking</Link>
+          </div>
         </div>
         <p className="text-sm text-gray-500 mt-1">
           Review, assign crew, and approve bookings → Google Calendar

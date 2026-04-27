@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { sendAssignmentEmail } from '@/lib/email'
 import { updateBookingRow } from '@/lib/google-sheets'
+import { requireAdmin } from '@/lib/session'
 import { format } from 'date-fns'
 
 export async function POST(
@@ -9,6 +10,9 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!(await requireAdmin())) {
+      return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+    }
     const { assignedEmails, adminNotes } = await request.json()
 
     const booking = await prisma.booking.update({
