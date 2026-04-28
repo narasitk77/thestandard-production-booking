@@ -100,8 +100,8 @@ export async function GET(request: NextRequest) {
       totalOT += s.otHours
     }
     // Also include any non-team-profile users with records
-    for (const [email, s] of summary.entries()) {
-      if (TEAM_PROFILES.find(p => p.email.toLowerCase() === email)) continue
+    Array.from(summary.entries()).forEach(([email, s]) => {
+      if (TEAM_PROFILES.find(p => p.email.toLowerCase() === email)) return
       const u = userMap.get(email)
       rows.push([
         String(i++),
@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
       ])
       totalHoliday += s.holidayDays
       totalOT += s.otHours
-    }
+    })
 
     rows.push(['รวมจำนวนวันทำงาน', '', '', '', String(totalHoliday), String(totalOT), '', ''])
     rows.push(['', '', '', '', '', '', '', ''])
