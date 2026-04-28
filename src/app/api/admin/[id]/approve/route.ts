@@ -26,6 +26,9 @@ export async function POST(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 
+    // Allow re-running on CONFIRMED bookings if calendar event is missing (retry path)
+    // This is safe — we just create a new event and overwrite the calendarEventId.
+
     // Create Google Calendar event
     const calendarEventId = await createCalendarEvent({
       id: booking.id,

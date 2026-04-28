@@ -127,33 +127,30 @@ export default function AdminPage() {
                 </div>
 
                 <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto justify-end">
-                  {b.status !== 'CANCELLED' && b.status !== 'COMPLETED' && (
+                  {b.status === 'REQUESTED' && (
                     <>
-                      <Link
-                        href={`/admin/${b.id}`}
-                        className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors"
-                      >
+                      <Link href={`/admin/${b.id}`}
+                        className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
                         EDIT
                       </Link>
-                      {b.status === 'REQUESTED' && (
-                        <ApproveButton bookingId={b.id} onDone={fetch_} />
-                      )}
+                      <ApproveButton bookingId={b.id} onDone={fetch_} />
                       <CancelButton bookingId={b.id} onDone={fetch_} />
+                    </>
+                  )}
+                  {b.status === 'CONFIRMED' && (
+                    <>
+                      <Link href={`/admin/${b.id}`}
+                        className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
+                        EDIT
+                      </Link>
+                      <CancelButton bookingId={b.id} onDone={fetch_} />
+                      <span className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded border border-green-200">
+                        ✓ Approved
+                      </span>
                     </>
                   )}
                   {b.status === 'CANCELLED' && (
                     <RestoreButton bookingId={b.id} onDone={fetch_} />
-                  )}
-                  {b.status === 'CONFIRMED' && (
-                    <Link href={`/admin/${b.id}`}
-                      className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
-                      EDIT
-                    </Link>
-                  )}
-                  {b.status === 'CONFIRMED' && (
-                    <span className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded border border-green-200">
-                      ✓ Approved
-                    </span>
                   )}
                 </div>
               </div>
