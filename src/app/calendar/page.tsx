@@ -32,6 +32,7 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true)
   const [cursor, setCursor] = useState(new Date())
   const [selected, setSelected] = useState<Date | null>(null)
+  const [hovered, setHovered] = useState<{ booking: Booking; x: number; y: number } | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -133,7 +134,12 @@ export default function CalendarPage() {
                       const c = STATUS_COLOR[b.status] || STATUS_COLOR.REQUESTED
                       return (
                         <div key={b.id}
-                          className={`text-[10px] px-1.5 py-0.5 rounded truncate ${c.bg} ${c.text} border border-current/10`}>
+                          onMouseEnter={e => {
+                            const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                            setHovered({ booking: b, x: r.left + r.width / 2, y: r.top })
+                          }}
+                          onMouseLeave={() => setHovered(null)}
+                          className={`text-[10px] px-1.5 py-0.5 rounded truncate ${c.bg} ${c.text} border border-current/10 cursor-pointer`}>
                           <span className="font-medium">{b.callTime}</span> {b.outlet.code}·{b.program.code}
                         </div>
                       )
@@ -148,6 +154,45 @@ export default function CalendarPage() {
           </div>
         )}
       </div>
+
+      {/* Hover tooltip */}
+      {hovered && (() => {
+        const b = hovered.booking
+        const c = STATUS_COLOR[b.status] || STATUS_COLOR.REQUESTED
+        return (
+          <div
+            className="fixed z-50 bg-white shadow-xl rounded-lg border border-gray-200 p-3 w-72 text-xs pointer-events-none"
+            style={{
+              left: Math.min(Math.max(8, hovered.x - 144), (typeof window !== 'undefined' ? window.innerWidth : 1024) - 296),
+              top: hovered.y - 8,
+              transform: 'translateY(-100%)',
+            }}
+          >
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${c.bg} ${c.text} border border-current/20`}>
+                {b.status === 'REQUESTED' ? '[REQUESTED]' : b.status}
+              </span>
+              <span className="text-gray-400 text-[11px]">{b.callTime}{b.estimatedWrap && ` → ${b.estimatedWrap}`}</span>
+            </div>
+            <div className="font-medium text-gray-800 mb-0.5 leading-snug">{b.outlet.name} · {b.program.name}</div>
+            <div className="text-gray-500 text-[11px] mb-1.5">
+              {b.shootType.replace('_', ' ')}{b.locationName && ` @ ${b.locationName}`}
+            </div>
+            <div className="border-t border-gray-100 pt-1.5 space-y-0.5">
+              <div className="text-gray-500"><span className="text-gray-400">Producer:</span> {b.producer}</div>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {b.episodes.slice(0, 3).map(ep => (
+                  <span key={ep.episodeId} className="episode-badge text-[10px]">{ep.episodeId}</span>
+                ))}
+                {b.episodes.length > 3 && <span className="text-gray-400">+{b.episodes.length - 3}</span>}
+              </div>
+              {b.episodes[0]?.title && (
+                <div className="text-gray-500 truncate mt-1 text-[11px]"><span className="text-gray-400">First ep:</span> {b.episodes[0].title}</div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Selected day details */}
       {selected && (

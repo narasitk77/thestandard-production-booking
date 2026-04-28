@@ -27,7 +27,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <Link href="/calendar" className="gf-link">Calendar</Link>
             {session && <Link href="/my-bookings" className="gf-link">My Bookings</Link>}
             {isAdmin && <Link href="/dashboard" className="gf-link">Dashboard</Link>}
-            <Link href="/upload" className="gf-link">Upload</Link>
+            {isAdmin && <Link href="/upload" className="gf-link text-gray-400">Upload <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded ml-0.5">DEV</span></Link>}
             {isAdmin && <Link href="/admin" className="text-[#db4437] text-sm hover:underline font-medium">Admin</Link>}
             {session ? (
               <>
