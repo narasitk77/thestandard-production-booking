@@ -58,9 +58,9 @@ export async function createCalendarEvent(booking: {
       : new Date(startTime.getTime() + 4 * 60 * 60 * 1000)
 
     const epCount = booking.episodes.length
-    const location = booking.shootType === 'STUDIO'
-      ? 'Studio'
-      : booking.locationName || booking.shootType.replace('_', ' ')
+    // Location = the actual room/venue (independent of Shoot Type)
+    const location = booking.locationName || '—'
+    const shootTypeLabel = booking.shootType.replace('_', ' ')
 
     const title = epCount === 1
       ? `[${booking.outlet.code}] ${booking.program.name} — ${booking.episodes[0].title}`
@@ -73,7 +73,8 @@ ${epList}
 
 Outlet: ${booking.outlet.name} (${booking.outlet.code})
 Program: ${booking.program.name} (${booking.program.code})
-Shoot Type: ${booking.shootType.replace('_', ' ')}
+Shoot Type: ${shootTypeLabel}
+Location / Room: ${location}
 Producer: ${booking.producer}
 Crew: ${booking.crewRequired.join(', ') || '—'}
 Agency Ref: ${booking.agencyRef || '—'}

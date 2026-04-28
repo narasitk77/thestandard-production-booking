@@ -91,10 +91,8 @@ export function buildCalendarPacket(booking: {
   const wrapStr = booking.estimatedWrap ? `→ ${booking.estimatedWrap}` : ''
   const episodes = booking.episodes || []
   const epCount = episodes.length
-  const location =
-    booking.shootType === 'STUDIO'
-      ? `Studio`
-      : booking.locationName || booking.shootType.replace('_', ' ')
+  // Location = actual room (independent of Shoot Type)
+  const location = booking.locationName || '—'
 
   const epList = episodes
     .map(e => `  • ${e.episodeId} — ${e.title}`)
@@ -114,7 +112,8 @@ ${title}
 
 TIME: ${booking.callTime} ${wrapStr}
 DATE: ${dateStr}
-LOCATION: ${location}
+LOCATION / ROOM: ${location}
+SHOOT TYPE: ${shootTypeLabel(booking.shootType)}
 
 ──────────────────────────────
 Production Project
@@ -123,7 +122,6 @@ ${epList}
 
 Outlet: ${booking.outletName} (${booking.outletCode})
 Program: ${booking.programName} (${booking.programCode})
-Shoot Type: ${shootTypeLabel(booking.shootType)}
 Producer: ${booking.producer}
 Creative/Host: ${creative}
 Crew: ${crew}

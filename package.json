@@ -1,6 +1,6 @@
 {
   "name": "thestandard-production-booking",
-  "version": "1.7.0",
+  "version": "1.9.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -24,7 +24,9 @@
     "googleapis": "^140.0.1",
     "nodemailer": "^6.9.14",
     "next-auth": "^4.24.7",
-    "recharts": "^2.12.7"
+    "recharts": "^2.12.7",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",

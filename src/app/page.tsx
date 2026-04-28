@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { OUTLETS, PRODUCERS, CREW_OPTIONS } from '@/lib/data'
+import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } from '@/lib/locations'
 
 const CATEGORIES = ['Recurring', 'Agency Job', 'Service Job', 'Internal']
 const SHOOT_TYPES = ['Studio', 'On Location', 'Remote / Online', 'Event']
@@ -27,7 +28,8 @@ export default function BookingForm() {
   const [shootDate, setShootDate] = useState('')
   const [category, setCategory] = useState('Recurring')
   const [shootType, setShootType] = useState('Studio')
-  const [locationName, setLocationName] = useState('')
+  const [locationId, setLocationId] = useState('')
+  const [locationCustom, setLocationCustom] = useState('')
   const [callTime, setCallTime] = useState('')
   const [estimatedWrap, setEstimatedWrap] = useState('')
   const [producer, setProducer] = useState('')
@@ -60,11 +62,27 @@ export default function BookingForm() {
   const toggleCrew = (c: string) =>
     setCrew(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
 
+  const selectedLocation = findLocation(locationId)
+  const needsCustomText = !!selectedLocation && locationNeedsManualText(selectedLocation.id)
+  const resolvedLocationName = !selectedLocation
+    ? null
+    : needsCustomText
+      ? (locationCustom ? `${selectedLocation.fullName} — ${locationCustom}` : selectedLocation.fullName)
+      : selectedLocation.fullName
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     if (!outletCode || !programCode || !shootDate || !producer) {
       setError('Please fill in all required fields.')
+      return
+    }
+    if (!locationId) {
+      setError('Please choose a Location / Room.')
+      return
+    }
+    if (needsCustomText && !locationCustom.trim()) {
+      setError('Please specify the location.')
       return
     }
     if (epTitles.some(t => !t.trim())) {
@@ -82,7 +100,7 @@ export default function BookingForm() {
           shootDate,
           category: CATEGORY_VALUES[category],
           shootType: SHOOT_TYPE_VALUES[shootType],
-          locationName: locationName || null,
+          locationName: resolvedLocationName,
           callTime,
           estimatedWrap: estimatedWrap || null,
           producer,
@@ -102,7 +120,6 @@ export default function BookingForm() {
     }
   }
 
-  const needsLocation = shootType !== 'Studio'
   const isAgency = category === 'Agency Job'
 
   return (
@@ -225,22 +242,50 @@ export default function BookingForm() {
           ))}
         </div>
 
-        {/* LOCATION (conditional) */}
-        {needsLocation && (
-          <div className="gf-card p-6">
-            <label className="gf-label">
-              LOCATION NAME <span className="gf-required">*</span>
-            </label>
-            <input
-              type="text"
-              className="gf-input"
-              placeholder="e.g. Grand Hyatt, Client Office, Studio B"
-              value={locationName}
-              onChange={e => setLocationName(e.target.value)}
-              required
-            />
-          </div>
-        )}
+        {/* LOCATION / ROOM */}
+        <div className="gf-card p-6">
+          <label className="gf-label">
+            LOCATION / ROOM <span className="gf-required">*</span>
+          </label>
+          <p className="text-xs text-gray-400 mb-3">Where the shoot happens (independent of Shoot Type above)</p>
+          <select
+            className="gf-input"
+            value={locationId}
+            onChange={e => { setLocationId(e.target.value); setLocationCustom('') }}
+            required
+          >
+            <option value="">Choose a room / location…</option>
+            {LOCATION_GROUPS.map(g => (
+              <optgroup key={g.key} label={g.label}>
+                {LOCATIONS.filter(l => l.group === g.key).map(l => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}{l.capacity ? ` · cap. ${l.capacity}` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+
+          {selectedLocation && selectedLocation.group !== 'EXTERNAL' && (
+            <p className="text-xs text-gray-500 mt-2">
+              📍 {selectedLocation.fullName}{selectedLocation.capacity ? ` · capacity ${selectedLocation.capacity}` : ''}
+            </p>
+          )}
+
+          {needsCustomText && (
+            <div className="mt-3">
+              <label className="gf-label">SPECIFY LOCATION <span className="gf-required">*</span></label>
+              <input
+                type="text"
+                className="gf-input"
+                placeholder="e.g. Grand Hyatt, Client Office, BACC"
+                value={locationCustom}
+                onChange={e => setLocationCustom(e.target.value)}
+                required
+              />
+            </div>
+          )}
+        </div>
 
         {/* TIME */}
         <div className="gf-card p-6 grid grid-cols-2 gap-6">
@@ -393,7 +438,7 @@ export default function BookingForm() {
             onClick={() => {
               setOutletCode(''); setProgramCode(''); setShootDate('')
               setCategory('Recurring'); setShootType('Studio')
-              setLocationName(''); setCallTime(''); setEstimatedWrap('')
+              setLocationId(''); setLocationCustom(''); setCallTime(''); setEstimatedWrap('')
               setProducer(''); setCreative(''); setCrew([])
               setAgencyRef(''); setNotes(''); setEpCount(1); setEpTitles([''])
             }}

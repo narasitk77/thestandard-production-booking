@@ -25,6 +25,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <span className="text-gray-600 font-medium">THE STANDARD · Production</span>
           <div className="flex gap-4 items-center">
             <Link href="/calendar" className="gf-link">Calendar</Link>
+            <Link href="/manual" className="gf-link">คู่มือ</Link>
             {session && <Link href="/my-bookings" className="gf-link">My Bookings</Link>}
             {isAdmin && <Link href="/dashboard" className="gf-link">Dashboard</Link>}
             {isAdmin && <Link href="/upload" className="gf-link text-gray-400">Upload <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded ml-0.5">DEV</span></Link>}
