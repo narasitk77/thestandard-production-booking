@@ -1,9 +1,33 @@
 import { PrismaClient } from '@prisma/client'
 import { OUTLETS } from '../src/lib/data'
+import { TEAM_PROFILES } from '../src/lib/team-profiles'
 
 const prisma = new PrismaClient()
 
+const ADMIN_EMAILS = ['narasit.k@thestandard.co']
+
 async function main() {
+  console.log('Seeding team profiles...')
+  for (const p of TEAM_PROFILES) {
+    const isAdmin = ADMIN_EMAILS.includes(p.email)
+    await prisma.user.upsert({
+      where: { email: p.email },
+      update: {
+        thaiName: p.thaiName,
+        employeeId: p.employeeId,
+        position: p.position,
+      },
+      create: {
+        email: p.email,
+        thaiName: p.thaiName,
+        employeeId: p.employeeId,
+        position: p.position,
+        role: isAdmin ? 'ADMIN' : 'USER',
+      },
+    })
+  }
+  console.log(`✓ ${TEAM_PROFILES.length} team profiles synced`)
+
   console.log('Seeding outlets and programs...')
 
   for (const outlet of OUTLETS) {

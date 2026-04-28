@@ -1,6 +1,7 @@
 import type { AuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { prisma } from './db'
+import { findProfileByEmail } from './team-profiles'
 
 const ALLOWED_DOMAIN = 'thestandard.co'
 const INITIAL_ADMINS = ['narasit.k@thestandard.co']
@@ -26,12 +27,16 @@ export const authOptions: AuthOptions = {
       if (!email) return false
       if (!email.endsWith('@' + ALLOWED_DOMAIN)) return '/login?error=domain'
 
+      const teamProfile = findProfileByEmail(email)
       const existing = await prisma.user.findUnique({ where: { email } })
       if (!existing) {
         await prisma.user.create({
           data: {
             email,
             name: (profile as any)?.name ?? null,
+            thaiName: teamProfile?.thaiName ?? null,
+            employeeId: teamProfile?.employeeId ?? null,
+            position: teamProfile?.position ?? null,
             role: INITIAL_ADMINS.includes(email) ? 'ADMIN' : 'USER',
           },
         })

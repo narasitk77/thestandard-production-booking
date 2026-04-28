@@ -42,15 +42,39 @@ enum UserRole {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  role      UserRole @default(USER)
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  email      String   @unique
+  name       String?
+  thaiName   String?  // ชื่อ-นามสกุลภาษาไทย
+  employeeId String?  // TSD00xxx
+  position   String?  // Producer / Videographer / etc
+  role       UserRole @default(USER)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@map("users")
+}
+
+enum OTType {
+  HOLIDAY  // เสาร์-อาทิตย์ / วันหยุดตามประกาศบริษัท (counts as 1 day)
+  OVERTIME // ทำงานเกิน 8 ชั่วโมง (counts hours)
+}
+
+model OTRecord {
+  id          String   @id @default(cuid())
+  userEmail   String
+  month       String   // YYYY-MM, derived from date
+  date        DateTime @db.Date
+  type        OTType
+  hours       Float    @default(0)  // for OVERTIME (decimal hours)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userEmail, month])
+  @@index([month])
+  @@map("ot_records")
 }
 
 model Outlet {
