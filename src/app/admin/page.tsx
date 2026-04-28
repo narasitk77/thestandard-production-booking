@@ -141,6 +141,15 @@ export default function AdminPage() {
                       <CancelButton bookingId={b.id} onDone={fetch_} />
                     </>
                   )}
+                  {b.status === 'CANCELLED' && (
+                    <RestoreButton bookingId={b.id} onDone={fetch_} />
+                  )}
+                  {b.status === 'CONFIRMED' && (
+                    <Link href={`/admin/${b.id}`}
+                      className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
+                      EDIT
+                    </Link>
+                  )}
                   {b.status === 'CONFIRMED' && (
                     <span className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded border border-green-200">
                       ✓ Approved
@@ -153,6 +162,30 @@ export default function AdminPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function RestoreButton({ bookingId, onDone }: { bookingId: string; onDone: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const handle = async () => {
+    if (!confirm('Restore booking นี้กลับมาเป็น [REQUESTED]?')) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/${bookingId}/restore`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      onDone()
+    } catch (e: any) {
+      alert('Restore failed: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <button onClick={handle} disabled={loading}
+      className="px-3 py-1.5 text-xs border border-yellow-400 text-yellow-700 bg-yellow-50 rounded hover:bg-yellow-500 hover:text-white transition-colors disabled:opacity-50">
+      {loading ? '…' : '↺ RESTORE'}
+    </button>
   )
 }
 

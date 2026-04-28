@@ -50,26 +50,70 @@ export async function PATCH(
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
     const body = await request.json()
-    const { status, notes, callTime, estimatedWrap, locationName, crewRequired } = body
 
-    const existing = await prisma.booking.findUnique({ where: { id: params.id } })
+    // Editable fields (do NOT affect Episode ID — outletCode/programCode/shootDate/sequence are immutable)
+    const {
+      status,
+      notes,
+      callTime,
+      estimatedWrap,
+      locationName,
+      crewRequired,
+      shootType,
+      category,
+      producer,
+      creative,
+      agencyRef,
+      adminNotes,
+      assignedEmails,
+      episodeTitles, // Array<{ id: string, title: string }> — only updates titles, NOT episodeId
+    } = body
+
+    const existing = await prisma.booking.findUnique({
+      where: { id: params.id },
+      include: { episodes: true },
+    })
     if (!existing) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
 
-    const booking = await prisma.booking.update({
-      where: { id: params.id },
-      data: {
-        ...(status && { status }),
-        ...(notes !== undefined && { notes }),
-        ...(callTime && { callTime }),
-        ...(estimatedWrap !== undefined && { estimatedWrap }),
-        ...(locationName !== undefined && { locationName }),
-        ...(crewRequired && { crewRequired }),
-      },
-      include: {
-        outlet: true,
-        program: true,
-        episodes: { orderBy: { sequence: 'asc' } },
-      },
+    // Update booking fields in a transaction along with episode titles
+    const booking = await prisma.$transaction(async (tx) => {
+      // Update episode titles if provided (NEVER episodeId or sequence)
+      if (Array.isArray(episodeTitles)) {
+        for (const ep of episodeTitles) {
+          if (!ep?.id || typeof ep.title !== 'string') continue
+          // Verify episode belongs to this booking
+          const owns = existing.episodes.find(e => e.id === ep.id)
+          if (!owns) continue
+          await tx.episode.update({
+            where: { id: ep.id },
+            data: { title: ep.title.trim() },
+          })
+        }
+      }
+
+      return tx.booking.update({
+        where: { id: params.id },
+        data: {
+          ...(status && { status }),
+          ...(notes !== undefined && { notes: notes || null }),
+          ...(callTime && { callTime }),
+          ...(estimatedWrap !== undefined && { estimatedWrap: estimatedWrap || null }),
+          ...(locationName !== undefined && { locationName: locationName || null }),
+          ...(crewRequired && Array.isArray(crewRequired) && { crewRequired }),
+          ...(shootType && { shootType }),
+          ...(category && { category }),
+          ...(producer && { producer }),
+          ...(creative && Array.isArray(creative) && { creative }),
+          ...(agencyRef !== undefined && { agencyRef: agencyRef || null }),
+          ...(adminNotes !== undefined && { adminNotes: adminNotes || null }),
+          ...(assignedEmails && Array.isArray(assignedEmails) && { assignedEmails }),
+        },
+        include: {
+          outlet: true,
+          program: true,
+          episodes: { orderBy: { sequence: 'asc' } },
+        },
+      })
     })
 
     // On cancellation, remove calendar event and sync sheet
@@ -80,6 +124,11 @@ export async function PATCH(
       if (existing.sheetRowIndex) {
         updateBookingRow(existing.sheetRowIndex, { status: 'CANCELLED' }).catch(() => {})
       }
+      // Clear stale calendar event ID since it was deleted
+      await prisma.booking.update({
+        where: { id: params.id },
+        data: { calendarEventId: null },
+      })
     }
 
     return NextResponse.json({ booking })

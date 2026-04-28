@@ -206,6 +206,23 @@
 - ยืนยันใน popup
 - ระบบจะ: เปลี่ยนสถานะเป็น `CANCELLED` + ลบ Calendar Event + อัปเดต Sheet
 
+### การ Restore (นำกลับมา)
+- งานที่ Cancel ไปแล้ว มีปุ่ม **↺ RESTORE** ที่การ์ด
+- กด → ยืนยัน → สถานะกลับเป็น `[REQUESTED]`
+- หมายเหตุ: Calendar event เก่าถูกลบแล้ว ต้อง **Approve** อีกครั้งเพื่อสร้าง event ใหม่
+- ทำได้ในหน้ารายการ `/admin` หรือในหน้า Edit `/admin/[id]` (มีแถบเตือนเหลืองบนสุด)
+
+### การแก้ไขรายละเอียด Booking
+- เปิดหน้า Edit ของ Booking → ในส่วน **Booking Details** กดปุ่ม **Edit**
+- แก้ได้: Call Time, Wrap Time, Shoot Type, Location, Producer, Creative/Host, Crew, Agency Ref, Notes, ชื่อตอน (Episode title)
+- **แก้ไม่ได้** (เพราะกระทบ Booking number / Episode ID):
+  - Outlet
+  - Program
+  - Shoot Date
+  - Episode ID (ตัว `NWS-260427-KYM-01` ห้ามเปลี่ยน)
+  - ลำดับตอน (sequence)
+- ถ้าต้องเปลี่ยน Outlet/Program/Date/ID → ต้อง **Cancel** แล้วสร้าง Booking ใหม่
+
 ---
 
 ## 6. Dashboard — สรุปและสถิติ (เฉพาะแอดมิน)

@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDisplayDate, shootTypeLabel } from '@/lib/utils'
-import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X } from 'lucide-react'
+import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
+import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 
 interface Episode { id: string; episodeId: string; title: string }
 interface BookingDetail {
@@ -92,6 +93,38 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [flContract, setFlContract] = useState('')
   const [flEmail, setFlEmail] = useState('')
 
+  // Edit Booking Details mode
+  const [editMode, setEditMode] = useState(false)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editForm, setEditForm] = useState({
+    callTime: '',
+    estimatedWrap: '',
+    shootType: '',
+    locationName: '',
+    producer: '',
+    creative: '',
+    crewRequired: '',
+    agencyRef: '',
+    notes: '',
+    episodeTitles: [] as { id: string; episodeId: string; title: string }[],
+  })
+  const [restoring, setRestoring] = useState(false)
+
+  const hydrateEditForm = (b: BookingDetail) => {
+    setEditForm({
+      callTime: b.callTime || '',
+      estimatedWrap: b.estimatedWrap || '',
+      shootType: b.shootType,
+      locationName: b.locationName || '',
+      producer: b.producer || '',
+      creative: (b.creative || []).join(', '),
+      crewRequired: (b.crewRequired || []).join(', '),
+      agencyRef: b.agencyRef || '',
+      notes: b.notes || '',
+      episodeTitles: b.episodes.map(e => ({ id: e.id, episodeId: e.episodeId, title: e.title })),
+    })
+  }
+
   useEffect(() => {
     fetch(`/api/bookings/${id}`)
       .then(r => r.json())
@@ -103,6 +136,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         setBooking(d.booking)
         setAssignEmails(d.booking.assignedEmails || [])
         setAdminNotes(d.booking.adminNotes || '')
+        hydrateEditForm(d.booking)
       })
       .catch(e => setError(e?.message || 'Failed to load booking'))
       .finally(() => setLoading(false))
@@ -185,10 +219,64 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     }
   }
 
+  const handleSaveDetails = async () => {
+    setError('')
+    setEditSaving(true)
+    try {
+      const body: any = {
+        callTime: editForm.callTime,
+        estimatedWrap: editForm.estimatedWrap || null,
+        shootType: editForm.shootType,
+        locationName: editForm.locationName || null,
+        producer: editForm.producer,
+        creative: editForm.creative ? editForm.creative.split(',').map(s => s.trim()).filter(Boolean) : [],
+        crewRequired: editForm.crewRequired ? editForm.crewRequired.split(',').map(s => s.trim()).filter(Boolean) : [],
+        agencyRef: editForm.agencyRef || null,
+        notes: editForm.notes || null,
+        episodeTitles: editForm.episodeTitles.map(e => ({ id: e.id, title: e.title })),
+      }
+      const res = await fetch(`/api/bookings/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setBooking(data.booking)
+      hydrateEditForm(data.booking)
+      setEditMode(false)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const handleRestore = async () => {
+    if (!confirm('นำ booking กลับมา (สถานะจะเป็น [REQUESTED] รอ Approve อีกครั้ง)?')) return
+    setError('')
+    setRestoring(true)
+    try {
+      const res = await fetch(`/api/admin/${id}/restore`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setBooking(data.booking)
+      hydrateEditForm(data.booking)
+      setApproved(false)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setRestoring(false)
+    }
+  }
+
   if (loading) return <div className="flex items-center justify-center min-h-96"><Loader2 className="w-8 h-8 animate-spin text-gray-400" /></div>
   if (!booking) return <div className="max-w-2xl mx-auto px-4 py-20 text-center text-gray-500">Booking not found.</div>
 
   const isConfirmed = booking.status === 'CONFIRMED' || approved
+  const isCancelled = booking.status === 'CANCELLED'
   const totalAssigned = assignEmails.length + freelancers.length
 
   return (
@@ -221,27 +309,167 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       </div>
 
       {error && <div className="gf-card p-4 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
-      {saved && <div className="gf-card p-4 text-sm text-green-600 border-l-4 border-green-400">✓ Saved — emails sent to assigned crew</div>}
+      {saved && <div className="gf-card p-4 text-sm text-green-600 border-l-4 border-green-400">✓ Saved</div>}
       {approved && <div className="gf-card p-4 text-sm text-green-600 border-l-4 border-green-400">✓ Approved — Google Calendar event created</div>}
 
-      {/* Episode IDs */}
+      {/* CANCELLED → Restore banner */}
+      {isCancelled && (
+        <div className="gf-card p-4 border-l-4 border-yellow-400 bg-yellow-50 flex items-start gap-3 flex-wrap">
+          <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-yellow-900">Booking ถูกยกเลิก</div>
+            <div className="text-xs text-yellow-700">นำกลับมาเป็น [REQUESTED] เพื่อให้ Approve ใหม่ได้ — Calendar event เก่าโดนลบไปแล้ว ต้อง Approve เพื่อสร้างใหม่</div>
+          </div>
+          <button onClick={handleRestore} disabled={restoring}
+            className="px-3 py-1.5 text-xs bg-yellow-500 text-white rounded hover:bg-yellow-600 inline-flex items-center gap-1 disabled:opacity-50">
+            {restoring ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Restore
+          </button>
+        </div>
+      )}
+
+      {/* Episode IDs (always visible — IDs locked, titles editable in edit mode) */}
       <div className="gf-card p-5">
-        <div className="text-xs text-gray-500 font-medium mb-2 uppercase tracking-wide">Episode IDs</div>
-        {booking.episodes.map(ep => (
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs text-gray-500 font-medium uppercase tracking-wide flex items-center gap-1">
+            Episode IDs
+            <Lock className="w-3 h-3 text-gray-400" />
+          </div>
+          <span className="text-[10px] text-gray-400">ID ห้ามแก้ · แก้ชื่อตอนได้ในโหมด Edit</span>
+        </div>
+        {(editMode ? editForm.episodeTitles : booking.episodes).map((ep, i) => (
           <div key={ep.id} className="flex items-center gap-3 py-1.5">
             <span className="episode-badge">{ep.episodeId}</span>
-            <span className="text-sm text-gray-700">{ep.title}</span>
+            {editMode ? (
+              <input className="gf-input flex-1" value={editForm.episodeTitles[i].title}
+                onChange={e => {
+                  const next = [...editForm.episodeTitles]
+                  next[i] = { ...next[i], title: e.target.value }
+                  setEditForm({ ...editForm, episodeTitles: next })
+                }} />
+            ) : (
+              <span className="text-sm text-gray-700">{(ep as Episode).title}</span>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Booking info */}
-      <div className="gf-card p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-        <div><div className="text-xs text-gray-400 mb-0.5">Producer</div><div className="text-gray-800">{booking.producer}</div></div>
-        <div><div className="text-xs text-gray-400 mb-0.5">Crew Requested</div><div className="text-gray-800">{booking.crewRequired.join(', ') || '—'}</div></div>
-        <div><div className="text-xs text-gray-400 mb-0.5">Creative/Host</div><div className="text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
-        <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
-        {booking.notes && <div className="col-span-2"><div className="text-xs text-gray-400 mb-0.5">Notes</div><div className="text-gray-800">{booking.notes}</div></div>}
+      {/* Booking details — view or edit mode */}
+      <div className="gf-card p-4 sm:p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-medium text-gray-700">Booking Details</div>
+          {!editMode ? (
+            <button onClick={() => setEditMode(true)}
+              className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+              <Pencil className="w-3 h-3" /> Edit
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button onClick={() => { hydrateEditForm(booking); setEditMode(false) }}
+                disabled={editSaving}
+                className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={handleSaveDetails} disabled={editSaving}
+                className="text-xs px-3 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1 disabled:opacity-50">
+                {editSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save
+              </button>
+            </div>
+          )}
+        </div>
+
+        {!editMode ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <div><div className="text-xs text-gray-400 mb-0.5">Call Time → Wrap</div><div className="text-gray-800">{booking.callTime}{booking.estimatedWrap && ` → ${booking.estimatedWrap}`}</div></div>
+            <div><div className="text-xs text-gray-400 mb-0.5">Shoot Type</div><div className="text-gray-800">{shootTypeLabel(booking.shootType)}</div></div>
+            <div><div className="text-xs text-gray-400 mb-0.5">Location</div><div className="text-gray-800">{booking.locationName || '—'}</div></div>
+            <div><div className="text-xs text-gray-400 mb-0.5">Producer</div><div className="text-gray-800">{booking.producer}</div></div>
+            <div><div className="text-xs text-gray-400 mb-0.5">Creative/Host</div><div className="text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
+            <div><div className="text-xs text-gray-400 mb-0.5">Crew Requested</div><div className="text-gray-800">{booking.crewRequired.join(', ') || '—'}</div></div>
+            <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
+            {booking.notes && <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Notes</div><div className="text-gray-800 whitespace-pre-line">{booking.notes}</div></div>}
+          </div>
+        ) : (
+          <div className="space-y-3 text-sm">
+            <div className="bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-500 flex items-start gap-2">
+              <Lock className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              <span>ห้ามแก้: Outlet · Program · Shoot Date · Episode ID · ลำดับ EP (เพราะกระทบ Booking number)</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Call Time</label>
+                <input type="time" className="gf-input" value={editForm.callTime}
+                  onChange={e => setEditForm({ ...editForm, callTime: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Estimated Wrap</label>
+                <input type="time" className="gf-input" value={editForm.estimatedWrap}
+                  onChange={e => setEditForm({ ...editForm, estimatedWrap: e.target.value })} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Shoot Type</label>
+                <select className="gf-input" value={editForm.shootType}
+                  onChange={e => setEditForm({ ...editForm, shootType: e.target.value })}>
+                  <option value="STUDIO">Studio</option>
+                  <option value="ON_LOCATION">On Location</option>
+                  <option value="REMOTE_ONLINE">Remote / Online</option>
+                  <option value="EVENT">Event</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Location / Room</label>
+                <select className="gf-input" value={editForm.locationName}
+                  onChange={e => setEditForm({ ...editForm, locationName: e.target.value })}>
+                  <option value="">— Choose —</option>
+                  {LOCATION_GROUPS.map(g => (
+                    <optgroup key={g.key} label={g.label}>
+                      {LOCATIONS.filter(l => l.group === g.key).map(l => (
+                        <option key={l.id} value={l.fullName}>{l.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                  {/* If existing booking has a non-standard location, preserve it as an option */}
+                  {editForm.locationName && !LOCATIONS.some(l => l.fullName === editForm.locationName) && (
+                    <option value={editForm.locationName}>{editForm.locationName}</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Producer</label>
+              <input className="gf-input" value={editForm.producer}
+                onChange={e => setEditForm({ ...editForm, producer: e.target.value })} />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Creative / Host (คั่นด้วย ,)</label>
+              <input className="gf-input" value={editForm.creative}
+                onChange={e => setEditForm({ ...editForm, creative: e.target.value })} />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Crew Requested (คั่นด้วย ,)</label>
+              <input className="gf-input" value={editForm.crewRequired}
+                onChange={e => setEditForm({ ...editForm, crewRequired: e.target.value })} />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Agency Ref</label>
+              <input className="gf-input" value={editForm.agencyRef}
+                onChange={e => setEditForm({ ...editForm, agencyRef: e.target.value })} />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Notes</label>
+              <textarea className="gf-input resize-none" rows={3} value={editForm.notes}
+                onChange={e => setEditForm({ ...editForm, notes: e.target.value })} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ASSIGN */}
