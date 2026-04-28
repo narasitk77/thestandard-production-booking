@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, use } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDisplayDate, shootTypeLabel } from '@/lib/utils'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X } from 'lucide-react'
@@ -73,8 +73,8 @@ function TeamSection({ label, members, checked, onToggle }: {
   )
 }
 
-export default function AdminEditPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
+export default function AdminEditPage({ params }: { params: { id: string } }) {
+  const { id } = params
   const [booking, setBooking] = useState<BookingDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [assignEmails, setAssignEmails] = useState<string[]>([])
