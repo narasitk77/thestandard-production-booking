@@ -23,6 +23,10 @@ export async function PATCH(
       return NextResponse.json({ error: 'Closed month — read-only' }, { status: 400 })
     }
 
+    if (existing.bookingId) {
+      return NextResponse.json({ error: 'Auto records from bookings cannot be edited — change the booking instead' }, { status: 400 })
+    }
+
     const body = await request.json()
     const { date, type, hours, description } = body
 
@@ -59,6 +63,9 @@ export async function DELETE(
     }
     if (!isMonthEditable(existing.month) && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Closed month — read-only' }, { status: 400 })
+    }
+    if (existing.bookingId && session.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Auto records from bookings — sync via the booking, not manual delete' }, { status: 400 })
     }
 
     await prisma.oTRecord.delete({ where: { id: params.id } })

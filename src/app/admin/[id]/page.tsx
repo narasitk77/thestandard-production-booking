@@ -479,11 +479,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         )}
       </div>
 
-      {/* ASSIGN */}
-      {!isConfirmed && (
+      {/* ASSIGN — allow editing crew on REQUESTED, ASSIGNED, and CONFIRMED bookings (not CANCELLED) */}
+      {!isCancelled && (
         <div className="gf-card p-5 space-y-5">
           <div className="text-sm font-medium text-gray-700 border-b border-gray-100 pb-2 flex items-center gap-2">
             <Mail className="w-4 h-4 text-[#673ab7]" /> ASSIGN TEAM
+            {isConfirmed && <span className="ml-auto text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200">re-assign</span>}
             {totalAssigned > 0 && (
               <span className="ml-auto text-xs bg-[#673ab7] text-white px-2 py-0.5 rounded-full">{totalAssigned} assigned</span>
             )}

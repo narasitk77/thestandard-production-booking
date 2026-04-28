@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { sendAssignmentEmail } from '@/lib/email'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { requireAdmin } from '@/lib/session'
+import { syncBookingOT } from '@/lib/ot-sync'
 import { format } from 'date-fns'
 
 export async function POST(
@@ -15,12 +16,21 @@ export async function POST(
     }
     const { assignedEmails, adminNotes } = await request.json()
 
+    const existing = await prisma.booking.findUnique({ where: { id: params.id } })
+    if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    // Status logic: don't downgrade CONFIRMED bookings during re-assign.
+    // REQUESTED → ASSIGNED (was unassigned, now has crew).
+    // ASSIGNED stays ASSIGNED (re-assignment).
+    // CONFIRMED stays CONFIRMED (re-assignment after approve).
+    const nextStatus = existing.status === 'CONFIRMED' ? 'CONFIRMED' : 'ASSIGNED'
+
     const booking = await prisma.booking.update({
       where: { id: params.id },
       data: {
         assignedEmails: assignedEmails || [],
         adminNotes: adminNotes || null,
-        status: 'ASSIGNED',
+        status: nextStatus,
       },
       include: {
         outlet: true,
@@ -64,6 +74,9 @@ export async function POST(
         status: 'ASSIGNED',
       })
     }
+
+    // Re-sync OT records (in case crew list changed)
+    syncBookingOT(booking.id).catch(e => console.error('syncBookingOT error:', e))
 
     return NextResponse.json({ booking, emailResults })
   } catch (error) {

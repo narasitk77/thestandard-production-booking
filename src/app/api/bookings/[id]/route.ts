@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession, requireAdmin } from '@/lib/session'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
+import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 
 export async function GET(
   _request: NextRequest,
@@ -116,7 +117,7 @@ export async function PATCH(
       })
     })
 
-    // On cancellation, remove calendar event and sync sheet
+    // On cancellation, remove calendar event, sheet row, and auto-OT records
     if (status === 'CANCELLED') {
       if (existing.calendarEventId) {
         deleteCalendarEvent(existing.calendarEventId).catch(() => {})
@@ -124,11 +125,20 @@ export async function PATCH(
       if (existing.sheetRowIndex) {
         updateBookingRow(existing.sheetRowIndex, { status: 'CANCELLED' }).catch(() => {})
       }
-      // Clear stale calendar event ID since it was deleted
       await prisma.booking.update({
         where: { id: params.id },
         data: { calendarEventId: null },
       })
+      clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
+    } else if (
+      // Re-sync OT if scheduling fields changed and booking is active
+      booking.status !== 'CANCELLED' && (
+        callTime !== undefined ||
+        estimatedWrap !== undefined ||
+        Array.isArray(assignedEmails)
+      )
+    ) {
+      syncBookingOT(params.id).catch(e => console.error('syncBookingOT error:', e))
     }
 
     return NextResponse.json({ booking })

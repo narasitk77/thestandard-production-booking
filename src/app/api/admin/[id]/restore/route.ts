@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { updateBookingRow } from '@/lib/google-sheets'
+import { syncBookingOT } from '@/lib/ot-sync'
 
 /**
  * Restore a CANCELLED booking back to live (status = REQUESTED).
@@ -46,6 +47,10 @@ export async function POST(
         approvedAt: '',
       }).catch(() => {})
     }
+
+    // Regenerate OT records (will create them again only if booking ends up
+    // back at CONFIRMED or has crew + qualifying schedule)
+    syncBookingOT(params.id).catch(e => console.error('syncBookingOT error:', e))
 
     return NextResponse.json({ booking })
   } catch (error) {

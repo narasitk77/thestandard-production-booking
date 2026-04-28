@@ -69,11 +69,13 @@ model OTRecord {
   type        OTType
   hours       Float    @default(0)  // for OVERTIME (decimal hours)
   description String?
+  bookingId   String?  // if auto-generated from a booking, the booking id (null = manual)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([userEmail, month])
   @@index([month])
+  @@index([bookingId])
   @@map("ot_records")
 }
 

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { createCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { requireAdmin } from '@/lib/session'
+import { syncBookingOT } from '@/lib/ot-sync'
 import { format } from 'date-fns'
 
 export async function POST(
@@ -72,6 +73,9 @@ export async function POST(
         approvedAt: approvedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
       })
     }
+
+    // Auto-generate OT records for the assigned crew
+    syncBookingOT(updated.id).catch(e => console.error('syncBookingOT error:', e))
 
     return NextResponse.json({
       booking: updated,

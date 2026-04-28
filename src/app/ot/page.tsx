@@ -13,6 +13,7 @@ interface OTRecord {
   type: 'HOLIDAY' | 'OVERTIME'
   hours: number
   description: string | null
+  bookingId: string | null
 }
 
 interface Profile {
@@ -250,15 +251,23 @@ export default function OTPage() {
                 }`}>
                   {r.type === 'HOLIDAY' ? 'วันหยุด' : 'OT'}
                 </span>
+                {r.bookingId && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                    auto
+                  </span>
+                )}
                 <span className="text-sm text-gray-800 font-medium tabular-nums">
                   {r.type === 'OVERTIME' ? `${r.hours} ชม.` : '1 วัน'}
                 </span>
                 <span className="text-xs text-gray-500 flex-1 min-w-[100px] truncate">{r.description || '—'}</span>
-                {editable && (
+                {editable && !r.bookingId && (
                   <button onClick={() => handleDelete(r.id)}
                     className="text-gray-400 hover:text-red-500 p-1">
                     <Trash2 className="w-4 h-4" />
                   </button>
+                )}
+                {r.bookingId && (
+                  <span className="text-[10px] text-gray-400" title="Auto-generated from booking — sync from Admin Console">📌</span>
                 )}
               </div>
             ))}
@@ -269,9 +278,11 @@ export default function OTPage() {
       {/* Info banner */}
       <div className="gf-card p-3 text-xs text-gray-500 flex items-start gap-2 border-l-4 border-blue-200">
         <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
-        <div>
-          <p className="mb-0.5"><span className="font-medium text-gray-700">เดือนนี้แก้ไขได้</span> · เดือนก่อนหน้าเก็บไว้ 10 วันแล้วลบอัตโนมัติ</p>
-          <p>ผู้ใช้ทั่วไปแก้ไขเฉพาะของตัวเองได้ · Admin export CSV รวมทุกคนได้</p>
+        <div className="space-y-1">
+          <p><span className="font-medium text-gray-700">รายการ <span className="bg-purple-50 text-purple-700 px-1 rounded">auto</span> สร้างจาก Booking ที่คุณถูก Assign + Approve</span> — แก้/ลบเองไม่ได้ (sync อัตโนมัติเมื่อ admin แก้ booking)</p>
+          <p>กฎ Auto: <strong>เสาร์-อาทิตย์</strong> = 1 วันหยุด · <strong>วันธรรมดาทำงานเกิน 8 ชม.</strong> = OT เท่ากับชั่วโมงส่วนเกิน · ไม่ตรงเงื่อนไข = ไม่สร้างให้</p>
+          <p>เพิ่มมือเพื่อ claim OT เพิ่ม (เช่น ทำงานบ้าน/ตัดต่อนอกเวลา) ได้เสมอ</p>
+          <p className="text-gray-400">เดือนนี้แก้ไขได้ · เดือนก่อนหน้าเก็บไว้ 10 วันแล้วลบอัตโนมัติ</p>
         </div>
       </div>
     </div>
