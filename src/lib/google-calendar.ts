@@ -2,7 +2,7 @@ import { google } from 'googleapis'
 import { format } from 'date-fns'
 
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID ||
-  'c_74ba4f943e365bd8f8c6617c188f7e2bf1efbe17701f7c6908d620260ef9ce0c@group.calendar.google.com'
+  '72bf6ae390fb09d1e0a117dbaf421799be6bcc3b21ec2b7c3e2d7a65e65f9dc5@group.calendar.google.com'
 
 function getAuth() {
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
