@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { getSession, requireAdmin } from '@/lib/session'
+import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { updateBookingRow } from '@/lib/google-sheets'
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       include: {
@@ -41,8 +46,14 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!(await requireAdmin())) {
+      return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+    }
     const body = await request.json()
     const { status, notes, callTime, estimatedWrap, locationName, crewRequired } = body
+
+    const existing = await prisma.booking.findUnique({ where: { id: params.id } })
+    if (!existing) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
 
     const booking = await prisma.booking.update({
       where: { id: params.id },
@@ -60,6 +71,16 @@ export async function PATCH(
         episodes: { orderBy: { sequence: 'asc' } },
       },
     })
+
+    // On cancellation, remove calendar event and sync sheet
+    if (status === 'CANCELLED') {
+      if (existing.calendarEventId) {
+        deleteCalendarEvent(existing.calendarEventId).catch(() => {})
+      }
+      if (existing.sheetRowIndex) {
+        updateBookingRow(existing.sheetRowIndex, { status: 'CANCELLED' }).catch(() => {})
+      }
+    }
 
     return NextResponse.json({ booking })
   } catch (error) {

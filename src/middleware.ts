@@ -12,6 +12,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/upload') ||
     pathname.startsWith('/my-bookings') ||
+    pathname.startsWith('/calendar') ||
     pathname === '/'
 
   if (isAuthRequired && !hasSession) {
@@ -26,6 +27,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|login|api/auth|calendar).*)',
+    '/((?!_next/static|_next/image|favicon.ico|login|api/auth).*)',
   ],
 }

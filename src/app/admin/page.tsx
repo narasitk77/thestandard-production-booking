@@ -22,7 +22,7 @@ const STATUS_BADGE: Record<string, string> = {
   COMPLETED: 'bg-blue-100 text-blue-700 border border-blue-200',
 }
 
-const STATUS_ORDER = ['REQUESTED', 'ASSIGNED', 'CONFIRMED', 'COMPLETED', 'CANCELLED']
+const STATUS_ORDER = ['REQUESTED', 'CONFIRMED', 'COMPLETED', 'CANCELLED']
 
 export default function AdminPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -135,9 +135,10 @@ export default function AdminPage() {
                       >
                         EDIT
                       </Link>
-                      {(b.status === 'ASSIGNED' || b.status === 'REQUESTED') && (
+                      {b.status === 'REQUESTED' && (
                         <ApproveButton bookingId={b.id} onDone={fetch_} />
                       )}
+                      <CancelButton bookingId={b.id} onDone={fetch_} />
                     </>
                   )}
                   {b.status === 'CONFIRMED' && (
@@ -152,6 +153,34 @@ export default function AdminPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function CancelButton({ bookingId, onDone }: { bookingId: string; onDone: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const handle = async () => {
+    if (!confirm('Cancel this booking? It will be moved to Cancelled and removed from the calendar.')) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'CANCELLED' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      onDone()
+    } catch (e: any) {
+      alert('Cancel failed: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <button onClick={handle} disabled={loading}
+      className="px-3 py-1.5 text-xs border border-red-200 text-red-600 rounded hover:bg-red-50 transition-colors disabled:opacity-50">
+      {loading ? '…' : 'CANCEL'}
+    </button>
   )
 }
 
