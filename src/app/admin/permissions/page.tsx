@@ -57,7 +57,7 @@ export default function PermissionsPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8 space-y-3">
+    <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
       <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
         <ArrowLeft className="w-4 h-4" /> Admin Console
       </Link>
@@ -70,33 +70,36 @@ export default function PermissionsPage() {
       {error && <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
 
       {/* Add user */}
-      <div className="gf-card p-5">
+      <div className="gf-card p-4 sm:p-5">
         <div className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
           <UserPlus className="w-4 h-4 text-[#673ab7]" /> Add / Update User
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <input type="email" className="gf-input flex-1" placeholder="email@thestandard.co"
             value={newEmail} onChange={e => setNewEmail(e.target.value)} />
-          <select className="gf-input" value={newRole} onChange={e => setNewRole(e.target.value as any)}>
-            <option value="USER">User</option>
-            <option value="ADMIN">Admin</option>
-          </select>
-          <button onClick={addUser} disabled={!newEmail}
-            className="px-4 py-1 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white disabled:opacity-40">
-            Save
-          </button>
+          <div className="flex gap-2">
+            <select className="gf-input flex-1 sm:flex-none" value={newRole} onChange={e => setNewRole(e.target.value as any)}>
+              <option value="USER">User</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+            <button onClick={addUser} disabled={!newEmail}
+              className="px-4 py-1 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white disabled:opacity-40">
+              Save
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Users list */}
-      <div className="gf-card p-5">
+      <div className="gf-card p-4 sm:p-5">
         <div className="text-sm font-medium text-gray-700 mb-3">Users ({users.length})</div>
         {loading ? (
           <div className="py-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" /></div>
         ) : users.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-6">No users yet. Anyone who signs in will be added automatically.</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+          <table className="w-full text-sm min-w-[500px]">
             <thead className="border-b border-gray-100">
               <tr className="text-xs text-gray-400 uppercase tracking-wide">
                 <th className="text-left py-2">Email</th>
@@ -143,6 +146,7 @@ export default function PermissionsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

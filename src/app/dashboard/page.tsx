@@ -207,18 +207,18 @@ export default function DashboardPage() {
   const total = bookings.length
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-5">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+      <div className="flex items-start sm:items-center justify-between gap-2 mb-4 sm:mb-5 flex-wrap">
         <div>
-          <h1 className="text-2xl font-normal text-gray-800">Dashboard</h1>
-          <p className="text-sm text-gray-500">{total} total bookings · {filtered.length} shown</p>
+          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-gray-500">{total} total · {filtered.length} shown</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={exportBookingsCSV}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
-            <Download className="w-3.5 h-3.5" /> Export Bookings
+            className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+            <Download className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Export</span> Bookings
           </button>
-          <Link href="/" className="gf-submit">+ New Booking</Link>
+          <Link href="/" className="gf-submit text-xs sm:text-sm">+ New</Link>
         </div>
       </div>
 
@@ -443,7 +443,8 @@ export default function DashboardPage() {
             No bookings match these filters.
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[600px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 {['Date', 'Outlet / Program', 'Episode IDs', 'Producer', 'Status', ''].map(h => (
@@ -483,6 +484,7 @@ export default function DashboardPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

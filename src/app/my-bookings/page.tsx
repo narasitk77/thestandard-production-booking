@@ -38,27 +38,28 @@ export default function MyBookingsPage() {
   }, [tab])
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-4">
+    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+      <div className="flex items-start sm:items-center justify-between gap-2 mb-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-normal text-gray-800">My Bookings</h1>
-          <p className="text-sm text-gray-500">Bookings you requested or are assigned to</p>
+          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">My Bookings</h1>
+          <p className="text-xs sm:text-sm text-gray-500">Bookings you requested or are assigned to</p>
         </div>
-        <Link href="/" className="gf-submit">+ New Booking</Link>
+        <Link href="/" className="gf-submit text-xs sm:text-sm">+ New</Link>
       </div>
 
-      <div className="flex gap-2 mb-4 border-b border-gray-200">
+      <div className="flex gap-1 sm:gap-2 mb-4 border-b border-gray-200 overflow-x-auto -mx-3 sm:mx-0 px-3 sm:px-0">
         {[
-          { key: 'mine', label: 'Mine (Requested + Assigned)' },
-          { key: 'confirmed', label: 'All Confirmed' },
+          { key: 'mine', label: 'Mine (Requested + Assigned)', mobile: 'Mine' },
+          { key: 'confirmed', label: 'All Confirmed', mobile: 'Confirmed' },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key as any)}
-            className={`px-4 py-2 text-sm border-b-2 -mb-px ${
+            className={`px-3 sm:px-4 py-2 text-xs sm:text-sm border-b-2 -mb-px whitespace-nowrap ${
               tab === t.key
                 ? 'border-[#673ab7] text-[#673ab7] font-medium'
                 : 'border-transparent text-gray-500 hover:text-gray-800'
             }`}>
-            {t.label}
+            <span className="sm:hidden">{t.mobile}</span>
+            <span className="hidden sm:inline">{t.label}</span>
           </button>
         ))}
       </div>

@@ -123,12 +123,12 @@ export default function BookingForm() {
   const isAgency = category === 'Agency Job'
 
   return (
-    <div className="max-w-[640px] mx-auto px-4 py-8 space-y-3">
+    <div className="max-w-[640px] mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
 
       {/* Header card */}
-      <div className="gf-header p-6">
-        <h1 className="text-3xl font-normal text-gray-800 mb-1">PRODUCTION BOOKING</h1>
-        <p className="text-sm text-gray-500">ระบบการ Booking การผลิตของ THE STANDARD</p>
+      <div className="gf-header p-4 sm:p-6">
+        <h1 className="text-2xl sm:text-3xl font-normal text-gray-800 mb-1">PRODUCTION BOOKING</h1>
+        <p className="text-xs sm:text-sm text-gray-500">ระบบการ Booking การผลิตของ THE STANDARD</p>
         <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-[#db4437]">
           * Indicates required question
         </div>
@@ -143,7 +143,7 @@ export default function BookingForm() {
       <form onSubmit={handleSubmit} className="space-y-3">
 
         {/* OUTLET */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             OUTLET <span className="gf-required">*</span>
           </label>
@@ -164,7 +164,7 @@ export default function BookingForm() {
         </div>
 
         {/* PROGRAM */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             PROGRAM <span className="gf-required">*</span>
           </label>
@@ -188,7 +188,7 @@ export default function BookingForm() {
         </div>
 
         {/* SHOOT DATE */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             SHOOT DATE <span className="gf-required">*</span>
           </label>
@@ -203,7 +203,7 @@ export default function BookingForm() {
         </div>
 
         {/* CATEGORY */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             CATEGORY <span className="gf-required">*</span>
           </label>
@@ -223,7 +223,7 @@ export default function BookingForm() {
         </div>
 
         {/* SHOOT TYPE */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             SHOOT TYPE <span className="gf-required">*</span>
           </label>
@@ -243,7 +243,7 @@ export default function BookingForm() {
         </div>
 
         {/* LOCATION / ROOM */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             LOCATION / ROOM <span className="gf-required">*</span>
           </label>
@@ -288,7 +288,7 @@ export default function BookingForm() {
         </div>
 
         {/* TIME */}
-        <div className="gf-card p-6 grid grid-cols-2 gap-6">
+        <div className="gf-section grid grid-cols-2 gap-6">
           <div>
             <label className="gf-label">
               CALL TIME <span className="gf-required">*</span>
@@ -313,7 +313,7 @@ export default function BookingForm() {
         </div>
 
         {/* NUMBER OF EPISODES */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             NUMBER OF EPISODES <span className="gf-required">*</span>
           </label>
@@ -351,7 +351,7 @@ export default function BookingForm() {
         </div>
 
         {/* PRODUCER */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">
             PRODUCER <span className="gf-required">*</span>
           </label>
@@ -372,7 +372,7 @@ export default function BookingForm() {
         </div>
 
         {/* CREATIVE / HOST */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">CREATIVE / HOST</label>
           <input
             type="text"
@@ -384,7 +384,7 @@ export default function BookingForm() {
         </div>
 
         {/* CREW */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">CREW REQUIRED</label>
           {CREW_OPTIONS.map(c => (
             <label key={c} className="gf-option">
@@ -401,7 +401,7 @@ export default function BookingForm() {
 
         {/* AGENCY REF (conditional) */}
         {isAgency && (
-          <div className="gf-card p-6">
+          <div className="gf-section">
             <label className="gf-label">
               AGENCY REFERENCE <span className="gf-required">*</span>
             </label>
@@ -417,7 +417,7 @@ export default function BookingForm() {
         )}
 
         {/* NOTES */}
-        <div className="gf-card p-6">
+        <div className="gf-section">
           <label className="gf-label">NOTES</label>
           <textarea
             className="gf-input resize-none"

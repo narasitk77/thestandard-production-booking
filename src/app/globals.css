@@ -5,6 +5,12 @@
 @layer base {
   html { font-family: 'Google Sans', Roboto, Arial, sans-serif; }
   body { @apply bg-[#F0EBF8] min-h-screen; }
+  /* Larger tap targets on touch devices */
+  button, a, input[type="checkbox"], input[type="radio"] {
+    @apply touch-manipulation;
+  }
+  /* Prevent horizontal scroll on mobile */
+  html, body { @apply overflow-x-hidden; }
 }
 
 @layer components {
@@ -50,5 +56,10 @@
 
   .episode-badge {
     @apply inline-flex items-center px-2 py-0.5 rounded bg-gray-800 text-white text-xs font-mono;
+  }
+
+  /* Responsive padding helper for booking form sections */
+  .gf-section {
+    @apply gf-card p-4 sm:p-6;
   }
 }

@@ -60,7 +60,7 @@ function TeamSection({ label, members, checked, onToggle }: {
   return (
     <div>
       <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{label}</div>
-      <div className="grid grid-cols-2 gap-x-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         {members.map(m => (
           <label key={m.email} className="gf-option">
             <input type="checkbox" checked={checked.includes(m.email)}
@@ -192,7 +192,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const totalAssigned = assignEmails.length + freelancers.length
 
   return (
-    <div className="max-w-[680px] mx-auto px-4 py-8 space-y-3">
+    <div className="max-w-[680px] mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
 
       <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
         <ArrowLeft className="w-4 h-4" /> Admin Console
@@ -236,7 +236,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       </div>
 
       {/* Booking info */}
-      <div className="gf-card p-5 grid grid-cols-2 gap-3 text-sm">
+      <div className="gf-card p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
         <div><div className="text-xs text-gray-400 mb-0.5">Producer</div><div className="text-gray-800">{booking.producer}</div></div>
         <div><div className="text-xs text-gray-400 mb-0.5">Crew Requested</div><div className="text-gray-800">{booking.crewRequired.join(', ') || '—'}</div></div>
         <div><div className="text-xs text-gray-400 mb-0.5">Creative/Host</div><div className="text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
@@ -266,12 +266,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
               <UserPlus className="w-3.5 h-3.5" /> Freelance
             </div>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <input className="gf-input col-span-1" placeholder="Name *"
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+              <input className="gf-input" placeholder="Name *"
                 value={flName} onChange={e => setFlName(e.target.value)} />
-              <input className="gf-input col-span-1" placeholder="Contract No."
+              <input className="gf-input" placeholder="Contract No."
                 value={flContract} onChange={e => setFlContract(e.target.value)} />
-              <input className="gf-input col-span-1" placeholder="Email (optional)"
+              <input className="gf-input" placeholder="Email (optional)"
                 value={flEmail} onChange={e => setFlEmail(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addFreelancer())} />
             </div>

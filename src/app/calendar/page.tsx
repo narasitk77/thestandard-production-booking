@@ -64,32 +64,32 @@ export default function CalendarPage() {
     : []
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+      <div className="mb-4 flex items-start sm:items-center justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-2xl font-normal text-gray-800">Production Calendar</h1>
-          <p className="text-sm text-gray-500">All bookings · Asia/Bangkok</p>
+          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Production Calendar</h1>
+          <p className="text-xs sm:text-sm text-gray-500">All bookings · Asia/Bangkok</p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-1.5 sm:gap-2 items-center">
           <button onClick={() => setCursor(subMonths(cursor, 1))}
-            className="p-2 border border-gray-300 rounded hover:bg-gray-50">
+            className="p-2 border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100">
             <ChevronLeft className="w-4 h-4" />
           </button>
           <button onClick={() => setCursor(new Date())}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">
+            className="px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100">
             Today
           </button>
           <button onClick={() => setCursor(addMonths(cursor, 1))}
-            className="p-2 border border-gray-300 rounded hover:bg-gray-50">
+            className="p-2 border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100">
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-lg font-medium text-gray-800">{format(cursor, 'MMMM yyyy')}</span>
-          <div className="flex gap-3 text-xs">
+        <div className="px-3 sm:px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-base sm:text-lg font-medium text-gray-800">{format(cursor, 'MMMM yyyy')}</span>
+          <div className="flex gap-2 sm:gap-3 text-[10px] sm:text-xs flex-wrap">
             {Object.entries(STATUS_COLOR).map(([k, c]) => (
               <span key={k} className="flex items-center gap-1">
                 <span className={`w-2 h-2 rounded-full ${c.dot}`}></span>
@@ -100,8 +100,11 @@ export default function CalendarPage() {
         </div>
 
         <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50">
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
-            <div key={d} className="px-2 py-2 text-xs font-medium text-gray-500 text-center">{d}</div>
+          {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d, i) => (
+            <div key={d} className="px-1 sm:px-2 py-2 text-[10px] sm:text-xs font-medium text-gray-500 text-center">
+              <span className="sm:hidden">{d}</span>
+              <span className="hidden sm:inline">{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}</span>
+            </div>
           ))}
         </div>
 
@@ -119,34 +122,46 @@ export default function CalendarPage() {
                 <button
                   key={key}
                   onClick={() => setSelected(day)}
-                  className={`min-h-24 border-b border-r border-gray-100 p-1.5 text-left hover:bg-gray-50 transition-colors ${
+                  className={`min-h-16 sm:min-h-24 border-b border-r border-gray-100 p-1 sm:p-1.5 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors ${
                     !inMonth ? 'bg-gray-50/50' : ''
                   } ${isSelected ? 'ring-2 ring-[#673ab7] ring-inset' : ''}`}
                 >
-                  <div className={`text-xs mb-1 ${
-                    isToday ? 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#673ab7] text-white' :
+                  <div className={`text-[11px] sm:text-xs mb-0.5 sm:mb-1 ${
+                    isToday ? 'inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#673ab7] text-white' :
                     inMonth ? 'text-gray-700' : 'text-gray-400'
                   }`}>
                     {format(day, 'd')}
                   </div>
                   <div className="space-y-0.5">
-                    {dayBookings.slice(0, 3).map(b => {
-                      const c = STATUS_COLOR[b.status] || STATUS_COLOR.REQUESTED
-                      return (
-                        <div key={b.id}
-                          onMouseEnter={e => {
-                            const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                            setHovered({ booking: b, x: r.left + r.width / 2, y: r.top })
-                          }}
-                          onMouseLeave={() => setHovered(null)}
-                          className={`text-[10px] px-1.5 py-0.5 rounded truncate ${c.bg} ${c.text} border border-current/10 cursor-pointer`}>
-                          <span className="font-medium">{b.callTime}</span> {b.outlet.code}·{b.program.code}
-                        </div>
-                      )
-                    })}
-                    {dayBookings.length > 3 && (
-                      <div className="text-[10px] text-gray-400 px-1">+{dayBookings.length - 3} more</div>
-                    )}
+                    {/* Mobile: show only colored dots, Desktop: full chips */}
+                    <div className="flex flex-wrap gap-0.5 sm:hidden">
+                      {dayBookings.slice(0, 4).map(b => {
+                        const c = STATUS_COLOR[b.status] || STATUS_COLOR.REQUESTED
+                        return <span key={b.id} className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+                      })}
+                      {dayBookings.length > 4 && (
+                        <span className="text-[9px] text-gray-400">+{dayBookings.length - 4}</span>
+                      )}
+                    </div>
+                    <div className="hidden sm:block space-y-0.5">
+                      {dayBookings.slice(0, 3).map(b => {
+                        const c = STATUS_COLOR[b.status] || STATUS_COLOR.REQUESTED
+                        return (
+                          <div key={b.id}
+                            onMouseEnter={e => {
+                              const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                              setHovered({ booking: b, x: r.left + r.width / 2, y: r.top })
+                            }}
+                            onMouseLeave={() => setHovered(null)}
+                            className={`text-[10px] px-1.5 py-0.5 rounded truncate ${c.bg} ${c.text} border border-current/10 cursor-pointer`}>
+                            <span className="font-medium">{b.callTime}</span> {b.outlet.code}·{b.program.code}
+                          </div>
+                        )
+                      })}
+                      {dayBookings.length > 3 && (
+                        <div className="text-[10px] text-gray-400 px-1">+{dayBookings.length - 3} more</div>
+                      )}
+                    </div>
                   </div>
                 </button>
               )

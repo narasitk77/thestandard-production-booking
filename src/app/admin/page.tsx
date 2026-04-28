@@ -43,20 +43,20 @@ export default function AdminPage() {
   useEffect(() => { fetch_() }, [fetch_])
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
 
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-normal text-gray-800">Admin Console</h1>
+      <div className="mb-4 sm:mb-6">
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Admin Console</h1>
           <div className="flex gap-2">
-            <Link href="/admin/permissions" className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">
+            <Link href="/admin/permissions" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
               Permissions
             </Link>
-            <Link href="/" className="gf-submit text-sm">+ New Booking</Link>
+            <Link href="/" className="gf-submit text-xs sm:text-sm">+ New</Link>
           </div>
         </div>
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="text-xs sm:text-sm text-gray-500 mt-1">
           Review, assign crew, and approve bookings → Google Calendar
         </p>
       </div>
@@ -97,10 +97,10 @@ export default function AdminPage() {
       ) : (
         <div className="space-y-3">
           {bookings.map(b => (
-            <div key={b.id} className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+            <div key={b.id} className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
+                <div className="flex-1 min-w-0 w-full">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || STATUS_BADGE.REQUESTED}`}>
                       {b.status === 'REQUESTED' ? '[REQUESTED]' : statusLabel(b.status)}
                     </span>
@@ -108,15 +108,15 @@ export default function AdminPage() {
                       {formatDisplayDate(b.shootDate)} · {b.callTime}
                     </span>
                   </div>
-                  <div className="font-medium text-gray-800">
+                  <div className="font-medium text-gray-800 text-sm sm:text-base">
                     {b.outlet.name} · {b.program.name}
                   </div>
-                  <div className="text-sm text-gray-500 mt-0.5">
+                  <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producer}
                     {b.assignedEmails.length > 0 && (
-                      <span className="ml-2 text-blue-600">
+                      <div className="mt-0.5 text-blue-600 break-all">
                         → {b.assignedEmails.join(', ')}
-                      </span>
+                      </div>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1 mt-2">
@@ -126,7 +126,7 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto justify-end">
                   {b.status !== 'CANCELLED' && b.status !== 'COMPLETED' && (
                     <>
                       <Link
