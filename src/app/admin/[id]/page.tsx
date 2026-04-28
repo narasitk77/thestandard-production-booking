@@ -96,10 +96,15 @@ export default function AdminEditPage({ params }: { params: Promise<{ id: string
     fetch(`/api/bookings/${id}`)
       .then(r => r.json())
       .then(d => {
+        if (!d?.booking) {
+          setError(d?.error || 'Booking not found')
+          return
+        }
         setBooking(d.booking)
         setAssignEmails(d.booking.assignedEmails || [])
         setAdminNotes(d.booking.adminNotes || '')
       })
+      .catch(e => setError(e?.message || 'Failed to load booking'))
       .finally(() => setLoading(false))
   }, [id])
 

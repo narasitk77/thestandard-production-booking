@@ -75,9 +75,17 @@ export default function MyBookingsPage() {
             <Link key={b.id} href={`/dashboard/${b.id}`}
               className="gf-card p-4 flex items-center gap-4 hover:border-[#673ab7] transition-colors">
               <div className="flex-shrink-0 text-center w-20">
-                <div className="text-xs text-gray-400">{formatDisplayDate(b.shootDate).split(' ')[0]}</div>
-                <div className="text-lg font-medium text-gray-800">{b.shootDate.slice(8, 10)}</div>
-                <div className="text-xs text-gray-400">{b.callTime}</div>
+                {(() => {
+                  const d = new Date(b.shootDate)
+                  const valid = !isNaN(d.getTime())
+                  return (
+                    <>
+                      <div className="text-xs text-gray-400">{valid ? formatDisplayDate(b.shootDate).split(' ')[0] : '—'}</div>
+                      <div className="text-lg font-medium text-gray-800">{valid ? String(d.getDate()).padStart(2,'0') : '--'}</div>
+                      <div className="text-xs text-gray-400">{b.callTime}</div>
+                    </>
+                  )
+                })()}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-gray-800 font-medium truncate">{b.outlet.name} · {b.program.name}</div>

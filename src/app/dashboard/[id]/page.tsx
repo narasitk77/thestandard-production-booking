@@ -51,10 +51,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [copied, setCopied] = useState(false)
   const [updating, setUpdating] = useState(false)
 
+  const [error, setError] = useState('')
+
   useEffect(() => {
     fetch(`/api/bookings/${id}`)
       .then(r => r.json())
-      .then(data => setBooking(data.booking))
+      .then(data => {
+        if (!data?.booking) {
+          setError(data?.error || 'Booking not found')
+          return
+        }
+        setBooking(data.booking)
+      })
+      .catch(e => setError(e?.message || 'Failed to load booking'))
       .finally(() => setLoading(false))
   }, [id])
 
@@ -85,13 +94,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   if (!booking) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
-        <p className="text-gray-500">Booking not found.</p>
+        <p className="text-gray-500">{error || 'Booking not found.'}</p>
         <Link href="/dashboard" className="gf-link mt-4 inline-block">Back to Dashboard</Link>
       </div>
     )
   }
 
-  const calendarPacket = buildCalendarPacket({
+  let calendarPacket = ''
+  try {
+    calendarPacket = buildCalendarPacket({
     outletName: booking.outlet.name,
     outletCode: booking.outlet.code,
     programName: booking.program.name,
@@ -107,7 +118,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     agencyRef: booking.agencyRef,
     notes: booking.notes,
     episodes: booking.episodes,
-  })
+    })
+  } catch (e) {
+    console.error('buildCalendarPacket error:', e)
+    calendarPacket = '(calendar packet unavailable)'
+  }
 
   const handleCopy = () => {
     navigator.clipboard.writeText(calendarPacket)
@@ -116,7 +131,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const d = new Date(booking.shootDate)
-  const driveFolder = `Production/${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${booking.outlet.code}-${booking.shootDate.slice(2, 4)}${booking.shootDate.slice(5, 7)}${booking.shootDate.slice(8, 10)}-${booking.program.code}/`
+  const validDate = !isNaN(d.getTime())
+  const yy = validDate ? String(d.getFullYear()).slice(-2) : '--'
+  const mm = validDate ? String(d.getMonth() + 1).padStart(2, '0') : '--'
+  const dd = validDate ? String(d.getDate()).padStart(2, '0') : '--'
+  const yyyy = validDate ? d.getFullYear() : '----'
+  const driveFolder = `Production/${yyyy}/${mm}/${booking.outlet.code}-${yy}${mm}${dd}-${booking.program.code}/`
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-3">

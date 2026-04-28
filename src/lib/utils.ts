@@ -5,19 +5,25 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
 }
 
-export function formatThaiDate(date: Date | string): string {
+function safeDate(date: Date | string): Date | null {
+  if (!date) return null
   const d = typeof date === 'string' ? parseISO(date) : date
-  return format(d, 'd MMM yyyy')
+  return d instanceof Date && !isNaN(d.getTime()) ? d : null
+}
+
+export function formatThaiDate(date: Date | string): string {
+  const d = safeDate(date)
+  return d ? format(d, 'd MMM yyyy') : '—'
 }
 
 export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? parseISO(date) : date
-  return format(d, 'yyyy-MM-dd')
+  const d = safeDate(date)
+  return d ? format(d, 'yyyy-MM-dd') : ''
 }
 
 export function formatDisplayDate(date: Date | string): string {
-  const d = typeof date === 'string' ? parseISO(date) : date
-  return format(d, 'EEE dd MMM yyyy')
+  const d = safeDate(date)
+  return d ? format(d, 'EEE dd MMM yyyy') : '—'
 }
 
 export function shootTypeLabel(type: string): string {
@@ -80,24 +86,27 @@ export function buildCalendarPacket(booking: {
   episodes: Array<{ episodeId: string; title: string }>
 }): string {
   const d = typeof booking.shootDate === 'string' ? parseISO(booking.shootDate) : booking.shootDate
-  const dateStr = format(d, 'yyyy-MM-dd')
+  const validDate = d instanceof Date && !isNaN(d.getTime())
+  const dateStr = validDate ? format(d, 'yyyy-MM-dd') : '—'
   const wrapStr = booking.estimatedWrap ? `→ ${booking.estimatedWrap}` : ''
-  const epCount = booking.episodes.length
+  const episodes = booking.episodes || []
+  const epCount = episodes.length
   const location =
     booking.shootType === 'STUDIO'
       ? `Studio`
       : booking.locationName || booking.shootType.replace('_', ' ')
 
-  const epList = booking.episodes
+  const epList = episodes
     .map(e => `  • ${e.episodeId} — ${e.title}`)
     .join('\n')
 
   const crew = booking.crewRequired?.join(', ') || '—'
   const creative = booking.creative?.join(', ') || '—'
 
+  const firstEpTitle = episodes[0]?.title || '(no episode)'
   const title =
     epCount === 1
-      ? `[${booking.outletCode}] ${booking.programName} — ${booking.episodes[0].title}`
+      ? `[${booking.outletCode}] ${booking.programName} — ${firstEpTitle}`
       : `[${booking.outletCode}] ${booking.programName} — ${epCount} EPs (${booking.callTime}${wrapStr})`
 
   return `EVENT TITLE:
@@ -119,7 +128,7 @@ Producer: ${booking.producer}
 Creative/Host: ${creative}
 Crew: ${crew}
 
-NAS: /Production/${format(d, 'yyyy/MM')}/${booking.outletCode}-${format(d, 'yyMMdd')}-${booking.programCode}/
+NAS: /Production/${validDate ? format(d, 'yyyy/MM') : '----/--'}/${booking.outletCode}-${validDate ? format(d, 'yyMMdd') : '------'}-${booking.programCode}/
 Agency Ref: ${booking.agencyRef || '—'}
 Notes: ${booking.notes || '—'}
 ──────────────────────────────
