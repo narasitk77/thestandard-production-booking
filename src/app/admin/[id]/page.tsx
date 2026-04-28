@@ -21,6 +21,13 @@ interface BookingDetail {
 interface Freelancer { id: string; name: string; contract: string; email: string }
 
 const TEAM = {
+  producer: [
+    { name: 'Nat · Narasit (Production Admin)', email: 'narasit.k@thestandard.co' },
+    { name: 'Tui · Tossapol (Coordinator)', email: 'tossapol.b@thestandard.co' },
+    { name: 'Aom · Aomtian (Producer)', email: 'aomtian.t@thestandard.co' },
+    { name: 'Zang · Onticha (Producer)', email: 'onticha.t@thestandard.co' },
+    { name: 'Nice · Natchaya (Producer)', email: 'natchaya.k@thestandard.co' },
+  ],
   video: [
     { name: 'Bird · Nuttapong', email: 'nuttapong.k@thestandard.co' },
     { name: 'Arm · Sakdipat', email: 'sakdipat.p@thestandard.co' },
@@ -483,6 +490,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           </div>
 
           {/* Video Team */}
+          <TeamSection label="Producer / Coordinator" members={TEAM.producer} checked={assignEmails} onToggle={toggleEmail} />
           <TeamSection label="Videographer" members={TEAM.video} checked={assignEmails} onToggle={toggleEmail} />
           <TeamSection label="Video Director" members={TEAM.director} checked={assignEmails} onToggle={toggleEmail} />
           <TeamSection label="Sound Team" members={TEAM.sound} checked={assignEmails} onToggle={toggleEmail} />

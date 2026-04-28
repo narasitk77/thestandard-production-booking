@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
-import { TEAM_PROFILES } from '@/lib/team-profiles'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
 
 const THAI_MONTHS = [
@@ -28,7 +27,7 @@ export async function GET(request: NextRequest) {
     const monthName = THAI_MONTHS[parseInt(mm) - 1] || mm
 
     const records = await prisma.oTRecord.findMany({ where: { month }, orderBy: [{ userEmail: 'asc' }, { date: 'asc' }] })
-    const users = await prisma.user.findMany()
+    const users = await prisma.user.findMany({ where: { active: true }, orderBy: [{ employeeId: 'asc' }, { createdAt: 'asc' }] })
     const userMap = new Map(users.map(u => [u.email.toLowerCase(), u]))
 
     if (detail) {
@@ -37,13 +36,12 @@ export async function GET(request: NextRequest) {
       rows.push(['ลำดับ','ชื่อ - นามสกุล','รหัสพนักงาน','ตำแหน่ง','วันที่','ประเภท','ชั่วโมง','รายละเอียด'].map(csvCell).join(','))
       records.forEach((r, i) => {
         const u = userMap.get(r.userEmail.toLowerCase())
-        const profile = TEAM_PROFILES.find(p => p.email.toLowerCase() === r.userEmail.toLowerCase())
         const typeThai = r.type === 'HOLIDAY' ? 'เสาร์-อาทิตย์/วันหยุด' : 'ทำงานล่วงเวลา (>8 ชม.)'
         rows.push([
           i + 1,
-          u?.thaiName || profile?.thaiName || r.userEmail,
-          u?.employeeId || profile?.employeeId || '',
-          u?.position || profile?.position || '',
+          u?.thaiName || r.userEmail,
+          u?.employeeId || '',
+          u?.position || '',
           new Date(r.date).toISOString().slice(0, 10),
           typeThai,
           r.type === 'OVERTIME' ? r.hours : 1,
@@ -80,17 +78,15 @@ export async function GET(request: NextRequest) {
     let i = 1
     let totalHoliday = 0
     let totalOT = 0
-    for (const profile of TEAM_PROFILES) {
-      const email = profile.email.toLowerCase()
-      const u = userMap.get(email)
+    // Iterate active users in employeeId order
+    for (const u of users) {
+      const email = u.email.toLowerCase()
       const s = summary.get(email) || { holidayDays: 0, otHours: 0 }
-      // Skip people with zero this month UNLESS they're in the user table (i.e. relevant)
-      if (s.holidayDays === 0 && s.otHours === 0 && !u) continue
       rows.push([
         String(i++),
-        u?.thaiName || profile.thaiName,
-        u?.employeeId || profile.employeeId,
-        u?.position || profile.position,
+        u.thaiName || email,
+        u.employeeId || '',
+        u.position || '',
         String(s.holidayDays),
         String(s.otHours),
         '',
@@ -99,18 +95,18 @@ export async function GET(request: NextRequest) {
       totalHoliday += s.holidayDays
       totalOT += s.otHours
     }
-    // Also include any non-team-profile users with records
+    // Also include any orphan emails (records but no User row)
+    const userEmails = new Set(users.map(u => u.email.toLowerCase()))
     Array.from(summary.entries()).forEach(([email, s]) => {
-      if (TEAM_PROFILES.find(p => p.email.toLowerCase() === email)) return
-      const u = userMap.get(email)
+      if (userEmails.has(email)) return
       rows.push([
         String(i++),
-        u?.thaiName || email,
-        u?.employeeId || '',
-        u?.position || '',
+        email,
+        '',
+        '',
         String(s.holidayDays),
         String(s.otHours),
-        '',
+        '(unknown user)',
         '',
       ])
       totalHoliday += s.holidayDays

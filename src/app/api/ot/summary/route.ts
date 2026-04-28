@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
-import { TEAM_PROFILES } from '@/lib/team-profiles'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
 
 interface PersonSummary {
+  userId: string | null
   email: string
   thaiName: string
   employeeId: string
   position: string
+  role: string
+  active: boolean
   holidayDays: number
   otHours: number
-  notes: string
 }
 
 export async function GET(request: NextRequest) {
@@ -22,46 +23,57 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const month = searchParams.get('month') || currentMonthYYYYMM()
+    const includeInactive = searchParams.get('includeInactive') === '1'
 
     const records = await prisma.oTRecord.findMany({ where: { month } })
-    const users = await prisma.user.findMany()
-    const userMap = new Map(users.map(u => [u.email.toLowerCase(), u]))
+    const users = await prisma.user.findMany({
+      where: includeInactive ? {} : { active: true },
+      orderBy: [{ employeeId: 'asc' }, { createdAt: 'asc' }],
+    })
 
-    // Aggregate per email
-    const map = new Map<string, PersonSummary>()
-    for (const profile of TEAM_PROFILES) {
-      const email = profile.email.toLowerCase()
-      const user = userMap.get(email)
-      map.set(email, {
-        email,
-        thaiName: user?.thaiName || profile.thaiName,
-        employeeId: user?.employeeId || profile.employeeId,
-        position: user?.position || profile.position,
-        holidayDays: 0,
-        otHours: 0,
-        notes: '',
-      })
-    }
+    // Build aggregations from records
+    const totals = new Map<string, { holidayDays: number; otHours: number }>()
     for (const r of records) {
-      const email = r.userEmail.toLowerCase()
-      let s = map.get(email)
-      if (!s) {
-        const user = userMap.get(email)
-        s = {
-          email,
-          thaiName: user?.thaiName || email,
-          employeeId: user?.employeeId || '',
-          position: user?.position || '',
-          holidayDays: 0, otHours: 0, notes: '',
-        }
-        map.set(email, s)
-      }
-      if (r.type === 'HOLIDAY') s.holidayDays += 1
-      if (r.type === 'OVERTIME') s.otHours += r.hours
+      const k = r.userEmail.toLowerCase()
+      if (!totals.has(k)) totals.set(k, { holidayDays: 0, otHours: 0 })
+      const t = totals.get(k)!
+      if (r.type === 'HOLIDAY') t.holidayDays += 1
+      if (r.type === 'OVERTIME') t.otHours += r.hours
     }
 
-    const summary = Array.from(map.values())
-    summary.sort((a, b) => a.employeeId.localeCompare(b.employeeId))
+    // One row per user
+    const summary: PersonSummary[] = users.map(u => {
+      const t = totals.get(u.email.toLowerCase()) || { holidayDays: 0, otHours: 0 }
+      return {
+        userId: u.id,
+        email: u.email,
+        thaiName: u.thaiName || '',
+        employeeId: u.employeeId || '',
+        position: u.position || '',
+        role: u.role,
+        active: u.active,
+        holidayDays: t.holidayDays,
+        otHours: Math.round(t.otHours * 100) / 100,
+      }
+    })
+
+    // Include any orphan emails (records but no User row)
+    const userEmails = new Set(users.map(u => u.email.toLowerCase()))
+    Array.from(totals.entries()).forEach(([email, t]) => {
+      if (!userEmails.has(email)) {
+        summary.push({
+          userId: null,
+          email,
+          thaiName: '(unknown)',
+          employeeId: '',
+          position: '',
+          role: 'USER',
+          active: true,
+          holidayDays: t.holidayDays,
+          otHours: Math.round(t.otHours * 100) / 100,
+        })
+      }
+    })
 
     return NextResponse.json({ month, summary })
   } catch (e) {
