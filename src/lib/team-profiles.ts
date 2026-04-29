@@ -31,7 +31,7 @@ export const TEAM_PROFILES: TeamProfile[] = [
   { email: 'worased.p@thestandard.co',     thaiName: 'วรเศรษฐ์ ผลเจริญพงศ์',  employeeId: 'TSD00202', position: 'Video Director' },
   { email: 'kitti.k@thestandard.co',       thaiName: 'กิตติ คล้ายเกิด',         employeeId: 'TSD00233', position: 'Video Editor' },
   { email: 'ratchaseth.c@thestandard.co',  thaiName: 'รัชเศรษฐ์ ชวัลปัญญวัฒน์', employeeId: 'TSD00240', position: 'Videographer' },
-  { email: 'panyapohn.s@thestandard.co',   thaiName: 'ปัญญาภรณ์ สมบัตินิมิตร', employeeId: 'TSD00255', position: 'Video Creative' },
+  { email: 'panyapohn.s@thestandard.co',   thaiName: 'ปัญญาภรณ์ สมบัตินิมิตร', employeeId: 'TSD00255', position: 'Video Director' },
   { email: 'natchaya.k@thestandard.co',    thaiName: 'ณัฐชยา กาฬสิงห์',       employeeId: 'TSD00271', position: 'Producer' },
   { email: 'jaruwan.k@thestandard.co',     thaiName: 'จารุวรรณ ไกรลาศ',       employeeId: 'TSD00272', position: 'Switcher' },
   { email: 'wachirawit.t@thestandard.co',  thaiName: 'วชิรวิทย์ เตมียกุล',      employeeId: 'TSD00286', position: 'Video Editor' },

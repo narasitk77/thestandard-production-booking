@@ -57,6 +57,9 @@ const TEAM = {
     { name: 'Dream · Kamonwan', email: 'kamonwan.l@thestandard.co' },
     { name: 'Ting · Jaruwan', email: 'jaruwan.k@thestandard.co' },
   ],
+  virtualProduction: [
+    { name: 'Famp · Assawapol (Virtual Production)', email: 'assawapol.t@thestandard.co' },
+  ],
 }
 
 function TeamSection({ label, members, checked, onToggle }: {
@@ -497,6 +500,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           <TeamSection label="Sound Team" members={TEAM.sound} checked={assignEmails} onToggle={toggleEmail} />
           <TeamSection label="Photographer" members={TEAM.photo} checked={assignEmails} onToggle={toggleEmail} />
           <TeamSection label="Switcher" members={TEAM.switcher} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Virtual Production" members={TEAM.virtualProduction} checked={assignEmails} onToggle={toggleEmail} />
 
           {/* Freelance */}
           <div>
