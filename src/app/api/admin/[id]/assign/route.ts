@@ -39,14 +39,13 @@ export async function POST(
       },
     })
 
-    // Send email to each assigned crew member
-    const emailResults: string[] = []
-    for (const email of (assignedEmails || [])) {
-      try {
-        const name = email.split('@')[0]
-        await sendAssignmentEmail({
+    // Fire-and-forget all I/O so the user doesn't wait on slow SMTP/Sheets.
+    // Failures are logged server-side but the user's UI returns immediately.
+    Promise.all(
+      (assignedEmails || []).map((email: string) =>
+        sendAssignmentEmail({
           to: email,
-          toName: name,
+          toName: email.split('@')[0],
           bookingId: booking.id,
           outletName: booking.outlet.name,
           programName: booking.program.name,
@@ -59,26 +58,20 @@ export async function POST(
           episodes: booking.episodes,
           notes: booking.notes,
           adminNotes: booking.adminNotes,
-        })
-        emailResults.push(`✓ ${email}`)
-      } catch (e) {
-        console.error(`Failed to send email to ${email}:`, e)
-        emailResults.push(`✗ ${email}`)
-      }
-    }
+        }).catch(e => console.error(`Email to ${email} failed:`, e?.message || e))
+      )
+    ).catch(() => {})
 
-    // Update Google Sheets
     if (booking.sheetRowIndex) {
-      await updateBookingRow(booking.sheetRowIndex, {
+      updateBookingRow(booking.sheetRowIndex, {
         assignedEmails: assignedEmails?.join(', ') || '',
-        status: 'ASSIGNED',
-      })
+        status: nextStatus,
+      }).catch(e => console.error('updateBookingRow error:', e?.message || e))
     }
 
-    // Re-sync OT records (in case crew list changed)
     syncBookingOT(booking.id).catch(e => console.error('syncBookingOT error:', e))
 
-    return NextResponse.json({ booking, emailResults })
+    return NextResponse.json({ booking, queued: assignedEmails?.length || 0 })
   } catch (error) {
     console.error('POST /api/admin/[id]/assign error:', error)
     return NextResponse.json({ error: 'Failed to assign' }, { status: 500 })
