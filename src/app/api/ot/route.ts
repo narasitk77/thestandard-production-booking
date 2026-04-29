@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { cleanupOTRecords, currentMonthYYYYMM, isMonthEditable } from '@/lib/ot-cleanup'
+import { parseTimeToMinutes } from '@/lib/ot-calc'
 
 function deriveMonth(dateStr: string): string {
   return dateStr.slice(0, 7)
@@ -12,7 +13,6 @@ export async function GET(request: NextRequest) {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Lazy cleanup
     cleanupOTRecords().catch(() => {})
 
     const { searchParams } = new URL(request.url)
@@ -20,7 +20,6 @@ export async function GET(request: NextRequest) {
     const email = searchParams.get('email')
     const all = searchParams.get('all') === '1'
 
-    // Non-admins can only see their own records (regardless of email param)
     const targetEmail = (session.role === 'ADMIN' && (email || all))
       ? email
       : session.email
@@ -30,7 +29,7 @@ export async function GET(request: NextRequest) {
         month,
         ...(targetEmail ? { userEmail: targetEmail } : {}),
       },
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }],
     })
 
     return NextResponse.json({
@@ -51,13 +50,25 @@ export async function POST(request: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await request.json()
-    const { date, type, hours, description } = body
+    const { date, startTime, endTime, jobTask, justification } = body
 
-    if (!date || !type) {
-      return NextResponse.json({ error: 'Date and type are required' }, { status: 400 })
+    if (!date) return NextResponse.json({ error: 'Date is required' }, { status: 400 })
+    if (!startTime || !endTime) {
+      return NextResponse.json({ error: 'Start time and end time are required' }, { status: 400 })
     }
-    if (type !== 'HOLIDAY' && type !== 'OVERTIME') {
-      return NextResponse.json({ error: 'Invalid type' }, { status: 400 })
+    const sMin = parseTimeToMinutes(startTime)
+    const eMin = parseTimeToMinutes(endTime)
+    if (sMin === null || eMin === null) {
+      return NextResponse.json({ error: 'Invalid time format (use HH:MM)' }, { status: 400 })
+    }
+    if (eMin <= sMin) {
+      return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 })
+    }
+    if (!jobTask || !jobTask.trim()) {
+      return NextResponse.json({ error: 'Job task description is required' }, { status: 400 })
+    }
+    if (!justification || !justification.trim()) {
+      return NextResponse.json({ error: 'Justification is required (why OT was necessary)' }, { status: 400 })
     }
 
     const month = deriveMonth(date)
@@ -70,9 +81,11 @@ export async function POST(request: NextRequest) {
         userEmail: session.email,
         month,
         date: new Date(date),
-        type,
-        hours: type === 'OVERTIME' ? Number(hours) || 0 : 0,
-        description: description?.trim() || null,
+        startTime,
+        endTime,
+        jobTask: jobTask.trim(),
+        justification: justification.trim(),
+        // legacy fields kept null for new records
       },
     })
 

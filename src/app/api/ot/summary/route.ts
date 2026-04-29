@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
+import { summarizeDay } from '@/lib/ot-calc'
 
 interface PersonSummary {
   userId: string | null
@@ -11,8 +12,10 @@ interface PersonSummary {
   position: string
   role: string
   active: boolean
-  holidayDays: number
-  otHours: number
+  weekendHolidayDays: number  // count of qualifying weekend/holiday days
+  weekdayOTDays: number        // count of qualifying weekday >8h days
+  totalDays: number
+  totalAmount: number          // THB
 }
 
 export async function GET(request: NextRequest) {
@@ -25,25 +28,43 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month') || currentMonthYYYYMM()
     const includeInactive = searchParams.get('includeInactive') === '1'
 
-    const records = await prisma.oTRecord.findMany({ where: { month } })
+    const records = await prisma.oTRecord.findMany({ where: { month }, orderBy: [{ date: 'asc' }, { startTime: 'asc' }] })
     const users = await prisma.user.findMany({
       where: includeInactive ? {} : { active: true },
       orderBy: [{ employeeId: 'asc' }, { createdAt: 'asc' }],
     })
 
-    // Build aggregations from records
-    const totals = new Map<string, { holidayDays: number; otHours: number }>()
+    // Group records by (email, date) and run summarizeDay per group
+    const dayMap = new Map<string, { email: string; date: string; recs: typeof records }>()
     for (const r of records) {
-      const k = r.userEmail.toLowerCase()
-      if (!totals.has(k)) totals.set(k, { holidayDays: 0, otHours: 0 })
-      const t = totals.get(k)!
-      if (r.type === 'HOLIDAY') t.holidayDays += 1
-      if (r.type === 'OVERTIME') t.otHours += r.hours
+      const dateStr = r.date.toISOString().slice(0, 10)
+      const key = `${r.userEmail.toLowerCase()}::${dateStr}`
+      if (!dayMap.has(key)) dayMap.set(key, { email: r.userEmail.toLowerCase(), date: dateStr, recs: [] })
+      dayMap.get(key)!.recs.push(r)
     }
 
-    // One row per user
+    const personTotals = new Map<string, { wh: number; wd: number; amt: number }>()
+    Array.from(dayMap.values()).forEach(g => {
+      const summary = summarizeDay(
+        g.date,
+        g.recs.map(r => ({
+          startTime: r.startTime || '',
+          endTime: r.endTime || '',
+          jobTask: r.jobTask,
+          justification: r.justification,
+        }))
+      )
+      if (!summary.qualifies) return
+      const key = g.email
+      if (!personTotals.has(key)) personTotals.set(key, { wh: 0, wd: 0, amt: 0 })
+      const t = personTotals.get(key)!
+      if (summary.dayType === 'WEEKDAY') t.wd += 1
+      else t.wh += 1
+      t.amt += summary.otAmountTHB
+    })
+
     const summary: PersonSummary[] = users.map(u => {
-      const t = totals.get(u.email.toLowerCase()) || { holidayDays: 0, otHours: 0 }
+      const t = personTotals.get(u.email.toLowerCase()) || { wh: 0, wd: 0, amt: 0 }
       return {
         userId: u.id,
         email: u.email,
@@ -52,14 +73,16 @@ export async function GET(request: NextRequest) {
         position: u.position || '',
         role: u.role,
         active: u.active,
-        holidayDays: t.holidayDays,
-        otHours: Math.round(t.otHours * 100) / 100,
+        weekendHolidayDays: t.wh,
+        weekdayOTDays: t.wd,
+        totalDays: t.wh + t.wd,
+        totalAmount: t.amt,
       }
     })
 
-    // Include any orphan emails (records but no User row)
+    // Include orphan records
     const userEmails = new Set(users.map(u => u.email.toLowerCase()))
-    Array.from(totals.entries()).forEach(([email, t]) => {
+    Array.from(personTotals.entries()).forEach(([email, t]) => {
       if (!userEmails.has(email)) {
         summary.push({
           userId: null,
@@ -69,8 +92,10 @@ export async function GET(request: NextRequest) {
           position: '',
           role: 'USER',
           active: true,
-          holidayDays: t.holidayDays,
-          otHours: Math.round(t.otHours * 100) / 100,
+          weekendHolidayDays: t.wh,
+          weekdayOTDays: t.wd,
+          totalDays: t.wh + t.wd,
+          totalAmount: t.amt,
         })
       }
     })

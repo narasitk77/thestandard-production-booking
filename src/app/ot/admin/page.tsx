@@ -12,8 +12,10 @@ interface PersonSummary {
   position: string
   role: string
   active: boolean
-  holidayDays: number
-  otHours: number
+  weekendHolidayDays: number
+  weekdayOTDays: number
+  totalDays: number
+  totalAmount: number
 }
 
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
@@ -73,11 +75,12 @@ export default function OTAdminPage() {
 
   const totals = summary.reduce(
     (a, s) => ({
-      holiday: a.holiday + s.holidayDays,
-      ot: a.ot + s.otHours,
-      people: a.people + ((s.holidayDays + s.otHours) > 0 ? 1 : 0),
+      wh: a.wh + s.weekendHolidayDays,
+      wd: a.wd + s.weekdayOTDays,
+      amount: a.amount + s.totalAmount,
+      people: a.people + (s.totalDays > 0 ? 1 : 0),
     }),
-    { holiday: 0, ot: 0, people: 0 }
+    { wh: 0, wd: 0, amount: 0, people: 0 }
   )
 
   const startEdit = (s: PersonSummary) => {
@@ -208,18 +211,22 @@ export default function OTAdminPage() {
       </div>
 
       {/* Totals */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="gf-card p-4">
           <div className="text-xs text-gray-500 mb-1">คนที่บันทึก</div>
           <div className="text-2xl font-medium text-gray-800">{totals.people}</div>
         </div>
         <div className="gf-card p-4">
-          <div className="text-xs text-gray-500 mb-1">วันหยุดรวม</div>
-          <div className="text-2xl font-medium text-gray-800">{totals.holiday} <span className="text-sm text-gray-400">วัน</span></div>
+          <div className="text-xs text-gray-500 mb-1">หยุด/Hol (500/วัน)</div>
+          <div className="text-2xl font-medium text-gray-800">{totals.wh}<span className="text-sm text-gray-400 ml-1">วัน</span></div>
         </div>
         <div className="gf-card p-4">
-          <div className="text-xs text-gray-500 mb-1">OT รวม</div>
-          <div className="text-2xl font-medium text-gray-800">{totals.ot} <span className="text-sm text-gray-400">ชม.</span></div>
+          <div className="text-xs text-gray-500 mb-1">วันธรรมดา &gt;8h (300/วัน)</div>
+          <div className="text-2xl font-medium text-gray-800">{totals.wd}<span className="text-sm text-gray-400 ml-1">วัน</span></div>
+        </div>
+        <div className="gf-card p-4 bg-green-50">
+          <div className="text-xs text-green-700 mb-1">รวม THB</div>
+          <div className="text-2xl font-medium text-green-800">฿{totals.amount.toLocaleString('th-TH')}</div>
         </div>
       </div>
 
@@ -281,8 +288,9 @@ export default function OTAdminPage() {
                   <th className="text-left py-2 pr-2">รหัส</th>
                   <th className="text-left py-2 pr-2">ตำแหน่ง</th>
                   <th className="text-left py-2 pr-2">Role</th>
-                  <th className="text-right py-2 pr-2">วันหยุด</th>
-                  <th className="text-right py-2 pr-2">OT</th>
+                  <th className="text-right py-2 pr-2">หยุด/Hol</th>
+                  <th className="text-right py-2 pr-2">WD &gt;8h</th>
+                  <th className="text-right py-2 pr-2">THB</th>
                   <th className="text-right py-2 pr-2 w-32">Actions</th>
                 </tr>
               </thead>
@@ -340,8 +348,9 @@ export default function OTAdminPage() {
                         )}
                       </td>
 
-                      <td className="py-2 pr-2 text-right tabular-nums font-medium">{s.holidayDays || 0}</td>
-                      <td className="py-2 pr-2 text-right tabular-nums font-medium">{s.otHours || 0}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums font-medium">{s.weekendHolidayDays || 0}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums font-medium">{s.weekdayOTDays || 0}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums font-medium text-green-700">{s.totalAmount ? `฿${s.totalAmount.toLocaleString('th-TH')}` : '—'}</td>
 
                       <td className="py-2 pr-2 text-right">
                         {!s.userId ? (
@@ -388,8 +397,9 @@ export default function OTAdminPage() {
               <tfoot>
                 <tr className="border-t-2 border-gray-300 font-medium">
                   <td colSpan={6} className="py-2 pr-2 text-right text-gray-700">รวม</td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{totals.holiday}</td>
-                  <td className="py-2 pr-2 text-right tabular-nums">{totals.ot}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{totals.wh}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{totals.wd}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-green-700">฿{totals.amount.toLocaleString('th-TH')}</td>
                   <td></td>
                 </tr>
               </tfoot>

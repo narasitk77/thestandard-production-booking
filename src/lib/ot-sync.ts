@@ -1,76 +1,50 @@
 import { prisma } from './db'
-import type { Booking } from '@prisma/client'
 
 /**
- * Auto-generate OT records from a booking's assigned crew.
+ * Auto-generate OT TASK records from a booking's assigned crew.
  *
- * Rules:
- *  - Weekend (Sat/Sun) → HOLIDAY (1 day per crew member)
- *  - Weekday with (estimatedWrap - callTime) > 8 hours → OVERTIME with the excess hours
- *  - Otherwise → no OT record (normal work day)
+ * Each assigned crew gets one record per booking with:
+ *  - startTime = booking.callTime
+ *  - endTime = booking.estimatedWrap (or callTime + 4h default)
+ *  - jobTask = "[Auto] OUTLET·PROGRAM EpisodeIDs"
+ *  - justification = "Auto from booking ID"
  *
- * Idempotent: deletes any existing records for this booking first, then re-creates.
+ * Day-type / OT amount is computed at view time from the date + tasks list.
  *
- * Records keep `bookingId` so they survive alongside manual entries.
+ * Idempotent: deletes any existing records linked to this booking first.
  */
 export async function syncBookingOT(bookingId: string): Promise<{ created: number }> {
-  const booking = await prisma.booking.findUnique({ where: { id: bookingId } })
-  if (!booking) return { created: 0 }
-
-  // Always remove existing auto-records for this booking first
   await prisma.oTRecord.deleteMany({ where: { bookingId } })
 
-  // Don't generate for cancelled bookings
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' } } },
+  })
+  if (!booking) return { created: 0 }
   if (booking.status === 'CANCELLED') return { created: 0 }
 
   const emails = (booking.assignedEmails || []).filter(Boolean)
   if (emails.length === 0) return { created: 0 }
+  if (!booking.callTime) return { created: 0 }
 
+  const startTime = booking.callTime
+  const endTime = booking.estimatedWrap || addHoursStr(startTime, 4)
   const date = new Date(booking.shootDate)
-  const day = date.getDay() // 0=Sun, 6=Sat
-  const isWeekend = day === 0 || day === 6
-  const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+  const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 
-  let type: 'HOLIDAY' | 'OVERTIME' | null = null
-  let hours = 0
-
-  if (isWeekend) {
-    type = 'HOLIDAY'
-  } else {
-    const start = parseTimeToMinutes(booking.callTime)
-    const end = parseTimeToMinutes(booking.estimatedWrap)
-    if (start != null && end != null && end > start) {
-      const totalMinutes = end - start
-      const totalHours = totalMinutes / 60
-      if (totalHours > 8) {
-        type = 'OVERTIME'
-        hours = Math.round((totalHours - 8) * 100) / 100
-      }
-    }
-  }
-
-  if (!type) return { created: 0 }
-
-  const description = `[Auto] Booking · ${booking.outletId.slice(0, 0)}` // will be improved below
-
-  // Build a richer description with episode IDs
-  const fullBooking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' } } },
-  })
-  const epIds = fullBooking?.episodes.map(e => e.episodeId).join(', ') || ''
-  const desc = fullBooking
-    ? `[Auto] ${fullBooking.outlet.code}·${fullBooking.program.code} ${epIds}`.trim()
-    : '[Auto] from booking'
+  const epIds = booking.episodes.map(e => e.episodeId).join(', ')
+  const jobTask = `[Auto] ${booking.outlet.code}·${booking.program.code}${epIds ? ` (${epIds})` : ''}`
+  const justification = `Auto-generated from approved booking ${booking.id}`
 
   await prisma.oTRecord.createMany({
     data: emails.map(email => ({
       userEmail: email.toLowerCase(),
       month,
       date,
-      type: type!,
-      hours: type === 'OVERTIME' ? hours : 0,
-      description: desc,
+      startTime,
+      endTime,
+      jobTask,
+      justification,
       bookingId,
     })),
   })
@@ -78,18 +52,15 @@ export async function syncBookingOT(bookingId: string): Promise<{ created: numbe
   return { created: emails.length }
 }
 
-/**
- * Delete all auto-generated OT records linked to a booking.
- * Called when a booking is cancelled.
- */
 export async function clearBookingOT(bookingId: string): Promise<number> {
   const result = await prisma.oTRecord.deleteMany({ where: { bookingId } })
   return result.count
 }
 
-function parseTimeToMinutes(t: string | null | undefined): number | null {
-  if (!t) return null
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t)
-  if (!m) return null
-  return parseInt(m[1]) * 60 + parseInt(m[2])
+function addHoursStr(hhmm: string, hours: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const total = h * 60 + m + hours * 60
+  const eh = Math.min(23, Math.floor(total / 60))
+  const em = total % 60
+  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { isMonthEditable } from '@/lib/ot-cleanup'
+import { parseTimeToMinutes } from '@/lib/ot-calc'
 
 export async function PATCH(
   request: NextRequest,
@@ -14,7 +15,6 @@ export async function PATCH(
     const existing = await prisma.oTRecord.findUnique({ where: { id: params.id } })
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-    // Only owner or admin can edit
     if (existing.userEmail !== session.email && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
@@ -28,15 +28,27 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { date, type, hours, description } = body
+    const { date, startTime, endTime, jobTask, justification } = body
+
+    if (startTime !== undefined && endTime !== undefined) {
+      const sMin = parseTimeToMinutes(startTime)
+      const eMin = parseTimeToMinutes(endTime)
+      if (sMin === null || eMin === null) {
+        return NextResponse.json({ error: 'Invalid time format' }, { status: 400 })
+      }
+      if (eMin <= sMin) {
+        return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 })
+      }
+    }
 
     const updated = await prisma.oTRecord.update({
       where: { id: params.id },
       data: {
         ...(date && { date: new Date(date), month: date.slice(0, 7) }),
-        ...(type && { type }),
-        ...(hours !== undefined && { hours: Number(hours) || 0 }),
-        ...(description !== undefined && { description: description?.trim() || null }),
+        ...(startTime !== undefined && { startTime }),
+        ...(endTime !== undefined && { endTime }),
+        ...(jobTask !== undefined && { jobTask: jobTask?.trim() || null }),
+        ...(justification !== undefined && { justification: justification?.trim() || null }),
       },
     })
 

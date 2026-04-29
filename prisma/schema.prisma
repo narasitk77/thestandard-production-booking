@@ -62,16 +62,25 @@ enum OTType {
 }
 
 model OTRecord {
-  id          String   @id @default(cuid())
-  userEmail   String
-  month       String   // YYYY-MM, derived from date
-  date        DateTime @db.Date
-  type        OTType
-  hours       Float    @default(0)  // for OVERTIME (decimal hours)
-  description String?
-  bookingId   String?  // if auto-generated from a booking, the booking id (null = manual)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  userEmail     String
+  month         String   // YYYY-MM, derived from date
+  date          DateTime @db.Date
+
+  // Task-level fields (new model — required for new entries)
+  startTime     String?  @db.VarChar(5)  // HH:MM
+  endTime       String?  @db.VarChar(5)  // HH:MM
+  jobTask       String?  // description of work performed
+  justification String?  // why OT/standby was necessary
+
+  // Legacy fields (kept for backward compat with old data; not used for new entries)
+  type          OTType?
+  hours         Float    @default(0)
+  description   String?
+
+  bookingId     String?  // if auto-generated from a booking, the booking id (null = manual)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([userEmail, month])
   @@index([month])
