@@ -26,11 +26,24 @@ export async function cleanupOTRecords(): Promise<number> {
   // After day 10: keep only current
   const keep = day <= 10 ? [currentMonth, prevMonth] : [currentMonth]
 
-  const result = await prisma.oTRecord.deleteMany({
+  // 1) Drop records outside the keep window (10-day archive policy)
+  const oldDel = await prisma.oTRecord.deleteMany({
     where: { month: { notIn: keep } },
   })
 
-  return result.count
+  // 2) Drop legacy pre-v1.15 records that lack the new task fields.
+  //    Safe filter: missing both startTime AND justification (so we never delete
+  //    a freshly-created record that just hasn't been opened yet).
+  const legacyDel = await prisma.oTRecord.deleteMany({
+    where: {
+      AND: [
+        { startTime: null },
+        { justification: null },
+      ],
+    },
+  })
+
+  return oldDel.count + legacyDel.count
 }
 
 export function currentMonthYYYYMM(): string {

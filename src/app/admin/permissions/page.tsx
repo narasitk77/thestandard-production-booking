@@ -63,8 +63,13 @@ export default function PermissionsPage() {
       </Link>
 
       <div className="gf-header p-6">
-        <h1 className="text-2xl font-normal text-gray-800">Permissions</h1>
-        <p className="text-sm text-gray-500 mt-1">Manage who can access the admin console</p>
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-normal text-gray-800">Permissions</h1>
+            <p className="text-sm text-gray-500 mt-1">Manage who can access the admin console</p>
+          </div>
+          <TestEmailButton />
+        </div>
       </div>
 
       {error && <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
@@ -149,6 +154,40 @@ export default function PermissionsPage() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function TestEmailButton() {
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const send = async () => {
+    setLoading(true); setResult(null)
+    try {
+      const res = await fetch('/api/admin/test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      const data = await res.json()
+      if (res.ok) setResult({ ok: true, msg: `✓ Sent to ${data.sentTo} (${data.config?.host}:${data.config?.port})` })
+      else setResult({ ok: false, msg: `${data.error || 'Failed'}: ${data.detail || ''} [${data.code || ''}]` })
+    } catch (e: any) {
+      setResult({ ok: false, msg: e?.message || 'Network error' })
+    } finally {
+      setLoading(false)
+      setTimeout(() => setResult(null), 12000)
+    }
+  }
+
+  return (
+    <div className="text-right">
+      <button onClick={send} disabled={loading}
+        className="text-xs px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+        {loading ? 'Testing…' : '✉︎ Test SMTP'}
+      </button>
+      {result && (
+        <div className={`text-[11px] mt-1 max-w-xs ${result.ok ? 'text-green-700' : 'text-red-600'}`}>
+          {result.msg}
+        </div>
+      )}
     </div>
   )
 }

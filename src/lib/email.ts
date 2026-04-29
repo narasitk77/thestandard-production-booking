@@ -1,14 +1,25 @@
 import nodemailer from 'nodemailer'
 
 function getTransport() {
+  // Default to 465 SSL — port 587 STARTTLS is unreliable on cloud hosts (Render etc.)
+  const port = parseInt(process.env.SMTP_PORT || '465')
+  // 'secure: true' means port 465 SSL/TLS; 'false' = upgrade via STARTTLS (587/25)
+  const secureFlag = process.env.SMTP_SECURE
+    ? process.env.SMTP_SECURE === 'true'
+    : port === 465
+
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
+    port,
+    secure: secureFlag,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    // Hard caps so we never hang the API thread
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
   })
 }
 
