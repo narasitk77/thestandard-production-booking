@@ -81,6 +81,26 @@ Push to `main` → Render auto-deploys.
 - PostgreSQL: `dpg-d7neua57vvec739364k0-a` (free tier — **expires 2026-05-27**)
 - Region: Singapore
 
+### Email Delivery
+
+Render free web services block outbound SMTP ports `25`, `465`, and `587`, so production email should use an HTTP email provider.
+
+Supported providers:
+
+```bash
+# Recommended on Render free
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_xxx
+EMAIL_FROM="THE STANDARD Production Booking <production@thestandard.co>"
+
+# Alternative
+EMAIL_PROVIDER=sendgrid
+SENDGRID_API_KEY=SG.xxx
+EMAIL_FROM="THE STANDARD Production Booking <production@thestandard.co>"
+```
+
+SMTP is still supported where outbound SMTP is allowed, or when using a provider port such as `2525`.
+
 ## Stack
 
 | Layer | Technology |

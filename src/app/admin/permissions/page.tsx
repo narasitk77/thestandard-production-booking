@@ -167,7 +167,7 @@ function TestEmailButton() {
     try {
       const res = await fetch('/api/admin/test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
       const data = await res.json()
-      if (res.ok) setResult({ ok: true, msg: `✓ Sent to ${data.sentTo} (${data.config?.host}:${data.config?.port})` })
+      if (res.ok) setResult({ ok: true, msg: `✓ Sent to ${data.sentTo} via ${data.provider || data.config?.provider || 'email'}` })
       else setResult({ ok: false, msg: `${data.error || 'Failed'}: ${data.detail || ''} [${data.code || ''}]` })
     } catch (e: any) {
       setResult({ ok: false, msg: e?.message || 'Network error' })
@@ -181,7 +181,7 @@ function TestEmailButton() {
     <div className="text-right">
       <button onClick={send} disabled={loading}
         className="text-xs px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
-        {loading ? 'Testing…' : '✉︎ Test SMTP'}
+        {loading ? 'Testing…' : '✉︎ Test Email'}
       </button>
       {result && (
         <div className={`text-[11px] mt-1 max-w-xs ${result.ok ? 'text-green-700' : 'text-red-600'}`}>

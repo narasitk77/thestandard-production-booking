@@ -101,7 +101,7 @@ export async function POST(
         failed: failedEmails,
       },
       warning: failedEmails.length
-        ? `Saved, but email failed for ${failedEmails.map(f => f.email).join(', ')}`
+        ? `Saved, but email failed for ${failedEmails.map(f => f.email).join(', ')}: ${failedEmails[0].error}`
         : null,
     })
   } catch (error) {
