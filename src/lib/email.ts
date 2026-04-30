@@ -39,9 +39,8 @@ export async function sendAssignmentEmail(opts: {
   notes?: string | null
   adminNotes?: string | null
 }) {
-  if (!process.env.SMTP_USER) {
-    console.warn('Email: no SMTP credentials configured')
-    return
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error('SMTP_USER/SMTP_PASS not configured')
   }
 
   const transport = getTransport()

@@ -6,6 +6,16 @@ import { requireAdmin } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { format } from 'date-fns'
 
+function cleanEmailList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(
+    value
+      .filter((email): email is string => typeof email === 'string')
+      .map(email => email.trim())
+      .filter(Boolean)
+  ))
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -15,6 +25,7 @@ export async function POST(
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
     const { assignedEmails, adminNotes } = await request.json()
+    const emailRecipients = cleanEmailList(assignedEmails)
 
     const existing = await prisma.booking.findUnique({ where: { id: params.id } })
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -28,7 +39,7 @@ export async function POST(
     const booking = await prisma.booking.update({
       where: { id: params.id },
       data: {
-        assignedEmails: assignedEmails || [],
+        assignedEmails: emailRecipients,
         adminNotes: adminNotes || null,
         status: nextStatus,
       },
@@ -39,10 +50,8 @@ export async function POST(
       },
     })
 
-    // Fire-and-forget all I/O so the user doesn't wait on slow SMTP/Sheets.
-    // Failures are logged server-side but the user's UI returns immediately.
-    Promise.all(
-      (assignedEmails || []).map((email: string) =>
+    const emailResults = await Promise.allSettled(
+      emailRecipients.map((email) =>
         sendAssignmentEmail({
           to: email,
           toName: email.split('@')[0],
@@ -58,20 +67,43 @@ export async function POST(
           episodes: booking.episodes,
           notes: booking.notes,
           adminNotes: booking.adminNotes,
-        }).catch(e => console.error(`Email to ${email} failed:`, e?.message || e))
+        })
       )
-    ).catch(() => {})
+    )
+    const failedEmails = emailResults.flatMap((result, index) => {
+      if (result.status === 'fulfilled') return []
+      const reason = result.reason
+      return [{
+        email: emailRecipients[index],
+        error: reason?.message || String(reason),
+      }]
+    })
+    failedEmails.forEach(({ email, error }) => {
+      console.error(`Email to ${email} failed:`, error)
+    })
+    const sentEmails = emailResults.length - failedEmails.length
 
     if (booking.sheetRowIndex) {
       updateBookingRow(booking.sheetRowIndex, {
-        assignedEmails: assignedEmails?.join(', ') || '',
+        assignedEmails: emailRecipients.join(', '),
         status: nextStatus,
       }).catch(e => console.error('updateBookingRow error:', e?.message || e))
     }
 
     syncBookingOT(booking.id).catch(e => console.error('syncBookingOT error:', e))
 
-    return NextResponse.json({ booking, queued: assignedEmails?.length || 0 })
+    return NextResponse.json({
+      booking,
+      queued: sentEmails,
+      email: {
+        requested: emailRecipients.length,
+        sent: sentEmails,
+        failed: failedEmails,
+      },
+      warning: failedEmails.length
+        ? `Saved, but email failed for ${failedEmails.map(f => f.email).join(', ')}`
+        : null,
+    })
   } catch (error) {
     console.error('POST /api/admin/[id]/assign error:', error)
     return NextResponse.json({ error: 'Failed to assign' }, { status: 500 })

@@ -94,6 +94,8 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [saving, setSaving] = useState(false)
   const [approving, setApproving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [savedMessage, setSavedMessage] = useState('✓ Saved')
+  const [savedTone, setSavedTone] = useState<'success' | 'warning'>('success')
   const [approved, setApproved] = useState(false)
   const [error, setError] = useState('')
 
@@ -176,6 +178,13 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const removeFreelancer = (id: string) =>
     setFreelancers(prev => prev.filter(f => f.id !== id))
 
+  const showSaved = (message = '✓ Saved', tone: 'success' | 'warning' = 'success') => {
+    setSavedMessage(message)
+    setSavedTone(tone)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 3000)
+  }
+
   const handleAssign = async () => {
     setError('')
     setSaving(true)
@@ -202,9 +211,23 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setBooking(prev => prev ? { ...prev, status: 'ASSIGNED', assignedEmails: data.booking.assignedEmails } : prev)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
+      setBooking(prev => prev ? {
+        ...prev,
+        status: data.booking.status,
+        assignedEmails: data.booking.assignedEmails,
+        adminNotes: data.booking.adminNotes,
+      } : data.booking)
+      setAssignEmails(data.booking.assignedEmails || [])
+      setAdminNotes(data.booking.adminNotes || '')
+
+      const email = data.email || { sent: data.queued || 0, requested: allEmails.length, failed: [] }
+      if (data.warning) {
+        showSaved(data.warning, 'warning')
+      } else if (email.sent > 0) {
+        showSaved(`✓ Saved & sent ${email.sent} email${email.sent === 1 ? '' : 's'}`)
+      } else {
+        showSaved('✓ Saved (no email recipients)')
+      }
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -255,8 +278,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       setBooking(data.booking)
       hydrateEditForm(data.booking)
       setEditMode(false)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
+      showSaved()
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -319,7 +341,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       </div>
 
       {error && <div className="gf-card p-4 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
-      {saved && <div className="gf-card p-4 text-sm text-green-600 border-l-4 border-green-400">✓ Saved</div>}
+      {saved && (
+        <div className={`gf-card p-4 text-sm border-l-4 ${
+          savedTone === 'warning'
+            ? 'text-yellow-700 border-yellow-400 bg-yellow-50'
+            : 'text-green-600 border-green-400'
+        }`}>
+          {savedMessage}
+        </div>
+      )}
       {approved && <div className="gf-card p-4 text-sm text-green-600 border-l-4 border-green-400">✓ Approved — Google Calendar event created</div>}
 
       {/* CANCELLED → Restore banner */}
