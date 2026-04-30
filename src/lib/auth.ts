@@ -6,6 +6,37 @@ import { findProfileByEmail } from './team-profiles'
 const ALLOWED_DOMAIN = 'thestandard.co'
 const INITIAL_ADMINS = ['narasit.k@thestandard.co']
 
+async function refreshAccessToken(token: any) {
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID || '',
+        client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
+        grant_type: 'refresh_token',
+        refresh_token: token.refreshToken,
+      }),
+    })
+    const refreshed = await response.json()
+    if (!response.ok) throw refreshed
+
+    return {
+      ...token,
+      accessToken: refreshed.access_token,
+      accessTokenExpires: Date.now() + (refreshed.expires_in || 3600) * 1000,
+      refreshToken: refreshed.refresh_token ?? token.refreshToken,
+      accessTokenError: undefined,
+    }
+  } catch (error) {
+    console.error('Google access token refresh failed:', error)
+    return {
+      ...token,
+      accessTokenError: 'RefreshAccessTokenError',
+    }
+  }
+}
+
 export const authOptions: AuthOptions = {
   providers: [
     GoogleProvider({
@@ -14,7 +45,15 @@ export const authOptions: AuthOptions = {
       authorization: {
         params: {
           hd: ALLOWED_DOMAIN,
-          prompt: 'select_account',
+          prompt: 'consent select_account',
+          access_type: 'offline',
+          response_type: 'code',
+          scope: [
+            'openid',
+            'email',
+            'profile',
+            'https://www.googleapis.com/auth/gmail.send',
+          ].join(' '),
         },
       },
     }),
@@ -51,24 +90,43 @@ export const authOptions: AuthOptions = {
       }
       return true
     },
-    async jwt({ token, user }) {
-      const email = (user?.email || token.email)?.toLowerCase()
+    async jwt({ token, user, account }) {
+      let nextToken: any = token
+      if (account?.access_token) {
+        nextToken = {
+          ...nextToken,
+          accessToken: account.access_token,
+          accessTokenExpires: account.expires_at ? account.expires_at * 1000 : Date.now() + 3600 * 1000,
+          refreshToken: account.refresh_token ?? nextToken.refreshToken,
+          accessTokenError: undefined,
+        }
+      } else if (
+        nextToken.accessToken &&
+        nextToken.accessTokenExpires &&
+        Date.now() > nextToken.accessTokenExpires - 60_000 &&
+        nextToken.refreshToken
+      ) {
+        nextToken = await refreshAccessToken(nextToken)
+      }
+
+      const email = (user?.email || nextToken.email)?.toLowerCase()
       if (email) {
         const u = await prisma.user.findUnique({ where: { email } })
         if (u) {
-          ;(token as any).role = u.role
-          ;(token as any).userId = u.id
-          ;(token as any).active = u.active
-          token.email = u.email
-          token.name = u.name
+          nextToken.role = u.role
+          nextToken.userId = u.id
+          nextToken.active = u.active
+          nextToken.email = u.email
+          nextToken.name = u.name
         }
       }
-      return token
+      return nextToken
     },
     async session({ session, token }) {
       if (session.user) {
         ;(session.user as any).role = (token as any).role || 'USER'
         ;(session.user as any).id = (token as any).userId
+        ;(session.user as any).accessTokenError = (token as any).accessTokenError
       }
       return session
     },

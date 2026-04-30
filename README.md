@@ -83,7 +83,11 @@ Push to `main` → Render auto-deploys.
 
 ### Email Delivery
 
-Render free web services block outbound SMTP ports `25`, `465`, and `587`, so production email should use an HTTP email provider.
+Render free web services block outbound SMTP ports `25`, `465`, and `587`.
+
+The app can send through the logged-in admin's Google account using the Gmail HTTPS API. After this scope is deployed, admins must sign out and sign in once to grant Gmail send permission.
+
+Optional provider-based delivery is also supported:
 
 Supported providers:
 

@@ -1,12 +1,17 @@
 import nodemailer from 'nodemailer'
 
-type EmailProvider = 'resend' | 'sendgrid' | 'smtp'
+type EmailProvider = 'resend' | 'sendgrid' | 'gmail-oauth' | 'smtp'
 
 type EmailMessage = {
   to: string | string[]
   subject: string
   text: string
   html?: string
+}
+
+type EmailContext = {
+  gmailAccessToken?: string | null
+  gmailFrom?: string | null
 }
 
 type EmailSendResult = {
@@ -50,13 +55,21 @@ function getTransport() {
   })
 }
 
-function getPreferredProvider(): EmailProvider | null {
+function getPreferredProvider(context: EmailContext = {}): EmailProvider | null {
   const configuredProvider = process.env.EMAIL_PROVIDER?.toLowerCase()
-  if (configuredProvider === 'resend' || configuredProvider === 'sendgrid' || configuredProvider === 'smtp') {
+  if (
+    configuredProvider === 'resend' ||
+    configuredProvider === 'sendgrid' ||
+    configuredProvider === 'gmail-oauth' ||
+    configuredProvider === 'gmail' ||
+    configuredProvider === 'smtp'
+  ) {
+    if (configuredProvider === 'gmail') return 'gmail-oauth'
     return configuredProvider
   }
   if (process.env.RESEND_API_KEY) return 'resend'
   if (process.env.SENDGRID_API_KEY) return 'sendgrid'
+  if (context.gmailAccessToken) return 'gmail-oauth'
   if (process.env.SMTP_USER || process.env.SMTP_PASS) return 'smtp'
   return null
 }
@@ -102,6 +115,83 @@ async function parseErrorResponse(res: Response) {
     return json?.message || json?.error || JSON.stringify(json)
   } catch {
     return text
+  }
+}
+
+function encodeHeader(value: string) {
+  return `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`
+}
+
+function toBase64Url(value: string) {
+  return Buffer.from(value, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+function buildMime(message: EmailMessage, from: string) {
+  const recipients = normalizeRecipients(message.to)
+  if (recipients.length === 0) {
+    throw new Error('Email recipient not configured')
+  }
+
+  const boundary = `production-booking-${Date.now()}`
+  const html = message.html || message.text.replace(/\n/g, '<br>')
+
+  return [
+    `From: ${from}`,
+    `To: ${recipients.join(', ')}`,
+    `Subject: ${encodeHeader(message.subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    message.text,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    html,
+    '',
+    `--${boundary}--`,
+    '',
+  ].join('\r\n')
+}
+
+async function sendViaGmailOAuth(message: EmailMessage, context: EmailContext): Promise<EmailSendResult> {
+  if (!context.gmailAccessToken) {
+    throw new Error('Google Gmail send permission missing. Sign out and sign in again, then allow Gmail send access.')
+  }
+  const provider = 'gmail-oauth'
+  const from = context.gmailFrom || process.env.EMAIL_FROM || process.env.SMTP_FROM || ''
+  if (!from) {
+    throw new Error('Google sender email not available')
+  }
+  const raw = toBase64Url(buildMime(message, from))
+
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${context.gmailAccessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ raw }),
+  })
+
+  if (!res.ok) {
+    throw new Error(`Gmail API failed: ${await parseErrorResponse(res)}`)
+  }
+
+  const data = await res.json().catch(() => ({}))
+  return {
+    provider,
+    messageId: data?.id,
+    config: getEmailConfigSummary(provider),
   }
 }
 
@@ -204,11 +294,12 @@ async function sendViaSmtp(message: EmailMessage): Promise<EmailSendResult> {
   }
 }
 
-export function isEmailConfigured() {
-  const provider = getPreferredProvider()
+export function isEmailConfigured(context: EmailContext = {}) {
+  const provider = getPreferredProvider(context)
   if (!provider) return false
   if (provider === 'resend') return Boolean(process.env.RESEND_API_KEY && getSender(provider))
   if (provider === 'sendgrid') return Boolean(process.env.SENDGRID_API_KEY && getSender(provider))
+  if (provider === 'gmail-oauth') return Boolean(context.gmailAccessToken)
   return Boolean(process.env.SMTP_USER && process.env.SMTP_PASS)
 }
 
@@ -227,6 +318,9 @@ export function getEmailConfigSummary(provider = getPreferredProvider()) {
       endpoint: process.env.SENDGRID_API_URL || 'https://api.sendgrid.com/v3/mail/send',
     }
   }
+  if (provider === 'gmail-oauth') {
+    return { provider }
+  }
   if (provider === 'smtp') {
     const config = getSmtpConfig()
     return {
@@ -240,13 +334,14 @@ export function getEmailConfigSummary(provider = getPreferredProvider()) {
   return { provider: null }
 }
 
-export async function sendEmail(message: EmailMessage): Promise<EmailSendResult> {
-  const provider = getPreferredProvider()
+export async function sendEmail(message: EmailMessage, context: EmailContext = {}): Promise<EmailSendResult> {
+  const provider = getPreferredProvider(context)
   if (!provider) {
     throw new Error('Email provider not configured')
   }
   if (provider === 'resend') return sendViaResend(message)
   if (provider === 'sendgrid') return sendViaSendGrid(message)
+  if (provider === 'gmail-oauth') return sendViaGmailOAuth(message, context)
   return sendViaSmtp(message)
 }
 
@@ -265,6 +360,8 @@ export async function sendAssignmentEmail(opts: {
   episodes: Array<{ episodeId: string; title: string }>
   notes?: string | null
   adminNotes?: string | null
+  senderAccessToken?: string | null
+  senderEmail?: string | null
 }) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
 
@@ -292,12 +389,18 @@ ${appUrl}/dashboard/${opts.bookingId}
 
 THE STANDARD Production Booking`
 
-  await sendEmail({
-    to: opts.to,
-    subject: `[Production] ${opts.outletName} · ${opts.programName} — ${opts.shootDate}`,
-    text,
-    html: text.replace(/\n/g, '<br>').replace(/────+/g, '<hr>'),
-  })
+  await sendEmail(
+    {
+      to: opts.to,
+      subject: `[Production] ${opts.outletName} · ${opts.programName} — ${opts.shootDate}`,
+      text,
+      html: text.replace(/\n/g, '<br>').replace(/────+/g, '<hr>'),
+    },
+    {
+      gmailAccessToken: opts.senderAccessToken,
+      gmailFrom: opts.senderEmail,
+    }
+  )
 }
 
 export async function sendApprovalNotification(opts: {

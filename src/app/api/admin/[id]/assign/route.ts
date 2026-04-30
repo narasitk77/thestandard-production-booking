@@ -5,6 +5,7 @@ import { updateBookingRow } from '@/lib/google-sheets'
 import { requireAdmin } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { format } from 'date-fns'
+import { getToken } from 'next-auth/jwt'
 
 function cleanEmailList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -21,9 +22,12 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    if (!(await requireAdmin())) {
+    const session = await requireAdmin()
+    if (!session) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
+    const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
+    const senderAccessToken = typeof authToken?.accessToken === 'string' ? authToken.accessToken : null
     const { assignedEmails, adminNotes } = await request.json()
     const emailRecipients = cleanEmailList(assignedEmails)
 
@@ -67,6 +71,8 @@ export async function POST(
           episodes: booking.episodes,
           notes: booking.notes,
           adminNotes: booking.adminNotes,
+          senderAccessToken,
+          senderEmail: session.email,
         })
       )
     )
