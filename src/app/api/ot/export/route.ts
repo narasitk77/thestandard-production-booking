@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
-import { summarizeDay, formatTHB, RATE_WEEKDAY_OT_THB, RATE_WEEKEND_OR_HOLIDAY_THB } from '@/lib/ot-calc'
+import { summarizeDay, formatTHB, RATE_WEEKDAY_OT_THB, RATE_WEEKEND_OR_HOLIDAY_THB, WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
 
 const THAI_MONTHS = [
   'มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
     rows.push([
       'ลำดับ', 'ชื่อ - นามสกุล', 'รหัสพนักงาน', 'ตำแหน่ง',
       `เสาร์-อาทิตย์/วันหยุด (วัน, ${RATE_WEEKEND_OR_HOLIDAY_THB} THB)`,
-      `ทำงานเกิน 8 ชม. (วัน, ${RATE_WEEKDAY_OT_THB} THB)`,
+      `ทำงานเกิน ${WEEKDAY_THRESHOLD_HOURS} ชม. (วัน, ${RATE_WEEKDAY_OT_THB} THB)`,
       'รวม (THB)', 'หมายเหตุ',
     ])
 

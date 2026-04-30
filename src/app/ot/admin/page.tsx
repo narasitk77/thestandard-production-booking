@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users } from 'lucide-react'
+import { WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
 
 interface PersonSummary {
   userId: string | null
@@ -221,7 +222,7 @@ export default function OTAdminPage() {
           <div className="text-2xl font-medium text-gray-800">{totals.wh}<span className="text-sm text-gray-400 ml-1">วัน</span></div>
         </div>
         <div className="gf-card p-4">
-          <div className="text-xs text-gray-500 mb-1">วันธรรมดา &gt;8h (300/วัน)</div>
+          <div className="text-xs text-gray-500 mb-1">วันธรรมดา &gt;{WEEKDAY_THRESHOLD_HOURS}h (300/วัน)</div>
           <div className="text-2xl font-medium text-gray-800">{totals.wd}<span className="text-sm text-gray-400 ml-1">วัน</span></div>
         </div>
         <div className="gf-card p-4 bg-green-50">
@@ -289,7 +290,7 @@ export default function OTAdminPage() {
                   <th className="text-left py-2 pr-2">ตำแหน่ง</th>
                   <th className="text-left py-2 pr-2">Role</th>
                   <th className="text-right py-2 pr-2">หยุด/Hol</th>
-                  <th className="text-right py-2 pr-2">WD &gt;8h</th>
+                  <th className="text-right py-2 pr-2">WD &gt;{WEEKDAY_THRESHOLD_HOURS}h</th>
                   <th className="text-right py-2 pr-2">THB</th>
                   <th className="text-right py-2 pr-2 w-32">Actions</th>
                 </tr>

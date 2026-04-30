@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Calendar, Clock, Plus, Trash2, Loader2, Lock, Info, AlertTriangle } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
-import { summarizeDay, formatTHB, type DaySummary } from '@/lib/ot-calc'
+import { summarizeDay, formatTHB, WEEKDAY_THRESHOLD_HOURS, type DaySummary } from '@/lib/ot-calc'
 import { isThaiHoliday, getHolidayName } from '@/lib/thai-holidays'
 
 interface OTRecord {
@@ -234,7 +234,7 @@ export default function OTPage() {
           <div className="text-2xl font-medium text-gray-800">{totals.weekendHoliday}</div>
         </div>
         <div className="gf-card p-4">
-          <div className="text-xs text-gray-500 mb-1">วันธรรมดา &gt;8h</div>
+          <div className="text-xs text-gray-500 mb-1">วันธรรมดา &gt;{WEEKDAY_THRESHOLD_HOURS}h</div>
           <div className="text-2xl font-medium text-gray-800">{totals.weekdayOT}</div>
         </div>
       </div>
@@ -256,7 +256,7 @@ export default function OTPage() {
                 const info = dateInfo(date)
                 if (info.isHoliday) return <p className="text-[10px] text-red-600 mt-1">🎉 {info.holidayName} (วันหยุดประกาศ — 500 THB)</p>
                 if (info.isWeekend) return <p className="text-[10px] text-orange-600 mt-1">📅 วันเสาร์/อาทิตย์ (500 THB)</p>
-                return <p className="text-[10px] text-gray-400 mt-1">วันธรรมดา (ต้อง span &gt; 8h → 300 THB)</p>
+                return <p className="text-[10px] text-gray-400 mt-1">วันธรรมดา (ต้อง span &gt; {WEEKDAY_THRESHOLD_HOURS}h → 300 THB)</p>
               })()}
             </div>
             <div>
@@ -307,7 +307,7 @@ export default function OTPage() {
       <div className="gf-card p-3 text-xs text-gray-500 border-l-4 border-blue-200 space-y-1">
         <p className="flex items-center gap-1"><Info className="w-3 h-3 text-blue-400" /> <strong>กฎ OT:</strong></p>
         <ul className="list-disc pl-5 space-y-0.5">
-          <li><strong>วันธรรมดา:</strong> ทำงาน (start ของงานแรก → end ของงานสุดท้าย) เกิน 8 ชม. → <strong>300 THB</strong></li>
+          <li><strong>วันธรรมดา:</strong> ทำงาน (start ของงานแรก → end ของงานสุดท้าย) เกิน {WEEKDAY_THRESHOLD_HOURS} ชม. → <strong>300 THB</strong></li>
           <li><strong>เสาร์-อาทิตย์:</strong> ทำงานช่วงไหนก็ได้ → <strong>500 THB</strong></li>
           <li><strong>วันหยุดประกาศ:</strong> ตามปฏิทินไทย Google Calendar → <strong>500 THB</strong></li>
           <li>ถ้ามีช่วงว่างระหว่างงาน (เช่น เช้า + เย็น) → นับเป็น <strong>"Standby"</strong></li>

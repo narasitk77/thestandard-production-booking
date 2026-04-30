@@ -5,7 +5,7 @@ export type DayType = 'WEEKDAY' | 'WEEKEND' | 'HOLIDAY'
 // Rates per Thai labor context — fixed daily, no stacking.
 export const RATE_WEEKEND_OR_HOLIDAY_THB = 500
 export const RATE_WEEKDAY_OT_THB = 300
-export const WEEKDAY_THRESHOLD_HOURS = 8
+export const WEEKDAY_THRESHOLD_HOURS = 9
 
 export function getDayType(date: Date | string): DayType {
   // Holiday check first — if a date is BOTH weekend and holiday, treat as HOLIDAY (still 500 THB).
@@ -56,7 +56,7 @@ export interface DaySummary {
  *
  * Rules (Thai labor context):
  *  - Weekend or Public Holiday + ANY work → 500 THB (no stacking when both)
- *  - Weekday + (last_end - first_start) > 8 hours → 300 THB
+ *  - Weekday + (last_end - first_start) > 9 hours → 300 THB
  *  - Otherwise → no OT
  *  - "Standby" tag added when there are gaps between tasks within a qualifying day
  */
@@ -110,13 +110,13 @@ export function summarizeDay(date: Date | string, tasks: OTTaskInput[]): DaySumm
     status = 'Weekend'
     qualifies = true
   } else {
-    // Weekday: needs SPAN > 8 hours
+    // Weekday: needs SPAN > 9 hours
     if (totalHours > WEEKDAY_THRESHOLD_HOURS) {
       otAmountTHB = RATE_WEEKDAY_OT_THB
-      status = 'Weekday OT (>8h)'
+      status = `Weekday OT (>${WEEKDAY_THRESHOLD_HOURS}h)`
       qualifies = true
     } else {
-      status = `Weekday — under ${WEEKDAY_THRESHOLD_HOURS}h, no OT`
+      status = `Weekday — ${WEEKDAY_THRESHOLD_HOURS}h or less, no OT`
     }
   }
 

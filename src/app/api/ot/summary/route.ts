@@ -13,7 +13,7 @@ interface PersonSummary {
   role: string
   active: boolean
   weekendHolidayDays: number  // count of qualifying weekend/holiday days
-  weekdayOTDays: number        // count of qualifying weekday >8h days
+  weekdayOTDays: number        // count of qualifying weekday OT days
   totalDays: number
   totalAmount: number          // THB
 }
