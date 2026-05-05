@@ -358,6 +358,7 @@ export async function sendAssignmentEmail(opts: {
   outletName: string
   programName: string
   shootDate: string
+  shootEndDate?: string | null
   callTime: string
   estimatedWrap?: string | null
   shootType: string
@@ -374,6 +375,9 @@ export async function sendAssignmentEmail(opts: {
   const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')
   const location = opts.shootType === 'STUDIO' ? 'Studio' : opts.locationName || opts.shootType.replace('_', ' ')
   const wrapStr = opts.estimatedWrap ? ` → ${opts.estimatedWrap}` : ''
+  const dateStr = opts.shootEndDate && opts.shootEndDate !== opts.shootDate
+    ? `${opts.shootDate} → ${opts.shootEndDate}`
+    : opts.shootDate
 
   const text = `สวัสดี ${opts.toName},
 
@@ -381,7 +385,7 @@ export async function sendAssignmentEmail(opts: {
 
 ────────────────────────────────
 ${opts.outletName} · ${opts.programName}
-วันถ่าย: ${opts.shootDate}
+วันถ่าย: ${dateStr}
 เวลา: ${opts.callTime}${wrapStr}
 สถานที่: ${location}
 Producer: ${opts.producer}

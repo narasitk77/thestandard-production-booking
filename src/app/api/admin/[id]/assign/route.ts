@@ -65,6 +65,7 @@ export async function POST(
           outletName: booking.outlet.name,
           programName: booking.program.name,
           shootDate: format(new Date(booking.shootDate), 'yyyy-MM-dd'),
+          shootEndDate: booking.shootEndDate ? format(new Date(booking.shootEndDate), 'yyyy-MM-dd') : null,
           callTime: booking.callTime,
           estimatedWrap: booking.estimatedWrap,
           shootType: booking.shootType,

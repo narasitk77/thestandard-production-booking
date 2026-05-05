@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { formatDisplayDate, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
+import { formatDateRange, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
 import { ArrowLeft, Copy, Check, Calendar, Folder, Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 interface Episode {
@@ -26,6 +26,7 @@ interface UploadRecord {
 interface BookingDetail {
   id: string
   shootDate: string
+  shootEndDate?: string | null
   callTime: string
   estimatedWrap?: string
   status: string
@@ -108,6 +109,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     programName: booking.program.name,
     programCode: booking.program.code,
     shootDate: booking.shootDate,
+    shootEndDate: booking.shootEndDate,
     callTime: booking.callTime,
     estimatedWrap: booking.estimatedWrap,
     shootType: booking.shootType,
@@ -158,7 +160,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               {booking.outlet.name} · {booking.program.name}
             </h1>
             <p className="text-sm text-gray-500">
-              {formatDisplayDate(booking.shootDate)} · {booking.callTime}
+              {formatDateRange(booking.shootDate, booking.shootEndDate)} · {booking.callTime}
               {booking.estimatedWrap && ` → ${booking.estimatedWrap}`}
               {' · '}{shootTypeLabel(booking.shootType)}
               {booking.locationName && ` @ ${booking.locationName}`}

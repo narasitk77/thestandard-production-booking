@@ -26,6 +26,24 @@ export function formatDisplayDate(date: Date | string): string {
   return d ? format(d, 'EEE dd MMM yyyy') : '—'
 }
 
+/** Shows "Mon 05 May 2026" for single-day, "Mon 05 → Wed 07 May 2026" for multi-day */
+export function formatDateRange(
+  shootDate: Date | string,
+  shootEndDate?: Date | string | null
+): string {
+  const start = safeDate(shootDate)
+  if (!start) return '—'
+  const end = shootEndDate ? safeDate(shootEndDate) : null
+  if (!end || format(end, 'yyyy-MM-dd') === format(start, 'yyyy-MM-dd')) {
+    return format(start, 'EEE dd MMM yyyy')
+  }
+  // Same month
+  if (format(start, 'MMM yyyy') === format(end, 'MMM yyyy')) {
+    return `${format(start, 'EEE dd')} → ${format(end, 'EEE dd MMM yyyy')}`
+  }
+  return `${format(start, 'EEE dd MMM yyyy')} → ${format(end, 'EEE dd MMM yyyy')}`
+}
+
 export function shootTypeLabel(type: string): string {
   const map: Record<string, string> = {
     STUDIO: 'Studio',
@@ -74,6 +92,7 @@ export function buildCalendarPacket(booking: {
   programName: string
   programCode: string
   shootDate: Date | string
+  shootEndDate?: Date | string | null
   callTime: string
   estimatedWrap?: string | null
   shootType: string
@@ -87,7 +106,13 @@ export function buildCalendarPacket(booking: {
 }): string {
   const d = typeof booking.shootDate === 'string' ? parseISO(booking.shootDate) : booking.shootDate
   const validDate = d instanceof Date && !isNaN(d.getTime())
-  const dateStr = validDate ? format(d, 'yyyy-MM-dd') : '—'
+  const endD = booking.shootEndDate
+    ? (typeof booking.shootEndDate === 'string' ? parseISO(booking.shootEndDate) : booking.shootEndDate)
+    : null
+  const isMultiDay = endD && validDate && format(endD, 'yyyy-MM-dd') !== format(d, 'yyyy-MM-dd')
+  const dateStr = validDate
+    ? (isMultiDay ? `${format(d, 'yyyy-MM-dd')} → ${format(endD!, 'yyyy-MM-dd')}` : format(d, 'yyyy-MM-dd'))
+    : '—'
   const wrapStr = booking.estimatedWrap ? `→ ${booking.estimatedWrap}` : ''
   const episodes = booking.episodes || []
   const epCount = episodes.length

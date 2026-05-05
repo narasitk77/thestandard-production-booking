@@ -75,6 +75,7 @@ export async function POST(request: NextRequest) {
       outletCode,
       programCode,
       shootDate,
+      shootEndDate,
       category,
       shootType,
       locationName,
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest) {
       const newBooking = await tx.booking.create({
         data: {
           shootDate: parsedDate,
+          shootEndDate: shootEndDate ? new Date(shootEndDate) : null,
           category,
           shootType,
           locationName: locationName || null,

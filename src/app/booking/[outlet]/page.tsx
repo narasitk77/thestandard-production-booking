@@ -21,6 +21,7 @@ export default function BookingPage({ params }: { params: Promise<{ outlet: stri
   const [error, setError] = useState('')
 
   const [shootDate, setShootDate] = useState('')
+  const [shootEndDate, setShootEndDate] = useState('')
   const [category, setCategory] = useState('RECURRING')
   const [programCode, setProgramCode] = useState('')
   const [shootType, setShootType] = useState('STUDIO')
@@ -84,6 +85,7 @@ export default function BookingPage({ params }: { params: Promise<{ outlet: stri
           outletCode,
           programCode,
           shootDate,
+          shootEndDate: shootEndDate || null,
           category,
           shootType,
           locationName: locationName || null,
@@ -149,19 +151,30 @@ export default function BookingPage({ params }: { params: Promise<{ outlet: stri
                 type="date"
                 className="input"
                 value={shootDate}
-                onChange={e => setShootDate(e.target.value)}
+                onChange={e => { setShootDate(e.target.value); if (shootEndDate && e.target.value > shootEndDate) setShootEndDate('') }}
                 min={new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
                 required
               />
             </div>
             <div>
-              <label className="label">Category <span className="text-red-500">*</span></label>
-              <select className="input" value={category} onChange={e => setCategory(e.target.value)} required>
-                {CATEGORY_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+              <label className="label">Shoot End <span className="text-brand-gray-400 font-normal">(multi-day)</span></label>
+              <input
+                type="date"
+                className="input"
+                value={shootEndDate}
+                onChange={e => setShootEndDate(e.target.value)}
+                min={shootDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
+              />
             </div>
+          </div>
+
+          <div>
+            <label className="label">Category <span className="text-red-500">*</span></label>
+            <select className="input" value={category} onChange={e => setCategory(e.target.value)} required>
+              {CATEGORY_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </div>
 
           <div>

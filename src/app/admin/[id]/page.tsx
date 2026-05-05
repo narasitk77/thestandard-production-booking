@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { formatDisplayDate, shootTypeLabel } from '@/lib/utils'
+import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 
 interface Episode { id: string; episodeId: string; title: string }
 interface BookingDetail {
-  id: string; shootDate: string; callTime: string; estimatedWrap?: string
+  id: string; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]
   assignedEmails: string[]; agencyRef?: string; notes?: string; adminNotes?: string
@@ -333,7 +333,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           {booking.outlet.name} · {booking.program.name}
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          {formatDisplayDate(booking.shootDate)} · {booking.callTime}
+          {formatDateRange(booking.shootDate, booking.shootEndDate)} · {booking.callTime}
           {booking.estimatedWrap && ` → ${booking.estimatedWrap}`}
           {' · '}{shootTypeLabel(booking.shootType)}
           {booking.locationName && ` @ ${booking.locationName}`}

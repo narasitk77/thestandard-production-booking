@@ -118,6 +118,7 @@ model Program {
 model Booking {
   id               String        @id @default(cuid())
   shootDate        DateTime      @db.Date
+  shootEndDate     DateTime?     @db.Date   // null = single-day shoot
   category         Category
   shootType        ShootType
   locationName     String?
