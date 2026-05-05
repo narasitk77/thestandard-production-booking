@@ -160,20 +160,23 @@ export default function PermissionsPage() {
 
 function TestEmailButton() {
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; msg: string; hint?: string } | null>(null)
 
   const send = async () => {
     setLoading(true); setResult(null)
     try {
       const res = await fetch('/api/admin/test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
       const data = await res.json()
-      if (res.ok) setResult({ ok: true, msg: `✓ Sent to ${data.sentTo} via ${data.provider || data.config?.provider || 'email'}` })
-      else setResult({ ok: false, msg: `${data.error || 'Failed'}: ${data.detail || ''} [${data.code || ''}]` })
+      if (res.ok) {
+        setResult({ ok: true, msg: `✓ Sent to ${data.sentTo} via ${data.provider || data.config?.provider || 'email'}` })
+      } else {
+        setResult({ ok: false, msg: `${data.error || 'Failed'}: ${data.detail || ''}`, hint: data.hint })
+      }
     } catch (e: any) {
       setResult({ ok: false, msg: e?.message || 'Network error' })
     } finally {
       setLoading(false)
-      setTimeout(() => setResult(null), 12000)
+      setTimeout(() => setResult(null), 20000)
     }
   }
 
@@ -184,8 +187,9 @@ function TestEmailButton() {
         {loading ? 'Testing…' : '✉︎ Test Email'}
       </button>
       {result && (
-        <div className={`text-[11px] mt-1 max-w-xs ${result.ok ? 'text-green-700' : 'text-red-600'}`}>
-          {result.msg}
+        <div className={`text-[11px] mt-1 max-w-sm text-left ${result.ok ? 'text-green-700' : 'text-red-600'}`}>
+          <div>{result.msg}</div>
+          {result.hint && <div className="mt-1 text-gray-500">{result.hint}</div>}
         </div>
       )}
     </div>

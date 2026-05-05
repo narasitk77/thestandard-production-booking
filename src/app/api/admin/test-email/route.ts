@@ -8,8 +8,8 @@ import { getToken } from 'next-auth/jwt'
  *
  *   POST /api/admin/test-email   { to?: string }
  *
- * Sends a tiny test message and returns the provider/API/SMTP error verbatim
- * so the admin can diagnose delivery without making a real booking.
+ * Tries Gmail OAuth first, then falls back to SMTP automatically.
+ * Returns actionable hints so the admin knows exactly what to fix.
  */
 export async function POST(request: NextRequest) {
   const session = await requireAdmin()
@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
   const to = (body.to as string) || session.email
   const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
   const senderAccessToken = typeof authToken?.accessToken === 'string' ? authToken.accessToken : null
+  const accessTokenError = (authToken as any)?.accessTokenError
 
   try {
     const info = await sendEmail(
@@ -41,10 +42,28 @@ export async function POST(request: NextRequest) {
       config: info.config,
     })
   } catch (e: any) {
+    const msg: string = e?.message || String(e)
+    const code: string = e?.code || 'unknown'
+
+    // Build an actionable hint based on the error pattern
+    let hint: string | undefined
+    if (msg.includes('provider not configured') || msg.includes('not configured')) {
+      hint = 'No email provider is set up. Add SMTP_USER + SMTP_PASS (Gmail App Password) to your Render environment variables, or sign out and sign in to enable Gmail OAuth.'
+    } else if (msg.includes('gmail.send') || msg.includes('insufficient authentication') || msg.includes('Gmail send permission') || msg.includes('Gmail API failed')) {
+      hint = 'Your Google session is missing the gmail.send permission. Sign out and sign in again — on the consent screen, allow "Send email on your behalf".'
+    } else if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ESOCKET') {
+      hint = `Cannot reach SMTP server (${code}). Check SMTP_HOST / SMTP_PORT in Render env vars. For Gmail use smtp.gmail.com port 587 or 465.`
+    } else if (msg.includes('Invalid login') || msg.includes('Username and Password') || msg.includes('535') || msg.includes('534')) {
+      hint = 'Gmail rejected the login. Use a 16-character App Password from myaccount.google.com/apppasswords (not your regular Gmail password). 2-Step Verification must be enabled on the account first.'
+    } else if (accessTokenError === 'RefreshAccessTokenError') {
+      hint = 'Your Google session token expired. Sign out and sign in again to restore email access.'
+    }
+
     return NextResponse.json({
       error: 'Email send failed',
-      detail: e?.message || String(e),
-      code: e?.code || 'unknown',
+      detail: msg,
+      code,
+      hint,
       config: getEmailConfigSummary(),
     }, { status: 500 })
   }

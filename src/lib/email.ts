@@ -21,9 +21,9 @@ type EmailSendResult = {
   config: ReturnType<typeof getEmailConfigSummary>
 }
 
-function getSmtpConfig() {
-  // Default to 465 SSL — port 587 STARTTLS is unreliable on cloud hosts (Render etc.)
-  const port = parseInt(process.env.SMTP_PORT || '465')
+function getSmtpConfig(portOverride?: number) {
+  // Default to 587 STARTTLS; override to 465 SSL via SMTP_PORT env var
+  const port = portOverride ?? parseInt(process.env.SMTP_PORT || '587')
   // 'secure: true' means port 465 SSL/TLS; 'false' = upgrade via STARTTLS (587/25)
   const secureFlag = process.env.SMTP_SECURE
     ? process.env.SMTP_SECURE === 'true'
@@ -37,22 +37,20 @@ function getSmtpConfig() {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    tls: {
+      // Allow self-signed / intermediate certs common on cloud-hosted SMTP relays
+      rejectUnauthorized: false,
+    },
     // Hard caps so we never hang the API thread
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 20_000,
   }
 }
 
-function getTransport() {
-  const config = getSmtpConfig()
-  return nodemailer.createTransport({
-    ...config,
-    auth: {
-      user: config.auth.user,
-      pass: config.auth.pass,
-    },
-  })
+function getTransport(portOverride?: number) {
+  const config = getSmtpConfig(portOverride)
+  return nodemailer.createTransport(config)
 }
 
 function getPreferredProvider(context: EmailContext = {}): EmailProvider | null {
@@ -278,14 +276,34 @@ async function sendViaSmtp(message: EmailMessage): Promise<EmailSendResult> {
     throw new Error('SMTP_USER/SMTP_PASS not configured')
   }
   const provider = 'smtp'
-  const transport = getTransport()
-  const info = await transport.sendMail({
-    from: getSender(provider),
-    to: normalizeRecipients(message.to),
-    subject: message.subject,
-    text: message.text,
-    html: message.html,
-  })
+  const primaryPort = parseInt(process.env.SMTP_PORT || '587')
+  const altPort = primaryPort === 587 ? 465 : 587
+
+  const doSend = async (port: number) => {
+    const transport = getTransport(port)
+    return transport.sendMail({
+      from: getSender(provider),
+      to: normalizeRecipients(message.to),
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+    })
+  }
+
+  let info: any
+  try {
+    info = await doSend(primaryPort)
+  } catch (primaryErr: any) {
+    // Auto-retry on the alternate port before giving up
+    try {
+      info = await doSend(altPort)
+      console.info(`SMTP: port ${primaryPort} failed, sent via port ${altPort}. Set SMTP_PORT=${altPort} to make this permanent.`)
+    } catch {
+      // Throw the original (primary port) error — it's more informative
+      throw primaryErr
+    }
+  }
+
   return {
     provider,
     messageId: info.messageId,
@@ -337,11 +355,24 @@ export function getEmailConfigSummary(provider = getPreferredProvider()) {
 export async function sendEmail(message: EmailMessage, context: EmailContext = {}): Promise<EmailSendResult> {
   const provider = getPreferredProvider(context)
   if (!provider) {
-    throw new Error('Email provider not configured')
+    throw new Error('Email provider not configured. Set SMTP_USER + SMTP_PASS in Render environment variables, or configure RESEND_API_KEY / SENDGRID_API_KEY.')
   }
   if (provider === 'resend') return sendViaResend(message)
   if (provider === 'sendgrid') return sendViaSendGrid(message)
-  if (provider === 'gmail-oauth') return sendViaGmailOAuth(message, context)
+
+  // Gmail OAuth: if it fails (e.g. token lacks gmail.send scope), fall back to SMTP
+  if (provider === 'gmail-oauth') {
+    try {
+      return await sendViaGmailOAuth(message, context)
+    } catch (oauthErr: any) {
+      console.warn('Gmail OAuth send failed, falling back to SMTP:', oauthErr?.message)
+      if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+        return sendViaSmtp(message)
+      }
+      throw oauthErr
+    }
+  }
+
   return sendViaSmtp(message)
 }
 
