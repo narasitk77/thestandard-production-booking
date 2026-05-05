@@ -4,6 +4,7 @@ import { generateEpisodeId } from '@/lib/episode-id'
 import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { getSession } from '@/lib/session'
+import { autoCompleteBookings } from '@/lib/booking-complete'
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,6 +12,9 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    // Auto-complete past CONFIRMED bookings (lazy, fire-and-forget)
+    autoCompleteBookings().catch(e => console.error('autoCompleteBookings error:', e))
 
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') ?? '1')
