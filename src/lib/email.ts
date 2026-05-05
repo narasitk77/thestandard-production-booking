@@ -21,10 +21,9 @@ type EmailSendResult = {
   config: ReturnType<typeof getEmailConfigSummary>
 }
 
-function getSmtpConfig(portOverride?: number) {
-  // Default to 587 STARTTLS; override to 465 SSL via SMTP_PORT env var
-  const port = portOverride ?? parseInt(process.env.SMTP_PORT || '587')
-  // 'secure: true' means port 465 SSL/TLS; 'false' = upgrade via STARTTLS (587/25)
+function getSmtpConfig() {
+  const port = parseInt(process.env.SMTP_PORT || '587')
+  // secure:true = SSL/TLS (port 465); false = STARTTLS (port 587)
   const secureFlag = process.env.SMTP_SECURE
     ? process.env.SMTP_SECURE === 'true'
     : port === 465
@@ -37,20 +36,16 @@ function getSmtpConfig(portOverride?: number) {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-    tls: {
-      // Allow self-signed / intermediate certs common on cloud-hosted SMTP relays
-      rejectUnauthorized: false,
-    },
-    // Hard caps so we never hang the API thread
-    connectionTimeout: 15_000,
-    greetingTimeout: 15_000,
-    socketTimeout: 20_000,
+    tls: { rejectUnauthorized: false },
+    // Fail fast — if the port is blocked on Render these will never succeed
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 10_000,
   }
 }
 
-function getTransport(portOverride?: number) {
-  const config = getSmtpConfig(portOverride)
-  return nodemailer.createTransport(config)
+function getTransport() {
+  return nodemailer.createTransport(getSmtpConfig())
 }
 
 function getPreferredProvider(context: EmailContext = {}): EmailProvider | null {
@@ -276,34 +271,14 @@ async function sendViaSmtp(message: EmailMessage): Promise<EmailSendResult> {
     throw new Error('SMTP_USER/SMTP_PASS not configured')
   }
   const provider = 'smtp'
-  const primaryPort = parseInt(process.env.SMTP_PORT || '587')
-  const altPort = primaryPort === 587 ? 465 : 587
-
-  const doSend = async (port: number) => {
-    const transport = getTransport(port)
-    return transport.sendMail({
-      from: getSender(provider),
-      to: normalizeRecipients(message.to),
-      subject: message.subject,
-      text: message.text,
-      html: message.html,
-    })
-  }
-
-  let info: any
-  try {
-    info = await doSend(primaryPort)
-  } catch (primaryErr: any) {
-    // Auto-retry on the alternate port before giving up
-    try {
-      info = await doSend(altPort)
-      console.info(`SMTP: port ${primaryPort} failed, sent via port ${altPort}. Set SMTP_PORT=${altPort} to make this permanent.`)
-    } catch {
-      // Throw the original (primary port) error — it's more informative
-      throw primaryErr
-    }
-  }
-
+  const transport = getTransport()
+  const info = await transport.sendMail({
+    from: getSender(provider),
+    to: normalizeRecipients(message.to),
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  })
   return {
     provider,
     messageId: info.messageId,

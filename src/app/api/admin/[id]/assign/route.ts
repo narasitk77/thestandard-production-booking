@@ -54,7 +54,9 @@ export async function POST(
       },
     })
 
-    const emailResults = await Promise.allSettled(
+    // Fire-and-forget: DB save is done, return to the user immediately.
+    // Emails send in background — failures are logged server-side only.
+    Promise.allSettled(
       emailRecipients.map((email) =>
         sendAssignmentEmail({
           to: email,
@@ -73,21 +75,9 @@ export async function POST(
           adminNotes: booking.adminNotes,
           senderAccessToken,
           senderEmail: session.email,
-        })
+        }).catch(e => console.error(`Email to ${email} failed:`, e?.message || e))
       )
-    )
-    const failedEmails = emailResults.flatMap((result, index) => {
-      if (result.status === 'fulfilled') return []
-      const reason = result.reason
-      return [{
-        email: emailRecipients[index],
-        error: reason?.message || String(reason),
-      }]
-    })
-    failedEmails.forEach(({ email, error }) => {
-      console.error(`Email to ${email} failed:`, error)
-    })
-    const sentEmails = emailResults.length - failedEmails.length
+    ).catch(() => {})
 
     if (booking.sheetRowIndex) {
       updateBookingRow(booking.sheetRowIndex, {
@@ -100,15 +90,7 @@ export async function POST(
 
     return NextResponse.json({
       booking,
-      queued: sentEmails,
-      email: {
-        requested: emailRecipients.length,
-        sent: sentEmails,
-        failed: failedEmails,
-      },
-      warning: failedEmails.length
-        ? `Saved, but email failed for ${failedEmails.map(f => f.email).join(', ')}: ${failedEmails[0].error}`
-        : null,
+      queued: emailRecipients.length,
     })
   } catch (error) {
     console.error('POST /api/admin/[id]/assign error:', error)

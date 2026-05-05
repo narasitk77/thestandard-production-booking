@@ -52,11 +52,11 @@ export async function POST(request: NextRequest) {
     } else if (msg.includes('gmail.send') || msg.includes('insufficient authentication') || msg.includes('Gmail send permission') || msg.includes('Gmail API failed')) {
       hint = 'Your Google session is missing the gmail.send permission. Sign out and sign in again — on the consent screen, allow "Send email on your behalf".'
     } else if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ESOCKET') {
-      hint = `Cannot reach SMTP server (${code}). Check SMTP_HOST / SMTP_PORT in Render env vars. For Gmail use smtp.gmail.com port 587 or 465.`
+      hint = `SMTP port blocked (${code}) — Render often blocks outbound SMTP. Best fix: sign out and sign in again to use Gmail OAuth instead (no SMTP needed). Or add RESEND_API_KEY to Render env vars (free at resend.com).`
     } else if (msg.includes('Invalid login') || msg.includes('Username and Password') || msg.includes('535') || msg.includes('534')) {
-      hint = 'Gmail rejected the login. Use a 16-character App Password from myaccount.google.com/apppasswords (not your regular Gmail password). 2-Step Verification must be enabled on the account first.'
+      hint = 'Gmail rejected the password. Use a 16-character App Password from myaccount.google.com/apppasswords — not your regular Gmail password. Or: sign out + sign in to use Gmail OAuth (no SMTP needed).'
     } else if (accessTokenError === 'RefreshAccessTokenError') {
-      hint = 'Your Google session token expired. Sign out and sign in again to restore email access.'
+      hint = 'Your Google session token expired. Sign out and sign in again.'
     }
 
     return NextResponse.json({
