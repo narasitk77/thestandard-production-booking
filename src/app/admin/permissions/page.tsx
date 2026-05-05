@@ -80,15 +80,15 @@ export default function PermissionsPage() {
           <UserPlus className="w-4 h-4 text-[#673ab7]" /> Add / Update User
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
-          <input type="email" className="gf-input flex-1" placeholder="email@thestandard.co"
+          <input type="email" className="gf-input flex-1 min-w-0" placeholder="email@thestandard.co"
             value={newEmail} onChange={e => setNewEmail(e.target.value)} />
-          <div className="flex gap-2">
-            <select className="gf-input flex-1 sm:flex-none" value={newRole} onChange={e => setNewRole(e.target.value as any)}>
+          <div className="flex gap-2 flex-shrink-0">
+            <select className="gf-input" value={newRole} onChange={e => setNewRole(e.target.value as any)}>
               <option value="USER">User</option>
               <option value="ADMIN">Admin</option>
             </select>
             <button onClick={addUser} disabled={!newEmail}
-              className="px-4 py-1 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white disabled:opacity-40">
+              className="px-4 py-1.5 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white disabled:opacity-40 whitespace-nowrap">
               Save
             </button>
           </div>
