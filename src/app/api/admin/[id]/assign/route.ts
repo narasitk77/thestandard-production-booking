@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { sendAssignmentEmail } from '@/lib/email'
+import { sendAssignmentEmail, buildEmailErrorHint } from '@/lib/email'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { requireAdmin } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
@@ -28,6 +28,7 @@ export async function POST(
     }
     const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
     const senderAccessToken = typeof authToken?.accessToken === 'string' ? authToken.accessToken : null
+    const accessTokenError = (authToken as any)?.accessTokenError as string | undefined
     const { assignedEmails, adminNotes } = await request.json()
     const emailRecipients = cleanEmailList(assignedEmails)
 
@@ -35,9 +36,6 @@ export async function POST(
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     // Status logic: don't downgrade CONFIRMED bookings during re-assign.
-    // REQUESTED → ASSIGNED (was unassigned, now has crew).
-    // ASSIGNED stays ASSIGNED (re-assignment).
-    // CONFIRMED stays CONFIRMED (re-assignment after approve).
     const nextStatus = existing.status === 'CONFIRMED' ? 'CONFIRMED' : 'ASSIGNED'
 
     const booking = await prisma.booking.update({
@@ -54,31 +52,47 @@ export async function POST(
       },
     })
 
-    // Fire-and-forget: DB save is done, return to the user immediately.
-    // Emails send in background — failures are logged server-side only.
-    Promise.allSettled(
-      emailRecipients.map((email) =>
-        sendAssignmentEmail({
-          to: email,
-          toName: email.split('@')[0],
-          bookingId: booking.id,
-          outletName: booking.outlet.name,
-          programName: booking.program.name,
-          shootDate: format(new Date(booking.shootDate), 'yyyy-MM-dd'),
-          shootEndDate: booking.shootEndDate ? format(new Date(booking.shootEndDate), 'yyyy-MM-dd') : null,
-          callTime: booking.callTime,
-          estimatedWrap: booking.estimatedWrap,
-          shootType: booking.shootType,
-          locationName: booking.locationName,
-          producer: booking.producer,
-          episodes: booking.episodes,
-          notes: booking.notes,
-          adminNotes: booking.adminNotes,
-          senderAccessToken,
-          senderEmail: session.email,
-        }).catch(e => console.error(`Email to ${email} failed:`, e?.message || e))
-      )
-    ).catch(() => {})
+    // Send emails synchronously so the UI can show real per-recipient results.
+    const sendResults = await Promise.all(
+      emailRecipients.map(async (email) => {
+        try {
+          await sendAssignmentEmail({
+            to: email,
+            toName: email.split('@')[0],
+            bookingId: booking.id,
+            outletName: booking.outlet.name,
+            programName: booking.program.name,
+            shootDate: format(new Date(booking.shootDate), 'yyyy-MM-dd'),
+            shootEndDate: booking.shootEndDate ? format(new Date(booking.shootEndDate), 'yyyy-MM-dd') : null,
+            callTime: booking.callTime,
+            estimatedWrap: booking.estimatedWrap,
+            shootType: booking.shootType,
+            locationName: booking.locationName,
+            producer: booking.producer,
+            episodes: booking.episodes,
+            notes: booking.notes,
+            adminNotes: booking.adminNotes,
+            senderAccessToken,
+            senderEmail: session.email,
+          })
+          return { email, ok: true as const }
+        } catch (err: any) {
+          const detail = err?.message || String(err)
+          console.error(`Email to ${email} failed:`, detail)
+          return {
+            email,
+            ok: false as const,
+            error: detail,
+            hint: buildEmailErrorHint(err, accessTokenError),
+          }
+        }
+      })
+    )
+
+    const sent = sendResults.filter(r => r.ok)
+    const failed = sendResults
+      .filter((r): r is { email: string; ok: false; error: string; hint?: string } => !r.ok)
+      .map(r => ({ email: r.email, error: r.error, hint: r.hint }))
 
     if (booking.sheetRowIndex) {
       updateBookingRow(booking.sheetRowIndex, {
@@ -91,7 +105,11 @@ export async function POST(
 
     return NextResponse.json({
       booking,
-      queued: emailRecipients.length,
+      email: {
+        requested: emailRecipients.length,
+        sent: sent.length,
+        failed,
+      },
     })
   } catch (error) {
     console.error('POST /api/admin/[id]/assign error:', error)

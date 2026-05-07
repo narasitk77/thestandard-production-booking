@@ -287,6 +287,27 @@ async function sendViaSmtp(message: EmailMessage): Promise<EmailSendResult> {
   }
 }
 
+export function buildEmailErrorHint(error: any, accessTokenError?: string | null): string | undefined {
+  const msg: string = error?.message || String(error || '')
+  const code: string = error?.code || 'unknown'
+  if (msg.includes('provider not configured') || msg.includes('not configured')) {
+    return 'No email provider is set up. Add SMTP_USER + SMTP_PASS (Gmail App Password) to your Render environment variables, or sign out and sign in to enable Gmail OAuth.'
+  }
+  if (msg.includes('gmail.send') || msg.includes('insufficient authentication') || msg.includes('Gmail send permission') || msg.includes('Gmail API failed')) {
+    return 'Your Google session is missing the gmail.send permission. Sign out and sign in again — on the consent screen, allow "Send email on your behalf".'
+  }
+  if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ESOCKET') {
+    return `SMTP port blocked (${code}) — Render often blocks outbound SMTP. Best fix: sign out and sign in again to use Gmail OAuth instead. Or add RESEND_API_KEY to Render env vars (free at resend.com).`
+  }
+  if (msg.includes('Invalid login') || msg.includes('Username and Password') || msg.includes('535') || msg.includes('534')) {
+    return 'Gmail rejected the password. Use a 16-character App Password from myaccount.google.com/apppasswords — not your regular Gmail password. Or: sign out + sign in to use Gmail OAuth.'
+  }
+  if (accessTokenError === 'RefreshAccessTokenError') {
+    return 'Your Google session token expired. Sign out and sign in again.'
+  }
+  return undefined
+}
+
 export function isEmailConfigured(context: EmailContext = {}) {
   const provider = getPreferredProvider(context)
   if (!provider) return false

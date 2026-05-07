@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/session'
-import { getEmailConfigSummary, sendEmail } from '@/lib/email'
+import { buildEmailErrorHint, getEmailConfigSummary, sendEmail } from '@/lib/email'
 import { getToken } from 'next-auth/jwt'
 
 /**
@@ -45,19 +45,7 @@ export async function POST(request: NextRequest) {
     const msg: string = e?.message || String(e)
     const code: string = e?.code || 'unknown'
 
-    // Build an actionable hint based on the error pattern
-    let hint: string | undefined
-    if (msg.includes('provider not configured') || msg.includes('not configured')) {
-      hint = 'No email provider is set up. Add SMTP_USER + SMTP_PASS (Gmail App Password) to your Render environment variables, or sign out and sign in to enable Gmail OAuth.'
-    } else if (msg.includes('gmail.send') || msg.includes('insufficient authentication') || msg.includes('Gmail send permission') || msg.includes('Gmail API failed')) {
-      hint = 'Your Google session is missing the gmail.send permission. Sign out and sign in again — on the consent screen, allow "Send email on your behalf".'
-    } else if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ESOCKET') {
-      hint = `SMTP port blocked (${code}) — Render often blocks outbound SMTP. Best fix: sign out and sign in again to use Gmail OAuth instead (no SMTP needed). Or add RESEND_API_KEY to Render env vars (free at resend.com).`
-    } else if (msg.includes('Invalid login') || msg.includes('Username and Password') || msg.includes('535') || msg.includes('534')) {
-      hint = 'Gmail rejected the password. Use a 16-character App Password from myaccount.google.com/apppasswords — not your regular Gmail password. Or: sign out + sign in to use Gmail OAuth (no SMTP needed).'
-    } else if (accessTokenError === 'RefreshAccessTokenError') {
-      hint = 'Your Google session token expired. Sign out and sign in again.'
-    }
+    const hint = buildEmailErrorHint(e, accessTokenError)
 
     return NextResponse.json({
       error: 'Email send failed',

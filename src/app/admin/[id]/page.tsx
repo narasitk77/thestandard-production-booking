@@ -220,13 +220,21 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       setAssignEmails(data.booking.assignedEmails || [])
       setAdminNotes(data.booking.adminNotes || '')
 
-      const email = data.email || { sent: data.queued || 0, requested: allEmails.length, failed: [] }
+      const email = data.email || { sent: 0, requested: allEmails.length, failed: [] }
+      const failedList: { email: string; error?: string; hint?: string }[] = email.failed || []
       if (data.warning) {
         showSaved(data.warning, 'warning')
-      } else if (email.sent > 0) {
+      } else if (email.requested === 0) {
+        showSaved('✓ Saved (no email recipients)')
+      } else if (failedList.length === 0) {
         showSaved(`✓ Saved & sent ${email.sent} email${email.sent === 1 ? '' : 's'}`)
       } else {
-        showSaved('✓ Saved (no email recipients)')
+        const firstHint = failedList.find(f => f.hint)?.hint
+        const failedNames = failedList.map(f => f.email).join(', ')
+        const baseMsg = email.sent > 0
+          ? `⚠ Saved · sent ${email.sent}/${email.requested} · failed: ${failedNames}`
+          : `⚠ Saved but ALL emails failed (${failedNames})`
+        showSaved(firstHint ? `${baseMsg} — ${firstHint}` : baseMsg, 'warning')
       }
     } catch (e: any) {
       setError(e.message)
