@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { sendAssignmentEmail, buildEmailErrorHint } from '@/lib/email'
+import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { requireAdmin } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
@@ -27,7 +28,7 @@ export async function POST(
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
     const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
-    const senderAccessToken = typeof authToken?.accessToken === 'string' ? authToken.accessToken : null
+    const senderAccessToken = await getValidGoogleAccessToken(authToken)
     const accessTokenError = (authToken as any)?.accessTokenError as string | undefined
     const { assignedEmails, adminNotes } = await request.json()
     const emailRecipients = cleanEmailList(assignedEmails)

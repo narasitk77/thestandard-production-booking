@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/session'
 import { buildEmailErrorHint, getEmailConfigSummary, sendEmail } from '@/lib/email'
+import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { getToken } from 'next-auth/jwt'
 
 /**
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}))
   const to = (body.to as string) || session.email
   const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
-  const senderAccessToken = typeof authToken?.accessToken === 'string' ? authToken.accessToken : null
+  const senderAccessToken = await getValidGoogleAccessToken(authToken)
   const accessTokenError = (authToken as any)?.accessTokenError
 
   try {
