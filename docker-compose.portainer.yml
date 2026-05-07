@@ -1,0 +1,92 @@
+# Portainer Stack — THE STANDARD Production Booking
+# ----------------------------------------------------
+# Deploy via: Portainer → Stacks → Add stack → Repository
+#   Repository URL : https://github.com/narasitk77/thestandard-production-booking
+#   Reference      : refs/heads/main
+#   Compose path   : docker-compose.portainer.yml
+#   Env vars       : paste from .env.portainer.example into "Environment variables"
+#
+# Notes vs. the local docker-compose.yml:
+# - No nginx (the app listens directly on $APP_PORT — put behind your existing reverse proxy)
+# - No migrate service (start.sh already runs `prisma db push` on every boot)
+
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: production-booking-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-production_booking}
+      POSTGRES_USER: ${POSTGRES_USER:-prod_booking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in stack env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-prod_booking}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: production-booking-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # --- Database ---
+      DATABASE_URL: postgresql://${POSTGRES_USER:-prod_booking}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-production_booking}
+
+      # --- Next.js / Auth ---
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public URL of the app}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${NEXTAUTH_URL}}
+
+      # --- Google OAuth (admin sign-in + Gmail send + Sheets/Calendar) ---
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?set GOOGLE_CLIENT_SECRET}
+
+      # --- Google Service Account (for Sheets / Calendar automation) ---
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${GOOGLE_SERVICE_ACCOUNT_EMAIL:-}
+      GOOGLE_PRIVATE_KEY: ${GOOGLE_PRIVATE_KEY:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_SHEETS_ID: ${GOOGLE_SHEETS_ID:-}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
+
+      # --- Email delivery (Gmail OAuth is primary; Resend as optional fallback) ---
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+
+      # --- App ---
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "${APP_PORT:-3001}:3000"
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+    driver: local
+  uploads:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
