@@ -85,6 +85,8 @@ export async function POST(request: NextRequest) {
       creative,
       crewRequired,
       agencyRef,
+      projectId,
+      projectName,
       notes,
       episodeTitles,
     } = body
@@ -147,6 +149,8 @@ export async function POST(request: NextRequest) {
           creative: creative || [],
           crewRequired: crewRequired || [],
           agencyRef: agencyRef || null,
+          projectId: projectId || null,
+          projectName: projectName || null,
           notes: notes || null,
           status: 'REQUESTED',
           createdByEmail: session.email,

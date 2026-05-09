@@ -1,9 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { OUTLETS, PRODUCERS, CREW_OPTIONS } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } from '@/lib/locations'
+
+type ProjectOption = {
+  projectId: string
+  projectName: string
+  producer?: string
+}
 
 const CATEGORIES = ['Recurring', 'Agency Job', 'Service Job', 'Internal']
 const SHOOT_TYPES = ['Studio', 'On Location', 'Remote / Online', 'Event']
@@ -36,7 +42,27 @@ export default function BookingForm() {
   const [creative, setCreative] = useState('')
   const [crew, setCrew] = useState<string[]>([])
   const [agencyRef, setAgencyRef] = useState('')
+  const [projectId, setProjectId] = useState('')
+  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
   const [notes, setNotes] = useState('')
+
+  // Load Project ID dropdown options from Producer Dashboard
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/projects')
+      .then(r => r.ok ? r.json() : { projects: [] })
+      .then(data => {
+        if (!cancelled) setProjectOptions(data.projects || [])
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setProjectsLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const selectedProject = projectOptions.find(p => p.projectId === projectId)
   const [epCount, setEpCount] = useState(1)
   const [epTitles, setEpTitles] = useState<string[]>([''])
   const [submitting, setSubmitting] = useState(false)
@@ -107,6 +133,8 @@ export default function BookingForm() {
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           agencyRef: agencyRef || null,
+          projectId: projectId || null,
+          projectName: selectedProject?.projectName || null,
           notes: notes || null,
           episodeTitles: epTitles.map(t => t.trim()),
         }),
@@ -399,6 +427,44 @@ export default function BookingForm() {
           ))}
         </div>
 
+        {/* PROJECT ID — links to Producer Dashboard "All Projects" */}
+        <div className="gf-section">
+          <label className="gf-label">
+            PROJECT ID
+            <span className="ml-2 text-xs font-normal text-gray-500">
+              (linked to Producer Dashboard · optional but recommended)
+            </span>
+          </label>
+          <select
+            className="gf-input"
+            value={projectId}
+            onChange={e => setProjectId(e.target.value)}
+            disabled={projectsLoading}
+          >
+            <option value="">
+              {projectsLoading
+                ? 'Loading projects…'
+                : projectOptions.length === 0
+                  ? '— No projects loaded (sheet unreachable) —'
+                  : '— Select Project —'}
+            </option>
+            {projectOptions.map(p => (
+              <option key={p.projectId} value={p.projectId}>
+                {p.projectId} · {p.projectName}
+                {p.producer ? ` (${p.producer})` : ''}
+              </option>
+            ))}
+          </select>
+          {selectedProject && (
+            <div className="mt-2 rounded bg-purple-50 px-3 py-2 text-xs text-gray-700">
+              <div><strong>Project:</strong> {selectedProject.projectName}</div>
+              {selectedProject.producer && (
+                <div><strong>Producer:</strong> {selectedProject.producer}</div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* AGENCY REF (conditional) */}
         {isAgency && (
           <div className="gf-section">
@@ -440,7 +506,7 @@ export default function BookingForm() {
               setCategory('Recurring'); setShootType('Studio')
               setLocationId(''); setLocationCustom(''); setCallTime(''); setEstimatedWrap('')
               setProducer(''); setCreative(''); setCrew([])
-              setAgencyRef(''); setNotes(''); setEpCount(1); setEpTitles([''])
+              setAgencyRef(''); setProjectId(''); setNotes(''); setEpCount(1); setEpTitles([''])
             }}
             className="text-sm text-[#673ab7] hover:underline"
           >

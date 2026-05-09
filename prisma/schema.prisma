@@ -129,6 +129,11 @@ model Booking {
   crewRequired     String[]
   assignedEmails   String[]
   agencyRef        String?
+  // Project ID layer — links booking to Producer Dashboard "All Projects".
+  // Format PP-YY-NNN (e.g. PP-26-001). Immutable. projectName is a snapshot
+  // captured at booking time so we can render without re-fetching the sheet.
+  projectId        String?
+  projectName      String?
   notes            String?
   adminNotes       String?
   status           BookingStatus @default(REQUESTED)

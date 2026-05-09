@@ -24,6 +24,8 @@ interface Booking {
   creative: string[]
   crewRequired: string[]
   agencyRef?: string
+  projectId?: string
+  projectName?: string
   notes?: string
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -101,6 +103,19 @@ function SuccessContent() {
           </p>
         </div>
       </div>
+
+      {/* Project ID — Producer Dashboard linkage */}
+      {booking.projectId && (
+        <div className="card p-4 mb-4">
+          <div className="text-xs text-brand-gray-500 mb-1">Project ID</div>
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono text-base text-brand-black">{booking.projectId}</span>
+            {booking.projectName && (
+              <span className="text-sm text-brand-gray-600">{booking.projectName}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Episode IDs */}
       <div className="card p-5 mb-4">

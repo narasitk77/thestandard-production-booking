@@ -3,12 +3,15 @@ import { google } from 'googleapis'
 const SHEET_ID = process.env.GOOGLE_SHEETS_ID!
 const SHEET_TAB = 'Bookings'
 
+// Column order is sheet-stable — append-only. Existing col indices are
+// hardcoded in updateBookingRow's colMap, so new columns go to the right.
 const HEADERS = [
   'Booking ID', 'Episode IDs', 'Outlet', 'Program',
   'Shoot Date', 'Shoot Type', 'Location', 'Call Time', 'Wrap Time',
   'Category', 'Producer', 'Creative/Host', 'Crew Required',
   'Assigned Emails', 'Agency Ref', 'Notes', 'Status',
   'Calendar Event ID', 'Created At', 'Approved At',
+  'Project ID', 'Project Name', // ← new (per ปุ๊ก memo 2026-05-08)
 ]
 
 function getAuth() {
@@ -33,7 +36,7 @@ export async function ensureHeaders() {
     const sheets = google.sheets({ version: 'v4', auth })
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_TAB}!A1:T1`,
+      range: `${SHEET_TAB}!A1:V1`,
     })
     if (!res.data.values || res.data.values[0]?.length === 0) {
       await sheets.spreadsheets.values.update({
@@ -64,6 +67,8 @@ export async function appendBookingRow(booking: {
   crewRequired: string[]
   assignedEmails?: string[]
   agencyRef?: string | null
+  projectId?: string | null
+  projectName?: string | null
   notes?: string | null
   status: string
   calendarEventId?: string | null
@@ -98,11 +103,13 @@ export async function appendBookingRow(booking: {
       booking.calendarEventId || '',
       new Date(booking.createdAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
       booking.approvedAt ? new Date(booking.approvedAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '',
+      booking.projectId || '',
+      booking.projectName || '',
     ]
 
     const appendRes = await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_TAB}!A:T`,
+      range: `${SHEET_TAB}!A:V`,
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: [row] },

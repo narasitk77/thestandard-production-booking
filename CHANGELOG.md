@@ -5,6 +5,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.16.0] — 2026-05-09
+
+### Added — Project ID layer (per memo from ปุ๊ก, 2026-05-08)
+
+Production Booking now consumes the **Project ID** dropdown owned by the Producer
+Dashboard ("All Projects" tab), so every booking can be tagged with the upstream
+`PP-YY-NNN` identifier instead of free-text project names.
+
+- New columns `projectId`, `projectName` on `Booking` (nullable, immutable once set)
+- New module `src/lib/projects.ts` — fetches the dropdown list from
+  `Producer Dashboard!All Projects!A2:D` via service-account read-only auth.
+  Strict gate: only rows matching `^PP-\d{2}-\d{3}$` are accepted.
+  Cached server-side for 5 min.
+- New endpoint `GET /api/projects[?refresh=1]` — returns the cached list
+- Booking form — adds Project ID dropdown that auto-fills Project Name + Producer
+- Booking POST persists `projectId` + `projectName`
+- Google Sheets sync — appends two new columns ("Project ID", "Project Name")
+  on the right (cols U, V) so existing column indices in `updateBookingRow`
+  stay valid
+- Booking success page + admin booking detail render the Project ID
+
+### Configurable env vars (optional)
+
+- `PRODUCER_DASHBOARD_SHEET_ID` — defaults to the Producer Dashboard sheet
+  ID from the memo
+- `PRODUCER_DASHBOARD_TAB` — defaults to `All Projects`
+
+The existing `GOOGLE_SERVICE_ACCOUNT_JSON` (or `GOOGLE_SERVICE_ACCOUNT_EMAIL` +
+`GOOGLE_PRIVATE_KEY`) must have read access to the Producer Dashboard sheet.
+
+### Notes
+
+- `projectId` is **optional** — existing bookings remain valid; new bookings
+  can be submitted without it (form falls back gracefully if the sheet is
+  unreachable)
+- Migration is non-destructive — `prisma db push` adds two nullable columns
+  on next boot
+
+---
+
+## [1.15.2] — 2026-05-09
+
+### Fixed — Email send fails after ~1 hour of session age
+
+Root cause: `getToken()` from `next-auth/jwt` only **decodes** the JWT cookie;
+it does NOT trigger the `jwt` callback that contains the access-token refresh
+logic. Result: any assignment / test-email call >1h after sign-in hit Gmail
+with a stale access token and got 401.
+
+- New `src/lib/google-token.ts` exports `getValidGoogleAccessToken(token)`
+  that refreshes against `oauth2.googleapis.com/token` on demand
+- Both assign and test-email routes now go through this helper
+- Assign route is no longer fire-and-forget — emails are awaited and the
+  response includes per-recipient `{ requested, sent, failed[{email,error,hint}] }`
+- Admin UI surfaces real per-recipient errors with actionable hints
+
+### Added — Portainer deployment alternative
+
+- `docker-compose.portainer.yml` — Portainer-ready stack (Repository deploy)
+- `.env.portainer.example` — env template
+- `PORTAINER_DEPLOY.md` — step-by-step guide
+
+---
+
 ## [1.5.0] — 2026-04-27
 
 ### Changed

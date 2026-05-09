@@ -11,7 +11,7 @@ interface BookingDetail {
   id: string; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]
-  assignedEmails: string[]; agencyRef?: string; notes?: string; adminNotes?: string
+  assignedEmails: string[]; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -434,6 +434,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div><div className="text-xs text-gray-400 mb-0.5">Creative/Host</div><div className="text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Crew Requested</div><div className="text-gray-800">{booking.crewRequired.join(', ') || '—'}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
+            <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Project ID</div><div className="text-gray-800">{booking.projectId ? <><span className="font-mono">{booking.projectId}</span>{booking.projectName ? <span className="text-gray-500"> · {booking.projectName}</span> : null}</> : '—'}</div></div>
             {booking.notes && <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Notes</div><div className="text-gray-800 whitespace-pre-line">{booking.notes}</div></div>}
           </div>
         ) : (
