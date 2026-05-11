@@ -6,9 +6,14 @@
 #   Compose path   : docker-compose.portainer.yml
 #   Env vars       : paste from .env.portainer.example into "Environment variables"
 #
+# This compose file pulls a pre-built image from GHCR (built automatically by
+# .github/workflows/docker-build.yml on every push to main). Portainer does
+# NOT need to build the image — it just pulls and runs.
+#
 # Notes vs. the local docker-compose.yml:
 # - No nginx (the app listens directly on $APP_PORT — put behind your existing reverse proxy)
 # - No migrate service (start.sh already runs `prisma db push` on every boot)
+# - Uses GHCR image (no `build:` context — faster Portainer deploys)
 
 version: '3.9'
 
@@ -32,9 +37,7 @@ services:
       - app-network
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/narasitk77/thestandard-production-booking:${IMAGE_TAG:-latest}
     container_name: production-booking-app
     restart: unless-stopped
     depends_on:
