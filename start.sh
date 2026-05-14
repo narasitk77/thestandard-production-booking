@@ -2,6 +2,38 @@
 set -e
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 0) Diagnostics — print the auth-relevant env so you don't need to exec into
+#    the container to debug OAuth callback issues. These show up as the very
+#    first lines of `docker logs production-booking-app`.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "=========================================="
+echo "  Production Booking — startup diagnostics"
+echo "=========================================="
+echo "  NEXTAUTH_URL        = ${NEXTAUTH_URL:-(unset)}"
+echo "  NEXT_PUBLIC_APP_URL = ${NEXT_PUBLIC_APP_URL:-(unset)}"
+echo "  NODE_ENV            = ${NODE_ENV:-(unset)}"
+echo "=========================================="
+
+# Catch the most common deployment footgun: NEXTAUTH_URL set to https:// when
+# the container only listens on plain HTTP. Google will redirect the browser
+# to https://… which the browser can't reach → "loading forever" after Allow.
+case "$NEXTAUTH_URL" in
+  https://*)
+    echo ""
+    echo "  ⚠  WARNING: NEXTAUTH_URL starts with https:// but this container"
+    echo "     serves plain HTTP on port 3000. After Google OAuth consent,"
+    echo "     the browser will be redirected to an https:// callback URL"
+    echo "     that this app cannot answer — sign-in will hang."
+    echo ""
+    echo "     Fix in Portainer → Stack → Environment variables:"
+    echo "       NEXTAUTH_URL=http://...   (remove the 's')"
+    echo "       NEXT_PUBLIC_APP_URL=http://...   (same)"
+    echo "     Then Update the stack to apply."
+    echo "=========================================="
+    ;;
+esac
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 1) Wait for Postgres to accept connections
 # ──────────────────────────────────────────────────────────────────────────────
 if [ -z "$DATABASE_URL" ]; then
