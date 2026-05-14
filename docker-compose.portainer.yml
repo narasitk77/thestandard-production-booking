@@ -23,13 +23,16 @@ services:
     container_name: production-booking-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-production_booking}
-      POSTGRES_USER: ${POSTGRES_USER:-prod_booking}
+      # NOTE: db name + user are hardcoded — they're internal identifiers, not
+      # secrets, and making them user-configurable led to silent typo failures.
+      # Only POSTGRES_PASSWORD is sourced from stack env vars.
+      POSTGRES_DB: production_booking
+      POSTGRES_USER: prod_booking
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in stack env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-prod_booking}"]
+      test: ["CMD-SHELL", "pg_isready -U prod_booking -d production_booking"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -44,8 +47,10 @@ services:
       db:
         condition: service_healthy
     environment:
-      # --- Database ---
-      DATABASE_URL: postgresql://${POSTGRES_USER:-prod_booking}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-production_booking}
+      # --- Database (db name + user hardcoded — matches db service above) ---
+      # start.sh contains a defensive CREATE DATABASE IF NOT EXISTS, so the
+      # app self-heals if the postgres volume was initialized with a stale name.
+      DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD}@db:5432/production_booking
 
       # --- Next.js / Auth ---
       NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public URL of the app}

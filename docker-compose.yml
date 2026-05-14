@@ -6,13 +6,16 @@ services:
     container_name: production-booking-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-production_booking}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # NOTE: db name + user are hardcoded — they're internal identifiers, not
+      # secrets, and making them user-configurable led to silent typo failures.
+      # Only POSTGRES_PASSWORD is sourced from .env / stack env vars.
+      POSTGRES_DB: production_booking
+      POSTGRES_USER: prod_booking
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U prod_booking -d production_booking"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,7 +32,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-production_booking}
+      # start.sh contains a defensive CREATE DATABASE IF NOT EXISTS, so the
+      # app self-heals if the postgres volume was initialized with a stale name.
+      DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD:-changeme}@db:5432/production_booking
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       # Auth (required for sign-in)
       NEXTAUTH_URL: ${NEXTAUTH_URL:-${NEXT_PUBLIC_APP_URL:-http://localhost:3000}}
@@ -85,7 +90,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-production_booking}
+      DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD:-changeme}@db:5432/production_booking
     networks:
       - app-network
     restart: "no"

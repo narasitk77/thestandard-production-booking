@@ -1,5 +1,6 @@
 FROM node:20-alpine
-RUN apk add --no-cache openssl libc6-compat
+# postgresql-client gives us psql/pg_isready for the defensive db-create step in start.sh
+RUN apk add --no-cache openssl libc6-compat postgresql-client
 
 WORKDIR /app
 
