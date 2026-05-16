@@ -81,20 +81,6 @@ services:
     networks:
       - app-network
 
-  migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile.migrate
-    container_name: production-booking-migrate
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD:-changeme}@db:5432/production_booking
-    networks:
-      - app-network
-    restart: "no"
-
 volumes:
   postgres_data:
     driver: local
