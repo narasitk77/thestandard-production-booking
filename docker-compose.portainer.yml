@@ -96,11 +96,15 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+    # Configured via CLI args, not a Caddyfile — Portainer git stacks can't
+    # reliably bind-mount repo files onto the Docker host. `caddy reverse-proxy`
+    # with --internal-certs terminates HTTPS using a self-signed cert from
+    # Caddy's local CA (persisted in the caddy_data volume).
+    command: caddy reverse-proxy --from https://192.168.21.220.nip.io:3001 --to app:3000 --internal-certs
     ports:
       # Host $APP_PORT → Caddy's HTTPS listener (container port 3001).
       - "${APP_PORT:-3001}:3001"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
