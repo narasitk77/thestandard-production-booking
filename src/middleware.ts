@@ -4,12 +4,6 @@ import { getToken } from 'next-auth/jwt'
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // AUTH_DISABLED=1 — no login required (trusted LAN deploy). Let everything
-  // through; getSession() in src/lib/session.ts supplies the admin identity.
-  if (process.env.AUTH_DISABLED === '1') {
-    return NextResponse.next()
-  }
-
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
   const hasSession = !!token?.email
 
