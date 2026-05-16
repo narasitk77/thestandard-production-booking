@@ -1,0 +1,24 @@
+# Caddy reverse proxy — TLS termination for the Portainer deployment
+# --------------------------------------------------------------------
+# Why this exists:
+#   The app container serves plain HTTP. Modern browsers (Chrome HTTPS-First)
+#   aggressively upgrade http:// → https:// for any hostname, which breaks the
+#   Google OAuth callback (browser hits https on an http-only server →
+#   ERR_EMPTY_RESPONSE). Render works because Render terminates TLS for us.
+#   Caddy does the same here: it terminates HTTPS and proxies to the app.
+#
+#   `tls internal` issues a self-signed cert from Caddy's local CA. The browser
+#   shows a one-time "not private" warning — click Advanced → Proceed once and
+#   the cert is trusted for the session. For a warning-free cert, install
+#   Caddy's root CA (in the caddy_data volume) on client machines.
+#
+# If the host/port ever changes, edit the site address below.
+
+{
+	auto_https disable_redirects
+}
+
+192.168.21.220.nip.io:3001 {
+	tls internal
+	reverse_proxy app:3000
+}

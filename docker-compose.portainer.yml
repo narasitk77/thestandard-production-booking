@@ -11,7 +11,9 @@
 # NOT need to build the image — it just pulls and runs.
 #
 # Notes vs. the local docker-compose.yml:
-# - No nginx (the app listens directly on $APP_PORT — put behind your existing reverse proxy)
+# - Caddy terminates TLS — the app is served over HTTPS on $APP_PORT. This is
+#   required: browsers (Chrome HTTPS-First) upgrade http:// to https://, which
+#   breaks the Google OAuth callback on a plain-HTTP server. Caddy fixes that.
 # - No migrate service (start.sh already runs `prisma db push` on every boot)
 # - Uses GHCR image (no `build:` context — faster Portainer deploys)
 
@@ -84,8 +86,23 @@ services:
       UPLOAD_DIR: /app/uploads
     volumes:
       - uploads:/app/uploads
+    # No published port — the app is reached only through Caddy (TLS proxy).
+    networks:
+      - app-network
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: production-booking-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
     ports:
-      - "${APP_PORT:-3001}:3000"
+      # Host $APP_PORT → Caddy's HTTPS listener (container port 3001).
+      - "${APP_PORT:-3001}:3001"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     networks:
       - app-network
 
@@ -93,6 +110,10 @@ volumes:
   postgres_data:
     driver: local
   uploads:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local
 
 networks:
