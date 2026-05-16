@@ -58,6 +58,10 @@ services:
       NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public URL of the app}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${NEXTAUTH_URL}}
+      # Caddy terminates TLS in front of the app, so NEXTAUTH_URL is https://
+      # even though the app itself listens on plain HTTP. Disable start.sh's
+      # https→http auto-fix so it doesn't undo the intended https scheme.
+      DISABLE_HTTPS_AUTOFIX: ${DISABLE_HTTPS_AUTOFIX:-1}
 
       # --- Google OAuth (admin sign-in + Gmail send + Sheets/Calendar) ---
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set GOOGLE_CLIENT_ID}
