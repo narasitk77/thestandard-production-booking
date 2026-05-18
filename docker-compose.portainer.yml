@@ -46,6 +46,12 @@ services:
       db:
         condition: service_healthy
     environment:
+      # Prefer IPv4 for DNS. The Docker host has no IPv6 egress, but DNS
+      # resolves hosts like accounts.google.com to IPv6 — Node would try IPv6
+      # first and hang, breaking Google OAuth ("outgoing request timed out").
+      # ipv4first makes Node connect over IPv4, which works.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+
       # --- Database (db name + user hardcoded — matches db service above) ---
       # start.sh contains a defensive CREATE DATABASE IF NOT EXISTS, so the
       # app self-heals if the postgres volume was initialized with a stale name.
