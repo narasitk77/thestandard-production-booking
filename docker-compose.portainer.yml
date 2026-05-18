@@ -96,6 +96,10 @@ services:
       - "${APP_PORT:-3001}:3000"
     networks:
       - app-network
+      # Also join the Nginx Proxy Manager network so NPM can reach the app by
+      # container name. Declaring it here (not a manual `docker network
+      # connect`) keeps the attachment across redeploys.
+      - npm-network
 
 volumes:
   postgres_data:
@@ -106,3 +110,7 @@ volumes:
 networks:
   app-network:
     driver: bridge
+  # Existing external network shared with Nginx Proxy Manager (management stack).
+  npm-network:
+    external: true
+    name: management_default
