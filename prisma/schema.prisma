@@ -124,7 +124,10 @@ model Booking {
   locationName     String?
   callTime         String        @db.VarChar(5)
   estimatedWrap    String?       @db.VarChar(5)
-  producer         String
+  producer         String   // Producer nickname (from Dashboard _Users tab)
+  producerEmail    String?  // Producer email (canonical id)
+  director         String?  // Director nickname (from Dashboard _Users tab)
+  directorEmail    String?  // Director email (canonical id)
   creative         String[]
   crewRequired     String[]
   assignedEmails   String[]

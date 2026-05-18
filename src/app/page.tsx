@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { OUTLETS, PRODUCERS, CREW_OPTIONS } from '@/lib/data'
+import { OUTLETS, CREW_OPTIONS } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } from '@/lib/locations'
 
 type ProjectOption = {
@@ -10,6 +10,9 @@ type ProjectOption = {
   projectName: string
   producer?: string
 }
+
+// Producer / Director — sourced from the Dashboard "_Users" tab.
+type Person = { email: string; nickname: string }
 
 const CATEGORIES = ['Recurring', 'Agency Job', 'Service Job', 'Internal']
 const SHOOT_TYPES = ['Studio', 'On Location', 'Remote / Online', 'Event']
@@ -39,13 +42,17 @@ export default function BookingForm() {
   const [locationCustom, setLocationCustom] = useState('')
   const [callTime, setCallTime] = useState('')
   const [estimatedWrap, setEstimatedWrap] = useState('')
-  const [producer, setProducer] = useState('')
+  const [producerEmail, setProducerEmail] = useState('')
+  const [directorEmail, setDirectorEmail] = useState('')
   const [creative, setCreative] = useState('')
   const [crew, setCrew] = useState<string[]>([])
   const [agencyRef, setAgencyRef] = useState('')
   const [projectId, setProjectId] = useState('')
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
+  const [producers, setProducers] = useState<Person[]>([])
+  const [directors, setDirectors] = useState<Person[]>([])
+  const [peopleLoading, setPeopleLoading] = useState(true)
   const [notes, setNotes] = useState('')
 
   // Load Project ID dropdown options from Producer Dashboard
@@ -59,6 +66,24 @@ export default function BookingForm() {
       .catch(() => {})
       .finally(() => {
         if (!cancelled) setProjectsLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  // Load Producer / Director options from Dashboard "_Users" tab
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/people')
+      .then(r => r.ok ? r.json() : { producers: [], directors: [] })
+      .then(data => {
+        if (!cancelled) {
+          setProducers(data.producers || [])
+          setDirectors(data.directors || [])
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPeopleLoading(false)
       })
     return () => { cancelled = true }
   }, [])
@@ -100,8 +125,8 @@ export default function BookingForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (!outletCode || !programCode || !shootDate || !shootEndDate || !producer) {
-      setError('Please fill in all required fields.')
+    if (!outletCode || !programCode || !shootDate || !shootEndDate || !producerEmail || !directorEmail) {
+      setError('Please fill in all required fields (incl. Producer & Director).')
       return
     }
     if (shootEndDate && shootEndDate < shootDate) {
@@ -135,7 +160,10 @@ export default function BookingForm() {
           locationName: resolvedLocationName,
           callTime,
           estimatedWrap: estimatedWrap || null,
-          producer,
+          producer: producers.find(p => p.email === producerEmail)?.nickname || '',
+          producerEmail,
+          director: directors.find(d => d.email === directorEmail)?.nickname || '',
+          directorEmail,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           agencyRef: agencyRef || null,
@@ -406,7 +434,7 @@ export default function BookingForm() {
           ))}
         </div>
 
-        {/* PRODUCER */}
+        {/* PRODUCER — from Dashboard _Users tab (Role = Producer) */}
         <div className="gf-section">
           <label className="gf-label">
             PRODUCER <span className="gf-required">*</span>
@@ -414,13 +442,48 @@ export default function BookingForm() {
           <div className="relative">
             <select
               className="gf-select pr-6"
-              value={producer}
-              onChange={e => setProducer(e.target.value)}
+              value={producerEmail}
+              onChange={e => setProducerEmail(e.target.value)}
               required
+              disabled={peopleLoading}
             >
-              <option value="">— Select Producer —</option>
-              {PRODUCERS.map(p => (
-                <option key={p} value={p}>{p}</option>
+              <option value="">
+                {peopleLoading
+                  ? 'Loading…'
+                  : producers.length === 0
+                    ? '— No producers loaded (sheet unreachable) —'
+                    : '— Select Producer —'}
+              </option>
+              {producers.map(p => (
+                <option key={p.email} value={p.email}>{p.nickname} ({p.email})</option>
+              ))}
+            </select>
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+          </div>
+        </div>
+
+        {/* DIRECTOR — from Dashboard _Users tab (Role = Director) */}
+        <div className="gf-section">
+          <label className="gf-label">
+            DIRECTOR <span className="gf-required">*</span>
+          </label>
+          <div className="relative">
+            <select
+              className="gf-select pr-6"
+              value={directorEmail}
+              onChange={e => setDirectorEmail(e.target.value)}
+              required
+              disabled={peopleLoading}
+            >
+              <option value="">
+                {peopleLoading
+                  ? 'Loading…'
+                  : directors.length === 0
+                    ? '— No directors loaded (sheet unreachable) —'
+                    : '— Select Director —'}
+              </option>
+              {directors.map(d => (
+                <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
               ))}
             </select>
             <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
@@ -533,7 +596,7 @@ export default function BookingForm() {
               setOutletCode(''); setProgramCode(''); setShootDate(''); setShootEndDate('')
               setCategory('Recurring'); setShootType('Studio')
               setLocationId(''); setLocationCustom(''); setCallTime(''); setEstimatedWrap('')
-              setProducer(''); setCreative(''); setCrew([])
+              setProducerEmail(''); setDirectorEmail(''); setCreative(''); setCrew([])
               setAgencyRef(''); setProjectId(''); setNotes(''); setEpCount(1); setEpTitles([''])
             }}
             className="text-sm text-[#673ab7] hover:underline"
