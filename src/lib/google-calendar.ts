@@ -128,3 +128,20 @@ export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
     return false
   }
 }
+
+// Returns the public Google Calendar URL (htmlLink) for an event, so emails
+// can link straight to the calendar event. Returns null if unavailable.
+export async function getCalendarEventLink(eventId: string): Promise<string | null> {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    return null
+  }
+  try {
+    const auth = getAuth()
+    const calendar = google.calendar({ version: 'v3', auth })
+    const res = await calendar.events.get({ calendarId: CALENDAR_ID, eventId })
+    return res.data.htmlLink || null
+  } catch (e) {
+    console.error('getCalendarEventLink error:', e)
+    return null
+  }
+}

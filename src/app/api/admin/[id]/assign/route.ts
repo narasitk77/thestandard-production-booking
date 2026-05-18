@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { sendAssignmentEmail, buildEmailErrorHint } from '@/lib/email'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { updateBookingRow } from '@/lib/google-sheets'
+import { getCalendarEventLink } from '@/lib/google-calendar'
 import { requireAdmin } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { format } from 'date-fns'
@@ -53,6 +54,12 @@ export async function POST(
       },
     })
 
+    // If the booking already has a Google Calendar event, the assignment email
+    // links straight to it (created when the booking was approved).
+    const calendarUrl = booking.calendarEventId
+      ? await getCalendarEventLink(booking.calendarEventId)
+      : null
+
     // Send emails synchronously so the UI can show real per-recipient results.
     const sendResults = await Promise.all(
       emailRecipients.map(async (email) => {
@@ -75,6 +82,7 @@ export async function POST(
             adminNotes: booking.adminNotes,
             senderAccessToken,
             senderEmail: session.email,
+            calendarUrl,
           })
           return { email, ok: true as const }
         } catch (err: any) {

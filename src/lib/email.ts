@@ -390,8 +390,12 @@ export async function sendAssignmentEmail(opts: {
   adminNotes?: string | null
   senderAccessToken?: string | null
   senderEmail?: string | null
+  calendarUrl?: string | null
 }) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
+  // NEXTAUTH_URL is a normal runtime env (NEXT_PUBLIC_* gets inlined at build
+  // time, so it can't reflect the real deployment URL). Prefer it.
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
+  const detailLink = opts.calendarUrl || `${appUrl}/dashboard/${opts.bookingId}`
 
   const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')
   const location = opts.shootType === 'STUDIO' ? 'Studio' : opts.locationName || opts.shootType.replace('_', ' ')
@@ -415,8 +419,8 @@ Episode IDs:
 ${epList}
 ────────────────────────────────
 
-${opts.adminNotes ? `หมายเหตุจาก Admin: ${opts.adminNotes}\n\n` : ''}${opts.notes ? `Notes: ${opts.notes}\n\n` : ''}ดูรายละเอียดได้ที่:
-${appUrl}/dashboard/${opts.bookingId}
+${opts.adminNotes ? `หมายเหตุจาก Admin: ${opts.adminNotes}\n\n` : ''}${opts.notes ? `Notes: ${opts.notes}\n\n` : ''}${opts.calendarUrl ? 'เปิดงานนี้ใน Google Calendar:' : 'ดูรายละเอียดได้ที่:'}
+${detailLink}
 
 THE STANDARD Production Booking`
 
@@ -445,7 +449,7 @@ export async function sendApprovalNotification(opts: {
 }) {
   if (!isEmailConfigured()) return
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
 
   const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')
 
