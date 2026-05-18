@@ -100,7 +100,7 @@ export default function BookingForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (!outletCode || !programCode || !shootDate || !producer) {
+    if (!outletCode || !programCode || !shootDate || !shootEndDate || !producer) {
       setError('Please fill in all required fields.')
       return
     }
@@ -232,24 +232,29 @@ export default function BookingForm() {
               className="gf-input"
               value={shootDate}
               onChange={e => {
-                setShootDate(e.target.value)
-                // keep end >= start
-                if (shootEndDate && e.target.value > shootEndDate) setShootEndDate('')
+                const v = e.target.value
+                setShootDate(v)
+                // auto-fill end date to the start date; user bumps it for
+                // multi-day shoots. Keeps end >= start.
+                if (!shootEndDate || shootEndDate < v) setShootEndDate(v)
               }}
               min={new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
               required
             />
           </div>
           <div>
-            <label className="gf-label">SHOOT END DATE</label>
+            <label className="gf-label">
+              SHOOT END DATE <span className="gf-required">*</span>
+            </label>
             <input
               type="date"
               className="gf-input"
               value={shootEndDate}
               onChange={e => setShootEndDate(e.target.value)}
               min={shootDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
+              required
             />
-            <p className="text-xs text-gray-400 mt-1">เว้นว่าง = ถ่ายวันเดียว · ใส่ถ้าถ่ายหลายวัน</p>
+            <p className="text-xs text-gray-400 mt-1">ถ่ายวันเดียว = วันเดียวกับวันเริ่ม (เติมให้อัตโนมัติ)</p>
           </div>
         </div>
 
