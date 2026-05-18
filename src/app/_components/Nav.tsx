@@ -7,9 +7,11 @@ import { signOut } from 'next-auth/react'
 
 interface NavProps {
   session: { email: string; role: 'USER' | 'ADMIN' } | null
+  // True only for Production-team members and admins — gates the OT menu.
+  canSeeOT?: boolean
 }
 
-export default function Nav({ session }: NavProps) {
+export default function Nav({ session, canSeeOT = false }: NavProps) {
   const [open, setOpen] = useState(false)
   const isAdmin = session?.role === 'ADMIN'
 
@@ -20,7 +22,7 @@ export default function Nav({ session }: NavProps) {
       <Link href="/calendar" onClick={close} className="gf-link block py-2 md:py-0">Calendar</Link>
       <Link href="/manual" onClick={close} className="gf-link block py-2 md:py-0">คู่มือ</Link>
       {session && <Link href="/my-bookings" onClick={close} className="gf-link block py-2 md:py-0">My Bookings</Link>}
-      {session && <Link href="/ot" onClick={close} className="gf-link block py-2 md:py-0">OT</Link>}
+      {canSeeOT && <Link href="/ot" onClick={close} className="gf-link block py-2 md:py-0">OT</Link>}
       {isAdmin && <Link href="/dashboard" onClick={close} className="gf-link block py-2 md:py-0">Dashboard</Link>}
       {isAdmin && (
         <Link href="/upload" onClick={close} className="gf-link block py-2 md:py-0 text-gray-400">

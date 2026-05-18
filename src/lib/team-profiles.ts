@@ -45,3 +45,11 @@ export const TEAM_PROFILES: TeamProfile[] = [
 export function findProfileByEmail(email: string): TeamProfile | undefined {
   return TEAM_PROFILES.find(p => p.email.toLowerCase() === email.toLowerCase())
 }
+
+// True if the email belongs to the Production team roster — used to gate the
+// OT module (menu + /ot pages) to team members only.
+export function isTeamMember(email: string | null | undefined): boolean {
+  if (!email) return false
+  const lower = email.toLowerCase()
+  return TEAM_PROFILES.some(p => p.email.toLowerCase() === lower)
+}
