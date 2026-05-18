@@ -32,6 +32,7 @@ export default function BookingForm() {
   const [outletCode, setOutletCode] = useState('')
   const [programCode, setProgramCode] = useState('')
   const [shootDate, setShootDate] = useState('')
+  const [shootEndDate, setShootEndDate] = useState('')
   const [category, setCategory] = useState('Recurring')
   const [shootType, setShootType] = useState('Studio')
   const [locationId, setLocationId] = useState('')
@@ -103,6 +104,10 @@ export default function BookingForm() {
       setError('Please fill in all required fields.')
       return
     }
+    if (shootEndDate && shootEndDate < shootDate) {
+      setError('Shoot End Date must be on or after Shoot Date.')
+      return
+    }
     if (!locationId) {
       setError('Please choose a Location / Room.')
       return
@@ -124,6 +129,7 @@ export default function BookingForm() {
           outletCode,
           programCode,
           shootDate,
+          shootEndDate: shootEndDate || null,
           category: CATEGORY_VALUES[category],
           shootType: SHOOT_TYPE_VALUES[shootType],
           locationName: resolvedLocationName,
@@ -215,19 +221,36 @@ export default function BookingForm() {
           </div>
         </div>
 
-        {/* SHOOT DATE */}
-        <div className="gf-section">
-          <label className="gf-label">
-            SHOOT DATE <span className="gf-required">*</span>
-          </label>
-          <input
-            type="date"
-            className="gf-input"
-            value={shootDate}
-            onChange={e => setShootDate(e.target.value)}
-            min={new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
-            required
-          />
+        {/* SHOOT DATE / END DATE */}
+        <div className="gf-section grid grid-cols-2 gap-6">
+          <div>
+            <label className="gf-label">
+              SHOOT DATE <span className="gf-required">*</span>
+            </label>
+            <input
+              type="date"
+              className="gf-input"
+              value={shootDate}
+              onChange={e => {
+                setShootDate(e.target.value)
+                // keep end >= start
+                if (shootEndDate && e.target.value > shootEndDate) setShootEndDate('')
+              }}
+              min={new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
+              required
+            />
+          </div>
+          <div>
+            <label className="gf-label">SHOOT END DATE</label>
+            <input
+              type="date"
+              className="gf-input"
+              value={shootEndDate}
+              onChange={e => setShootEndDate(e.target.value)}
+              min={shootDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
+            />
+            <p className="text-xs text-gray-400 mt-1">เว้นว่าง = ถ่ายวันเดียว · ใส่ถ้าถ่ายหลายวัน</p>
+          </div>
         </div>
 
         {/* CATEGORY */}
@@ -502,7 +525,7 @@ export default function BookingForm() {
           <button
             type="button"
             onClick={() => {
-              setOutletCode(''); setProgramCode(''); setShootDate('')
+              setOutletCode(''); setProgramCode(''); setShootDate(''); setShootEndDate('')
               setCategory('Recurring'); setShootType('Studio')
               setLocationId(''); setLocationCustom(''); setCallTime(''); setEstimatedWrap('')
               setProducer(''); setCreative(''); setCrew([])
