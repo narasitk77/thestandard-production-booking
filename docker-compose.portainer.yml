@@ -7,15 +7,14 @@
 #   Env vars       : paste from .env.portainer.example into "Environment variables"
 #
 # This compose file pulls a pre-built image from GHCR (built automatically by
-# .github/workflows/docker-build.yml on every push to main).
+# .github/workflows/docker-build.yml on every push to main). Portainer does
+# NOT need to build the image — it just pulls and runs.
 #
-# Architecture:
-#   browser --HTTPS--> caddy (:3443, self-signed cert) --HTTP--> app (:3000)
-# Caddy terminates TLS so Google OAuth works: the browser talks HTTPS to a
-# real hostname (thestandard.fortiddns.com), which Google's OAuth requires.
-# The app itself is internal-only — reached only through Caddy.
-#
-# Router: forward external port 3443 -> <docker-host-ip>:3443
+# Notes:
+# - The app is served directly over plain HTTP on $APP_PORT (no TLS proxy).
+# - Auth: set AUTH_DISABLED=1 to run without any login (trusted LAN access);
+#   set AUTH_DISABLED=0 to use Google OAuth sign-in.
+# - start.sh runs `prisma db push` on every boot (no separate migrate step).
 
 services:
   db:
@@ -23,8 +22,9 @@ services:
     container_name: production-booking-db
     restart: unless-stopped
     environment:
-      # db name + user are hardcoded internal identifiers; only the password
-      # is taken from stack env vars.
+      # NOTE: db name + user are hardcoded — they're internal identifiers, not
+      # secrets, and making them user-configurable led to silent typo failures.
+      # Only POSTGRES_PASSWORD is sourced from stack env vars.
       POSTGRES_DB: production_booking
       POSTGRES_USER: prod_booking
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in stack env}
@@ -46,19 +46,22 @@ services:
       db:
         condition: service_healthy
     environment:
-      # start.sh runs a defensive CREATE DATABASE IF NOT EXISTS + prisma db push.
+      # --- Database (db name + user hardcoded — matches db service above) ---
+      # start.sh contains a defensive CREATE DATABASE IF NOT EXISTS, so the
+      # app self-heals if the postgres volume was initialized with a stale name.
       DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD}@db:5432/production_booking
 
-      # --- Next.js / Auth ---
-      # NEXTAUTH_URL must be the public HTTPS URL the browser uses (the Caddy
-      # address), e.g. https://thestandard.fortiddns.com:3443
-      NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public https URL via Caddy}
+      # --- Auth ---
+      # AUTH_DISABLED=1 → no login, every request is the seeded admin (LAN use).
+      # AUTH_DISABLED=0 → Google OAuth sign-in (needs the OAuth env vars below).
+      AUTH_DISABLED: ${AUTH_DISABLED:-0}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public URL of the app}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${NEXTAUTH_URL}}
 
-      # --- Google OAuth (sign-in + Gmail send) ---
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?set GOOGLE_CLIENT_SECRET}
+      # --- Google OAuth (only used when AUTH_DISABLED=0) ---
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
 
       # --- Google Service Account (for Sheets / Calendar automation) ---
       GOOGLE_SERVICE_ACCOUNT_EMAIL: ${GOOGLE_SERVICE_ACCOUNT_EMAIL:-}
@@ -83,26 +86,8 @@ services:
       UPLOAD_DIR: /app/uploads
     volumes:
       - uploads:/app/uploads
-    # No published port — the app is reached only through Caddy.
-    networks:
-      - app-network
-
-  caddy:
-    image: caddy:2-alpine
-    container_name: production-booking-caddy
-    restart: unless-stopped
-    depends_on:
-      - app
-    # TLS termination via CLI args (no Caddyfile mount — Portainer git stacks
-    # can't bind-mount repo files). --internal-certs issues a self-signed cert
-    # from Caddy's local CA (persisted in caddy_data). The browser shows a
-    # one-time "not private" warning — click Advanced -> Proceed once.
-    command: caddy reverse-proxy --from https://thestandard.fortiddns.com:3443 --to app:3000 --internal-certs
     ports:
-      - "3443:3443"
-    volumes:
-      - caddy_data:/data
-      - caddy_config:/config
+      - "${APP_PORT:-3001}:3000"
     networks:
       - app-network
 
@@ -110,10 +95,6 @@ volumes:
   postgres_data:
     driver: local
   uploads:
-    driver: local
-  caddy_data:
-    driver: local
-  caddy_config:
     driver: local
 
 networks:
