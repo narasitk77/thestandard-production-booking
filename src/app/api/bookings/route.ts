@@ -182,16 +182,20 @@ export async function POST(request: NextRequest) {
       return newBooking
     })
 
-    // Write to Google Sheets (non-blocking)
-    appendBookingRow({
-      ...booking,
-      shootDate: booking.shootDate,
-      createdAt: booking.createdAt,
-    }).then(rowIndex => {
-      if (rowIndex) {
-        prisma.booking.update({ where: { id: booking.id }, data: { sheetRowIndex: rowIndex } }).catch(() => {})
-      }
-    }).catch(() => {})
+    // Sync to the Producer Dashboard "Bookings" tab — Content Agency only.
+    // Other outlets are recorded in the DB but not pushed to any sheet, so
+    // they never get a sheetRowIndex and later updateBookingRow calls no-op.
+    if (outletCode === 'AGN') {
+      appendBookingRow({
+        ...booking,
+        shootDate: booking.shootDate,
+        createdAt: booking.createdAt,
+      }).then(rowIndex => {
+        if (rowIndex) {
+          prisma.booking.update({ where: { id: booking.id }, data: { sheetRowIndex: rowIndex } }).catch(() => {})
+        }
+      }).catch(() => {})
+    }
 
     return NextResponse.json({ booking }, { status: 201 })
   } catch (error) {

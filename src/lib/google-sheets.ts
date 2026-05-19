@@ -3,10 +3,12 @@ import { google } from 'googleapis'
 /**
  * Bookings → Producer Dashboard sync
  * ----------------------------------
- * Every booking is written as one row in the "Bookings" tab of the Producer
- * Dashboard sheet — the same sheet that owns "All Projects" and "_Users".
- * The Project ID column links each booking back to its project, so the
- * Dashboard (and the daily Airtable sync) can group bookings per project.
+ * Content Agency (AGN) bookings are written as one row in the "Bookings" tab
+ * of the Producer Dashboard sheet — the same sheet that owns "All Projects"
+ * and "_Users". Bookings from other outlets stay in the DB only and are not
+ * synced here. The Project ID column links each booking back to its project,
+ * so the Dashboard (and the daily Airtable sync) can group bookings per
+ * project.
  *
  * The tab is auto-created on first write. Column order is append-only:
  * updateBookingRow's colMap hardcodes indices, so new columns go to the right.
