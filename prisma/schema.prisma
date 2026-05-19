@@ -124,9 +124,10 @@ model Booking {
   locationName     String?
   callTime         String        @db.VarChar(5)
   estimatedWrap    String?       @db.VarChar(5)
-  producer         String   // Producer nickname (from Dashboard _Users tab)
-  producerEmail    String?  // Producer email (canonical id)
-  director         String?  // Director nickname (from Dashboard _Users tab)
+  producer         String   // Content Agency: nickname from _Users tab; other outlets: free-text name
+  producerEmail    String?  // Producer email (canonical id, or free-text email)
+  producerPhone    String?  // Producer phone — free-text outlets only (Content Agency uses _Users)
+  director         String?  // Director nickname (Content Agency only — null for other outlets)
   directorEmail    String?  // Director email (canonical id)
   creative         String[]
   crewRequired     String[]

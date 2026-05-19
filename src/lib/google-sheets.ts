@@ -19,12 +19,13 @@ function getSheetId(): string {
   return process.env.PRODUCER_DASHBOARD_SHEET_ID || DEFAULT_DASHBOARD_SHEET_ID
 }
 
-// 27 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
+// 28 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
 // *Email columns keep the canonical id so Airtable can join on either.
+// PD Phone is filled only for non-Content-Agency outlets (free-text producer).
 const HEADERS = [
   'Booking ID', 'Project ID', 'Project Name', 'Outlet', 'Program',
   'Shoot Date', 'Shoot End Date', 'Call Time', 'Wrap Time', 'Shoot Type',
-  'Location', 'PD', 'PD Email', 'DIR', 'DIR Email',
+  'Location', 'PD', 'PD Email', 'PD Phone', 'DIR', 'DIR Email',
   'Episode IDs', 'Crew Required', 'Category', 'Creative/Host', 'Assigned Emails',
   'Status', 'Calendar Event ID', 'Notes', 'Created By', 'Created At',
   'Approved At', 'Updated At',
@@ -32,11 +33,11 @@ const HEADERS = [
 
 // 1-indexed column positions for partial updates.
 const COL = {
-  assignedEmails: 20,
-  status: 21,
-  calendarEventId: 22,
-  approvedAt: 26,
-  updatedAt: 27,
+  assignedEmails: 21,
+  status: 22,
+  calendarEventId: 23,
+  approvedAt: 27,
+  updatedAt: 28,
 } as const
 
 function getAuth() {
@@ -83,18 +84,13 @@ async function ensureSheetTab(sheets: any, spreadsheetId: string) {
       requestBody: { requests: [{ addSheet: { properties: { title: SHEET_TAB } } }] },
     })
   }
-  const res = await sheets.spreadsheets.values.get({
+  // Always (re)write row 1 so header/column changes propagate to the tab.
+  await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${SHEET_TAB}!A1:${lastCol}1`,
+    range: `${SHEET_TAB}!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [HEADERS] },
   })
-  if (!res.data.values || (res.data.values[0]?.length ?? 0) === 0) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${SHEET_TAB}!A1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [HEADERS] },
-    })
-  }
 }
 
 function fmtDate(d: Date | string | null | undefined): string {
@@ -121,6 +117,7 @@ export type BookingRow = {
   locationName?: string | null
   producer: string
   producerEmail?: string | null
+  producerPhone?: string | null
   director?: string | null
   directorEmail?: string | null
   episodes: Array<{ episodeId: string }>
@@ -157,6 +154,7 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       booking.locationName || '',
       booking.producer,
       booking.producerEmail || '',
+      booking.producerPhone || '',
       booking.director || '',
       booking.directorEmail || '',
       booking.episodes.map(e => e.episodeId).join(', '),

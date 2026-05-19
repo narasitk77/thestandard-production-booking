@@ -44,6 +44,10 @@ export default function BookingForm() {
   const [estimatedWrap, setEstimatedWrap] = useState('')
   const [producerEmail, setProducerEmail] = useState('')
   const [directorEmail, setDirectorEmail] = useState('')
+  // Non-Content-Agency outlets: producer entered as free text.
+  const [producerName, setProducerName] = useState('')
+  const [producerPhone, setProducerPhone] = useState('')
+  const [producerEmailText, setProducerEmailText] = useState('')
   const [creative, setCreative] = useState('')
   const [crew, setCrew] = useState<string[]>([])
   const [agencyRef, setAgencyRef] = useState('')
@@ -96,10 +100,20 @@ export default function BookingForm() {
 
   const selectedOutlet = OUTLETS.find(o => o.code === outletCode)
   const programs = selectedOutlet?.programs ?? []
+  // Content Agency (AGN) books people from the Dashboard _Users tab; every
+  // other outlet types the producer in by hand and has no Director field.
+  const isContentAgency = outletCode === 'AGN'
 
   const handleOutletChange = (code: string) => {
     setOutletCode(code)
     setProgramCode('')
+    // Producer/Director inputs differ per outlet — reset so stale values
+    // from the previous outlet's input shape don't carry over.
+    setProducerEmail('')
+    setDirectorEmail('')
+    setProducerName('')
+    setProducerPhone('')
+    setProducerEmailText('')
   }
 
   const handleEpCountChange = (n: number) => {
@@ -125,8 +139,17 @@ export default function BookingForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (!outletCode || !programCode || !shootDate || !shootEndDate || !producerEmail || !directorEmail) {
-      setError('Please fill in all required fields (incl. Producer & Director).')
+    if (!outletCode || !programCode || !shootDate || !shootEndDate) {
+      setError('Please fill in all required fields.')
+      return
+    }
+    if (isContentAgency) {
+      if (!producerEmail || !directorEmail) {
+        setError('Please select a Producer and Director.')
+        return
+      }
+    } else if (!producerName.trim() || !producerPhone.trim() || !producerEmailText.trim()) {
+      setError('Please fill in the Producer name, phone, and email.')
       return
     }
     if (shootEndDate && shootEndDate < shootDate) {
@@ -160,10 +183,15 @@ export default function BookingForm() {
           locationName: resolvedLocationName,
           callTime,
           estimatedWrap: estimatedWrap || null,
-          producer: producers.find(p => p.email === producerEmail)?.nickname || '',
-          producerEmail,
-          director: directors.find(d => d.email === directorEmail)?.nickname || '',
-          directorEmail,
+          producer: isContentAgency
+            ? producers.find(p => p.email === producerEmail)?.nickname || ''
+            : producerName.trim(),
+          producerEmail: isContentAgency ? producerEmail : (producerEmailText.trim() || null),
+          producerPhone: isContentAgency ? null : (producerPhone.trim() || null),
+          director: isContentAgency
+            ? directors.find(d => d.email === directorEmail)?.nickname || ''
+            : null,
+          directorEmail: isContentAgency ? directorEmail : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           agencyRef: agencyRef || null,
@@ -434,61 +462,108 @@ export default function BookingForm() {
           ))}
         </div>
 
-        {/* PRODUCER — from Dashboard _Users tab (Role = Producer) */}
+        {/* PRODUCER — Content Agency: pick from the Dashboard _Users tab.
+            Other outlets: type the name, phone and email by hand. */}
         <div className="gf-section">
           <label className="gf-label">
             PRODUCER <span className="gf-required">*</span>
           </label>
-          <div className="relative">
-            <select
-              className="gf-select pr-6"
-              value={producerEmail}
-              onChange={e => setProducerEmail(e.target.value)}
-              required
-              disabled={peopleLoading}
-            >
-              <option value="">
-                {peopleLoading
-                  ? 'Loading…'
-                  : producers.length === 0
-                    ? '— No producers loaded (sheet unreachable) —'
-                    : '— Select Producer —'}
-              </option>
-              {producers.map(p => (
-                <option key={p.email} value={p.email}>{p.nickname} ({p.email})</option>
-              ))}
-            </select>
-            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
-          </div>
+          {isContentAgency ? (
+            <div className="relative">
+              <select
+                className="gf-select pr-6"
+                value={producerEmail}
+                onChange={e => setProducerEmail(e.target.value)}
+                required
+                disabled={peopleLoading}
+              >
+                <option value="">
+                  {peopleLoading
+                    ? 'Loading…'
+                    : producers.length === 0
+                      ? '— No producers loaded (sheet unreachable) —'
+                      : '— Select Producer —'}
+                </option>
+                {producers.map(p => (
+                  <option key={p.email} value={p.email}>{p.nickname} ({p.email})</option>
+                ))}
+              </select>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">
+                  NAME <span className="gf-required">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="gf-input"
+                  placeholder="ชื่อ-นามสกุล โปรดิวเซอร์"
+                  value={producerName}
+                  onChange={e => setProducerName(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">
+                  PHONE <span className="gf-required">*</span>
+                </label>
+                <input
+                  type="tel"
+                  className="gf-input"
+                  placeholder="เบอร์โทรศัพท์"
+                  value={producerPhone}
+                  onChange={e => setProducerPhone(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">
+                  EMAIL <span className="gf-required">*</span>
+                </label>
+                <input
+                  type="email"
+                  className="gf-input"
+                  placeholder="email@example.com"
+                  value={producerEmailText}
+                  onChange={e => setProducerEmailText(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* DIRECTOR — from Dashboard _Users tab (Role = Director) */}
-        <div className="gf-section">
-          <label className="gf-label">
-            DIRECTOR <span className="gf-required">*</span>
-          </label>
-          <div className="relative">
-            <select
-              className="gf-select pr-6"
-              value={directorEmail}
-              onChange={e => setDirectorEmail(e.target.value)}
-              required
-              disabled={peopleLoading}
-            >
-              <option value="">
-                {peopleLoading
-                  ? 'Loading…'
-                  : directors.length === 0
-                    ? '— No directors loaded (sheet unreachable) —'
-                    : '— Select Director —'}
-              </option>
-              {directors.map(d => (
-                <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
-              ))}
-            </select>
-            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+        {/* DIRECTOR — Content Agency only (from Dashboard _Users tab) */}
+        {isContentAgency && (
+          <div className="gf-section">
+            <label className="gf-label">
+              DIRECTOR <span className="gf-required">*</span>
+            </label>
+            <div className="relative">
+              <select
+                className="gf-select pr-6"
+                value={directorEmail}
+                onChange={e => setDirectorEmail(e.target.value)}
+                required
+                disabled={peopleLoading}
+              >
+                <option value="">
+                  {peopleLoading
+                    ? 'Loading…'
+                    : directors.length === 0
+                      ? '— No directors loaded (sheet unreachable) —'
+                      : '— Select Director —'}
+                </option>
+                {directors.map(d => (
+                  <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
+                ))}
+              </select>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* CREATIVE / HOST */}
         <div className="gf-section">
@@ -596,7 +671,9 @@ export default function BookingForm() {
               setOutletCode(''); setProgramCode(''); setShootDate(''); setShootEndDate('')
               setCategory('Recurring'); setShootType('Studio')
               setLocationId(''); setLocationCustom(''); setCallTime(''); setEstimatedWrap('')
-              setProducerEmail(''); setDirectorEmail(''); setCreative(''); setCrew([])
+              setProducerEmail(''); setDirectorEmail('')
+              setProducerName(''); setProducerPhone(''); setProducerEmailText('')
+              setCreative(''); setCrew([])
               setAgencyRef(''); setProjectId(''); setNotes(''); setEpCount(1); setEpTitles([''])
             }}
             className="text-sm text-[#673ab7] hover:underline"
