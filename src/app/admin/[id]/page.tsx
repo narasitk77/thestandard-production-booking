@@ -620,24 +620,30 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             </div>
           )}
 
-          {/* Main Videographer (ช่างภาพหลัก) — pick one of the assigned crew */}
-          {assignEmails.length > 0 && (
-            <div>
-              <div className="text-xs text-gray-500 mb-1">
-                Main Videographer (ช่างภาพหลัก)
-                {booking?.videographerCount && booking.videographerCount > 1 && (
-                  <span className="ml-1 text-gray-400">— requested {booking.videographerCount} ช่างภาพ</span>
-                )}
+          {/* Main Videographer (ช่างภาพหลัก) — pick one of the assigned
+              members from the Videographer team. Hidden until at least one
+              Videographer is ticked in the section above. */}
+          {(() => {
+            const assignedVideographers = TEAM.video.filter(v => assignEmails.includes(v.email))
+            if (assignedVideographers.length === 0) return null
+            return (
+              <div>
+                <div className="text-xs text-gray-500 mb-1">
+                  Main Videographer (ช่างภาพหลัก)
+                  {booking?.videographerCount && booking.videographerCount > 1 && (
+                    <span className="ml-1 text-gray-400">— ขอ {booking.videographerCount} ช่างภาพ</span>
+                  )}
+                </div>
+                <select className="gf-input" value={mainVideographer}
+                  onChange={e => setMainVideographer(e.target.value)}>
+                  <option value="">— เลือก main videographer —</option>
+                  {assignedVideographers.map(v => (
+                    <option key={v.email} value={v.email}>{v.name}</option>
+                  ))}
+                </select>
               </div>
-              <select className="gf-input" value={mainVideographer}
-                onChange={e => setMainVideographer(e.target.value)}>
-                <option value="">— None —</option>
-                {assignEmails.map(em => (
-                  <option key={em} value={em}>{em}</option>
-                ))}
-              </select>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Admin notes */}
           <div>
