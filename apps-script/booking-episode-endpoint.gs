@@ -22,6 +22,10 @@
  *   2. IMPORTANT (pilot copy only): from the editor's function dropdown
  *      pick "bookingSeedCounters" → ▶ Run. Apps Script will ask for
  *      permissions the first time — Allow.
+ *
+ *      Also run "bookingBackfillDirStatus" once to fix any Dir-tab Status
+ *      cells left blank because the onEditPDForDirSync trigger doesn't
+ *      copy with the sheet (it scans PD and fills only the blank ones).
  *      This scans the PD tabs and seeds the EP_SEQ_* counters so the
  *      next booking-generated episode picks up the correct NN. Without
  *      it the first booking would reuse "L01" because ScriptProperties
@@ -237,6 +241,77 @@ function bookingSeedCounters() {
 
   var msg = 'Scanned ' + scanned + ' Episode IDs across ' + PD_TABS.length + ' PD tabs.\n' +
             'Updated ' + updated + ' / ' + keys.length + ' EP_SEQ_* counters.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (_) {}
+  return msg;
+}
+
+/**
+ * Backfill Dir-tab Status from PD-tab Status.
+ *
+ * Background: Dir.F (Status) is NOT a live formula — it's written by the
+ * onEditPDForDirSync trigger when a Producer edits Status in a PD tab.
+ * In the pilot copy, that trigger isn't installed (triggers don't copy
+ * with File → Make a Copy), so any Status set in PD AFTER the Dir row
+ * was created didn't propagate. Result: some Dir rows show Status,
+ * others are blank.
+ *
+ * This function walks every Dir tab, looks up each row's Episode ID in
+ * the PD tabs, and copies PD.Status (col H) into Dir.Status (col F) —
+ * ONLY when Dir.Status is blank, so anything already set is left alone.
+ *
+ * Run once from the editor: select bookingBackfillDirStatus → ▶ Run.
+ * Re-runnable safely.
+ */
+function bookingBackfillDirStatus() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var PD_TABS = ['PD อ้อม', 'PD ไนซ์', 'PD ซัง'];
+  var DIR_TABS = ['Dir. ป้าย', 'Dir. พัตเตอร์', 'Dir. ท็อป', 'Dir. เป้ง', 'Dir. ปุ๊ก'];
+
+  // Build a lookup: Episode ID -> Status, sourced from every PD tab.
+  // PD columns: 1 ProjectID · 2 Type · 3 EpisodeID · 4 Name · 5 Director · 6 Code · 7 EP · 8 Status
+  var pdStatusByEpId = {};
+  for (var t = 0; t < PD_TABS.length; t++) {
+    var sheet = ss.getSheetByName(PD_TABS[t]);
+    if (!sheet) continue;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) continue;
+    var data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+    for (var i = 0; i < data.length; i++) {
+      var epId = String(data[i][2] || '').trim();   // col C
+      var status = String(data[i][7] || '').trim(); // col H
+      if (epId && status) pdStatusByEpId[epId] = status;
+    }
+  }
+
+  // Walk each Dir tab; fill blank Status from the lookup.
+  // Dir columns: 1 EpID · 2 Type · 3 Name · 4 Producer · 5 EP · 6 Status
+  // Data rows start at row 3 (rows 1-2 are header / sub-header).
+  var checked = 0, filled = 0, skippedExisting = 0, notFoundInPD = 0;
+  for (var d = 0; d < DIR_TABS.length; d++) {
+    var dirSheet = ss.getSheetByName(DIR_TABS[d]);
+    if (!dirSheet) continue;
+    var dirLastRow = dirSheet.getLastRow();
+    if (dirLastRow < 3) continue;
+    var dirData = dirSheet.getRange(3, 1, dirLastRow - 2, 6).getValues();
+    for (var r = 0; r < dirData.length; r++) {
+      var epId = String(dirData[r][0] || '').trim();
+      var existing = String(dirData[r][5] || '').trim();
+      if (!epId) continue;
+      checked++;
+      if (existing) { skippedExisting++; continue; }
+      var pdStatus = pdStatusByEpId[epId];
+      if (!pdStatus) { notFoundInPD++; continue; }
+      dirSheet.getRange(r + 3, 6).setValue(pdStatus);
+      filled++;
+    }
+  }
+
+  var msg = 'Backfill complete:\n' +
+            '  Checked:           ' + checked + ' Dir-tab rows\n' +
+            '  Filled (blank → PD): ' + filled + '\n' +
+            '  Skipped (already set): ' + skippedExisting + '\n' +
+            '  Not found in any PD:   ' + notFoundInPD;
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (_) {}
   return msg;
