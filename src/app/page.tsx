@@ -52,6 +52,9 @@ export default function BookingForm() {
   const [crew, setCrew] = useState<string[]>([])
   const [agencyRef, setAgencyRef] = useState('')
   const [projectId, setProjectId] = useState('')
+  // Episode type for project-linked bookings — picked once per booking.
+  // The Dashboard sheet's Web App uses this to choose the EP_SEQ_<project>_<type> series.
+  const [episodeType, setEpisodeType] = useState<'L' | 'S' | 'A' | 'T' | ''>('')
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
   const [producers, setProducers] = useState<Person[]>([])
@@ -168,6 +171,10 @@ export default function BookingForm() {
       setError('Please fill in all episode titles.')
       return
     }
+    if (projectId && !episodeType) {
+      setError('Please select Episode Type (L / S / A / T) for the linked project.')
+      return
+    }
     setSubmitting(true)
     try {
       const res = await fetch('/api/bookings', {
@@ -197,6 +204,7 @@ export default function BookingForm() {
           agencyRef: agencyRef || null,
           projectId: projectId || null,
           projectName: selectedProject?.projectName || null,
+          episodeType: projectId && episodeType ? episodeType : null,
           notes: notes || null,
           episodeTitles: epTitles.map(t => t.trim()),
         }),
@@ -631,6 +639,34 @@ export default function BookingForm() {
           )}
         </div>
 
+        {/* EPISODE TYPE — only for project-linked bookings.
+            The Dashboard's Web App mints `PP-YY-NNN-{type}NN` using this. */}
+        {projectId && (
+          <div className="gf-section">
+            <label className="gf-label">
+              EPISODE TYPE <span className="gf-required">*</span>
+            </label>
+            <p className="text-xs text-gray-400 mb-2">
+              L = Long &nbsp;·&nbsp; S = Short &nbsp;·&nbsp; A = Album &nbsp;·&nbsp; T = Spot (รหัสตามชีท Dashboard)
+            </p>
+            <div className="relative">
+              <select
+                className="gf-select pr-6"
+                value={episodeType}
+                onChange={e => setEpisodeType(e.target.value as any)}
+                required
+              >
+                <option value="">— Select type —</option>
+                <option value="L">L · Long</option>
+                <option value="S">S · Short</option>
+                <option value="A">A · Album</option>
+                <option value="T">T · Spot</option>
+              </select>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+            </div>
+          </div>
+        )}
+
         {/* AGENCY REF (conditional) */}
         {isAgency && (
           <div className="gf-section">
@@ -674,7 +710,7 @@ export default function BookingForm() {
               setProducerEmail(''); setDirectorEmail('')
               setProducerName(''); setProducerPhone(''); setProducerEmailText('')
               setCreative(''); setCrew([])
-              setAgencyRef(''); setProjectId(''); setNotes(''); setEpCount(1); setEpTitles([''])
+              setAgencyRef(''); setProjectId(''); setEpisodeType(''); setNotes(''); setEpCount(1); setEpTitles([''])
             }}
             className="text-sm text-[#673ab7] hover:underline"
           >

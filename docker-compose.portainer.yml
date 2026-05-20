@@ -76,6 +76,13 @@ services:
       GOOGLE_SHEETS_ID: ${GOOGLE_SHEETS_ID:-}
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
 
+      # --- Producer Dashboard / Episode-ID Web App ---
+      # Override the source-of-truth sheet (e.g. point to the pilot copy).
+      PRODUCER_DASHBOARD_SHEET_ID: ${PRODUCER_DASHBOARD_SHEET_ID:-}
+      # Apps Script Web App that mints Episode IDs for project-linked bookings.
+      BOOKING_EPISODE_WEBAPP_URL: ${BOOKING_EPISODE_WEBAPP_URL:-}
+      BOOKING_EPISODE_WEBAPP_SECRET: ${BOOKING_EPISODE_WEBAPP_SECRET:-}
+
       # --- Email delivery (SMTP via Gmail App Password) ---
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
       EMAIL_FROM: ${EMAIL_FROM:-}

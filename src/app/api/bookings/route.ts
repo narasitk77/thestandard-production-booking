@@ -5,6 +5,7 @@ import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { getSession } from '@/lib/session'
 import { autoCompleteBookings } from '@/lib/booking-complete'
+import { requestEpisodeIds, type EpisodeType } from '@/lib/booking-episode-api'
 
 export async function GET(request: NextRequest) {
   try {
@@ -91,6 +92,7 @@ export async function POST(request: NextRequest) {
       agencyRef,
       projectId,
       projectName,
+      episodeType,
       notes,
       episodeTitles,
     } = body
@@ -125,18 +127,52 @@ export async function POST(request: NextRequest) {
       create: { code: program.code, name: program.name, category: program.category, outletId: outletDb.id },
     })
 
-    // Find next available sequence for this outlet+program+date
-    const existingEpisodes = await prisma.episode.findMany({
-      where: {
-        episodeId: {
-          startsWith: `${outletCode}-${formatDateForId(parsedDate)}-${programCode}-`,
+    // Determine Episode IDs.
+    //   Project-linked (projectId + episodeType): ask the Producer Dashboard's
+    //     Apps Script Web App for sheet-generated PP-YY-NNN-{type}NN IDs. The
+    //     Web App is the single owner of the EP_SEQ_ counter — so bookings
+    //     and hand-typed episodes stay in one continuous sequence.
+    //   Otherwise: generate locally with [OUT]-[YYMMDD]-[PROG]-[EE].
+    let episodeIds: string[]
+    let sequenceBase: number
+    if (projectId && episodeType) {
+      const result = await requestEpisodeIds({
+        projectId,
+        type: episodeType as EpisodeType,
+        count: episodeTitles.length,
+        titles: episodeTitles,
+      })
+      if (!result.ok) {
+        return NextResponse.json(
+          { error: `Failed to get Episode IDs from the Dashboard: ${result.error}` },
+          { status: 502 },
+        )
+      }
+      if (result.episodeIds.length !== episodeTitles.length) {
+        return NextResponse.json(
+          { error: `Dashboard returned ${result.episodeIds.length} IDs, expected ${episodeTitles.length}` },
+          { status: 502 },
+        )
+      }
+      episodeIds = result.episodeIds
+      sequenceBase = 1
+    } else {
+      // Find next available sequence for this outlet+program+date
+      const existingEpisodes = await prisma.episode.findMany({
+        where: {
+          episodeId: {
+            startsWith: `${outletCode}-${formatDateForId(parsedDate)}-${programCode}-`,
+          },
         },
-      },
-      orderBy: { sequence: 'desc' },
-      take: 1,
-    })
-
-    const startSeq = existingEpisodes.length > 0 ? existingEpisodes[0].sequence + 1 : 1
+        orderBy: { sequence: 'desc' },
+        take: 1,
+      })
+      const startSeq = existingEpisodes.length > 0 ? existingEpisodes[0].sequence + 1 : 1
+      episodeIds = episodeTitles.map((_: string, idx: number) =>
+        generateEpisodeId(outletCode, parsedDate, programCode, startSeq + idx),
+      )
+      sequenceBase = startSeq
+    }
 
     // Create booking + episodes in a transaction
     const booking = await prisma.$transaction(async (tx) => {
@@ -166,8 +202,8 @@ export async function POST(request: NextRequest) {
           programId: programDb.id,
           episodes: {
             create: episodeTitles.map((title: string, idx: number) => ({
-              episodeId: generateEpisodeId(outletCode, parsedDate, programCode, startSeq + idx),
-              sequence: startSeq + idx,
+              episodeId: episodeIds[idx],
+              sequence: sequenceBase + idx,
               title,
               programId: programDb.id,
             })),

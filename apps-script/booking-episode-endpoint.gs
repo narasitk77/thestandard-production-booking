@@ -40,16 +40,22 @@
  *   5. Send the Web App URL + the secret back to narasit.
  *
  * REQUEST   POST, JSON body:
- *   { "secret": "...", "projectId": "PP-26-008", "type": "L" }
+ *   {
+ *     "secret":    "...",
+ *     "projectId": "PP-26-008",
+ *     "type":      "L",                       // L | S | A | T
+ *     "count":     1,                         // optional, default 1, max 20
+ *     "titles":    ["Interview ep 1", ""]    // optional; written to PD col 7 "EP."
+ *   }
  *
  * RESPONSE  JSON:
- *   { "ok": true,  "episodeId": "PP-26-008-L04" }
+ *   { "ok": true,  "episodeIds": ["PP-26-008-L04", "PP-26-008-L05"] }
  *   { "ok": false, "error": "..." }
  *
  * QUICK TEST (after deploying):
  *   curl -X POST <WEB_APP_URL> \
  *     -H 'Content-Type: application/json' \
- *     -d '{"secret":"<your secret>","projectId":"PP-26-001","type":"L"}'
+ *     -d '{"secret":"<your secret>","projectId":"PP-26-001","type":"L","count":1}'
  */
 
 function doPost(e) {
@@ -65,35 +71,45 @@ function doPost(e) {
     // --- validate input ---
     var projectId = String(body.projectId || '').trim();
     var type = String(body.type || '').trim().toUpperCase();
+    var count = parseInt(body.count, 10);
+    if (!count || count < 1) count = 1;
+    var titles = Array.isArray(body.titles) ? body.titles : [];
+
     if (!/^PP-\d{2}-\d{3}$/.test(projectId)) {
       return _bk_json_({ ok: false, error: 'bad projectId (expect PP-YY-NNN)' });
     }
     if (['L', 'S', 'A', 'T'].indexOf(type) < 0) {
       return _bk_json_({ ok: false, error: 'bad type — expect L, S, A or T' });
     }
+    if (count > 20) {
+      return _bk_json_({ ok: false, error: 'count > 20 not allowed' });
+    }
 
     // --- serialize so simultaneous requests never double-number ---
     var lock = LockService.getScriptLock();
     lock.waitLock(20000);
-    var episodeId;
+    var episodeIds = [];
     try {
-      episodeId = _bk_generate_(projectId, type);
+      for (var i = 0; i < count; i++) {
+        episodeIds.push(_bk_generate_(projectId, type, String(titles[i] || '').trim()));
+      }
     } finally {
       lock.releaseLock();
     }
-    return _bk_json_({ ok: true, episodeId: episodeId });
+    return _bk_json_({ ok: true, episodeIds: episodeIds });
   } catch (err) {
     return _bk_json_({ ok: false, error: String((err && err.message) || err) });
   }
 }
 
 /**
- * Number the episode + create the PD-tab + Dir-tab rows.
+ * Number ONE episode + create its PD-tab + Dir-tab rows. Called once per
+ * desired episode by doPost; held inside doPost's lock for atomicity.
  * Reads the SAME EP_SEQ_<project>_<type> ScriptProperty the existing
  * onEditEpisode trigger uses, so the two flows share one continuous
  * sequence and can never collide.
  */
-function _bk_generate_(projectId, type) {
+function _bk_generate_(projectId, type, title) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var props = PropertiesService.getScriptProperties();
 
@@ -111,13 +127,14 @@ function _bk_generate_(projectId, type) {
 
   // 3) append row to the producer's PD tab
   //    PD column layout (must match the existing onEditEpisode handler):
-  //      1 Project ID · 2 Episode Type · 3 Episode ID · 4 Project Name · 5 Director
+  //      1 Project ID · 2 Episode Type · 3 Episode ID · 4 Project Name
+  //      5 Director   · 6 (Product Code, blank) · 7 EP. (title/description)
   var pdTabName = 'PD ' + info.producer;
   var pdSheet = ss.getSheetByName(pdTabName);
   if (!pdSheet) throw new Error('PD tab not found: "' + pdTabName + '"');
   var pdRow = Math.max(pdSheet.getLastRow() + 1, 2);
-  pdSheet.getRange(pdRow, 1, 1, 5).setValues([[
-    projectId, type, epId, info.projectName, info.director
+  pdSheet.getRange(pdRow, 1, 1, 7).setValues([[
+    projectId, type, epId, info.projectName, info.director, '', title || ''
   ]]);
 
   // 4) mirror into the Director's tab (idempotent — skip if epId already there)
@@ -138,7 +155,7 @@ function _bk_generate_(projectId, type) {
         // Dir column layout (must match existing autoCreateDirRow_):
         //   1 EpID · 2 Type · 3 ProjectName · 4 Producer · 5 EP. · 6 Status
         dirSheet.getRange(dirRow, 1, 1, 6).setValues([[
-          epId, type, info.projectName, info.producer, '', ''
+          epId, type, info.projectName, info.producer, title || '', ''
         ]]);
       }
     }
