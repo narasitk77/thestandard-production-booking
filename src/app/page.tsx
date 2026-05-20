@@ -104,7 +104,10 @@ export default function BookingForm() {
   const [error, setError] = useState('')
 
   const selectedOutlet = OUTLETS.find(o => o.code === outletCode)
-  const programs = selectedOutlet?.programs ?? []
+  // Hide single-char "Episode-Type" program codes (L/S/A/T on AGN) from the
+  // Program dropdown — those are only used as programCode aliases when a
+  // project-linked booking sends the chosen Episode Type to the backend.
+  const programs = (selectedOutlet?.programs ?? []).filter(p => p.code.length >= 2)
   // Content Agency (AGN) books people from the Dashboard _Users tab; every
   // other outlet types the producer in by hand and has no Director field.
   const isContentAgency = outletCode === 'AGN'
@@ -144,8 +147,16 @@ export default function BookingForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (!outletCode || !programCode || !shootDate || !shootEndDate) {
+    // Program is required EXCEPT when a Content Agency booking is linked to a
+    // Project — in that case Episode Type (L/S/A/T) takes the place of Program
+    // and gets sent as programCode on submit.
+    const skipProgramRequired = isContentAgency && !!projectId
+    if (!outletCode || !shootDate || !shootEndDate) {
       setError('Please fill in all required fields.')
+      return
+    }
+    if (!skipProgramRequired && !programCode) {
+      setError('Please select a Program.')
       return
     }
     if (isContentAgency) {
@@ -184,7 +195,9 @@ export default function BookingForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           outletCode,
-          programCode,
+          // For Content Agency project-linked bookings, the Episode Type
+          // doubles as the program code (L/S/A/T are aliases in AGN.programs).
+          programCode: (isContentAgency && projectId && episodeType) ? episodeType : programCode,
           shootDate,
           shootEndDate: shootEndDate || null,
           category: CATEGORY_VALUES[category],
@@ -264,29 +277,33 @@ export default function BookingForm() {
           </div>
         </div>
 
-        {/* PROGRAM */}
-        <div className="gf-section">
-          <label className="gf-label">
-            PROGRAM <span className="gf-required">*</span>
-          </label>
-          <div className="relative">
-            <select
-              className="gf-select pr-6"
-              value={programCode}
-              onChange={e => setProgramCode(e.target.value)}
-              required
-              disabled={!outletCode}
-            >
-              <option value="">{outletCode ? '— Select Program —' : '— Select Outlet first —'}</option>
-              {programs.map(p => (
-                <option key={p.code} value={p.code}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+        {/* PROGRAM — hidden for Content Agency + Project (Episode Type takes its
+            place; the form sends episodeType as programCode so backend lookups
+            still resolve via the L/S/A/T aliases added to AGN). */}
+        {!(isContentAgency && projectId) && (
+          <div className="gf-section">
+            <label className="gf-label">
+              PROGRAM <span className="gf-required">*</span>
+            </label>
+            <div className="relative">
+              <select
+                className="gf-select pr-6"
+                value={programCode}
+                onChange={e => setProgramCode(e.target.value)}
+                required
+                disabled={!outletCode}
+              >
+                <option value="">{outletCode ? '— Select Program —' : '— Select Outlet first —'}</option>
+                {programs.map(p => (
+                  <option key={p.code} value={p.code}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* SHOOT DATE / END DATE */}
         <div className="gf-section grid grid-cols-2 gap-6">

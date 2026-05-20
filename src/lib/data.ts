@@ -1,7 +1,7 @@
 export interface Program {
   code: string
   name: string
-  category: 'Recurring' | 'Short-form' | 'One-off/Event'
+  category: 'Recurring' | 'Short-form' | 'One-off/Event' | 'Long-form' | 'Album'
   notes?: string
 }
 
@@ -169,6 +169,14 @@ export const OUTLETS: Outlet[] = [
       { code: 'EVT', name: 'Event / Forum', category: 'One-off/Event', notes: 'Link กับ Agency Ref' },
       { code: 'VAD', name: 'Video Advertorial', category: 'One-off/Event', notes: 'Link กับ Agency Ref' },
       { code: 'SHC', name: 'Short Clip (Highlight)', category: 'Short-form', notes: 'Agency short-form' },
+      // Episode-type aliases. When a Content Agency booking is linked to a
+      // sheet Project, the form sends the chosen Episode Type (L/S/A/T) as
+      // the program code, so the backend lookup resolves to one of these.
+      // Filtered out of the form's Program dropdown (single-char codes).
+      { code: 'L', name: 'Long Form (project)', category: 'Long-form' },
+      { code: 'S', name: 'Short Clip (project)', category: 'Short-form' },
+      { code: 'A', name: 'Album / Photo (project)', category: 'Album' },
+      { code: 'T', name: 'Spot / Teaser (project)', category: 'Short-form' },
     ],
   },
 ]
