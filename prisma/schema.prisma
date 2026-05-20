@@ -142,7 +142,9 @@ model Booking {
   directorEmail    String?  // Director email (canonical id)
   creative         String[]
   crewRequired     String[]
+  videographerCount     Int     @default(1)  // how many videographers requested at booking time
   assignedEmails   String[]
+  mainVideographerEmail String?              // designated lead camera, picked at assign-time
   agencyRef        String?
   // Project ID layer — links booking to Producer Dashboard "All Projects".
   // Format PP-YY-NNN (e.g. PP-26-001). Immutable. projectName is a snapshot

@@ -10,8 +10,8 @@ interface Episode { id: string; episodeId: string; title: string }
 interface BookingDetail {
   id: string; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
-  producer: string; creative: string[]; crewRequired: string[]
-  assignedEmails: string[]; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
+  producer: string; creative: string[]; crewRequired: string[]; videographerCount?: number
+  assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -89,6 +89,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [booking, setBooking] = useState<BookingDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [assignEmails, setAssignEmails] = useState<string[]>([])
+  const [mainVideographer, setMainVideographer] = useState('')
   const [customEmail, setCustomEmail] = useState('')
   const [adminNotes, setAdminNotes] = useState('')
   const [saving, setSaving] = useState(false)
@@ -147,6 +148,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         }
         setBooking(d.booking)
         setAssignEmails(d.booking.assignedEmails || [])
+        setMainVideographer(d.booking.mainVideographerEmail || '')
         setAdminNotes(d.booking.adminNotes || '')
         hydrateEditForm(d.booking)
       })
@@ -204,10 +206,16 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         notes = notes ? `${notes}\n\nFreelancers:\n${fl}` : `Freelancers:\n${fl}`
       }
 
+      // Only keep the picked main videographer if they're still in the assigned list
+      const mainVdo = mainVideographer && allEmails.includes(mainVideographer) ? mainVideographer : null
       const res = await fetch(`/api/admin/${id}/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignedEmails: allEmails, adminNotes: notes }),
+        body: JSON.stringify({
+          assignedEmails: allEmails,
+          adminNotes: notes,
+          mainVideographerEmail: mainVdo,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -215,9 +223,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         ...prev,
         status: data.booking.status,
         assignedEmails: data.booking.assignedEmails,
+        mainVideographerEmail: data.booking.mainVideographerEmail,
         adminNotes: data.booking.adminNotes,
       } : data.booking)
       setAssignEmails(data.booking.assignedEmails || [])
+      setMainVideographer(data.booking.mainVideographerEmail || '')
       setAdminNotes(data.booking.adminNotes || '')
 
       const email = data.email || { sent: 0, requested: allEmails.length, failed: [] }
@@ -432,7 +442,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div><div className="text-xs text-gray-400 mb-0.5">Location</div><div className="text-gray-800">{booking.locationName || '—'}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Producer</div><div className="text-gray-800">{booking.producer}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Creative/Host</div><div className="text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
-            <div><div className="text-xs text-gray-400 mb-0.5">Crew Requested</div><div className="text-gray-800">{booking.crewRequired.join(', ') || '—'}</div></div>
+            <div><div className="text-xs text-gray-400 mb-0.5">Crew Requested</div><div className="text-gray-800">{
+              booking.crewRequired.length === 0
+                ? '—'
+                : booking.crewRequired
+                    .map(c => c === 'Videographer' && (booking.videographerCount || 1) > 1
+                      ? `${c} × ${booking.videographerCount}`
+                      : c)
+                    .join(', ')
+            }</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
             <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Project ID</div><div className="text-gray-800">{booking.projectId ? <><span className="font-mono">{booking.projectId}</span>{booking.projectName ? <span className="text-gray-500"> · {booking.projectName}</span> : null}</> : '—'}</div></div>
             {booking.notes && <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Notes</div><div className="text-gray-800 whitespace-pre-line">{booking.notes}</div></div>}
@@ -599,6 +617,25 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Main Videographer (ช่างภาพหลัก) — pick one of the assigned crew */}
+          {assignEmails.length > 0 && (
+            <div>
+              <div className="text-xs text-gray-500 mb-1">
+                Main Videographer (ช่างภาพหลัก)
+                {booking?.videographerCount && booking.videographerCount > 1 && (
+                  <span className="ml-1 text-gray-400">— requested {booking.videographerCount} ช่างภาพ</span>
+                )}
+              </div>
+              <select className="gf-input" value={mainVideographer}
+                onChange={e => setMainVideographer(e.target.value)}>
+                <option value="">— None —</option>
+                {assignEmails.map(em => (
+                  <option key={em} value={em}>{em}</option>
+                ))}
+              </select>
             </div>
           )}
 

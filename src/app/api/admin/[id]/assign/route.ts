@@ -31,8 +31,12 @@ export async function POST(
     const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
     const senderAccessToken = await getValidGoogleAccessToken(authToken)
     const accessTokenError = (authToken as any)?.accessTokenError as string | undefined
-    const { assignedEmails, adminNotes } = await request.json()
+    const { assignedEmails, adminNotes, mainVideographerEmail } = await request.json()
     const emailRecipients = cleanEmailList(assignedEmails)
+    // Only persist a main videographer if they're actually in the assigned list.
+    const mainVdo = typeof mainVideographerEmail === 'string' && mainVideographerEmail.trim() && emailRecipients.includes(mainVideographerEmail.trim())
+      ? mainVideographerEmail.trim()
+      : null
 
     const existing = await prisma.booking.findUnique({ where: { id: params.id } })
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -44,6 +48,7 @@ export async function POST(
       where: { id: params.id },
       data: {
         assignedEmails: emailRecipients,
+        mainVideographerEmail: mainVdo,
         adminNotes: adminNotes || null,
         status: nextStatus,
       },

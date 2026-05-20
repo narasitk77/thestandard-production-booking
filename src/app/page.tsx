@@ -50,6 +50,8 @@ export default function BookingForm() {
   const [producerEmailText, setProducerEmailText] = useState('')
   const [creative, setCreative] = useState('')
   const [crew, setCrew] = useState<string[]>([])
+  // จำนวน Videographer (ช่างภาพ) ที่ขอ — ใช้ได้เมื่อ Videographer อยู่ใน CREW REQUIRED
+  const [videographerCount, setVideographerCount] = useState(1)
   const [agencyRef, setAgencyRef] = useState('')
   const [projectId, setProjectId] = useState('')
   // Episode type for project-linked bookings — picked once per booking.
@@ -201,6 +203,7 @@ export default function BookingForm() {
           directorEmail: isContentAgency ? directorEmail : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
+          videographerCount: crew.includes('Videographer') ? videographerCount : 1,
           agencyRef: agencyRef || null,
           projectId: projectId || null,
           projectName: selectedProject?.projectName || null,
@@ -589,15 +592,31 @@ export default function BookingForm() {
         <div className="gf-section">
           <label className="gf-label">CREW REQUIRED</label>
           {CREW_OPTIONS.map(c => (
-            <label key={c} className="gf-option">
-              <input
-                type="checkbox"
-                checked={crew.includes(c)}
-                onChange={() => toggleCrew(c)}
-                className="accent-[#673ab7]"
-              />
-              <span className="text-sm text-gray-700">{c}</span>
-            </label>
+            <div key={c} className="flex items-center gap-3">
+              <label className="gf-option flex-1 mb-0">
+                <input
+                  type="checkbox"
+                  checked={crew.includes(c)}
+                  onChange={() => toggleCrew(c)}
+                  className="accent-[#673ab7]"
+                />
+                <span className="text-sm text-gray-700">{c}</span>
+              </label>
+              {c === 'Videographer' && crew.includes(c) && (
+                <span className="inline-flex items-center gap-1 text-xs text-gray-500 shrink-0">
+                  ×
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={videographerCount}
+                    onChange={e => setVideographerCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                    className="w-14 border border-gray-300 rounded px-1.5 py-0.5 text-sm tabular-nums"
+                  />
+                  คน
+                </span>
+              )}
+            </div>
           ))}
         </div>
 
@@ -709,7 +728,7 @@ export default function BookingForm() {
               setLocationId(''); setLocationCustom(''); setCallTime(''); setEstimatedWrap('')
               setProducerEmail(''); setDirectorEmail('')
               setProducerName(''); setProducerPhone(''); setProducerEmailText('')
-              setCreative(''); setCrew([])
+              setCreative(''); setCrew([]); setVideographerCount(1)
               setAgencyRef(''); setProjectId(''); setEpisodeType(''); setNotes(''); setEpCount(1); setEpTitles([''])
             }}
             className="text-sm text-[#673ab7] hover:underline"
