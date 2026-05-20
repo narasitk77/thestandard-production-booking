@@ -14,23 +14,30 @@
  * (the whole point of "ต้องตรง กับเลขเดิม"). The existing onEditEpisode
  * trigger keeps reading/writing the same counter exactly as before.
  *
- * SETUP (~5 min)
- * --------------
- *   1. Apps Script editor → File ➕ → "Script" → name it e.g.
+ * SETUP — for the pilot copy of the Dashboard sheet (~5 min)
+ * ----------------------------------------------------------
+ *   1. Apps Script editor → File ➕ → "Script" → name it
  *      "booking-episode-endpoint" → paste THIS WHOLE FILE.
- *      (Heads-up: if the project already has a doPost(), this would clash —
- *       ping narasit and we'll restructure. Current project has none.)
  *
- *   2. Project Settings → Script Properties → Add:
+ *   2. IMPORTANT (pilot copy only): from the editor's function dropdown
+ *      pick "bookingSeedCounters" → ▶ Run. Apps Script will ask for
+ *      permissions the first time — Allow.
+ *      This scans the PD tabs and seeds the EP_SEQ_* counters so the
+ *      next booking-generated episode picks up the correct NN. Without
+ *      it the first booking would reuse "L01" because ScriptProperties
+ *      do NOT copy with File → Make a Copy (only cell values copy).
+ *      (Skip on ปุ๊ก's master sheet — the counter is already live there.)
+ *
+ *   3. Project Settings → Script Properties → Add:
  *        BOOKING_API_SECRET = <a long random string, e.g. `openssl rand -hex 32`>
  *
- *   3. Deploy → New deployment → type "Web app"
+ *   4. Deploy → New deployment → type "Web app"
  *        Description    : Booking endpoint
  *        Execute as     : Me  (sheet owner)
  *        Who has access : Anyone
  *      → Deploy → copy the Web App URL.
  *
- *   4. Send the Web App URL + the secret back to narasit (private channel).
+ *   5. Send the Web App URL + the secret back to narasit.
  *
  * REQUEST   POST, JSON body:
  *   { "secret": "...", "projectId": "PP-26-008", "type": "L" }
@@ -162,6 +169,60 @@ function _bk_lookupProject_(ss, projectId) {
     }
   }
   return null;
+}
+
+/**
+ * Seed the EP_SEQ_<project>_<type> counters from existing Episode IDs in
+ * the PD tabs. Required after File → Make a Copy, because ScriptProperties
+ * do NOT copy with the spreadsheet (only cell values copy). Without
+ * seeding, the next booking-generated episode would reuse "L01"/"S01" etc.
+ *
+ * Safe to re-run — the counter only moves forward. If the existing counter
+ * is already ahead of what's in the PD tabs, it stays put.
+ *
+ * From the Apps Script editor: select "bookingSeedCounters" in the function
+ * dropdown → ▶ Run.
+ */
+function bookingSeedCounters() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var props = PropertiesService.getScriptProperties();
+  var PD_TABS = ['PD อ้อม', 'PD ไนซ์', 'PD ซัง'];
+  var maxByKey = {};  // "<project>_<type>" → max NN seen
+  var scanned = 0;
+
+  for (var t = 0; t < PD_TABS.length; t++) {
+    var sheet = ss.getSheetByName(PD_TABS[t]);
+    if (!sheet) continue;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) continue;
+    var values = sheet.getRange(2, 3, lastRow - 1, 1).getValues(); // col 3 = Episode ID
+    for (var i = 0; i < values.length; i++) {
+      var m = String(values[i][0] || '').trim().match(/^(PP-\d{2}-\d{3})-([A-Z])(\d{2,})$/);
+      if (!m) continue;
+      scanned++;
+      var key = m[1] + '_' + m[2];
+      var nn = parseInt(m[3], 10);
+      if (!maxByKey[key] || nn > maxByKey[key]) maxByKey[key] = nn;
+    }
+  }
+
+  var keys = Object.keys(maxByKey);
+  var updated = 0;
+  for (var k = 0; k < keys.length; k++) {
+    var propKey = 'EP_SEQ_' + keys[k];
+    var nextVal = maxByKey[keys[k]] + 1; // next available
+    var existing = parseInt(props.getProperty(propKey) || '0', 10);
+    if (nextVal > existing) {
+      props.setProperty(propKey, String(nextVal));
+      updated++;
+    }
+  }
+
+  var msg = 'Scanned ' + scanned + ' Episode IDs across ' + PD_TABS.length + ' PD tabs.\n' +
+            'Updated ' + updated + ' / ' + keys.length + ' EP_SEQ_* counters.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (_) {}
+  return msg;
 }
 
 function _bk_pad2_(n) {
