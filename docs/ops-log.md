@@ -5,6 +5,122 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-21 · Migration — bookingCode backfill + AuditLog table + 90-day retention
+
+Adds an audit trail to every booking change and gives booking + episode a
+shared human-readable ID. See `CHANGELOG.md` [1.18.0] for the full feature
+list. This entry covers the operational concerns only.
+
+### Schema delta
+
+- `bookings.bookingCode` — new column, `TEXT NULL UNIQUE`
+- `audit_logs` — new table (id, at, actorEmail, action, entityType, entityId,
+  bookingCode, fromStatus, toStatus, changes JSONB) + four indexes
+
+`prisma db push --accept-data-loss` handles both — additive change, no
+existing column is dropped.
+
+### Backfill (idempotent, post-push)
+
+`start.sh` runs after `db push`:
+
+```sql
+UPDATE bookings b
+   SET "bookingCode" = (
+     SELECT e."episodeId" FROM episodes e
+     WHERE e."bookingId" = b.id
+     ORDER BY e.sequence ASC LIMIT 1
+   )
+ WHERE b."bookingCode" IS NULL;
+```
+
+`WHERE bookingCode IS NULL` makes it a no-op on second boot. Bookings with
+zero episodes (shouldn't exist; defensive) keep `NULL` — `@unique` permits
+multiple NULLs.
+
+### Retention purge (90 days, every boot)
+
+```sh
+psql "$DATABASE_URL" -c "DELETE FROM audit_logs WHERE at < now() - INTERVAL '90 days'"
+```
+
+Non-fatal (`|| echo`) — failure on first boot before the table exists is
+ignored. Can also be triggered manually by an admin via
+`POST /api/audit/purge` without restarting the service.
+
+### Pre-purge warning + CSV export
+
+- Admins see a yellow banner on every admin page when there are rows in the
+  14-day "warning window" (older than 76 days but younger than 90).
+- The banner links to `/api/audit/export?from=…` which streams a UTF-8 CSV
+  (BOM-prefixed; Excel opens Thai cleanly).
+- The same banner load also fires an auto-email to every active admin
+  (throttled ≤ once / 24 h via the `audit.auto_email_sent` marker row).
+
+Email provider follows existing precedence
+(`EMAIL_PROVIDER` → `RESEND_API_KEY` → `gmail-oauth` → SMTP); no new env vars
+needed.
+
+### Concurrency hardening
+
+Local episode-sequence generation now takes a PostgreSQL advisory lock per
+`(outlet, date, program)` slot inside the booking transaction
+(`pg_advisory_xact_lock(hashtextextended(key, 0))`). Combined with a 3-try
+retry on `P2002`, this makes 20-EP simultaneous bookings safe even on the
+local generation path. Project-linked bookings already had this property
+through the Producer Dashboard Web App counter — unchanged.
+
+### Deploy checklist
+
+- [ ] Build new image and push: `ghcr.io/narasitk77/thestandard-production-booking:sha-<new>`
+- [ ] Redeploy Portainer stack — `start.sh` runs the backfill + purge automatically
+- [ ] Sanity: open `/admin` as an admin; expect bookings list to render (no banner
+      yet because there's nothing in the warning window)
+- [ ] Sanity: create a new booking with 2+ episodes; verify `bookingCode` in the
+      DB equals `episodes[0].episodeId`
+- [ ] Sanity: PATCH a booking status (e.g. `REQUESTED → ASSIGNED`); confirm
+      `GET /api/bookings/:id/history` returns the `booking.status_change` row
+- [ ] Sanity: hit `/api/audit/export` — should download a CSV with the BOM
+      and at least the create + status-change rows from above
+
+### Rollback path
+
+If something breaks: revert the image tag in Portainer to `sha-<previous>`.
+Schema change is additive (column + table), so the old code keeps working
+against the new DB — no schema rollback needed unless we explicitly remove
+the column/table.
+
+---
+
+## 2026-05-20 · Migration — Booking Category enum rename (in-place)
+
+Renamed the `Category` enum values on `bookings.category` without dropping
+data. Old → New: `RECURRING → ORIGINAL_CONTENT`, `AGENCY_JOB → ADVERTORIAL`,
+`SERVICE_JOB → EVENT`, `INTERNAL` (unchanged).
+
+### Migration mechanism
+
+Added an idempotent `DO $$ ... $$` block to `start.sh` that runs **before**
+`prisma db push --accept-data-loss`. It uses `ALTER TYPE "Category" RENAME
+VALUE 'OLD' TO 'NEW'`, which mutates the enum type in place — existing rows
+keep their data, no column drop/recreate, no `--accept-data-loss` collateral.
+
+The block guards each rename with `pg_enum` existence checks, so it's safe to:
+- Run on a fresh DB (the type doesn't exist yet — outer `pg_type` guard skips it)
+- Run a second time after rollout (old labels are gone — inner checks skip)
+- Roll back to v1.16.x if needed (the new enum values become "orphans" but
+  `start.sh` would re-run on next boot of older code; only forward path tested)
+
+### Deploy checklist
+
+- [ ] Build new image: `ghcr.io/narasitk77/thestandard-production-booking:sha-<new>`
+- [ ] Redeploy Portainer stack — `start.sh` runs the SQL block automatically
+- [ ] Verify `probook.xtec9.xyz` form shows new labels
+- [ ] Spot-check existing bookings in admin — Category column should display
+      "Original Content", "Advertorial", "Event", "Internal" via `categoryLabel()`
+
+---
+
 ## 2026-05-20 · Sprint deploy — Episode-Type unification + sheet integration
 
 Big push. `ghcr.io/narasitk77/thestandard-production-booking:sha-b597c3c`

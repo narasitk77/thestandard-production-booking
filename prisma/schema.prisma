@@ -15,9 +15,9 @@ enum ShootType {
 }
 
 enum Category {
-  RECURRING
-  AGENCY_JOB
-  SERVICE_JOB
+  ORIGINAL_CONTENT
+  ADVERTORIAL
+  EVENT
   INTERNAL
 }
 
@@ -128,6 +128,11 @@ model Program {
 
 model Booking {
   id               String        @id @default(cuid())
+  // Display code = the first episode's episodeId. Same format as Episode.episodeId,
+  // so a booking and its episodes share one human-readable namespace. Set after
+  // episode creation (so backfill / pre-episode states keep it nullable).
+  // Immutable once assigned — never updated when first episode is removed.
+  bookingCode      String?       @unique
   shootDate        DateTime      @db.Date
   shootEndDate     DateTime?     @db.Date   // null = single-day shoot
   category         Category
@@ -183,6 +188,31 @@ model Episode {
   createdAt   DateTime @default(now())
 
   @@map("episodes")
+}
+
+// Booking change history. Best-effort: written outside the booking transaction
+// to keep booking creation/update reliable. Rows older than 90 days are purged
+// at app startup (start.sh). Admins get a 14-day warning banner + auto-email
+// before purge so they can download a CSV report. action examples:
+//   booking.create | booking.update | booking.status_change | booking.delete
+//   audit.auto_email_sent | audit.purge_run
+model AuditLog {
+  id           String   @id @default(cuid())
+  at           DateTime @default(now())
+  actorEmail   String?
+  action       String   @db.VarChar(64)
+  entityType   String   @db.VarChar(32)
+  entityId     String?
+  bookingCode  String?
+  fromStatus   String?  @db.VarChar(16)
+  toStatus     String?  @db.VarChar(16)
+  changes      Json?
+
+  @@index([entityType, entityId])
+  @@index([bookingCode])
+  @@index([at])
+  @@index([action])
+  @@map("audit_logs")
 }
 
 model Upload {

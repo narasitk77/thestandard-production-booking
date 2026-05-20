@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getSession } from '@/lib/session'
+import AdminAuditBanner from '@/app/_components/AdminAuditBanner'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
@@ -17,5 +18,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       </div>
     )
   }
-  return <>{children}</>
+  return (
+    <>
+      <AdminAuditBanner />
+      {children}
+    </>
+  )
 }

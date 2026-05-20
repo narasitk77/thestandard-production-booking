@@ -4,6 +4,9 @@ import { getSession, requireAdmin } from '@/lib/session'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
+import { assertStatusTransition } from '@/lib/booking-status'
+import { logAudit, diffBooking } from '@/lib/audit'
+import type { BookingStatus } from '@prisma/client'
 
 export async function GET(
   _request: NextRequest,
@@ -47,6 +50,8 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     if (!(await requireAdmin())) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
@@ -76,6 +81,19 @@ export async function PATCH(
       include: { episodes: true },
     })
     if (!existing) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+
+    // Reject illegal status transitions (e.g. COMPLETED → REQUESTED) before
+    // touching the DB. Returns 400 with the rule it violated.
+    if (status && status !== existing.status) {
+      try {
+        assertStatusTransition(existing.status, status as BookingStatus)
+      } catch (e: any) {
+        return NextResponse.json(
+          { error: e?.message || 'Invalid status transition' },
+          { status: 400 },
+        )
+      }
+    }
 
     // Update booking fields in a transaction along with episode titles
     const booking = await prisma.$transaction(async (tx) => {
@@ -119,6 +137,36 @@ export async function PATCH(
       })
     })
 
+    // Audit — fire-and-forget. Status changes get a dedicated row; other
+    // edits get a `booking.update` row with a field-level diff. We log both
+    // when status AND other fields change in one request.
+    if (status && status !== existing.status) {
+      logAudit({
+        actorEmail: session.email,
+        action: 'booking.status_change',
+        entityType: 'Booking',
+        entityId: booking.id,
+        bookingCode: booking.bookingCode,
+        fromStatus: existing.status,
+        toStatus: booking.status,
+      })
+    }
+    const otherDiff = diffBooking(existing, booking)
+    if (otherDiff && (!status || Object.keys(otherDiff).some(k => k !== 'status'))) {
+      // Drop the status key from the diff — already captured above
+      const { status: _omit, ...rest } = otherDiff
+      if (Object.keys(rest).length > 0) {
+        logAudit({
+          actorEmail: session.email,
+          action: 'booking.update',
+          entityType: 'Booking',
+          entityId: booking.id,
+          bookingCode: booking.bookingCode,
+          changes: rest,
+        })
+      }
+    }
+
     // On cancellation, remove calendar event, sheet row, and auto-OT records
     if (status === 'CANCELLED') {
       if (existing.calendarEventId) {
@@ -155,10 +203,34 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    // Soft-delete: flip status to CANCELLED. We snapshot the previous status
+    // for the audit log so retrospective reads can see what we cancelled.
+    const before = await prisma.booking.findUnique({
+      where: { id: params.id },
+      select: { id: true, status: true, bookingCode: true },
+    })
+    if (!before) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+
     await prisma.booking.update({
       where: { id: params.id },
       data: { status: 'CANCELLED' },
     })
+
+    logAudit({
+      actorEmail: session.email,
+      action: 'booking.delete',
+      entityType: 'Booking',
+      entityId: before.id,
+      bookingCode: before.bookingCode,
+      fromStatus: before.status,
+      toStatus: 'CANCELLED',
+    })
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('DELETE /api/bookings/[id] error:', error)

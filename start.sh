@@ -52,8 +52,68 @@ fi
 # ──────────────────────────────────────────────────────────────────────────────
 # 3) Sync schema + seed + boot
 # ──────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Pre-migration: rename Category enum values in-place so `prisma db push`
+# doesn't drop+recreate the column (which would erase data). Safe to re-run.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Renaming Category enum values (if old names exist)..."
+psql "$DATABASE_URL" <<'SQL' || echo "Enum rename skipped (type missing or already renamed)"
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'Category') THEN
+    IF EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'RECURRING' AND enumtypid = '"Category"'::regtype) THEN
+      ALTER TYPE "Category" RENAME VALUE 'RECURRING' TO 'ORIGINAL_CONTENT';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'AGENCY_JOB' AND enumtypid = '"Category"'::regtype) THEN
+      ALTER TYPE "Category" RENAME VALUE 'AGENCY_JOB' TO 'ADVERTORIAL';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'SERVICE_JOB' AND enumtypid = '"Category"'::regtype) THEN
+      ALTER TYPE "Category" RENAME VALUE 'SERVICE_JOB' TO 'EVENT';
+    END IF;
+  END IF;
+END $$;
+SQL
+
 echo "==> Syncing database schema..."
 npx prisma db push --accept-data-loss
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Post-push: backfill booking_code for existing bookings created before the
+# field was added. Sets booking_code = first episode's episode_id (matches the
+# format used for new bookings). Idempotent — only fills NULL rows.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Backfilling Booking.bookingCode from first episode..."
+psql "$DATABASE_URL" <<'SQL' || echo "Backfill skipped (table missing or already filled)"
+DO $$
+DECLARE
+  filled INT;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'bookings' AND column_name = 'bookingCode'
+  ) THEN
+    UPDATE bookings b
+       SET "bookingCode" = (
+         SELECT e."episodeId" FROM episodes e
+         WHERE e."bookingId" = b.id
+         ORDER BY e.sequence ASC
+         LIMIT 1
+       )
+     WHERE b."bookingCode" IS NULL;
+    GET DIAGNOSTICS filled = ROW_COUNT;
+    RAISE NOTICE 'Backfilled % booking(s) with bookingCode', filled;
+  END IF;
+END $$;
+SQL
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Post-push: purge audit_logs older than 90 days. Same query as
+# /api/audit/purge — running on startup gives us a baseline tick even if no
+# admin opens the dashboard.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Purging audit_logs older than 90 days..."
+psql "$DATABASE_URL" -c "DELETE FROM audit_logs WHERE at < now() - INTERVAL '90 days'" \
+  || echo "Audit purge skipped (table missing)"
 
 echo "==> Seeding database (idempotent)..."
 npx tsx prisma/seed.ts || echo "Seed skipped or already done"

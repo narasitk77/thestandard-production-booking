@@ -6,6 +6,8 @@ import { appendBookingRow } from '@/lib/google-sheets'
 import { getSession } from '@/lib/session'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { requestEpisodeIds, type EpisodeType } from '@/lib/booking-episode-api'
+import { allocateEpisodeSequence, withSequenceRetry } from '@/lib/episode-sequence'
+import { logAudit } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   try {
@@ -111,8 +113,14 @@ export async function POST(request: NextRequest) {
     if (!episodeTitles || episodeTitles.length === 0) {
       return NextResponse.json({ error: 'At least one episode title required' }, { status: 400 })
     }
+    if (episodeTitles.length > 20) {
+      return NextResponse.json({ error: 'Maximum 20 episodes per booking' }, { status: 400 })
+    }
 
     const parsedDate = new Date(shootDate)
+    if (isNaN(parsedDate.getTime())) {
+      return NextResponse.json({ error: `Invalid shootDate: ${shootDate}` }, { status: 400 })
+    }
 
     // Upsert outlet DB record
     const outletDb = await prisma.outlet.upsert({
@@ -132,10 +140,13 @@ export async function POST(request: NextRequest) {
     //   Project-linked (projectId + episodeType): ask the Producer Dashboard's
     //     Apps Script Web App for sheet-generated PP-YY-NNN-{type}NN IDs. The
     //     Web App is the single owner of the EP_SEQ_ counter — so bookings
-    //     and hand-typed episodes stay in one continuous sequence.
-    //   Otherwise: generate locally with [OUT]-[YYMMDD]-[PROG]-[EE].
-    let episodeIds: string[]
-    let sequenceBase: number
+    //     and hand-typed episodes stay in one continuous sequence. The Web
+    //     App call is OUTSIDE the DB transaction (it's a network call).
+    //   Otherwise: allocate inside the booking transaction via an advisory
+    //     lock on (outlet, date, program) so concurrent local bookings can't
+    //     read the same max(sequence). Wrapped in withSequenceRetry as a
+    //     defense-in-depth against rare @unique violations.
+    let projectEpisodeIds: string[] | null = null
     if (projectId && episodeType) {
       const result = await requestEpisodeIds({
         projectId,
@@ -155,69 +166,91 @@ export async function POST(request: NextRequest) {
           { status: 502 },
         )
       }
-      episodeIds = result.episodeIds
-      sequenceBase = 1
-    } else {
-      // Find next available sequence for this outlet+program+date
-      const existingEpisodes = await prisma.episode.findMany({
-        where: {
-          episodeId: {
-            startsWith: `${outletCode}-${formatDateForId(parsedDate)}-${programCode}-`,
-          },
-        },
-        orderBy: { sequence: 'desc' },
-        take: 1,
-      })
-      const startSeq = existingEpisodes.length > 0 ? existingEpisodes[0].sequence + 1 : 1
-      episodeIds = episodeTitles.map((_: string, idx: number) =>
-        generateEpisodeId(outletCode, parsedDate, programCode, startSeq + idx),
-      )
-      sequenceBase = startSeq
+      projectEpisodeIds = result.episodeIds
     }
 
-    // Create booking + episodes in a transaction
-    const booking = await prisma.$transaction(async (tx) => {
-      const newBooking = await tx.booking.create({
-        data: {
-          shootDate: parsedDate,
-          shootEndDate: shootEndDate ? new Date(shootEndDate) : null,
-          category,
-          shootType,
-          locationName: locationName || null,
-          callTime,
-          estimatedWrap: estimatedWrap || null,
-          producer,
-          producerEmail: producerEmail || null,
-          producerPhone: producerPhone || null,
-          director: director || null,
-          directorEmail: directorEmail || null,
-          creative: creative || [],
-          crewRequired: crewRequired || [],
-          videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)),
-          agencyRef: agencyRef || null,
-          projectId: projectId || null,
-          projectName: projectName || null,
-          notes: notes || null,
-          status: 'REQUESTED',
-          createdByEmail: session.email,
-          outletId: outletDb.id,
-          programId: programDb.id,
-          episodes: {
-            create: episodeTitles.map((title: string, idx: number) => ({
-              episodeId: episodeIds[idx],
-              sequence: sequenceBase + idx,
-              title,
-              programId: programDb.id,
-            })),
+    // Create booking + episodes in a transaction. Wrapped in withSequenceRetry
+    // so a P2002 (@unique) on episodeId triggers a fresh sequence allocation
+    // up to 3 times — only relevant for the local-generation path; the
+    // project-linked path is collision-free by construction.
+    const booking = await withSequenceRetry(async () =>
+      prisma.$transaction(async (tx) => {
+        let episodeIds: string[]
+        let sequenceBase: number
+        if (projectEpisodeIds) {
+          episodeIds = projectEpisodeIds
+          sequenceBase = 1
+        } else {
+          sequenceBase = await allocateEpisodeSequence(tx, outletCode, parsedDate, programCode)
+          episodeIds = episodeTitles.map((_: string, idx: number) =>
+            generateEpisodeId(outletCode, parsedDate, programCode, sequenceBase + idx),
+          )
+        }
+
+        return tx.booking.create({
+          data: {
+            // bookingCode = first episode's ID — same format as Episode.episodeId,
+            // naturally unique (every episodeId is @unique), readable as a
+            // booking handle. Stable for the lifetime of the booking even if
+            // the first episode is later removed.
+            bookingCode: episodeIds[0],
+            shootDate: parsedDate,
+            shootEndDate: shootEndDate ? new Date(shootEndDate) : null,
+            category,
+            shootType,
+            locationName: locationName || null,
+            callTime,
+            estimatedWrap: estimatedWrap || null,
+            producer,
+            producerEmail: producerEmail || null,
+            producerPhone: producerPhone || null,
+            director: director || null,
+            directorEmail: directorEmail || null,
+            creative: creative || [],
+            crewRequired: crewRequired || [],
+            videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)),
+            agencyRef: agencyRef || null,
+            projectId: projectId || null,
+            projectName: projectName || null,
+            notes: notes || null,
+            status: 'REQUESTED',
+            createdByEmail: session.email,
+            outletId: outletDb.id,
+            programId: programDb.id,
+            episodes: {
+              create: episodeTitles.map((title: string, idx: number) => ({
+                episodeId: episodeIds[idx],
+                sequence: sequenceBase + idx,
+                title,
+                programId: programDb.id,
+              })),
+            },
           },
-        },
-        include: {
-          outlet: true,
-          program: true,
-          episodes: { orderBy: { sequence: 'asc' } },
-        },
-      })
-      return newBooking
+          include: {
+            outlet: true,
+            program: true,
+            episodes: { orderBy: { sequence: 'asc' } },
+          },
+        })
+      }),
+    )
+
+    // Audit — fire-and-forget, outside the booking transaction so an audit
+    // failure can't bring down booking creation. logAudit swallows its own
+    // errors and logs to console.
+    logAudit({
+      actorEmail: session.email,
+      action: 'booking.create',
+      entityType: 'Booking',
+      entityId: booking.id,
+      bookingCode: booking.bookingCode,
+      toStatus: booking.status,
+      changes: {
+        episodeIds: booking.episodes.map(e => e.episodeId),
+        outletCode,
+        programCode,
+        shootDate: parsedDate.toISOString(),
+      },
     })
 
     // Sync to the Producer Dashboard "Bookings" tab — Content Agency only.
@@ -240,11 +273,4 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/bookings error:', error)
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })
   }
-}
-
-function formatDateForId(date: Date): string {
-  const yy = String(date.getFullYear()).slice(-2)
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
-  return `${yy}${mm}${dd}`
 }

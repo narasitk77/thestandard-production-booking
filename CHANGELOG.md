@@ -5,6 +5,122 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.18.0] — 2026-05-21
+
+### Added — Booking code + atomic episode sequence + audit log
+
+The booking ↔ episode pair now shares one ID format, and every booking change
+leaves a 90-day audit trail.
+
+**Booking code**
+
+- New field `Booking.bookingCode` (`String?` `@unique`) — set on create to
+  `episodes[0].episodeId`, so a booking is identified by the same
+  `[OUT]-[YYMMDD]-[PROG]-[EE]` (or `PP-YY-NNN-LNN`) string as its first
+  episode. Immutable once set; never recomputed.
+- Backfilled at startup for pre-existing bookings (see ops-log).
+
+**Atomic episode sequence (local-generation path)**
+
+- New `src/lib/episode-sequence.ts` — `allocateEpisodeSequence(tx, …)` takes a
+  PostgreSQL `pg_advisory_xact_lock` on the `(outlet, date, program)` tuple
+  inside the booking transaction, so concurrent bookings on the same slot can
+  no longer read the same `max(sequence)`. The lock auto-releases on
+  commit/rollback.
+- `withSequenceRetry(fn, 3)` — defense-in-depth retry on `P2002` if the lock
+  somehow fails to engage. Logs a console warning when a retry fires so any
+  Layer-1 regression surfaces in prod logs.
+- Project-linked bookings (`projectId` + `episodeType`) remain unchanged —
+  the Producer Dashboard Web App still owns the `EP_SEQ_` counter and is
+  collision-free by construction.
+
+**Audit log**
+
+- New model `AuditLog` (id, at, actorEmail, action, entityType, entityId,
+  bookingCode, fromStatus, toStatus, changes JSON). Indexed on `at`,
+  `bookingCode`, `(entityType, entityId)`, and `action`.
+- Logged actions (fire-and-forget, written outside the booking transaction so
+  audit failure never blocks a save):
+  - `booking.create` — full episode-IDs + slot context
+  - `booking.update` — field-level diff over the editable-field whitelist
+  - `booking.status_change` — separate row, with `fromStatus` / `toStatus`
+  - `booking.delete` — soft-delete (status → CANCELLED) row
+  - `audit.auto_email_sent` / `audit.purge_run` — meta-rows used for throttle
+    and post-incident analysis
+- New whitelist `src/lib/booking-status.ts` — rejects illegal transitions
+  (e.g. `COMPLETED → REQUESTED`) with HTTP 400.
+
+**Retention + CSV reminder (90-day rolling window)**
+
+- New `src/lib/audit-retention.ts` — policy constants (`RETENTION_DAYS=90`,
+  `WARNING_DAYS=14`, `AUTO_EMAIL_THROTTLE_HOURS=24`) and helpers
+  (`getPurgeWarning`, `canSendAutoEmail`, `iterateAuditLogs`).
+- `start.sh` runs `DELETE FROM audit_logs WHERE at < now() - INTERVAL '90 days'`
+  on every boot (non-fatal).
+- New endpoint `GET /api/audit/purge-warning` — admin-only; returns banner
+  data and fires the auto-email helper.
+- New endpoint `GET /api/audit/export` — admin-only; streams a UTF-8 CSV
+  (BOM-prefixed for Excel/Thai support), paginates 500 rows at a time so
+  memory stays flat.
+- New endpoint `POST /api/audit/purge` — admin-only manual purge trigger.
+- New endpoint `GET /api/bookings/:id/history` — per-booking audit trail.
+- New `src/lib/audit-auto-email.ts` + `src/app/_components/AdminAuditBanner.tsx`
+  — yellow banner on every admin page during the warning window, and a
+  throttled (≤1 per 24 h) auto-email to every active admin with the CSV link.
+
+### Files changed
+
+- `prisma/schema.prisma` — `Booking.bookingCode`, model `AuditLog`
+- `start.sh` — backfill `bookingCode`, purge `audit_logs`
+- `src/lib/episode-sequence.ts`, `src/lib/audit.ts`, `src/lib/booking-status.ts`,
+  `src/lib/csv.ts`, `src/lib/audit-retention.ts`, `src/lib/audit-auto-email.ts`
+- `src/app/api/bookings/route.ts`, `src/app/api/bookings/[id]/route.ts`
+- `src/app/api/bookings/[id]/history/route.ts`,
+  `src/app/api/audit/purge-warning/route.ts`,
+  `src/app/api/audit/export/route.ts`, `src/app/api/audit/purge/route.ts`
+- `src/app/_components/AdminAuditBanner.tsx`, `src/app/admin/layout.tsx`
+
+### Notes
+
+- Audit writes are best-effort. In a crash between booking commit and audit
+  write a row may be lost; the booking record remains authoritative.
+- Booking POST now hard-caps at **20 episodes per request** (was unbounded);
+  matches the operational ceiling.
+- `shootDate` is validated (`isNaN(parsedDate.getTime())`) before any DB work.
+
+---
+
+## [1.17.0] — 2026-05-20
+
+### Changed — Booking Category renamed
+
+Renamed the `Category` enum on bookings to better reflect how the team
+classifies shoots:
+
+| Old              | New                |
+|------------------|--------------------|
+| Recurring        | Original Content   |
+| Agency Job       | Advertorial        |
+| Service Job      | Event              |
+| Internal         | Internal (unchanged) |
+
+- `prisma/schema.prisma` — `Category` enum values updated: `ORIGINAL_CONTENT`,
+  `ADVERTORIAL`, `EVENT`, `INTERNAL`
+- `start.sh` — added idempotent pre-migration step (`ALTER TYPE ... RENAME VALUE`)
+  that runs before `prisma db push`, so existing rows keep their data and the
+  column doesn't get dropped/recreated. Safe to re-run.
+- UI: `src/app/page.tsx`, `src/app/booking/[outlet]/page.tsx`, `src/lib/data.ts`,
+  `src/lib/utils.ts` — all option lists, label maps, default-state strings,
+  and conditional logic (`isAgency → isAdvertorial`) updated.
+
+### Migration notes
+
+- The `ALTER TYPE ... RENAME VALUE` in `start.sh` is in-place — no data loss.
+- The Agency Reference field (formerly shown for "Agency Job") now shows for
+  "Advertorial" with the same label.
+
+---
+
 ## [1.16.0] — 2026-05-09
 
 ### Added — Project ID layer (per memo from ปุ๊ก, 2026-05-08)
