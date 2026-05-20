@@ -98,6 +98,15 @@ export default function BookingForm() {
   }, [])
 
   const selectedProject = projectOptions.find(p => p.projectId === projectId)
+  // Project picker is filtered by the selected Producer (Content Agency only):
+  // if the user picked ไนซ์, the dropdown shows only ไนซ์'s projects.
+  // Producer match is on the nickname (case/whitespace-tolerant).
+  const selectedProducerNickname = (
+    producers.find(p => p.email === producerEmail)?.nickname || ''
+  ).trim().toLowerCase()
+  const visibleProjects = selectedProducerNickname
+    ? projectOptions.filter(p => (p.producer || '').trim().toLowerCase() === selectedProducerNickname)
+    : projectOptions
   const [epCount, setEpCount] = useState(1)
   const [epTitles, setEpTitles] = useState<string[]>([''])
   const [submitting, setSubmitting] = useState(false)
@@ -501,7 +510,15 @@ export default function BookingForm() {
               <select
                 className="gf-select pr-6"
                 value={producerEmail}
-                onChange={e => setProducerEmail(e.target.value)}
+                onChange={e => {
+                  setProducerEmail(e.target.value)
+                  // Project + Episode Type are scoped to the Producer — when the
+                  // Producer changes, drop the previous pick so the user can't
+                  // accidentally submit a booking against a different Producer's
+                  // project.
+                  setProjectId('')
+                  setEpisodeType('')
+                }}
                 required
                 disabled={peopleLoading}
               >
@@ -656,9 +673,11 @@ export default function BookingForm() {
                 ? 'Loading projects…'
                 : projectOptions.length === 0
                   ? '— No projects loaded (sheet unreachable) —'
-                  : '— Select Project —'}
+                  : visibleProjects.length === 0
+                    ? `— No projects for this Producer —`
+                    : '— Select Project —'}
             </option>
-            {projectOptions.map(p => (
+            {visibleProjects.map(p => (
               <option key={p.projectId} value={p.projectId}>
                 {p.projectId} · {p.projectName}
                 {p.producer ? ` (${p.producer})` : ''}
