@@ -22,7 +22,7 @@ export default function BookingPage({ params }: { params: Promise<{ outlet: stri
 
   const [shootDate, setShootDate] = useState('')
   const [shootEndDate, setShootEndDate] = useState('')
-  const [category, setCategory] = useState('RECURRING')
+  const [category, setCategory] = useState('ORIGINAL_CONTENT')
   const [programCode, setProgramCode] = useState('')
   const [shootType, setShootType] = useState('STUDIO')
   const [locationName, setLocationName] = useState('')
@@ -112,7 +112,7 @@ export default function BookingPage({ params }: { params: Promise<{ outlet: stri
   }
 
   const needsLocation = shootType !== 'STUDIO'
-  const isAgency = category === 'AGENCY_JOB'
+  const isAdvertorial = category === 'ADVERTORIAL'
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
@@ -362,7 +362,7 @@ export default function BookingPage({ params }: { params: Promise<{ outlet: stri
             </div>
           </div>
 
-          {isAgency && (
+          {isAdvertorial && (
             <div>
               <label className="label">Agency Reference <span className="text-red-500">*</span></label>
               <input
@@ -371,7 +371,7 @@ export default function BookingPage({ params }: { params: Promise<{ outlet: stri
                 placeholder="e.g., QU-3108"
                 value={agencyRef}
                 onChange={e => setAgencyRef(e.target.value)}
-                required={isAgency}
+                required={isAdvertorial}
               />
               <p className="text-xs text-brand-gray-400 mt-1">
                 Agency Ref เก็บเป็น field แยก — ไม่ใช่ตัว Episode ID

@@ -56,9 +56,9 @@ export function shootTypeLabel(type: string): string {
 
 export function categoryLabel(cat: string): string {
   const map: Record<string, string> = {
-    RECURRING: 'Recurring',
-    AGENCY_JOB: 'Agency Job',
-    SERVICE_JOB: 'Service Job',
+    ORIGINAL_CONTENT: 'Original Content',
+    ADVERTORIAL: 'Advertorial',
+    EVENT: 'Event',
     INTERNAL: 'Internal',
   }
   return map[cat] ?? cat

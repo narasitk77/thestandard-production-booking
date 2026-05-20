@@ -221,9 +221,9 @@ export const PRODUCERS = [
 export const CREW_OPTIONS = ['Videographer', 'Sound', 'DIT', 'Lighting', 'MUA', 'Art Director']
 
 export const CATEGORY_OPTIONS = [
-  { value: 'RECURRING', label: 'Recurring' },
-  { value: 'AGENCY_JOB', label: 'Agency Job' },
-  { value: 'SERVICE_JOB', label: 'Service Job' },
+  { value: 'ORIGINAL_CONTENT', label: 'Original Content' },
+  { value: 'ADVERTORIAL', label: 'Advertorial' },
+  { value: 'EVENT', label: 'Event' },
   { value: 'INTERNAL', label: 'Internal' },
 ]
 

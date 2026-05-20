@@ -14,7 +14,7 @@ type ProjectOption = {
 // Producer / Director — sourced from the Dashboard "_Users" tab.
 type Person = { email: string; nickname: string }
 
-const CATEGORIES = ['Recurring', 'Agency Job', 'Service Job', 'Internal']
+const CATEGORIES = ['Original Content', 'Advertorial', 'Event', 'Internal']
 const SHOOT_TYPES = ['Studio', 'On Location', 'Event']
 const SHOOT_TYPE_VALUES: Record<string, string> = {
   'Studio': 'STUDIO',
@@ -22,9 +22,9 @@ const SHOOT_TYPE_VALUES: Record<string, string> = {
   'Event': 'EVENT',
 }
 const CATEGORY_VALUES: Record<string, string> = {
-  'Recurring': 'RECURRING',
-  'Agency Job': 'AGENCY_JOB',
-  'Service Job': 'SERVICE_JOB',
+  'Original Content': 'ORIGINAL_CONTENT',
+  'Advertorial': 'ADVERTORIAL',
+  'Event': 'EVENT',
   'Internal': 'INTERNAL',
 }
 
@@ -35,7 +35,7 @@ export default function BookingForm() {
   const [programCode, setProgramCode] = useState('')
   const [shootDate, setShootDate] = useState('')
   const [shootEndDate, setShootEndDate] = useState('')
-  const [category, setCategory] = useState('Recurring')
+  const [category, setCategory] = useState('Original Content')
   const [shootType, setShootType] = useState('Studio')
   const [locationId, setLocationId] = useState('')
   const [locationCustom, setLocationCustom] = useState('')
@@ -230,7 +230,7 @@ export default function BookingForm() {
     }
   }
 
-  const isAgency = category === 'Agency Job'
+  const isAdvertorial = category === 'Advertorial'
 
   return (
     <div className="max-w-[640px] mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
@@ -680,7 +680,7 @@ export default function BookingForm() {
         </div>
 
         {/* AGENCY REF (conditional) */}
-        {isAgency && (
+        {isAdvertorial && (
           <div className="gf-section">
             <label className="gf-label">
               AGENCY REFERENCE <span className="gf-required">*</span>
@@ -717,7 +717,7 @@ export default function BookingForm() {
             type="button"
             onClick={() => {
               setOutletCode(''); setProgramCode(''); setShootDate(''); setShootEndDate('')
-              setCategory('Recurring'); setShootType('Studio')
+              setCategory('Original Content'); setShootType('Studio')
               setLocationId(''); setLocationCustom(''); setCallTime(''); setEstimatedWrap('')
               setProducerEmail(''); setDirectorEmail('')
               setProducerName(''); setProducerPhone(''); setProducerEmailText('')
