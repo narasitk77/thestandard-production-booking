@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users } from 'lucide-react'
+import { ArrowLeft, Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users, CheckCircle2 } from 'lucide-react'
 import { WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
 
 interface PersonSummary {
@@ -17,6 +17,9 @@ interface PersonSummary {
   weekdayOTDays: number
   totalDays: number
   totalAmount: number
+  totalRecords: number
+  pendingRecords: number
+  approvedRecords: number
 }
 
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
@@ -137,6 +140,22 @@ export default function OTAdminPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: s.userId, active: !s.active }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      load()
+    } catch (e: any) { setError(e.message) }
+  }
+
+  const approveAll = async (s: PersonSummary) => {
+    if (!s.pendingRecords) return
+    if (!confirm(`อนุมัติ OT ${s.pendingRecords} รายการของ ${s.thaiName || s.email} (${monthLabel(month)})?`)) return
+    setError('')
+    try {
+      const res = await fetch('/api/ot/admin/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: s.email, month }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -369,6 +388,19 @@ export default function OTAdminPage() {
                           </div>
                         ) : (
                           <div className="inline-flex gap-1">
+                            {s.pendingRecords > 0 && (
+                              <button onClick={() => approveAll(s)}
+                                title={`อนุมัติ OT ${s.pendingRecords} รายการ`}
+                                className="text-xs px-2 py-1 border border-amber-400 text-amber-700 rounded hover:bg-amber-100 inline-flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> Approve {s.pendingRecords}
+                              </button>
+                            )}
+                            {s.pendingRecords === 0 && s.approvedRecords > 0 && (
+                              <span title={`${s.approvedRecords} รายการอนุมัติแล้ว`}
+                                className="text-xs px-2 py-1 border border-green-300 text-green-700 rounded inline-flex items-center gap-1 bg-green-50">
+                                <CheckCircle2 className="w-3 h-3" /> {s.approvedRecords}
+                              </span>
+                            )}
                             <button onClick={() => startEdit(s)} title="แก้ไข"
                               className="text-xs p-1.5 border border-gray-300 rounded hover:bg-gray-50">
                               <Pencil className="w-3 h-3" />

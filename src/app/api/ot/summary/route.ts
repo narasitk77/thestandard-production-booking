@@ -16,6 +16,9 @@ interface PersonSummary {
   weekdayOTDays: number        // count of qualifying weekday OT days
   totalDays: number
   totalAmount: number          // THB
+  totalRecords: number         // raw OT entries logged this month (any status)
+  pendingRecords: number       // entries awaiting manager approval
+  approvedRecords: number      // entries already signed off
 }
 
 export async function GET(request: NextRequest) {
@@ -43,6 +46,19 @@ export async function GET(request: NextRequest) {
       dayMap.get(key)!.recs.push(r)
     }
 
+    // Track raw record counts per user (independent of qualifying-day logic).
+    // "totalRecords" includes both qualifying and non-qualifying entries so
+    // the admin sees every record the user logged, not just paid days.
+    const personRecordCounts = new Map<string, { total: number; pending: number; approved: number }>()
+    for (const r of records) {
+      const key = r.userEmail.toLowerCase()
+      if (!personRecordCounts.has(key)) personRecordCounts.set(key, { total: 0, pending: 0, approved: 0 })
+      const c = personRecordCounts.get(key)!
+      c.total += 1
+      if (r.approvalStatus === 'APPROVED') c.approved += 1
+      else c.pending += 1
+    }
+
     const personTotals = new Map<string, { wh: number; wd: number; amt: number }>()
     Array.from(dayMap.values()).forEach(g => {
       const summary = summarizeDay(
@@ -65,6 +81,7 @@ export async function GET(request: NextRequest) {
 
     const summary: PersonSummary[] = users.map(u => {
       const t = personTotals.get(u.email.toLowerCase()) || { wh: 0, wd: 0, amt: 0 }
+      const c = personRecordCounts.get(u.email.toLowerCase()) || { total: 0, pending: 0, approved: 0 }
       return {
         userId: u.id,
         email: u.email,
@@ -77,13 +94,17 @@ export async function GET(request: NextRequest) {
         weekdayOTDays: t.wd,
         totalDays: t.wh + t.wd,
         totalAmount: t.amt,
+        totalRecords: c.total,
+        pendingRecords: c.pending,
+        approvedRecords: c.approved,
       }
     })
 
-    // Include orphan records
+    // Include orphan records (entries whose userEmail has no User row)
     const userEmails = new Set(users.map(u => u.email.toLowerCase()))
     Array.from(personTotals.entries()).forEach(([email, t]) => {
       if (!userEmails.has(email)) {
+        const c = personRecordCounts.get(email) || { total: 0, pending: 0, approved: 0 }
         summary.push({
           userId: null,
           email,
@@ -96,6 +117,9 @@ export async function GET(request: NextRequest) {
           weekdayOTDays: t.wd,
           totalDays: t.wh + t.wd,
           totalAmount: t.amt,
+          totalRecords: c.total,
+          pendingRecords: c.pending,
+          approvedRecords: c.approved,
         })
       }
     })
