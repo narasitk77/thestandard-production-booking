@@ -15,11 +15,10 @@ type ProjectOption = {
 type Person = { email: string; nickname: string }
 
 const CATEGORIES = ['Recurring', 'Agency Job', 'Service Job', 'Internal']
-const SHOOT_TYPES = ['Studio', 'On Location', 'Remote / Online', 'Event']
+const SHOOT_TYPES = ['Studio', 'On Location', 'Event']
 const SHOOT_TYPE_VALUES: Record<string, string> = {
   'Studio': 'STUDIO',
   'On Location': 'ON_LOCATION',
-  'Remote / Online': 'REMOTE_ONLINE',
   'Event': 'EVENT',
 }
 const CATEGORY_VALUES: Record<string, string> = {
@@ -54,9 +53,6 @@ export default function BookingForm() {
   const [videographerCount, setVideographerCount] = useState(1)
   const [agencyRef, setAgencyRef] = useState('')
   const [projectId, setProjectId] = useState('')
-  // Episode type for project-linked bookings — picked once per booking.
-  // The Dashboard sheet's Web App uses this to choose the EP_SEQ_<project>_<type> series.
-  const [episodeType, setEpisodeType] = useState<'L' | 'S' | 'A' | 'T' | ''>('')
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
   const [producers, setProducers] = useState<Person[]>([])
@@ -116,7 +112,10 @@ export default function BookingForm() {
   // Hide single-char "Episode-Type" program codes (L/S/A/T on AGN) from the
   // Program dropdown — those are only used as programCode aliases when a
   // project-linked booking sends the chosen Episode Type to the backend.
-  const programs = (selectedOutlet?.programs ?? []).filter(p => p.code.length >= 2)
+  // Show ONLY the universal Episode Type picks (L / S / A / T). The longer
+  // legacy show codes (DTW, MNW, EVT, etc.) stay in data.ts for backward
+  // compat with old bookings but never appear in the dropdown.
+  const programs = (selectedOutlet?.programs ?? []).filter(p => p.code.length === 1)
   // Content Agency (AGN) books people from the Dashboard _Users tab; every
   // other outlet types the producer in by hand and has no Director field.
   const isContentAgency = outletCode === 'AGN'
@@ -156,16 +155,8 @@ export default function BookingForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    // Program is required EXCEPT when a Content Agency booking is linked to a
-    // Project — in that case Episode Type (L/S/A/T) takes the place of Program
-    // and gets sent as programCode on submit.
-    const skipProgramRequired = isContentAgency && !!projectId
-    if (!outletCode || !shootDate || !shootEndDate) {
+    if (!outletCode || !programCode || !shootDate || !shootEndDate) {
       setError('Please fill in all required fields.')
-      return
-    }
-    if (!skipProgramRequired && !programCode) {
-      setError('Please select a Program.')
       return
     }
     if (isContentAgency) {
@@ -193,10 +184,6 @@ export default function BookingForm() {
       setError('Please fill in all episode titles.')
       return
     }
-    if (projectId && !episodeType) {
-      setError('Please select Episode Type (L / S / A / T) for the linked project.')
-      return
-    }
     setSubmitting(true)
     try {
       const res = await fetch('/api/bookings', {
@@ -204,9 +191,7 @@ export default function BookingForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           outletCode,
-          // For Content Agency project-linked bookings, the Episode Type
-          // doubles as the program code (L/S/A/T are aliases in AGN.programs).
-          programCode: (isContentAgency && projectId && episodeType) ? episodeType : programCode,
+          programCode,
           shootDate,
           shootEndDate: shootEndDate || null,
           category: CATEGORY_VALUES[category],
@@ -229,7 +214,9 @@ export default function BookingForm() {
           agencyRef: agencyRef || null,
           projectId: projectId || null,
           projectName: selectedProject?.projectName || null,
-          episodeType: projectId && episodeType ? episodeType : null,
+          // For Content Agency + Project, the chosen Episode Type (programCode)
+          // also identifies the L/S/A/T series the Web App should mint into.
+          episodeType: (isContentAgency && projectId && programCode.length === 1) ? programCode : null,
           notes: notes || null,
           episodeTitles: epTitles.map(t => t.trim()),
         }),
@@ -286,33 +273,32 @@ export default function BookingForm() {
           </div>
         </div>
 
-        {/* PROGRAM — hidden for Content Agency + Project (Episode Type takes its
-            place; the form sends episodeType as programCode so backend lookups
-            still resolve via the L/S/A/T aliases added to AGN). */}
-        {!(isContentAgency && projectId) && (
-          <div className="gf-section">
-            <label className="gf-label">
-              PROGRAM <span className="gf-required">*</span>
-            </label>
-            <div className="relative">
-              <select
-                className="gf-select pr-6"
-                value={programCode}
-                onChange={e => setProgramCode(e.target.value)}
-                required
-                disabled={!outletCode}
-              >
-                <option value="">{outletCode ? '— Select Program —' : '— Select Outlet first —'}</option>
-                {programs.map(p => (
-                  <option key={p.code} value={p.code}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
-            </div>
+        {/* EPISODE TYPE — universal picker (L / S / A / T) used for every
+            outlet and every booking. Replaces the old per-outlet Program
+            dropdown. Codes align with the Dashboard sheet so the same
+            classification flows form → app → sheet. */}
+        <div className="gf-section">
+          <label className="gf-label">
+            EPISODE TYPE <span className="gf-required">*</span>
+          </label>
+          <div className="relative">
+            <select
+              className="gf-select pr-6"
+              value={programCode}
+              onChange={e => setProgramCode(e.target.value)}
+              required
+              disabled={!outletCode}
+            >
+              <option value="">{outletCode ? '— Select Episode Type —' : '— Select Outlet first —'}</option>
+              {programs.map(p => (
+                <option key={p.code} value={p.code}>
+                  {p.code} · {p.name}
+                </option>
+              ))}
+            </select>
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
           </div>
-        )}
+        </div>
 
         {/* SHOOT DATE / END DATE */}
         <div className="gf-section grid grid-cols-2 gap-6">
@@ -427,7 +413,7 @@ export default function BookingForm() {
               <input
                 type="text"
                 className="gf-input"
-                placeholder="e.g. Grand Hyatt, Client Office, BACC"
+                placeholder="ชื่อสถานที่ · ที่อยู่ · หรือลิงก์ Google Maps"
                 value={locationCustom}
                 onChange={e => setLocationCustom(e.target.value)}
                 required
@@ -512,12 +498,10 @@ export default function BookingForm() {
                 value={producerEmail}
                 onChange={e => {
                   setProducerEmail(e.target.value)
-                  // Project + Episode Type are scoped to the Producer — when the
-                  // Producer changes, drop the previous pick so the user can't
-                  // accidentally submit a booking against a different Producer's
-                  // project.
+                  // Project is scoped to the Producer — when the Producer changes,
+                  // drop the previous pick so the user can't accidentally submit
+                  // a booking against a different Producer's project.
                   setProjectId('')
-                  setEpisodeType('')
                 }}
                 required
                 disabled={peopleLoading}
@@ -610,13 +594,14 @@ export default function BookingForm() {
           </div>
         )}
 
-        {/* CREATIVE / HOST */}
+        {/* แขก / Subject  (formerly Creative / Host) — the people/topic being
+            shot. Stored as `creative` for backward compatibility. */}
         <div className="gf-section">
-          <label className="gf-label">CREATIVE / HOST</label>
+          <label className="gf-label">แขก / SUBJECT</label>
           <input
             type="text"
             className="gf-input"
-            placeholder="e.g. Ken, แนน  (comma separated)"
+            placeholder="e.g. คุณ Ken, คุณแนน (คั่นด้วยจุลภาค)"
             value={creative}
             onChange={e => setCreative(e.target.value)}
           />
@@ -694,34 +679,6 @@ export default function BookingForm() {
           )}
         </div>
 
-        {/* EPISODE TYPE — only for project-linked bookings.
-            The Dashboard's Web App mints `PP-YY-NNN-{type}NN` using this. */}
-        {projectId && (
-          <div className="gf-section">
-            <label className="gf-label">
-              EPISODE TYPE <span className="gf-required">*</span>
-            </label>
-            <p className="text-xs text-gray-400 mb-2">
-              L = Long &nbsp;·&nbsp; S = Short &nbsp;·&nbsp; A = Album &nbsp;·&nbsp; T = Spot (รหัสตามชีท Dashboard)
-            </p>
-            <div className="relative">
-              <select
-                className="gf-select pr-6"
-                value={episodeType}
-                onChange={e => setEpisodeType(e.target.value as any)}
-                required
-              >
-                <option value="">— Select type —</option>
-                <option value="L">L · Long</option>
-                <option value="S">S · Short</option>
-                <option value="A">A · Album</option>
-                <option value="T">T · Spot</option>
-              </select>
-              <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none text-xs">▾</span>
-            </div>
-          </div>
-        )}
-
         {/* AGENCY REF (conditional) */}
         {isAgency && (
           <div className="gf-section">
@@ -765,7 +722,7 @@ export default function BookingForm() {
               setProducerEmail(''); setDirectorEmail('')
               setProducerName(''); setProducerPhone(''); setProducerEmailText('')
               setCreative(''); setCrew([]); setVideographerCount(1)
-              setAgencyRef(''); setProjectId(''); setEpisodeType(''); setNotes(''); setEpCount(1); setEpTitles([''])
+              setAgencyRef(''); setProjectId(''); setNotes(''); setEpCount(1); setEpTitles([''])
             }}
             className="text-sm text-[#673ab7] hover:underline"
           >

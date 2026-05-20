@@ -40,7 +40,7 @@ export function parseEpisodeId(episodeId: string): {
   sequence: number
   shootDate: Date
 } | null {
-  const match = episodeId.match(/^([A-Z]{2,4})-(\d{6})-([A-Z0-9]{2,4})-(\d{2})$/)
+  const match = episodeId.match(/^([A-Z]{2,4})-(\d{6})-([A-Z0-9]{1,4})-(\d{2})$/)
   if (!match) return null
 
   const [, outletCode, dateStr, programCode, seqStr] = match

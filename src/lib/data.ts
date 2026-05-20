@@ -181,6 +181,27 @@ export const OUTLETS: Outlet[] = [
   },
 ]
 
+// Universal Episode Type options (L / S / A / T) — injected into every outlet
+// so the booking form shows one consistent picker regardless of outlet. The
+// codes align with the Dashboard sheet's Episode Type column, so the same
+// classification flows end-to-end (form → app → sheet). Existing outlet-
+// specific show codes (DTW, MNW, EVT, etc.) stay in the data for backward
+// compatibility with old bookings; they're hidden from the form by a
+// code.length === 1 filter on the picker.
+const EPISODE_TYPE_PROGRAMS: Program[] = [
+  { code: 'L', name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว', category: 'Long-form' },
+  { code: 'S', name: 'Vertical Short · Reel · TikTok · Short clip', category: 'Short-form' },
+  { code: 'A', name: 'Photo Album · ภาพถ่ายชุด', category: 'Album' },
+  { code: 'T', name: 'Spot · Bumper · Promo · โฆษณา', category: 'Short-form' },
+]
+for (const outlet of OUTLETS) {
+  for (const ep of EPISODE_TYPE_PROGRAMS) {
+    if (!outlet.programs.find(p => p.code === ep.code)) {
+      outlet.programs.push({ ...ep })
+    }
+  }
+}
+
 export const OUTLET_MAP = Object.fromEntries(OUTLETS.map(o => [o.code, o]))
 
 export function getOutlet(code: string): Outlet | undefined {
