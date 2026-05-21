@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.1] — 2026-05-21
+
+### Fixed — PROJECT ID no longer hard-blocks Content Agency when the sheet is down
+
+A sheet outage previously made every Content Agency booking impossible: the
+PROJECT ID dropdown had no options to pick, yet it was `required`, so the form
+could never submit. Now PROJECT ID is a **graceful-degradation** field:
+
+- Required **only** when the Producer Dashboard sheet returned selectable
+  projects (`visibleProjects.length > 0`). When the sheet is unreachable, or the
+  selected producer has no projects, the field becomes optional.
+- An amber notice explains the degraded mode and that booking can proceed
+  without a Project ID.
+- With no Project ID, the backend already falls back to a local `AGN-YYMMDD-…`
+  Episode ID (the project-linked Web App path is skipped), so the queue keeps
+  working through the outage. The project can be linked later.
+
+`src/app/page.tsx` — added `projectSelectable` / `projectsUnavailable` flags;
+label `*`, `<select required>`, and submit validation are now gated on
+`projectSelectable`.
+
+---
+
 ## [1.19.0] — 2026-05-21
 
 ### Added — Video Type field on the booking form

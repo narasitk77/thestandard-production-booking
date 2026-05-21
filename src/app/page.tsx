@@ -114,6 +114,13 @@ export default function BookingForm() {
   const visibleProjects = selectedProducerNickname
     ? projectOptions.filter(p => (p.producer || '').trim().toLowerCase() === selectedProducerNickname)
     : projectOptions
+  // Backup plan: PROJECT ID is required ONLY when the Dashboard sheet actually
+  // returned options to pick. If the sheet is unreachable (projectOptions empty)
+  // or this producer has no projects, we degrade to optional so a sheet outage
+  // can't block every Content Agency booking — the backend then falls back to a
+  // local AGN-format Episode ID, and the project can be linked later.
+  const projectsUnavailable = !projectsLoading && projectOptions.length === 0
+  const projectSelectable = !projectsLoading && visibleProjects.length > 0
   const [epCount, setEpCount] = useState(1)
   const [epTitles, setEpTitles] = useState<string[]>([''])
   const [submitting, setSubmitting] = useState(false)
@@ -175,7 +182,9 @@ export default function BookingForm() {
         setError('Please select a Producer and Director.')
         return
       }
-      if (!projectId) {
+      // Required only when the sheet gave us projects to choose from.
+      // Sheet down / no projects → optional (backup plan).
+      if (projectSelectable && !projectId) {
         setError('Please select a Project ID.')
         return
       }
@@ -681,7 +690,7 @@ export default function BookingForm() {
         {isContentAgency && (
         <div className="gf-section">
           <label className="gf-label">
-            PROJECT ID <span className="gf-required">*</span>
+            PROJECT ID {projectSelectable && <span className="gf-required">*</span>}
             <span className="ml-2 text-xs font-normal text-gray-500">
               (linked to Producer Dashboard)
             </span>
@@ -691,7 +700,7 @@ export default function BookingForm() {
             value={projectId}
             onChange={e => setProjectId(e.target.value)}
             disabled={projectsLoading}
-            required
+            required={projectSelectable}
           >
             <option value="">
               {projectsLoading
@@ -709,6 +718,12 @@ export default function BookingForm() {
               </option>
             ))}
           </select>
+          {projectsUnavailable && (
+            <div className="mt-2 rounded bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+              ⚠️ โหลดรายการ Project จาก Producer Dashboard ไม่ได้ตอนนี้ — จองคิวได้เลยโดยไม่ต้องระบุ
+              Project ID (ระบบจะออก Episode ID แบบ local ให้ และเชื่อม Project ภายหลังได้)
+            </div>
+          )}
           {selectedProject && (
             <div className="mt-2 rounded bg-purple-50 px-3 py-2 text-xs text-gray-700">
               <div><strong>Project:</strong> {selectedProject.projectName}</div>
