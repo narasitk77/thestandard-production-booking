@@ -164,6 +164,10 @@ export default function BookingForm() {
         setError('Please select a Producer and Director.')
         return
       }
+      if (!projectId) {
+        setError('Please select a Project ID.')
+        return
+      }
     } else if (!producerName.trim() || !producerPhone.trim() || !producerEmailText.trim()) {
       setError('Please fill in the Producer name, phone, and email.')
       return
@@ -212,8 +216,8 @@ export default function BookingForm() {
           crewRequired: crew,
           videographerCount: crew.includes('Videographer') ? videographerCount : 1,
           agencyRef: agencyRef || null,
-          projectId: projectId || null,
-          projectName: selectedProject?.projectName || null,
+          projectId: isContentAgency ? (projectId || null) : null,
+          projectName: isContentAgency ? (selectedProject?.projectName || null) : null,
           // For Content Agency + Project, the chosen Episode Type (programCode)
           // also identifies the L/S/A/T series the Web App should mint into.
           episodeType: (isContentAgency && projectId && programCode.length === 1) ? programCode : null,
@@ -639,12 +643,13 @@ export default function BookingForm() {
           ))}
         </div>
 
-        {/* PROJECT ID — links to Producer Dashboard "All Projects" */}
+        {/* PROJECT ID — Content Agency only; links to Producer Dashboard "All Projects" */}
+        {isContentAgency && (
         <div className="gf-section">
           <label className="gf-label">
-            PROJECT ID
+            PROJECT ID <span className="gf-required">*</span>
             <span className="ml-2 text-xs font-normal text-gray-500">
-              (linked to Producer Dashboard · optional but recommended)
+              (linked to Producer Dashboard)
             </span>
           </label>
           <select
@@ -652,6 +657,7 @@ export default function BookingForm() {
             value={projectId}
             onChange={e => setProjectId(e.target.value)}
             disabled={projectsLoading}
+            required
           >
             <option value="">
               {projectsLoading
@@ -678,6 +684,7 @@ export default function BookingForm() {
             </div>
           )}
         </div>
+        )}
 
         {/* AGENCY REF (conditional) */}
         {isAdvertorial && (

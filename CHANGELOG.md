@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.18.1] — 2026-05-21
+
+### Changed — PROJECT ID field is now Content-Agency-only and required
+
+On the main booking form (`src/app/page.tsx`):
+
+- The **PROJECT ID** dropdown now renders **only when the outlet is Content
+  Agency** (`outletCode === 'AGN'`). Other outlets never see it.
+- For Content Agency it is now **required** (was "optional but recommended").
+  Label shows the red `*`; the `<select>` has `required`; submit validation
+  rejects an empty Project ID with "Please select a Project ID."
+- `projectId` / `projectName` are now sent as `null` for any non-Content-Agency
+  booking, so switching outlets after picking a project can't leak a stale
+  Project ID into the payload.
+
+No schema or backend change — `projectId` remains nullable on `Booking` for
+non-Content-Agency outlets. Backend does not hard-require it (the form is the
+only entry point for project-linked bookings).
+
+---
+
 ## [1.18.0] — 2026-05-21
 
 ### Added — Booking code + atomic episode sequence + audit log
