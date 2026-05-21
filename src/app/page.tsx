@@ -250,6 +250,20 @@ export default function BookingForm() {
           episodeTitles: epTitles.map(t => t.trim()),
         }),
       })
+      // The API always replies JSON. A non-JSON body means the request never
+      // reached our handler — usually a proxy 502/503/504 while the container
+      // is restarting (prisma db push right after a deploy), or an HTML error
+      // page. Surface the HTTP status instead of a cryptic "Unexpected token <".
+      const contentType = res.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        const transient = res.status === 502 || res.status === 503 || res.status === 504
+        throw new Error(
+          `เซิร์ฟเวอร์ตอบกลับผิดปกติ (HTTP ${res.status || 'no response'})` +
+            (transient
+              ? ' — แอปอาจกำลังรีสตาร์ทหลัง deploy ลองใหม่อีกครั้งใน ~1 นาที'
+              : ' — ลองใหม่อีกครั้ง หรือแจ้งแอดมินพร้อมเวลาที่เกิด'),
+        )
+      }
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
       router.push(`/booking/success?id=${data.booking.id}`)

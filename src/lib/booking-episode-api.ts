@@ -46,6 +46,11 @@ export async function requestEpisodeIds(
   if (!url || !secret) {
     return { ok: false, error: 'BOOKING_EPISODE_WEBAPP_URL / SECRET not configured' }
   }
+  // Hard timeout so a slow/hanging Apps Script Web App can't keep the booking
+  // POST open long enough for the upstream proxy to time out and return an HTML
+  // 504 page (which would surface to the client as "Unexpected token '<'").
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15_000)
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -53,6 +58,7 @@ export async function requestEpisodeIds(
       // Apps Script Web Apps redirect to script.googleusercontent.com on POST.
       // Node fetch follows redirects by default; explicit here for clarity.
       redirect: 'follow',
+      signal: controller.signal,
       body: JSON.stringify({
         secret,
         projectId: input.projectId,
@@ -64,12 +70,25 @@ export async function requestEpisodeIds(
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}` }
     }
-    const data = await res.json()
+    // Apps Script can answer 200 with an HTML error/login page. Guard the parse
+    // so that surfaces as a clean error string, not an unhandled throw.
+    const text = await res.text()
+    let data: any
+    try {
+      data = JSON.parse(text)
+    } catch {
+      return { ok: false, error: `non-JSON response from Web App: ${text.slice(0, 80)}` }
+    }
     if (!data || data.ok !== true || !Array.isArray(data.episodeIds)) {
       return { ok: false, error: (data && data.error) || 'malformed response' }
     }
     return { ok: true, episodeIds: data.episodeIds as string[] }
   } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      return { ok: false, error: 'Web App timed out after 15s' }
+    }
     return { ok: false, error: (e && e.message) || String(e) }
+  } finally {
+    clearTimeout(timer)
   }
 }

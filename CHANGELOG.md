@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.2] — 2026-05-21
+
+### Fixed — clearer error when the booking POST returns non-JSON
+
+The form showed a cryptic `Unexpected token '<', "<!DOCTYPE "... is not valid
+JSON` whenever `POST /api/bookings` replied with HTML instead of JSON (proxy
+502/503/504 while the container restarts after a deploy, or any upstream error
+page). The client now checks the response content-type first and shows the HTTP
+status with guidance ("แอปอาจกำลังรีสตาร์ทหลัง deploy ลองใหม่ใน ~1 นาที").
+
+### Hardened — Apps Script Web App call (Episode IDs)
+
+- 15s `AbortController` timeout so a hanging Web App can't keep the booking POST
+  open long enough to trigger an upstream proxy timeout (which is what produces
+  the HTML 504 the client choked on).
+- Parses the response via `text()` + `JSON.parse` so a 200-with-HTML answer
+  (Apps Script login/error page) returns a clean error string instead of
+  throwing.
+
+`src/app/page.tsx`, `src/lib/booking-episode-api.ts`.
+
+---
+
 ## [1.19.1] — 2026-05-21
 
 ### Fixed — PROJECT ID no longer hard-blocks Content Agency when the sheet is down
