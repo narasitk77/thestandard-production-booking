@@ -5,6 +5,42 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-21 · Incident — booking POST 502 ("Unexpected token '<'") → fixed in v1.20.0
+
+**Symptom:** Content Agency booking submit failed with `Unexpected token '<',
+"<!DOCTYPE "... is not valid JSON`. After redeploy it became the v1.19.2 banner
+"HTTP 502 — app restarting".
+
+**Diagnosis (no app crash):**
+- `GET /`, `POST /api/bookings` (unauth) → fast JSON every time (5/5 probes) →
+  app stable, not crash-looping.
+- App container logs: clean startup (`✓ Ready in 5.4s`), no error, no restart
+  loop. So the POST was not throwing — it was **hanging**.
+- 502 is from NPM (HTML body), i.e. NPM gave up waiting for the upstream.
+- Sheet-backed routes (`/api/projects`, `/api/people`) worked; the differentiator
+  on the failing path is the **Apps Script Web App** call for project-linked
+  Episode IDs. The host has known IPv6-egress issues with Google
+  (`NODE_OPTIONS=--dns-result-order=ipv4first` in the compose), and an
+  `AbortController` can't always interrupt a socket wedged in connect → the
+  `await` hung → NPM 502.
+
+**Fix (v1.20.0):**
+- `requestEpisodeIds` now uses a `Promise.race` hard 12s timeout (not just
+  AbortController) — guaranteed to return.
+- The booking POST falls back to local Episode IDs when the Web App fails, so a
+  Web App/Dashboard outage never blocks a booking (episodes get `AGN-…` IDs;
+  `projectId` still saved). Logged via `console.warn`.
+
+**Operational note:** during a Web App outage, watch
+`docker logs production-booking-app | grep 'Web App unavailable'` to find
+bookings that got local Episode IDs, in case they need re-issuing once the Web
+App is healthy.
+
+**Deploy:** image `sha-` of the v1.20.0 commit; standard Portainer re-pull +
+recreate. No schema change.
+
+---
+
 ## 2026-05-21 · Migration — bookingCode backfill + AuditLog table + 90-day retention
 
 Adds an audit trail to every booking change and gives booking + episode a

@@ -147,6 +147,12 @@ export async function POST(request: NextRequest) {
     //     lock on (outlet, date, program) so concurrent local bookings can't
     //     read the same max(sequence). Wrapped in withSequenceRetry as a
     //     defense-in-depth against rare @unique violations.
+    //   Reliability: if the Web App is unreachable/slow/misconfigured, we DO
+    //   NOT fail the booking. We fall back to local Episode IDs so the queue
+    //   keeps working; projectId/projectName are still saved on the booking so
+    //   the link to the project is preserved. (Episode IDs will be local
+    //   AGN-format instead of PP-format for that booking — a deliberate
+    //   trade-off favouring "booking always succeeds" over ID-format purity.)
     let projectEpisodeIds: string[] | null = null
     if (projectId && episodeType) {
       const result = await requestEpisodeIds({
@@ -155,19 +161,19 @@ export async function POST(request: NextRequest) {
         count: episodeTitles.length,
         titles: episodeTitles,
       })
-      if (!result.ok) {
-        return NextResponse.json(
-          { error: `Failed to get Episode IDs from the Dashboard: ${result.error}` },
-          { status: 502 },
+      if (result.ok && result.episodeIds.length === episodeTitles.length) {
+        projectEpisodeIds = result.episodeIds
+      } else {
+        const reason = result.ok
+          ? `count mismatch (got ${result.episodeIds.length}, expected ${episodeTitles.length})`
+          : result.error
+        console.warn(
+          `[bookings] Web App unavailable for project ${projectId} (${reason}) — ` +
+            `falling back to local Episode IDs so the booking still succeeds.`,
         )
+        // projectEpisodeIds stays null → the local advisory-lock allocator
+        // below mints the Episode IDs instead.
       }
-      if (result.episodeIds.length !== episodeTitles.length) {
-        return NextResponse.json(
-          { error: `Dashboard returned ${result.episodeIds.length} IDs, expected ${episodeTitles.length}` },
-          { status: 502 },
-        )
-      }
-      projectEpisodeIds = result.episodeIds
     }
 
     // Create booking + episodes in a transaction. Wrapped in withSequenceRetry

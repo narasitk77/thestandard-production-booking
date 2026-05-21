@@ -5,6 +5,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0] — 2026-05-21
+
+### Fixed — booking POST could hang → NPM 502 ("Unexpected token '<'")
+
+Root cause: a project-linked Content Agency booking calls the Apps Script Web
+App for Episode IDs. If that call wedged (the Docker host has documented
+IPv6-egress issues with Google hosts, and `AbortController` does not reliably
+interrupt a socket stuck in DNS/TCP connect), the `await` never resolved → the
+POST never responded → Nginx Proxy Manager returned an HTML 502 page → the form
+showed "Unexpected token '<'". The app itself never crashed or logged an error
+(consistent with a silent hang).
+
+**Two-part fix:**
+
+1. **Bulletproof timeout** (`src/lib/booking-episode-api.ts`) — `requestEpisodeIds`
+   now races the fetch against a hard 12s timer (`Promise.race`). Even if the
+   underlying socket never settles, the function returns within 12s. Previously
+   only an `AbortController` guarded it, which a wedged socket can ignore.
+
+2. **Fallback instead of failure** (`src/app/api/bookings/route.ts`) — if the
+   Web App is unreachable/slow/misconfigured, the booking no longer returns 502.
+   It falls back to **local Episode ID generation** (the advisory-lock path) so
+   the booking always succeeds. `projectId` / `projectName` are still saved, so
+   the project link is preserved; only the Episode-ID format differs
+   (`AGN-YYMMDD-T-NN` instead of `PP-YY-NNN-TNN`) for bookings created during a
+   Web App outage. A server-side `console.warn` records each fallback.
+
+Net effect: the booking queue stays up even when the Producer Dashboard Web App
+is down. Combined with 1.19.1 (no-project escape) and 1.19.2 (clear non-JSON
+error), a Dashboard/sheet outage can no longer block Content Agency bookings.
+
+### Note
+
+- This intentionally reverses the earlier "fail loud if the Web App is down"
+  stance (booking-episode-api.ts header) in favour of availability. If strict
+  ID-format consistency is required, watch the `console.warn` lines and re-issue
+  affected episodes once the Web App is healthy.
+
+---
+
 ## [1.19.2] — 2026-05-21
 
 ### Fixed — clearer error when the booking POST returns non-JSON

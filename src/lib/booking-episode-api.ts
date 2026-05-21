@@ -46,49 +46,71 @@ export async function requestEpisodeIds(
   if (!url || !secret) {
     return { ok: false, error: 'BOOKING_EPISODE_WEBAPP_URL / SECRET not configured' }
   }
-  // Hard timeout so a slow/hanging Apps Script Web App can't keep the booking
-  // POST open long enough for the upstream proxy to time out and return an HTML
-  // 504 page (which would surface to the client as "Unexpected token '<'").
+  // Bulletproof timeout. AbortController alone is NOT enough: a socket wedged
+  // in DNS resolution or TCP connect (this host has documented IPv6-egress
+  // issues with Google hosts) may never honour the abort, so the await would
+  // hang indefinitely → the booking POST never responds → NPM returns an HTML
+  // 502. We therefore Promise.race the request against a hard timer that ALWAYS
+  // resolves: even if the underlying fetch stays wedged forever, this function
+  // returns within TIMEOUT_MS and the caller falls back to local Episode IDs.
+  const TIMEOUT_MS = 12_000
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15_000)
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // Apps Script Web Apps redirect to script.googleusercontent.com on POST.
-      // Node fetch follows redirects by default; explicit here for clarity.
-      redirect: 'follow',
-      signal: controller.signal,
-      body: JSON.stringify({
-        secret,
-        projectId: input.projectId,
-        type: input.type,
-        count: input.count,
-        titles: input.titles || [],
-      }),
-    })
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}` }
-    }
-    // Apps Script can answer 200 with an HTML error/login page. Guard the parse
-    // so that surfaces as a clean error string, not an unhandled throw.
-    const text = await res.text()
-    let data: any
+  const abortTimer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  let guardTimer: ReturnType<typeof setTimeout> | undefined
+
+  const doRequest = async (): Promise<RequestEpisodeIdsResult> => {
     try {
-      data = JSON.parse(text)
-    } catch {
-      return { ok: false, error: `non-JSON response from Web App: ${text.slice(0, 80)}` }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Apps Script Web Apps redirect to script.googleusercontent.com on POST.
+        // Node fetch follows redirects by default; explicit here for clarity.
+        redirect: 'follow',
+        signal: controller.signal,
+        body: JSON.stringify({
+          secret,
+          projectId: input.projectId,
+          type: input.type,
+          count: input.count,
+          titles: input.titles || [],
+        }),
+      })
+      if (!res.ok) {
+        return { ok: false, error: `HTTP ${res.status}` }
+      }
+      // Apps Script can answer 200 with an HTML error/login page. Guard the
+      // parse so that surfaces as a clean error string, not an unhandled throw.
+      const text = await res.text()
+      let data: any
+      try {
+        data = JSON.parse(text)
+      } catch {
+        return { ok: false, error: `non-JSON response from Web App: ${text.slice(0, 80)}` }
+      }
+      if (!data || data.ok !== true || !Array.isArray(data.episodeIds)) {
+        return { ok: false, error: (data && data.error) || 'malformed response' }
+      }
+      return { ok: true, episodeIds: data.episodeIds as string[] }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        return { ok: false, error: `Web App aborted after ${TIMEOUT_MS}ms` }
+      }
+      return { ok: false, error: (e && e.message) || String(e) }
     }
-    if (!data || data.ok !== true || !Array.isArray(data.episodeIds)) {
-      return { ok: false, error: (data && data.error) || 'malformed response' }
-    }
-    return { ok: true, episodeIds: data.episodeIds as string[] }
-  } catch (e: any) {
-    if (e?.name === 'AbortError') {
-      return { ok: false, error: 'Web App timed out after 15s' }
-    }
-    return { ok: false, error: (e && e.message) || String(e) }
+  }
+
+  // Hard backstop: resolves the race even if doRequest's fetch never settles.
+  const guard = new Promise<RequestEpisodeIdsResult>(resolve => {
+    guardTimer = setTimeout(
+      () => resolve({ ok: false, error: `Web App timed out (hard) after ${TIMEOUT_MS}ms` }),
+      TIMEOUT_MS,
+    )
+  })
+
+  try {
+    return await Promise.race([doRequest(), guard])
   } finally {
-    clearTimeout(timer)
+    clearTimeout(abortTimer)
+    if (guardTimer) clearTimeout(guardTimer)
   }
 }
