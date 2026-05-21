@@ -15,6 +15,16 @@ type ProjectOption = {
 type Person = { email: string; nickname: string }
 
 const CATEGORIES = ['Original Content', 'Advertorial', 'Event', 'Internal']
+// Video format — stored verbatim as a string to match the Producer Dashboard sheet.
+const VIDEO_TYPES = [
+  'Teaser / Highlight',
+  'Vlog / On Location',
+  'Report (Host + Insert)',
+  'Interview',
+  'Documentary',
+  'Commercial',
+  'Others',
+]
 const SHOOT_TYPES = ['Studio', 'On Location', 'Event']
 const SHOOT_TYPE_VALUES: Record<string, string> = {
   'Studio': 'STUDIO',
@@ -36,6 +46,7 @@ export default function BookingForm() {
   const [shootDate, setShootDate] = useState('')
   const [shootEndDate, setShootEndDate] = useState('')
   const [category, setCategory] = useState('Original Content')
+  const [videoType, setVideoType] = useState('')
   const [shootType, setShootType] = useState('Studio')
   const [locationId, setLocationId] = useState('')
   const [locationCustom, setLocationCustom] = useState('')
@@ -172,6 +183,10 @@ export default function BookingForm() {
       setError('Please fill in the Producer name, phone, and email.')
       return
     }
+    if (!videoType) {
+      setError('Please select a Video Type.')
+      return
+    }
     if (shootEndDate && shootEndDate < shootDate) {
       setError('Shoot End Date must be on or after Shoot Date.')
       return
@@ -199,6 +214,7 @@ export default function BookingForm() {
           shootDate,
           shootEndDate: shootEndDate || null,
           category: CATEGORY_VALUES[category],
+          videoType,
           shootType: SHOOT_TYPE_VALUES[shootType],
           locationName: resolvedLocationName,
           callTime,
@@ -233,8 +249,6 @@ export default function BookingForm() {
       setSubmitting(false)
     }
   }
-
-  const isAdvertorial = category === 'Advertorial'
 
   return (
     <div className="max-w-[640px] mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
@@ -357,6 +371,26 @@ export default function BookingForm() {
                 className="accent-[#673ab7]"
               />
               <span className="text-sm text-gray-700">{c}</span>
+            </label>
+          ))}
+        </div>
+
+        {/* VIDEO TYPE */}
+        <div className="gf-section">
+          <label className="gf-label">
+            VIDEO TYPE <span className="gf-required">*</span>
+          </label>
+          {VIDEO_TYPES.map(v => (
+            <label key={v} className="gf-option">
+              <input
+                type="radio"
+                name="videoType"
+                value={v}
+                checked={videoType === v}
+                onChange={() => setVideoType(v)}
+                className="accent-[#673ab7]"
+              />
+              <span className="text-sm text-gray-700">{v}</span>
             </label>
           ))}
         </div>
@@ -686,22 +720,20 @@ export default function BookingForm() {
         </div>
         )}
 
-        {/* AGENCY REF (conditional) */}
-        {isAdvertorial && (
-          <div className="gf-section">
-            <label className="gf-label">
-              AGENCY REFERENCE <span className="gf-required">*</span>
-            </label>
-            <input
-              type="text"
-              className="gf-input"
-              placeholder="e.g. QU-3108"
-              value={agencyRef}
-              onChange={e => setAgencyRef(e.target.value)}
-              required
-            />
-          </div>
-        )}
+        {/* AGENCY REF — always shown (decoupled from Category per request) */}
+        <div className="gf-section">
+          <label className="gf-label">
+            AGENCY REFERENCE
+            <span className="ml-2 text-xs font-normal text-gray-500">(optional)</span>
+          </label>
+          <input
+            type="text"
+            className="gf-input"
+            placeholder="e.g. QU-3108"
+            value={agencyRef}
+            onChange={e => setAgencyRef(e.target.value)}
+          />
+        </div>
 
         {/* NOTES */}
         <div className="gf-section">

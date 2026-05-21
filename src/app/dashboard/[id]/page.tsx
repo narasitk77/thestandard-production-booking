@@ -31,6 +31,7 @@ interface BookingDetail {
   estimatedWrap?: string
   status: string
   category: string
+  videoType?: string | null
   shootType: string
   locationName?: string
   producer: string
@@ -155,6 +156,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
                 {statusLabel(booking.status)}
               </span>
               <span className="text-xs text-gray-400">{categoryLabel(booking.category)}</span>
+              {booking.videoType && (
+                <span className="text-xs text-gray-400">· {booking.videoType}</span>
+              )}
             </div>
             <h1 className="text-2xl font-normal text-gray-800 mb-1">
               {booking.outlet.name} · {booking.program.name}

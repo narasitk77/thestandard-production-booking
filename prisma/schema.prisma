@@ -136,6 +136,11 @@ model Booking {
   shootDate        DateTime      @db.Date
   shootEndDate     DateTime?     @db.Date   // null = single-day shoot
   category         Category
+  // Video format/type — free-string to mirror the Producer Dashboard sheet
+  // values (Teaser / Highlight, Vlog / On Location, Report (Host + Insert),
+  // Interview, Documentary, Commercial, Others). Nullable: pre-existing
+  // bookings have none. Independent of `category` (business classification).
+  videoType        String?
   shootType        ShootType
   locationName     String?
   callTime         String        @db.VarChar(5)

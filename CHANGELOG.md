@@ -5,6 +5,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.0] — 2026-05-21
+
+### Added — Video Type field on the booking form
+
+A new **Video Type** classification, independent of the existing business
+`Category`. Added as a new field (Category is unchanged).
+
+- New column `Booking.videoType` (`String?`, nullable). Stored verbatim as the
+  selected label to mirror the Producer Dashboard sheet values. Additive —
+  `prisma db push` adds a nullable column, existing bookings keep `null`.
+- Booking form (`src/app/page.tsx`) — new required **VIDEO TYPE** radio group
+  with 7 options: Teaser / Highlight, Vlog / On Location, Report (Host +
+  Insert), Interview, Documentary, Commercial, Others. Submit validation
+  rejects an empty value ("Please select a Video Type.").
+- `POST /api/bookings` persists `videoType`.
+- Google Sheets sync — appends a **Video Type** column to the right of
+  "Updated At" (col 29), keeping the hardcoded `COL` partial-update indices
+  valid.
+- Booking detail (`/dashboard/[id]`) shows the Video Type next to Category.
+
+### Changed — AGENCY REFERENCE always visible
+
+- The AGENCY REFERENCE field is now shown on every booking (previously only
+  when Category = Advertorial) and is **optional**. Removed the now-unused
+  `isAdvertorial` gate.
+
+### Notes
+
+- `videoType` is a plain string, not an enum — no enum migration, and the
+  option list can change without a schema change.
+- Sheet column is appended rightmost; if the Dashboard sheet already has a
+  Video Type column elsewhere, tell me and I'll map to that position instead.
+
+---
+
 ## [1.18.1] — 2026-05-21
 
 ### Changed — PROJECT ID field is now Content-Agency-only and required

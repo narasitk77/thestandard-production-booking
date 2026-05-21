@@ -30,7 +30,7 @@ const HEADERS = [
   'Location', 'PD', 'PD Email', 'PD Phone', 'DIR', 'DIR Email',
   'Episode IDs', 'Crew Required', 'Category', 'Creative/Host', 'Assigned Emails',
   'Status', 'Calendar Event ID', 'Notes', 'Created By', 'Created At',
-  'Approved At', 'Updated At',
+  'Approved At', 'Updated At', 'Video Type',
 ]
 
 // 1-indexed column positions for partial updates.
@@ -125,6 +125,7 @@ export type BookingRow = {
   episodes: Array<{ episodeId: string }>
   crewRequired: string[]
   category: string
+  videoType?: string | null
   creative: string[]
   assignedEmails?: string[]
   status: string
@@ -171,6 +172,7 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       fmtDateTime(booking.createdAt),
       '', // Approved At — filled in later by the approve route
       now,
+      booking.videoType || '', // Video Type — appended right of Updated At
     ]
 
     const appendRes = await sheets.spreadsheets.values.append({
