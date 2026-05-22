@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.26.3] — 2026-05-22
+
+### Added — Booking ID shown on the admin booking detail (all outlets)
+
+The admin booking detail page now shows the **Booking ID** (`bookingCode` — the
+Production ID for Content Agency, or the first Episode ID for other outlets)
+as a badge under the title, so it's easy to reference when working with a
+booking — regardless of outlet. `src/app/admin/[id]/page.tsx`.
+
+---
+
 ## [1.26.2] — 2026-05-22
 
 ### Fixed — re-assigning crew keeps the calendar guests in sync

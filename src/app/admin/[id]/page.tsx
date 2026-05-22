@@ -8,7 +8,7 @@ import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 
 interface Episode { id: string; episodeId: string; title: string }
 interface BookingDetail {
-  id: string; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
+  id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]; videographerCount?: number
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
@@ -350,6 +350,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         <h1 className="text-2xl font-normal text-gray-800">
           {booking.outlet.name} · {booking.program.name}
         </h1>
+        {booking.bookingCode && (
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-xs text-gray-400 uppercase tracking-wide">Booking ID</span>
+            <span className="episode-badge">{booking.bookingCode}</span>
+          </div>
+        )}
         <p className="text-sm text-gray-500 mt-1">
           {formatDateRange(booking.shootDate, booking.shootEndDate)} · {booking.callTime}
           {booking.estimatedWrap && ` → ${booking.estimatedWrap}`}
