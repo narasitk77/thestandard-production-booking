@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.24.1] — 2026-05-22
+
+### Fixed — Bookings tab "Booking ID" shows the readable code
+
+The "Booking ID" column in the Producer Dashboard **Bookings** tab now writes
+`booking.bookingCode` (the human-readable code shown in the app — e.g. the
+Production ID `AGN-260522-EVT-01`) instead of the internal CUID
+(`clxyz…`). `src/lib/google-sheets.ts` — `BookingRow` gains `bookingCode`, and
+`appendBookingRow` writes `bookingCode || id`.
+
+Note: only affects rows appended from now on; existing rows keep their old CUID
+value unless re-written.
+
+---
+
 ## [1.24.0] — 2026-05-22
 
 ### Changed — booking = a Production that SELECTS existing episodes (3-level ID model)

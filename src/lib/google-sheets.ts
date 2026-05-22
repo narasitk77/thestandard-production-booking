@@ -107,6 +107,7 @@ function fmtDateTime(d: Date | string | null | undefined): string {
 
 export type BookingRow = {
   id: string
+  bookingCode?: string | null
   projectId?: string | null
   projectName?: string | null
   outlet: { name: string }
@@ -144,7 +145,9 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
 
     const now = fmtDateTime(new Date())
     const row = [
-      booking.id,
+      // "Booking ID" column = the human-readable code shown in the app (the
+      // Production ID, e.g. AGN-260522-EVT-01) — NOT the internal CUID.
+      booking.bookingCode || booking.id,
       booking.projectId || '',
       booking.projectName || '',
       booking.outlet.name,
