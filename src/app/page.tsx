@@ -14,6 +14,16 @@ type ProjectOption = {
 // Producer / Director — sourced from the Dashboard "_Users" tab.
 type Person = { email: string; nickname: string }
 
+// An existing episode of a project (from the "_EPs" tab), Published ones excluded.
+type ProjectEpisode = {
+  episodeId: string
+  type: string
+  status: string
+  ep: string
+  productCode: string
+  projectName: string
+}
+
 const CATEGORIES = ['Original Content', 'Advertorial', 'Event', 'Internal']
 // Video format — stored verbatim as a string to match the Producer Dashboard sheet.
 const VIDEO_TYPES = [
@@ -66,6 +76,11 @@ export default function BookingForm() {
   const [projectId, setProjectId] = useState('')
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
+  // Existing episodes of the selected project (Content Agency flow) — fetched
+  // from the "_EPs" tab, Published excluded. The booking picks from these.
+  const [projectEpisodes, setProjectEpisodes] = useState<ProjectEpisode[]>([])
+  const [selectedEpisodeIds, setSelectedEpisodeIds] = useState<string[]>([])
+  const [episodesLoading, setEpisodesLoading] = useState(false)
   const [producers, setProducers] = useState<Person[]>([])
   const [directors, setDirectors] = useState<Person[]>([])
   const [peopleLoading, setPeopleLoading] = useState(true)
@@ -103,6 +118,25 @@ export default function BookingForm() {
       })
     return () => { cancelled = true }
   }, [])
+
+  // Load the selected project's episodes (Published excluded) for the picker.
+  useEffect(() => {
+    if (!projectId) { setProjectEpisodes([]); setSelectedEpisodeIds([]); return }
+    let cancelled = false
+    setEpisodesLoading(true)
+    setSelectedEpisodeIds([])
+    fetch(`/api/projects/${encodeURIComponent(projectId)}/episodes`)
+      .then(r => (r.ok ? r.json() : { episodes: [] }))
+      .then(data => { if (!cancelled) setProjectEpisodes(data.episodes || []) })
+      .catch(() => { if (!cancelled) setProjectEpisodes([]) })
+      .finally(() => { if (!cancelled) setEpisodesLoading(false) })
+    return () => { cancelled = true }
+  }, [projectId])
+
+  const toggleEpisode = (epId: string) =>
+    setSelectedEpisodeIds(prev =>
+      prev.includes(epId) ? prev.filter(x => x !== epId) : [...prev, epId],
+    )
 
   const selectedProject = projectOptions.find(p => p.projectId === projectId)
   // Project picker is filtered by the selected Producer (Content Agency only):
@@ -208,7 +242,13 @@ export default function BookingForm() {
       setError('Please specify the location.')
       return
     }
-    if (epTitles.some(t => !t.trim())) {
+    if (isContentAgency) {
+      // New flow: pick existing episodes of the project for this shoot.
+      if (selectedEpisodeIds.length === 0) {
+        setError('กรุณาเลือกอย่างน้อย 1 Episode ที่จะถ่าย')
+        return
+      }
+    } else if (epTitles.some(t => !t.trim())) {
       setError('Please fill in all episode titles.')
       return
     }
@@ -248,6 +288,8 @@ export default function BookingForm() {
           episodeType: (isContentAgency && projectId && programCode.length === 1) ? programCode : null,
           notes: notes || null,
           episodeTitles: epTitles.map(t => t.trim()),
+          // Content Agency: existing episodes picked for this shoot (Production).
+          selectedEpisodeIds,
         }),
       })
       // The API always replies JSON. A non-JSON body means the request never
@@ -508,7 +550,9 @@ export default function BookingForm() {
           </div>
         </div>
 
-        {/* NUMBER OF EPISODES */}
+        {/* NUMBER OF EPISODES — non-Content-Agency only. Content Agency picks
+            existing episodes from the project (after PROJECT ID) instead. */}
+        {!isContentAgency && (
         <div className="gf-section">
           <label className="gf-label">
             NUMBER OF EPISODES <span className="gf-required">*</span>
@@ -545,6 +589,7 @@ export default function BookingForm() {
             </div>
           ))}
         </div>
+        )}
 
         {/* PRODUCER — Content Agency: pick from the Dashboard _Users tab.
             Other outlets: type the name, phone and email by hand. */}
@@ -703,6 +748,47 @@ export default function BookingForm() {
             </div>
           )}
         </div>
+        )}
+
+        {/* SELECT EPISODES — Content Agency: pick existing episodes of the
+            project for this shoot (Production). Published ones are excluded. */}
+        {isContentAgency && projectId && (
+          <div className="gf-section">
+            <label className="gf-label">
+              EPISODES ที่จะถ่ายรอบนี้ <span className="gf-required">*</span>
+            </label>
+            {episodesLoading ? (
+              <p className="text-sm text-gray-400">กำลังโหลด episodes…</p>
+            ) : projectEpisodes.length === 0 ? (
+              <p className="text-sm text-gray-400">
+                — ไม่มี episode ที่ถ่ายได้ (Published หมดแล้ว หรือยังไม่ถูกสร้างในชีต) —
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {projectEpisodes.map(ep => (
+                  <label key={ep.episodeId} className="gf-option flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedEpisodeIds.includes(ep.episodeId)}
+                      onChange={() => toggleEpisode(ep.episodeId)}
+                      className="accent-[#673ab7] mt-0.5"
+                    />
+                    <span className="text-sm text-gray-700">
+                      <span className="font-mono font-medium">{ep.episodeId}</span>
+                      <span className="text-xs text-gray-500">
+                        {' · '}{ep.status}
+                        {ep.productCode ? ` · ${ep.productCode}` : ''}
+                        {ep.ep && ep.ep !== '-' ? ` · ${ep.ep}` : ''}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {selectedEpisodeIds.length > 0 && (
+              <p className="text-xs text-gray-500 mt-2">เลือกแล้ว {selectedEpisodeIds.length} EP</p>
+            )}
+          </div>
         )}
 
         {/* แขก / Subject  (formerly Creative / Host) — the people/topic being

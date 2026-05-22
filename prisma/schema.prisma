@@ -182,7 +182,9 @@ model Booking {
 
 model Episode {
   id          String   @id @default(cuid())
-  episodeId   String   @unique
+  // NOT @unique: an episode (e.g. PP-26-006-L01) can be shot across multiple
+  // Productions/bookings, so the same episodeId may appear on several rows.
+  episodeId   String
   sequence    Int
   title       String
   booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)

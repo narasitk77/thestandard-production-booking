@@ -5,6 +5,27 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-22 · Booking = Production (select existing episodes) + drop Episode @unique (v1.24.0)
+
+Content Agency bookings no longer GENERATE episodes — they SELECT existing ones
+(from the "_EPs" tab, Published excluded) and mint a **Production ID**
+(`AGN-260423-EVT-01`). See CHANGELOG [1.24.0] for the full model.
+
+**Schema change:** `Episode.episodeId` dropped its `@unique` constraint (an
+episode can be shot in multiple Productions). `prisma db push --accept-data-loss`
+on boot applies it — dropping a unique index is non-destructive (no data loss).
+
+**No new env / no migration data step.** Episodes are read live from the sheet
+(`_EPs`), so nothing to backfill. Nothing is written back to the `_EPs`/`PD`/`Dir`
+episode rows — only the Bookings tab + DB.
+
+**Verify after deploy:** book Content Agency → select project (e.g. Yamaha
+`PP-26-006`) → the form lists `PP-26-006-L01`, `PP-26-006-S01` (Post-production),
+NOT Published ones → multi-select → booking code becomes a Production ID like
+`AGN-260522-EVT-01`, and the chosen episodes show on the booking.
+
+---
+
 ## 2026-05-22 · Retire Apps Script Web App — project Episode IDs minted in-app (v1.22.0)
 
 After the Web App's repeated operational failures (502 hang, env lost, then a

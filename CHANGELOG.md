@@ -5,6 +5,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.24.0] — 2026-05-22
+
+### Changed — booking = a Production that SELECTS existing episodes (3-level ID model)
+
+Reworked the Content Agency flow around a 3-level ID hierarchy:
+
+| Level | Example | Where it's created |
+|---|---|---|
+| Project | `PP-26-023` | "All Projects" tab (humans) |
+| Episode | `PP-26-023-S01` | "_EPs" tab — producers create in the sheet |
+| **Production** | `AGN-260423-EVT-01` | **this booking** |
+
+The booking **no longer generates Episode IDs**. It now:
+
+- Loads the chosen project's **existing** episodes from the "_EPs" tab,
+  **excluding Published** ones — `GET /api/projects/:id/episodes` +
+  `listProjectEpisodes()` in `src/lib/dashboard-episodes.ts`.
+- Lets the user **multi-select** which episodes the shoot covers (form section
+  after PROJECT ID, replacing the title inputs for Content Agency).
+- Mints a **Production ID** `OUT-YYMMDD-SHOOTTYPE-NN` (e.g. `AGN-260423-EVT-01`;
+  `EVT`/`STD`/`LOC`/`REM` from the shoot type) as the booking's `bookingCode`.
+- Records the Production in the **DB + Bookings tab only** — it does **not**
+  write back to the `_EPs` / `PD` / `Dir` episode rows.
+
+Other outlets (non-AGN) keep the legacy flow: enter titles → local
+`OUT-YYMMDD-PROG-NN` Episode IDs, `bookingCode` = first episode.
+
+### Schema
+
+- `Episode.episodeId` is **no longer `@unique`** — the same episode can be shot
+  across multiple Productions. Applied via `prisma db push` on boot.
+
+### Files
+
+`src/app/page.tsx` (episode multi-select + fetch on project select),
+`src/app/api/bookings/route.ts` (select + Production ID),
+`src/app/api/projects/[id]/episodes/route.ts` (new),
+`src/lib/dashboard-episodes.ts` (`listProjectEpisodes`), `prisma/schema.prisma`.
+
+---
+
 ## [1.23.0] — 2026-05-22
 
 ### Added — in-app Changelog page
