@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.26.1] — 2026-05-22
+
+### Fixed — Producer Dashboard email match is case-insensitive
+
+The producer-scoped views matched `producerEmail` against the (lowercased)
+session email with a case-sensitive query — so a producer whose stored
+`producerEmail` had different casing would see **zero** bookings. Now
+case-insensitive in: `GET /api/bookings?scope=producer`,
+`GET /api/bookings/export?scope=producer`, and the producer-message
+authorization check.
+
+---
+
 ## [1.26.0] — 2026-05-22
 
 ### Added — assigned crew added as Google Calendar guests (attendees)

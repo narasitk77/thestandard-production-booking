@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
   const scope = new URL(request.url).searchParams.get('scope')
   const where =
     scope === 'producer'
-      ? { producerEmail: session.email }
+      ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
       : session.role === 'ADMIN'
         ? {}
         : { OR: [{ createdByEmail: session.email }, { assignedEmails: { has: session.email } }] }

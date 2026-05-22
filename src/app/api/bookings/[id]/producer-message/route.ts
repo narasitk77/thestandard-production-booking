@@ -37,7 +37,8 @@ export async function POST(
     if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
 
     // Only the shoot's Producer (or an admin) may message about it.
-    if (booking.producerEmail !== session.email && session.role !== 'ADMIN') {
+    // Case-insensitive — stored producerEmail casing may differ from the session.
+    if ((booking.producerEmail || '').toLowerCase() !== session.email && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'You are not the producer of this booking' }, { status: 403 })
     }
 

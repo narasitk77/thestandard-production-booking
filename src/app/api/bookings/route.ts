@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     // email — safe, no leak). Otherwise non-admins are restricted to their own
     // bookings + confirmed bookings; admins (no scope) see everything.
     const userFilter = scope === 'producer'
-      ? { producerEmail: session.email }
+      ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
       : session.role === 'ADMIN' && scope !== 'mine'
         ? {}
         : {
