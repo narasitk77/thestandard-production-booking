@@ -75,6 +75,11 @@ services:
       GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
       GOOGLE_SHEETS_ID: ${GOOGLE_SHEETS_ID:-}
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
+      # Domain-Wide Delegation: a @thestandard.co user the service account
+      # impersonates so it can invite assigned crew as calendar GUESTS + send
+      # invites. Requires DWD enabled in Workspace Admin (scope: calendar).
+      # Leave unset → crew are listed in the event description only (no guests).
+      GOOGLE_IMPERSONATE_SUBJECT: ${GOOGLE_IMPERSONATE_SUBJECT:-}
 
       # --- Producer Dashboard sheet ---
       # Source-of-truth sheet for "All Projects" / "PD <producer>" / "Dir <director>"

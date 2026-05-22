@@ -5,6 +5,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.26.0] — 2026-05-22
+
+### Added — assigned crew added as Google Calendar guests (attendees)
+
+The calendar event for a booking now adds the **assigned crew**
+(`assignedEmails`) as event **guests** — Google sends them a real invite they
+can accept/decline — instead of only listing them in the description.
+
+- `src/lib/google-calendar.ts`: `getAuth()` impersonates
+  `GOOGLE_IMPERSONATE_SUBJECT` (Domain-Wide Delegation); `createCalendarEvent`
+  adds `attendees` + `sendUpdates: 'all'` when that env is set.
+- **Graceful fallback**: if attendees are rejected (DWD not granted) or the env
+  is unset, the event is created **without guests** (the "Assigned:" line stays
+  in the description) — booking creation never breaks.
+
+### Requires (ops) — to actually invite guests
+
+A bare service account cannot invite attendees, so this needs **Domain-Wide
+Delegation**:
+1. Workspace Admin → Security → API controls → Domain-wide delegation → add the
+   service account's Client ID with scope
+   `https://www.googleapis.com/auth/calendar`.
+2. Set `GOOGLE_IMPERSONATE_SUBJECT` (Portainer stack) to a `@thestandard.co`
+   user who can manage the shared calendar.
+3. Redeploy. Without these, crew stay in the description only (no error).
+
+---
+
 ## [1.25.0] — 2026-05-22
 
 ### Added — Producer Dashboard (role-gated)

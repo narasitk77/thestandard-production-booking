@@ -5,6 +5,32 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-22 · Calendar guests — Domain-Wide Delegation setup (v1.26.0)
+
+To add assigned crew as real event guests (not just a description line), the
+service account must impersonate a Workspace user (DWD) — a bare service account
+can't invite attendees.
+
+1. **GCP** → the service account → copy its **Client ID** ("Unique ID", a long
+   number).
+2. **Workspace Admin** → Security → Access and data control → **API controls** →
+   **Domain-wide delegation** → Add new → Client ID = that ID, OAuth scope =
+   `https://www.googleapis.com/auth/calendar`.
+3. **Portainer stack env** → set `GOOGLE_IMPERSONATE_SUBJECT` = a
+   `@thestandard.co` user who can manage the shared calendar (e.g. the calendar
+   owner / an admin). The service account acts as them → becomes the event
+   organizer → can invite guests + send invites.
+4. Redeploy.
+
+**Without these:** the app logs a warning and creates the event **without**
+guests (crew remain in the "Assigned:" description line) — no error, bookings
+still work. So this is safe to ship before DWD is configured.
+
+**Verify:** confirm a booking → the assigned crew should receive a Google
+Calendar invite and appear as guests on the event.
+
+---
+
 ## 2026-05-22 · Booking = Production (select existing episodes) + drop Episode @unique (v1.24.0)
 
 Content Agency bookings no longer GENERATE episodes — they SELECT existing ones
