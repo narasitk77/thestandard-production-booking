@@ -78,8 +78,10 @@ services:
       # Domain-Wide Delegation: a @thestandard.co user the service account
       # impersonates so it can invite assigned crew as calendar GUESTS + send
       # invites. Requires DWD enabled in Workspace Admin (scope: calendar).
-      # Leave unset → crew are listed in the event description only (no guests).
-      GOOGLE_IMPERSONATE_SUBJECT: ${GOOGLE_IMPERSONATE_SUBJECT:-}
+      # DEFAULTS to narasit.k@thestandard.co (DWD verified working for this user)
+      # so guests work out of the box after a redeploy — no stack env var needed.
+      # Set a stack env var of the same name to override with a different subject.
+      GOOGLE_IMPERSONATE_SUBJECT: ${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}
 
       # --- Producer Dashboard sheet ---
       # Source-of-truth sheet for "All Projects" / "PD <producer>" / "Dir <director>"

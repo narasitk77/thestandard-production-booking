@@ -5,6 +5,57 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Calendar guests FIXED — `GOOGLE_IMPERSONATE_SUBJECT` was unset
+
+**Symptom:** Approved bookings appear on the shared Google Calendar, but the
+assigned crew are NOT added as guests (attendees) — only listed in the
+description's "Assigned:" line.
+
+**Root cause:** `GOOGLE_IMPERSONATE_SUBJECT` is unset in the deployment env, so
+`createCalendarEvent` computes `canInvite = false` and creates the event with an
+empty attendee list. (A bare service account can't invite attendees — see the
+v1.26.0 entry below.) The DWD grant from v1.26.0 was done, but the env var that
+turns it on was never set, so the code silently skipped attendees. No error.
+
+**Diagnosis (local DWD probe, service account creds from `.env`):**
+- Bare service account + attendee → `403 forbiddenForServiceAccounts`
+  ("Service accounts cannot invite attendees without Domain-Wide Delegation").
+- Impersonating `narasit.k@thestandard.co` + attendee → **SUCCESS** (event
+  created with the guest, then deleted). ⇒ DWD is already granted in Workspace
+  and this subject has access to the shared calendar.
+
+**Why the first idea (set a stack env var) didn't take:** `docker-compose.portainer.yml`
+interpolated `GOOGLE_IMPERSONATE_SUBJECT` from a *stack-level* env var
+(`${GOOGLE_IMPERSONATE_SUBJECT:-}`). If it isn't added to the stack's
+"Environment variables" — or the stack wasn't actually re-deployed — the
+container gets an empty value and guests are silently skipped. A test redeploy
+produced **no** calendar activity (no new event, no attendee update), confirming
+the var never reached the container.
+
+**Fix shipped (v1.26.4, deploy config — no app code change):**
+1. **`docker-compose.portainer.yml`** → `GOOGLE_IMPERSONATE_SUBJECT` now defaults
+   to `narasit.k@thestandard.co`
+   (`${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}`), so a redeploy
+   enables guests with no stack env var to remember. A stack env var still
+   overrides it.
+2. Added the same line to local `.env` for parity.
+3. **Retroactive backfill:** added guests to the 5 existing confirmed bookings
+   that had crew in the "Assigned:" line but no attendees — impersonated
+   `events.patch`, `sendUpdates:'none'` (no invite blast). Done from a local
+   script using the SA key; no redeploy required for these.
+
+Service account Client ID for DWD reference: `106117530552798836735`, scope
+`https://www.googleapis.com/auth/calendar`.
+
+**Remaining step (operator):** redeploy the Portainer stack so it picks up the
+updated compose (pull `fix/assign-email-real-results` / the v1.26.4 image, then
+**Update the stack**). After that, **new** approvals add guests automatically.
+
+**Verify:** approve a booking that has assigned crew → the crew appear as guests
+on the event (organizer becomes `narasit.k@thestandard.co`) and get an invite.
+
+---
+
 ## 2026-05-22 · Calendar guests — Domain-Wide Delegation setup (v1.26.0)
 
 To add assigned crew as real event guests (not just a description line), the

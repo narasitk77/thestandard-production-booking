@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.26.4] — 2026-05-23
+
+### Fixed — calendar guests now work out of the box (impersonate subject defaulted in compose)
+
+Approved bookings appeared on the shared calendar but the assigned crew were
+never added as **guests**: `GOOGLE_IMPERSONATE_SUBJECT` (the Workspace user the
+service account impersonates for Domain-Wide Delegation) was never reaching the
+container, so `createCalendarEvent` / `updateCalendarEventAttendees` silently
+skipped attendees. Confirmed with a live DWD probe — a bare service account hits
+`403 forbiddenForServiceAccounts`, while impersonating `narasit.k@thestandard.co`
+succeeds. So DWD was already granted in Workspace; only the env var was missing,
+and the compose file sourced it from an easily-missed *stack-level* env var.
+
+- `docker-compose.portainer.yml`: `GOOGLE_IMPERSONATE_SUBJECT` now **defaults to
+  `narasit.k@thestandard.co`** (`${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}`).
+  Guests work after a redeploy with no stack env var needed; still overridable.
+- Retroactively backfilled guests onto the 5 existing confirmed bookings that
+  had assigned crew but no attendees (added silently — `sendUpdates:'none'` — so
+  no invite blast).
+
+No app code changed.
+
+---
+
 ## [1.26.3] — 2026-05-22
 
 ### Added — Booking ID shown on the admin booking detail (all outlets)
