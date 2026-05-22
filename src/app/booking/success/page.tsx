@@ -89,7 +89,11 @@ function SuccessContent() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const driveFolder = `Production/${new Date(booking.shootDate).getFullYear()}/${String(new Date(booking.shootDate).getMonth() + 1).padStart(2, '0')}/${booking.outlet.code}-${booking.shootDate.slice(2, 4)}${booking.shootDate.slice(5, 7)}${booking.shootDate.slice(8, 10)}-${booking.program.code}/`
+  // Folder is named after the booking's first Episode ID (= bookingCode), so it
+  // matches the actual IDs (PP-26-006-T02) rather than a separate outlet-date code.
+  const sd = new Date(booking.shootDate)
+  const firstEpisodeId = booking.episodes[0]?.episodeId || `${booking.outlet.code}-${booking.program.code}`
+  const driveFolder = `Production/${sd.getFullYear()}/${String(sd.getMonth() + 1).padStart(2, '0')}/${firstEpisodeId}/`
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">

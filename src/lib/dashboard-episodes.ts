@@ -56,6 +56,21 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 
+// The "All Projects" Director cell can hold a composite like
+// "PP-26-006-L01 — ท็อป" (or several such lines). The PD Director column and
+// the "Dir. <name>" tab need just the bare nickname, so keep the segment after
+// the last em-dash of the last line. A clean "ท็อป" passes through unchanged.
+// Only split on em-dash (—), never hyphen, so the projectId's "-" stays intact.
+export function cleanDirectorName(raw: string): string {
+  const lastLine = String(raw || '')
+    .split(/[\r\n]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .pop() || ''
+  const segs = lastLine.split(/\s*—\s*/)
+  return (segs[segs.length - 1] || '').trim()
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -82,7 +97,7 @@ async function lookupProject(
       return {
         projectName: String(row[1] || '').trim(),
         producer: String(row[5] || '').trim(),
-        director: String(row[6] || '').trim(),
+        director: cleanDirectorName(row[6] as string),
       }
     }
   }

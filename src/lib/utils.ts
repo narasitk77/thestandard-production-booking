@@ -151,7 +151,7 @@ Producer: ${booking.producer}
 Creative/Host: ${creative}
 Crew: ${crew}
 
-NAS: /Production/${validDate ? format(d, 'yyyy/MM') : '----/--'}/${booking.outletCode}-${validDate ? format(d, 'yyMMdd') : '------'}-${booking.programCode}/
+NAS: /Production/${validDate ? format(d, 'yyyy/MM') : '----/--'}/${episodes[0]?.episodeId || `${booking.outletCode}-${booking.programCode}`}/
 Agency Ref: ${booking.agencyRef || '—'}
 Notes: ${booking.notes || '—'}
 ──────────────────────────────

@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.1] — 2026-05-22
+
+### Fixed — Drive folder path + Director column
+
+- **Drive / NAS folder path** now uses the booking's first Episode ID (e.g.
+  `Production/2026/05/PP-26-006-T02/`) instead of the `OUT-YYMMDD-PROG` code
+  (`AGN-260522-T`), so it matches the real Episode IDs. Updated in all three
+  places: `src/app/booking/success/page.tsx`, `src/app/dashboard/[id]/page.tsx`,
+  and the calendar packet in `src/lib/utils.ts`.
+- **Director value** written to the "PD &lt;producer&gt;" column and used for the
+  "Dir. &lt;director&gt;" tab name is now cleaned to the bare nickname. The
+  "All Projects" Director cell can hold a composite like `PP-26-006-L01 — ท็อป`;
+  `cleanDirectorName()` (in `src/lib/dashboard-episodes.ts`) keeps the segment
+  after the last em-dash of the last line, so the sheet shows just `ท็อป`. A
+  clean name passes through unchanged.
+
+---
+
 ## [1.22.0] — 2026-05-22
 
 ### Changed — project Episode IDs minted in-app (Apps Script Web App removed)

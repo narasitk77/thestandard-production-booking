@@ -139,7 +139,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const mm = validDate ? String(d.getMonth() + 1).padStart(2, '0') : '--'
   const dd = validDate ? String(d.getDate()).padStart(2, '0') : '--'
   const yyyy = validDate ? d.getFullYear() : '----'
-  const driveFolder = `Production/${yyyy}/${mm}/${booking.outlet.code}-${yy}${mm}${dd}-${booking.program.code}/`
+  // Folder named after the first Episode ID (matches the real IDs, e.g. PP-26-006-T02).
+  const firstEpisodeId = booking.episodes[0]?.episodeId || `${booking.outlet.code}-${booking.program.code}`
+  const driveFolder = `Production/${yyyy}/${mm}/${firstEpisodeId}/`
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-3">
