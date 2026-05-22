@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { generateEpisodeId } from '@/lib/episode-id'
+import { generateEpisodeId, formatShootDateForId } from '@/lib/episode-id'
 import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { getSession } from '@/lib/session'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { requestEpisodeIds, type EpisodeType } from '@/lib/booking-episode-api'
-import { allocateEpisodeSequence, withSequenceRetry } from '@/lib/episode-sequence'
 import { logAudit } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
@@ -138,22 +137,15 @@ export async function POST(request: NextRequest) {
     })
 
     // Determine Episode IDs.
-    //   Project-linked (projectId + episodeType): ask the Producer Dashboard's
-    //     Apps Script Web App for sheet-generated PP-YY-NNN-{type}NN IDs. The
-    //     Web App is the single owner of the EP_SEQ_ counter — so bookings
-    //     and hand-typed episodes stay in one continuous sequence. The Web
-    //     App call is OUTSIDE the DB transaction (it's a network call).
-    //   Otherwise: allocate inside the booking transaction via an advisory
-    //     lock on (outlet, date, program) so concurrent local bookings can't
-    //     read the same max(sequence). Wrapped in withSequenceRetry as a
-    //     defense-in-depth against rare @unique violations.
-    //   Reliability: if the Web App is unreachable/slow/misconfigured, we DO
-    //   NOT fail the booking. We fall back to local Episode IDs so the queue
-    //   keeps working; projectId/projectName are still saved on the booking so
-    //   the link to the project is preserved. (Episode IDs will be local
-    //   AGN-format instead of PP-format for that booking — a deliberate
-    //   trade-off favouring "booking always succeeds" over ID-format purity.)
-    let projectEpisodeIds: string[] | null = null
+    //   Project-linked (projectId + episodeType): the Producer Dashboard's
+    //   Apps Script Web App mints PP-YY-NNN-{type}NN IDs from the shared
+    //   EP_SEQ counter, so app-created and sheet-typed episodes stay in ONE
+    //   sequence. If it's unreachable we STOP with a clear error — minting a
+    //   local ID here would silently break that shared sequence.
+    //   Otherwise (no project): a local [OUT]-[YYMMDD]-[PROG]-[NN] ID, numbered
+    //   from the max existing episode for that outlet+date+program.
+    let episodeIds: string[]
+    let sequenceBase: number
     if (projectId && episodeType) {
       const result = await requestEpisodeIds({
         projectId,
@@ -161,87 +153,76 @@ export async function POST(request: NextRequest) {
         count: episodeTitles.length,
         titles: episodeTitles,
       })
-      if (result.ok && result.episodeIds.length === episodeTitles.length) {
-        projectEpisodeIds = result.episodeIds
-      } else {
+      if (!result.ok || result.episodeIds.length !== episodeTitles.length) {
         const reason = result.ok
-          ? `count mismatch (got ${result.episodeIds.length}, expected ${episodeTitles.length})`
+          ? `got ${result.episodeIds.length}, expected ${episodeTitles.length}`
           : result.error
-        console.warn(
-          `[bookings] Web App unavailable for project ${projectId} (${reason}) — ` +
-            `falling back to local Episode IDs so the booking still succeeds.`,
+        return NextResponse.json(
+          { error: `ออก Project ID ไม่ได้ตอนนี้ (Dashboard ไม่ตอบ: ${reason}) — ลองใหม่อีกครั้ง` },
+          { status: 503 },
         )
-        // projectEpisodeIds stays null → the local advisory-lock allocator
-        // below mints the Episode IDs instead.
       }
+      episodeIds = result.episodeIds
+      sequenceBase = 1
+    } else {
+      const prefix = `${outletCode}-${formatShootDateForId(parsedDate)}-${programCode}-`
+      const last = await prisma.episode.findFirst({
+        where: { episodeId: { startsWith: prefix } },
+        orderBy: { sequence: 'desc' },
+        select: { sequence: true },
+      })
+      sequenceBase = (last?.sequence ?? 0) + 1
+      episodeIds = episodeTitles.map((_: string, idx: number) =>
+        generateEpisodeId(outletCode, parsedDate, programCode, sequenceBase + idx),
+      )
     }
 
-    // Create booking + episodes in a transaction. Wrapped in withSequenceRetry
-    // so a P2002 (@unique) on episodeId triggers a fresh sequence allocation
-    // up to 3 times — only relevant for the local-generation path; the
-    // project-linked path is collision-free by construction.
-    const booking = await withSequenceRetry(async () =>
-      prisma.$transaction(async (tx) => {
-        let episodeIds: string[]
-        let sequenceBase: number
-        if (projectEpisodeIds) {
-          episodeIds = projectEpisodeIds
-          sequenceBase = 1
-        } else {
-          sequenceBase = await allocateEpisodeSequence(tx, outletCode, parsedDate, programCode)
-          episodeIds = episodeTitles.map((_: string, idx: number) =>
-            generateEpisodeId(outletCode, parsedDate, programCode, sequenceBase + idx),
-          )
-        }
-
-        return tx.booking.create({
-          data: {
-            // bookingCode = first episode's ID — same format as Episode.episodeId,
-            // naturally unique (every episodeId is @unique), readable as a
-            // booking handle. Stable for the lifetime of the booking even if
-            // the first episode is later removed.
-            bookingCode: episodeIds[0],
-            shootDate: parsedDate,
-            shootEndDate: shootEndDate ? new Date(shootEndDate) : null,
-            category,
-            videoType: videoType || null,
-            shootType,
-            locationName: locationName || null,
-            callTime,
-            estimatedWrap: estimatedWrap || null,
-            producer,
-            producerEmail: producerEmail || null,
-            producerPhone: producerPhone || null,
-            director: director || null,
-            directorEmail: directorEmail || null,
-            creative: creative || [],
-            crewRequired: crewRequired || [],
-            videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)),
-            agencyRef: agencyRef || null,
-            projectId: projectId || null,
-            projectName: projectName || null,
-            notes: notes || null,
-            status: 'REQUESTED',
-            createdByEmail: session.email,
-            outletId: outletDb.id,
+    // Create booking + its episodes. A nested create is atomic on its own —
+    // no explicit transaction needed.
+    const booking = await prisma.booking.create({
+      data: {
+        // bookingCode = first episode's ID: same format as Episode.episodeId,
+        // unique, and a readable handle for the whole booking.
+        bookingCode: episodeIds[0],
+        shootDate: parsedDate,
+        shootEndDate: shootEndDate ? new Date(shootEndDate) : null,
+        category,
+        videoType: videoType || null,
+        shootType,
+        locationName: locationName || null,
+        callTime,
+        estimatedWrap: estimatedWrap || null,
+        producer,
+        producerEmail: producerEmail || null,
+        producerPhone: producerPhone || null,
+        director: director || null,
+        directorEmail: directorEmail || null,
+        creative: creative || [],
+        crewRequired: crewRequired || [],
+        videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)),
+        agencyRef: agencyRef || null,
+        projectId: projectId || null,
+        projectName: projectName || null,
+        notes: notes || null,
+        status: 'REQUESTED',
+        createdByEmail: session.email,
+        outletId: outletDb.id,
+        programId: programDb.id,
+        episodes: {
+          create: episodeTitles.map((title: string, idx: number) => ({
+            episodeId: episodeIds[idx],
+            sequence: sequenceBase + idx,
+            title,
             programId: programDb.id,
-            episodes: {
-              create: episodeTitles.map((title: string, idx: number) => ({
-                episodeId: episodeIds[idx],
-                sequence: sequenceBase + idx,
-                title,
-                programId: programDb.id,
-              })),
-            },
-          },
-          include: {
-            outlet: true,
-            program: true,
-            episodes: { orderBy: { sequence: 'asc' } },
-          },
-        })
-      }),
-    )
+          })),
+        },
+      },
+      include: {
+        outlet: true,
+        program: true,
+        episodes: { orderBy: { sequence: 'asc' } },
+      },
+    })
 
     // Audit — fire-and-forget, outside the booking transaction so an audit
     // failure can't bring down booking creation. logAudit swallows its own

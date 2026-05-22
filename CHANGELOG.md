@@ -5,6 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0] — 2026-05-22
+
+### Changed — simplified Episode-ID generation (removed over-engineering)
+
+After review: the Apps Script Web App is **necessary** — the Producer Dashboard
+sheet auto-generates Episode IDs via its own onEdit trigger, and the Web App
+keeps booking-created IDs in that same shared `EP_SEQ` sequence (plus writes the
+PD/Dir tabs). What was over-built was the resilience scaffolding around the
+*local* path. Trimmed:
+
+- **Removed `src/lib/episode-sequence.ts`** (`pg_advisory_xact_lock` +
+  `withSequenceRetry`). Local (non-project) Episode IDs now use a plain
+  `findFirst(max sequence) + 1`. A single booking is one transaction, so the
+  "20 EPs at once" case never needed a lock; the `@unique` constraint still
+  guards the rare concurrent-same-slot case.
+- **Removed the redundant `prisma.$transaction` wrapper** — the nested
+  `booking.create({ episodes: { create } })` is atomic on its own.
+- **Removed the silent local-ID fallback for project bookings.** Previously, if
+  the Web App was unreachable a project booking silently got a local `AGN-…` ID
+  (wrong format, breaks the shared sequence — the source of recent confusion).
+  It now returns a clear `503` ("ออก Project ID ไม่ได้ตอนนี้ … ลองใหม่อีกครั้ง")
+  so the booking is retried rather than mis-numbered.
+- **Kept** the Web App call's hard timeout (still prevents the POST hanging →
+  NPM 502).
+
+Net: fewer moving parts; a project Episode ID is now always either correct
+(`PP-…`) or a clear error — never a silent wrong-format ID.
+
+`src/app/api/bookings/route.ts`, removed `src/lib/episode-sequence.ts`.
+
+---
+
 ## [1.20.0] — 2026-05-21
 
 ### Fixed — booking POST could hang → NPM 502 ("Unexpected token '<'")

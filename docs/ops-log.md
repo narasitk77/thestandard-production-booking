@@ -5,6 +5,42 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-22 · "AGN instead of PP" — Web App env lost + Episode-ID path simplified (v1.21.0)
+
+**Symptom:** project-linked bookings (e.g. Yamaha `PP-26-006`) produced local
+`AGN-260522-T-01..03` Episode IDs instead of `PP-26-006-T01..`.
+
+**Root cause:** `BOOKING_EPISODE_WEBAPP_URL` / `BOOKING_EPISODE_WEBAPP_SECRET`
+were **missing from the running container** (env lost during a redeploy — they
+were documented as set at `sha-b597c3c` but didn't survive). The v1.20.0 silent
+fallback then minted local IDs.
+
+**Two-part fix:**
+
+1. **Config (ops):** restore the two env vars in the Portainer stack — URL is in
+   this log's "Where things live"; secret lives in the Apps Script Script
+   Properties (`BOOKING_API_SECRET`). **Recreate the container** so they reach
+   `process.env`. Verify:
+   ```
+   docker exec production-booking-app printenv | grep BOOKING_EPISODE
+   ```
+2. **Code (v1.21.0):** removed the silent fallback — a project booking now
+   returns a clear `503` if the Web App is unreachable, instead of silently
+   producing a wrong-format / out-of-sequence ID. Also removed the
+   advisory-lock + retry scaffolding (over-engineered for the real load).
+
+**Why the Web App stays:** the Dashboard sheet auto-generates Episode IDs via
+its own onEdit trigger; the Web App keeps booking-created IDs in that **same
+shared `EP_SEQ` sequence** and writes the PD/Dir tabs. The app cannot mint
+project IDs locally without breaking that shared sequence — so for project
+bookings the Web App is the single source, and "fail loud" beats "silent local".
+
+**Guard against recurrence:** after any stack redeploy, confirm the env block
+matches this log's "Env vars set in Portainer stack" — never blank the two
+`BOOKING_EPISODE_*` vars.
+
+---
+
 ## 2026-05-21 · Incident — booking POST 502 ("Unexpected token '<'") → fixed in v1.20.0
 
 **Symptom:** Content Agency booking submit failed with `Unexpected token '<',
