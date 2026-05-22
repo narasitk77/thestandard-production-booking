@@ -5,7 +5,7 @@ import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { getSession } from '@/lib/session'
 import { autoCompleteBookings } from '@/lib/booking-complete'
-import { requestEpisodeIds, type EpisodeType } from '@/lib/booking-episode-api'
+import { generateProjectEpisodeIds } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
@@ -137,19 +137,19 @@ export async function POST(request: NextRequest) {
     })
 
     // Determine Episode IDs.
-    //   Project-linked (projectId + episodeType): the Producer Dashboard's
-    //   Apps Script Web App mints PP-YY-NNN-{type}NN IDs from the shared
-    //   EP_SEQ counter, so app-created and sheet-typed episodes stay in ONE
-    //   sequence. If it's unreachable we STOP with a clear error — minting a
-    //   local ID here would silently break that shared sequence.
+    //   Project-linked (projectId + episodeType): mint PP-YY-NNN-{type}NN IDs
+    //   in-app and write them into the Producer Dashboard sheet (PD/Dir tabs)
+    //   via the service account — numbered from the max in the producer's PD
+    //   tab. If the sheet can't be reached/resolved we STOP with a clear error
+    //   rather than mint an out-of-sequence ID.
     //   Otherwise (no project): a local [OUT]-[YYMMDD]-[PROG]-[NN] ID, numbered
     //   from the max existing episode for that outlet+date+program.
     let episodeIds: string[]
     let sequenceBase: number
     if (projectId && episodeType) {
-      const result = await requestEpisodeIds({
+      const result = await generateProjectEpisodeIds({
         projectId,
-        type: episodeType as EpisodeType,
+        type: episodeType,
         count: episodeTitles.length,
         titles: episodeTitles,
       })
@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
           ? `got ${result.episodeIds.length}, expected ${episodeTitles.length}`
           : result.error
         return NextResponse.json(
-          { error: `ออก Project ID ไม่ได้ตอนนี้ (Dashboard ไม่ตอบ: ${reason}) — ลองใหม่อีกครั้ง` },
+          { error: `ออก Project ID ไม่ได้ตอนนี้ (Dashboard: ${reason}) — ลองใหม่อีกครั้ง` },
           { status: 503 },
         )
       }

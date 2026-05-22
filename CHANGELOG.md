@@ -5,6 +5,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0] — 2026-05-22
+
+### Changed — project Episode IDs minted in-app (Apps Script Web App removed)
+
+The Apps Script Web App that minted `PP-YY-NNN-{type}NN` IDs was operationally
+fragile — the deployment URL kept dying and the env vars kept getting lost
+across redeploys. It's gone. The app now mints those IDs itself and writes the
+Producer Dashboard tabs via the **same Google service account** it already uses
+to read "All Projects" / "_Users" and write the "Bookings" tab.
+
+- **New `src/lib/dashboard-episodes.ts`** — `generateProjectEpisodeIds()`:
+  - looks up the project in "All Projects" (producer, director, project name);
+  - numbers from the max `{projectId}-{type}NN` in the producer's
+    "PD &lt;producer&gt;" tab (col C) — the complete record, so old projects
+    continue correctly with no migration;
+  - appends each episode to "PD &lt;producer&gt;" and (idempotently) to
+    "Dir. &lt;director&gt;", mirroring the exact column layout the Apps Script used.
+- `src/app/api/bookings/route.ts` — the project path calls
+  `generateProjectEpisodeIds` instead of the Web App. Still **fails loud** (503)
+  if the sheet can't be resolved — never a silent local ID.
+- **Removed** `src/lib/booking-episode-api.ts` and the
+  `BOOKING_EPISODE_WEBAPP_URL` / `_SECRET` env (compose + example).
+
+### Requires (ops)
+
+- The Google service account must have **edit** access to the Dashboard sheet
+  (it already does — it writes the Bookings tab).
+- **Turn OFF the sheet's onEdit episode auto-gen** so the app is the single
+  numbering authority (booking is app-only now). Otherwise the sheet's `EP_SEQ`
+  counter and the app's PD-tab numbering can diverge → duplicate numbers.
+- The Apps Script project `booking-episode-endpoint.gs` can be retired.
+
+---
+
 ## [1.21.0] — 2026-05-22
 
 ### Changed — simplified Episode-ID generation (removed over-engineering)

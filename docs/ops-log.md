@@ -5,6 +5,37 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-22 · Retire Apps Script Web App — project Episode IDs minted in-app (v1.22.0)
+
+After the Web App's repeated operational failures (502 hang, env lost, then a
+**dead deployment URL** — `…/AKfycbw2qiH…/exec` returned Google "ไม่พบเพจ"), we
+removed the Apps Script dependency entirely. The app now mints
+`PP-YY-NNN-{type}NN` IDs and writes the PD/Dir tabs itself via the Google
+service account (`src/lib/dashboard-episodes.ts`).
+
+**Required ops steps for this to be correct:**
+
+1. **Service account edit access** — already in place (it writes the Bookings
+   tab today), so no change needed.
+2. **Disable the sheet's onEdit episode auto-gen trigger.** The app numbers from
+   the producer's "PD &lt;producer&gt;" tab; the old onEdit used a separate
+   `EP_SEQ` Script Property the app can't update. With booking now app-only the
+   onEdit is dormant, but disable it so it can never fire and double-number.
+3. The old `BOOKING_EPISODE_WEBAPP_URL` / `_SECRET` env are dead — can be
+   removed from the Portainer stack (harmless if left).
+
+**Verify after deploy:** create a project booking (e.g. Yamaha `PP-26-006`,
+type T) → episodes should be `PP-26-006-T0N` and appear in "PD &lt;producer&gt;"
++ "Dir. &lt;director&gt;" tabs. If it errors `ออก Project ID ไม่ได้ (Dashboard:
+…)`, the message says why (project not in All Projects / PD tab missing / sheet
+unreachable).
+
+**Numbering source of truth is now the PD tab** — old projects with hand-typed
+episodes continue correctly with no migration (their episodes are already in the
+PD tab, which the app scans for the max).
+
+---
+
 ## 2026-05-22 · "AGN instead of PP" — Web App env lost + Episode-ID path simplified (v1.21.0)
 
 **Symptom:** project-linked bookings (e.g. Yamaha `PP-26-006`) produced local
