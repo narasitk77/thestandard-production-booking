@@ -141,12 +141,14 @@ export async function generateProjectEpisodeIds(input: {
   type: string
   count: number
   titles?: string[]
+  productCode?: string | null
 }): Promise<GenerateResult> {
   const projectId = String(input.projectId || '').trim()
   const type = String(input.type || '').trim().toUpperCase()
   let count = parseInt(String(input.count), 10)
   if (!count || count < 1) count = 1
   const titles = Array.isArray(input.titles) ? input.titles : []
+  const productCode = String(input.productCode || '').trim()
 
   if (!/^PP-\d{2}-\d{3}$/.test(projectId)) {
     return { ok: false, error: `bad projectId (expect PP-YY-NNN): ${projectId}` }
@@ -177,13 +179,13 @@ export async function generateProjectEpisodeIds(input: {
       const title = String(titles[i] || '').trim()
 
       // PD <producer>: A ProjectID · B Type · C EpisodeID · D Name · E Director
-      //                F (Code, blank) · G EP.(title)   [H Status set later]
+      //                F Product Code · G EP.(title)   [H Status set later]
       await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: `${tabRef(`PD ${info.producer}`)}!A:G`,
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
-        requestBody: { values: [[projectId, type, epId, info.projectName, info.director, '', title]] },
+        requestBody: { values: [[projectId, type, epId, info.projectName, info.director, productCode, title]] },
       })
 
       // Dir. <director>: A EpID · B Type · C Name · D Producer · E EP. · F Status

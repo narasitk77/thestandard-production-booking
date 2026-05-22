@@ -152,6 +152,7 @@ export async function POST(request: NextRequest) {
         type: episodeType,
         count: episodeTitles.length,
         titles: episodeTitles,
+        productCode: agencyRef, // written to the PD tab "Product Code" column
       })
       if (!result.ok || result.episodeIds.length !== episodeTitles.length) {
         const reason = result.ok

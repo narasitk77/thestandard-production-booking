@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.2] — 2026-05-22
+
+### Changed — "Agency Ref" → "Product code" (mapped to the sheet), PROJECT ID moved
+
+- The **AGENCY REFERENCE** field is relabelled **PRODUCT CODE** on the booking
+  form. Its value is now written to the "PD &lt;producer&gt;" tab's **Product
+  Code column (F)** for each episode (previously left blank). Stored internally
+  as `agencyRef` still — no schema change. `generateProjectEpisodeIds` takes a
+  `productCode` arg (`src/lib/dashboard-episodes.ts`); `route.ts` passes
+  `agencyRef` into it.
+- **PROJECT ID** field moved to sit **right after Director** on the form
+  (`src/app/page.tsx`); still required when the project list loads.
+
+---
+
 ## [1.22.1] — 2026-05-22
 
 ### Fixed — Drive folder path + Director column
