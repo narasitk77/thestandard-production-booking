@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0] — 2026-05-22
+
+### Added — in-app Changelog page
+
+- New page **`/changelog`** ("อัปเดต" in the nav, next to "คู่มือ") renders this
+  CHANGELOG.md with `react-markdown`, so anyone can see what changed in each
+  version on the website. Single source of truth — the page reads the same
+  CHANGELOG.md that's committed to the repo (`src/app/changelog/page.tsx`,
+  mirroring the `/manual` pattern). Nav link added in
+  `src/app/_components/Nav.tsx`.
+
+---
+
 ## [1.22.2] — 2026-05-22
 
 ### Changed — "Agency Ref" → "Product code" (mapped to the sheet), PROJECT ID moved

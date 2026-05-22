@@ -21,6 +21,7 @@ export default function Nav({ session, canSeeOT = false }: NavProps) {
     <>
       <Link href="/calendar" onClick={close} className="gf-link block py-2 md:py-0">Calendar</Link>
       <Link href="/manual" onClick={close} className="gf-link block py-2 md:py-0">คู่มือ</Link>
+      <Link href="/changelog" onClick={close} className="gf-link block py-2 md:py-0">อัปเดต</Link>
       {session && <Link href="/my-bookings" onClick={close} className="gf-link block py-2 md:py-0">My Bookings</Link>}
       {canSeeOT && <Link href="/ot" onClick={close} className="gf-link block py-2 md:py-0">OT</Link>}
       {isAdmin && <Link href="/dashboard" onClick={close} className="gf-link block py-2 md:py-0">Dashboard</Link>}
