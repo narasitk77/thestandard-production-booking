@@ -9,9 +9,11 @@ interface NavProps {
   session: { email: string; role: 'USER' | 'ADMIN' } | null
   // True only for Production-team members and admins — gates the OT menu.
   canSeeOT?: boolean
+  // True for admins + Producer/Co-Producer positions — gates the Producer menu.
+  canSeeProducer?: boolean
 }
 
-export default function Nav({ session, canSeeOT = false }: NavProps) {
+export default function Nav({ session, canSeeOT = false, canSeeProducer = false }: NavProps) {
   const [open, setOpen] = useState(false)
   const isAdmin = session?.role === 'ADMIN'
 
@@ -23,6 +25,7 @@ export default function Nav({ session, canSeeOT = false }: NavProps) {
       <Link href="/manual" onClick={close} className="gf-link block py-2 md:py-0">คู่มือ</Link>
       <Link href="/changelog" onClick={close} className="gf-link block py-2 md:py-0">อัปเดต</Link>
       {session && <Link href="/my-bookings" onClick={close} className="gf-link block py-2 md:py-0">My Bookings</Link>}
+      {canSeeProducer && <Link href="/producer" onClick={close} className="gf-link block py-2 md:py-0">Producer</Link>}
       {canSeeOT && <Link href="/ot" onClick={close} className="gf-link block py-2 md:py-0">OT</Link>}
       {isAdmin && <Link href="/dashboard" onClick={close} className="gf-link block py-2 md:py-0">Dashboard</Link>}
       {isAdmin && (

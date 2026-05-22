@@ -5,6 +5,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.25.0] — 2026-05-22
+
+### Added — Producer Dashboard (role-gated)
+
+New **`/producer`** page for Producers / Co-Producers. Access is gated by the
+user's `position` (an admin sets it on the Permissions page) — anyone whose
+position contains "producer", plus admins. The **Producer** menu link appears
+only for them (`canSeeProducer` computed in `layout.tsx`, mirroring `canSeeOT`).
+
+Features:
+- Lists the user's shoots — bookings where they are the **Producer**
+  (`producerEmail`) — with status, an **"assigned yet?"** indicator, project,
+  shoot date/time and episode IDs.
+- Per booking: view the **audit history**; **send an update + email the admins**;
+  **request a time change + email the admins** (admins apply the change via the
+  normal edit flow — the request is recorded in the audit log, the booking is
+  not auto-edited).
+- **Export** the user's bookings as CSV (for reports).
+
+Implementation — reuses existing pieces (audit log, history endpoint, `csv.ts`,
+`sendEmail`):
+- `getProducerAccess()` in `src/lib/session.ts`; gate wired through
+  `layout.tsx` → `Nav.tsx`.
+- `GET /api/bookings?scope=producer` (own producer shoots),
+  `GET /api/bookings/export?scope=producer` (CSV),
+  `POST /api/bookings/[id]/producer-message` (`type: update | time_change` →
+  audit log + email active admins).
+- `src/app/producer/page.tsx` (gate) + `ProducerDashboard.tsx` (client UI).
+
+No schema change — gating reads the existing `User.position`.
+
+---
+
 ## [1.24.1] — 2026-05-22
 
 ### Fixed — Bookings tab "Booking ID" shows the readable code

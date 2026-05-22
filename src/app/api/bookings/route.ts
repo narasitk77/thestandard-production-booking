@@ -32,18 +32,22 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
     const outlet = searchParams.get('outlet')
     const date = searchParams.get('date')
-    const scope = searchParams.get('scope') // 'mine' | 'all'
+    const scope = searchParams.get('scope') // 'mine' | 'all' | 'producer'
 
-    // Non-admins always restricted to their own bookings + confirmed bookings
-    const userFilter = session.role === 'ADMIN' && scope !== 'mine'
-      ? {}
-      : {
-          OR: [
-            { createdByEmail: session.email },
-            { assignedEmails: { has: session.email } },
-            ...(scope === 'mine' ? [] : [{ status: 'CONFIRMED' as const }]),
-          ],
-        }
+    // scope=producer → only shoots where this user is the Producer (their own
+    // email — safe, no leak). Otherwise non-admins are restricted to their own
+    // bookings + confirmed bookings; admins (no scope) see everything.
+    const userFilter = scope === 'producer'
+      ? { producerEmail: session.email }
+      : session.role === 'ADMIN' && scope !== 'mine'
+        ? {}
+        : {
+            OR: [
+              { createdByEmail: session.email },
+              { assignedEmails: { has: session.email } },
+              ...(scope === 'mine' ? [] : [{ status: 'CONFIRMED' as const }]),
+            ],
+          }
 
     const where = {
       ...userFilter,

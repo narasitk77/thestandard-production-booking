@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
-import { getSession } from '@/lib/session'
+import { getSession, getProducerAccess } from '@/lib/session'
 import { isTeamMember } from '@/lib/team-profiles'
 import Nav from './_components/Nav'
 
@@ -20,6 +20,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   // OT module is for the Production team — admins also see it (to manage).
   const canSeeOT = !!session && (session.role === 'ADMIN' || isTeamMember(session.email))
+  // Producer Dashboard — admins + users with a Producer/Co-Producer position.
+  const canSeeProducer = await getProducerAccess(session?.email)
 
   return (
     <html lang="th">
@@ -32,6 +34,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Nav
           session={session ? { email: session.email, role: session.role } : null}
           canSeeOT={canSeeOT}
+          canSeeProducer={canSeeProducer}
         />
         {children}
       </body>
