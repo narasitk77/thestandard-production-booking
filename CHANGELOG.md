@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.26.2] — 2026-05-22
+
+### Fixed — re-assigning crew keeps the calendar guests in sync
+
+Previously the calendar event's guests were set only at approve time; changing
+the crew afterward updated the DB + sent new assignment emails but left the
+event's guests stale. New `updateCalendarEventAttendees()` in
+`src/lib/google-calendar.ts` is now called from the assign route whenever the
+booking already has a `calendarEventId` — it replaces the event's attendees with
+the current crew (added crew get an invite, removed crew a cancellation) via
+`events.patch` + `sendUpdates: 'all'`. No-op without Domain-Wide Delegation (same
+as the create path), so it's safe regardless.
+
+---
+
 ## [1.26.1] — 2026-05-22
 
 ### Fixed — Producer Dashboard email match is case-insensitive

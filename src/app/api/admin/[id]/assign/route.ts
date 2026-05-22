@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { sendAssignmentEmail, buildEmailErrorHint } from '@/lib/email'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { updateBookingRow } from '@/lib/google-sheets'
-import { getCalendarEventLink } from '@/lib/google-calendar'
+import { getCalendarEventLink, updateCalendarEventAttendees } from '@/lib/google-calendar'
 import { requireAdmin } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { format } from 'date-fns'
@@ -64,6 +64,15 @@ export async function POST(
     const calendarUrl = booking.calendarEventId
       ? await getCalendarEventLink(booking.calendarEventId)
       : null
+
+    // Re-assign: keep the calendar event's GUESTS in sync with the new crew
+    // (added crew get an invite, removed crew a cancellation). Fire-and-forget;
+    // no-op without Domain-Wide Delegation.
+    if (booking.calendarEventId) {
+      updateCalendarEventAttendees(booking.calendarEventId, emailRecipients).catch(e =>
+        console.error('updateCalendarEventAttendees error:', e?.message || e),
+      )
+    }
 
     // Send emails synchronously so the UI can show real per-recipient results.
     const sendResults = await Promise.all(
