@@ -142,6 +142,8 @@ export async function POST(
           crewRequired: booking.crewRequired,
           agencyRef: booking.agencyRef,
           notes: booking.notes,
+        }, {
+          requireAttendees: emailRecipients.length > 0,
         })
         if (newEventId) {
           await prisma.booking.update({
