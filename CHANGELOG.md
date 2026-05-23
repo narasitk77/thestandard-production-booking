@@ -5,6 +5,85 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.28.2] — 2026-05-23
+
+### Fixed — calendar guests now sync synchronously on Assign (regression)
+
+**Symptom (reported by ops):** assigning crew on `/admin/[id]` did not add
+those people as guests on the Google Calendar event for the booking. The
+booking still showed the assigned list in the app and emails went out, but
+the calendar event stayed empty (or kept the previous guest list on
+re-assign). v1.26.x had fixed this once via Domain-Wide Delegation;
+something silently regressed.
+
+**Root causes (two, fixed together):**
+
+1. **Race condition on the approve → assign sequence.** Approve creates
+   the calendar event in a background task. If admin clicked Assign before
+   that background task finished, `booking.calendarEventId` was still
+   `NULL`, so the `if (booking.calendarEventId)` guard in the assign route
+   skipped the attendee update entirely. The event was created later
+   *without* guests, and nothing reconciled them.
+2. **Fire-and-forget attendee patch.** The assign route called
+   `updateCalendarEventAttendees(...).catch(...)` (no `await`). Failures
+   (DWD off, Google API rejection, expired impersonation) were logged
+   server-side but the response said "✓ Saved & sent N emails" regardless,
+   so admins assumed guests went out.
+
+**Fix (`src/app/api/admin/[id]/assign/route.ts`):**
+
+- Attendee update is now `await`ed. Result is captured into a typed
+  `calendarSync: { ok, eventId, action, error? }` object.
+- **Auto-recover branch added:** if the booking is `CONFIRMED` but has no
+  `calendarEventId` (race or earlier create failure), the assign route
+  creates the calendar event right then, with the just-assigned crew baked
+  in as guests, and saves the new `calendarEventId` to the DB.
+- Branch (3) — booking still in `REQUESTED`/`ASSIGNED` (not yet approved)
+  — stays a no-op; the existing approve route already bakes
+  `assignedEmails` into the event it creates, so guests will appear the
+  moment admin approves.
+
+**Admin UI (`src/app/admin/[id]/page.tsx`):**
+
+- The Assign toast now reports calendar guest sync status, e.g.
+  - `✓ Saved & sent 3 emails · calendar guests updated (3)`
+  - `✓ Saved & sent 3 emails · calendar event auto-created with 3 guests`
+  - `⚠ Saved · sent 3/3 · calendar guests NOT added (Google Calendar API
+    rejected the attendees update — see AuditLog calendar.attendees_update_failed)`
+- A failed calendar sync downgrades the toast tone to `warning` even when
+  email + DB save succeeded, so admins notice immediately instead of
+  finding out from crew that they didn't get invites.
+
+**Behavior preserved:**
+
+- Approve's background calendar create kept (don't block approve UX).
+- Email send loop unchanged.
+- `calendar.attendees_update_failed` / `calendar.invite_failed` AuditLog
+  rows + alert emails (from v1.26.5) still fire — now the UI also
+  reports them inline so admins don't have to query AuditLog to discover
+  silent failures.
+- `updateBookingRow` to the Producer Dashboard sheet still happens.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes (only pre-existing dynamic-server warnings on OT/audit
+  routes).
+- Manual QA (after deploy):
+  1. Submit a booking → approve immediately → assign 2 crew within 5s →
+     toast should read `calendar event auto-created with 2 guests` (the
+     race window). Calendar event in Google Calendar must show the 2
+     guests.
+  2. Submit + approve + wait 30s + assign → toast should read
+     `calendar guests updated (N)`. Event must have N guests.
+  3. Re-assign on an already-CONFIRMED booking with crew → swap one
+     member → toast `calendar guests updated`; calendar event reflects
+     the swap and removed crew gets a cancellation.
+  4. If toast warns `calendar guests NOT added` → query `AuditLog`
+     `action='calendar.attendees_update_failed'` for the diagnostic.
+
+---
+
 ## [1.28.1] — 2026-05-23
 
 ### Changed — booking wizard step 4 field order

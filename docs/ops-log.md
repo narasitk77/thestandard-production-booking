@@ -5,6 +5,75 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Calendar guest sync fix (v1.28.2) — no infra change, behavior fix
+
+**Scope:** Bug fix for the "assigned crew not showing as Google Calendar
+guests" regression. Touches one API route + one admin UI surface. No
+schema migration, no env-var change, no other API breakage.
+
+**Why this matters:** assign-without-guests is a silent failure mode that
+crew only notice when they don't get the invite. Ops requested an
+"automation" that adds guests immediately on assign and tells the admin
+when it didn't work. That's now wired.
+
+**What's different after redeploy:**
+
+- `/admin/[id]` Assign action now BLOCKS for ~0.5–2s while the calendar
+  guest patch (or auto-create) happens, instead of returning instantly
+  and dropping the result. Admins should expect a slightly longer "Save"
+  click on assign — that's the calendar sync running.
+- Toast message after Save Assign now includes calendar status:
+  `· calendar guests updated (N)` (existing event), `· calendar event
+  auto-created with N guests` (race-recover), or `· ⚠ calendar guests
+  NOT added (<reason>)`. Last form means follow-up needed.
+- If `GOOGLE_IMPERSONATE_SUBJECT` is missing/wrong (DWD off), the toast
+  says so directly instead of going green. Was previously silently green.
+
+**Verification after redeploy:**
+
+1. Approve any REQUESTED booking. Within 5 seconds, click Assign with 2+
+   crew → toast must read `calendar event auto-created with N guests`.
+   Open the event in Google Calendar → guests visible.
+2. Assign on a CONFIRMED booking that already has a calendar event → toast
+   reads `calendar guests updated (N)`. Event guest list reflects the new
+   list (added crew get invite, removed crew get cancellation — same as
+   v1.26.x behavior, just now reported in the UI).
+3. Re-assign with same crew list → no-op patch, toast still `updated (N)`.
+4. (Negative path) If you intentionally unset `GOOGLE_IMPERSONATE_SUBJECT`
+   in Portainer env and redeploy → assign toast reads `⚠ calendar guests
+   NOT added (GOOGLE_IMPERSONATE_SUBJECT not set — cannot add calendar
+   guests without Domain-Wide Delegation)`. Restore the env, redeploy.
+5. Confirm `AuditLog` still gets `calendar.attendees_update_failed` rows
+   on Google API errors — query `SELECT * FROM "AuditLog" WHERE action
+   LIKE 'calendar.%' ORDER BY at DESC LIMIT 5`.
+
+**Rollback trigger:** any regression in (a) the booking POST payload,
+(b) approve's calendar event creation, (c) assignment email send, or
+(d) Producer Dashboard sheet writes — revert image tag in Portainer to
+`sha-46cf7ba` (v1.28.1).
+
+**Files changed:**
+
+- `src/app/api/admin/[id]/assign/route.ts` — sync calendar patch +
+  auto-recover create branch + `calendarSync` in response.
+- `src/app/admin/[id]/page.tsx` — toast includes calendar guest result;
+  failed sync downgrades tone to warning.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
+## 2026-05-23 · Booking wizard step 4 reorder (v1.28.1) — no infra change
+
+UI-only follow-up to v1.28.0: in the CA flow's Step 4 (People & Crew),
+Project ID and Episodes now sit between Producer and Director so the
+cascade reads top-to-bottom (Producer → Project → Episodes → Director →
+Crew → Notes). No API/payload changes — pure JSX reorder.
+
+**Files changed:**
+- `src/app/_components/booking/BookingWizard.tsx`
+
+---
+
 ## 2026-05-23 · Operations-console UI redesign (v1.28.0) — no infra change
 
 **Scope:** UI/UX-only refactor across the user-facing surfaces. No schema

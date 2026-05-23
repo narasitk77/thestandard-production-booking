@@ -232,19 +232,37 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
 
       const email = data.email || { sent: 0, requested: allEmails.length, failed: [] }
       const failedList: { email: string; error?: string; hint?: string }[] = email.failed || []
+      // v1.28.2 — calendar guest sync status reported synchronously by the
+      // assign route. Surface it in the toast so admins know whether crew
+      // actually got Google Calendar invites (the persistent "no guests"
+      // regression was caused by silent fire-and-forget failures).
+      type CalSync = { ok: boolean; eventId: string | null; action: 'patched' | 'created' | 'deferred'; note?: string; error?: string }
+      const cal: CalSync | undefined = data.calendar
+      const guestCount = allEmails.length
+      const calendarFragment = !cal
+        ? ''
+        : cal.ok && cal.action === 'patched' && guestCount > 0
+          ? ` · calendar guests updated (${guestCount})`
+          : cal.ok && cal.action === 'created' && guestCount > 0
+            ? ` · calendar event auto-created with ${guestCount} guest${guestCount === 1 ? '' : 's'}`
+            : cal.ok && cal.action === 'deferred'
+              ? '' // booking not approved yet — silent, normal flow
+              : ` · ⚠ calendar guests NOT added (${cal.error || 'unknown error'})`
+
       if (data.warning) {
-        showSaved(data.warning, 'warning')
+        showSaved(data.warning + calendarFragment, 'warning')
       } else if (email.requested === 0) {
-        showSaved('✓ Saved (no email recipients)')
+        showSaved('✓ Saved (no email recipients)' + calendarFragment, cal && !cal.ok ? 'warning' : 'success')
       } else if (failedList.length === 0) {
-        showSaved(`✓ Saved & sent ${email.sent} email${email.sent === 1 ? '' : 's'}`)
+        const baseMsg = `✓ Saved & sent ${email.sent} email${email.sent === 1 ? '' : 's'}`
+        showSaved(baseMsg + calendarFragment, cal && !cal.ok ? 'warning' : 'success')
       } else {
         const firstHint = failedList.find(f => f.hint)?.hint
         const failedNames = failedList.map(f => f.email).join(', ')
         const baseMsg = email.sent > 0
           ? `⚠ Saved · sent ${email.sent}/${email.requested} · failed: ${failedNames}`
           : `⚠ Saved but ALL emails failed (${failedNames})`
-        showSaved(firstHint ? `${baseMsg} — ${firstHint}` : baseMsg, 'warning')
+        showSaved((firstHint ? `${baseMsg} — ${firstHint}` : baseMsg) + calendarFragment, 'warning')
       }
     } catch (e: any) {
       setError(e.message)
