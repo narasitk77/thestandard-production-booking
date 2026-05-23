@@ -55,6 +55,9 @@ export default function AdminPage() {
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Admin Console</h1>
           <div className="flex gap-2">
+            <Link href="/admin/team" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
+              Team
+            </Link>
             <Link href="/admin/health" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
               Health
             </Link>

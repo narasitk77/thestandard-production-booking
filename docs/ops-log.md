@@ -5,6 +5,71 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · TEAM roster → DB + /admin/team CRUD (v1.31.0) — schema change (additive)
+
+**Scope:** Move crew assignment roster from hardcoded `TEAM` constant
+in `src/app/admin/[id]/page.tsx` to a new Prisma table `team_members`,
+with a CRUD admin page at `/admin/team`. Adds 1 new table; no changes
+to existing tables. Calendar / booking / approve / assign flows
+unchanged.
+
+**Heads-up — schema change:**
+
+- New table `team_members` added via `prisma db push` (run
+  automatically by `start.sh` on container start). No data loss
+  because the table is new; existing tables untouched.
+- `prisma/seed.ts` inserts 26 initial members from
+  `src/lib/team-roster.ts` (matches the old hardcoded `TEAM` constant
+  exactly) — only inserts rows missing from the DB, so subsequent
+  seed runs preserve admin edits.
+
+**Portainer redeploy notes:**
+
+- Pull image `sha-<this-commit>`. Stack env unchanged from v1.30.0.
+- After redeploy:
+  1. Container log should show
+     `==> Syncing database schema...` (db push) → new table created.
+  2. Then `==> Seeding database (idempotent)...` →
+     `✓ team_members: 26 inserted, 0 already present` on the first run.
+     Subsequent runs print `0 inserted, 26 already present`.
+- `/admin/team` should show 7 role sections (Producer / Coordinator,
+  Videographer, Video Director, Sound Team, Photographer, Switcher,
+  Virtual Production) with the seeded members.
+
+**Verification after redeploy:**
+
+1. Open `/admin/team`. 7 sections render with 26 total members.
+2. Click Edit on any member → change display name → Save. Page
+   refreshes; new name visible.
+3. Open `/admin/[id]` for any REQUESTED booking. The "Assign crew"
+   section shows the same roster, including your edited name.
+4. Deactivate a member at `/admin/team`. Re-open `/admin/[id]`. The
+   deactivated member no longer appears in assign UI; historical
+   bookings that already had them assigned still show their email.
+5. Toggle "Show inactive" on `/admin/team` → deactivated member
+   reappears with an amber `inactive` chip and a Re-activate button.
+
+**Rollback trigger:** if `/admin/team` or `/admin/[id]` assign UI
+breaks. Revert to `sha-631292f` (v1.30.0); the `team_members` table
+stays in the DB (harmless), the code reverts to reading the hardcoded
+`TEAM` constant.
+
+**Files changed:**
+
+- `prisma/schema.prisma` — added `TeamMember` model.
+- `prisma/seed.ts` — added team_members seed loop.
+- `src/lib/team-roster.ts` (new) — RosterRole type, ROLE_ORDER,
+  ROLE_LABEL, INITIAL_TEAM_ROSTER seed data, groupByRole helper.
+- `src/app/api/admin/team/route.ts` (new) — GET list, POST create.
+- `src/app/api/admin/team/[id]/route.ts` (new) — PATCH update, DELETE soft-delete.
+- `src/app/admin/team/page.tsx` (new) — CRUD UI.
+- `src/app/admin/[id]/page.tsx` — removed hardcoded TEAM, fetches from
+  API with INITIAL_TEAM_ROSTER fallback.
+- `src/app/admin/page.tsx` — added Team link in header.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-24 · Sheet config consolidation + /admin/health (v1.30.0) — no infra change, infrastructure for sandbox↔prod sheet swap
 
 **Scope:** Internal-tooling release that paves the way for switching

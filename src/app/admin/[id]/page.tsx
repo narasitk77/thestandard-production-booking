@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
+import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
 
 interface Episode { id: string; episodeId: string; title: string }
 interface BookingDetail {
@@ -20,47 +21,13 @@ interface BookingDetail {
 
 interface Freelancer { id: string; name: string; contract: string; email: string }
 
-const TEAM = {
-  producer: [
-    { name: 'Nat · Narasit (Production Admin)', email: 'narasit.k@thestandard.co' },
-    { name: 'Tui · Tossapol (Coordinator)', email: 'tossapol.b@thestandard.co' },
-    { name: 'Aom · Aomtian (Producer)', email: 'aomtian.t@thestandard.co' },
-    { name: 'Zang · Onticha (Producer)', email: 'onticha.t@thestandard.co' },
-    { name: 'Nice · Natchaya (Producer)', email: 'natchaya.k@thestandard.co' },
-  ],
-  video: [
-    { name: 'Bird · Nuttapong', email: 'nuttapong.k@thestandard.co' },
-    { name: 'Arm · Sakdipat', email: 'sakdipat.p@thestandard.co' },
-    { name: 'Noom · Thanakorn', email: 'thanakorn.s@thestandard.co' },
-    { name: 'Dome · Phuridej', email: 'phuridej.p@thestandard.co' },
-    { name: 'F · Panathorn', email: 'panathorn.c@thestandard.co' },
-    { name: 'P · Ratchaseth', email: 'ratchaseth.c@thestandard.co' },
-    { name: 'Kim · Chaiyaphat', email: 'chaiyaphat.t@thestandard.co' },
-    { name: 'Tew · Watcharapol', email: 'watcharapol.c@thestandard.co' },
-  ],
-  director: [
-    { name: 'Pook · Panu (Head Director)', email: 'panu.w@thestandard.co' },
-    { name: 'Top · Tanapak', email: 'tanapak.I@thestandard.co' },
-    { name: 'PAT · Worased', email: 'worased.p@thestandard.co' },
-    { name: 'Paii · Panyapohn', email: 'panyapohn.s@thestandard.co' },
-  ],
-  sound: [
-    { name: 'Art · Krittapon (Sr. Sound Eng.)', email: 'krittapon.j@thestandard.co' },
-    { name: 'Note · Daejarnat', email: 'daejarnat.d@thestandard.co' },
-    { name: 'Thee · Thaphat', email: 'thaphat.t@thestandard.co' },
-    { name: 'Peace · Nuthkitta', email: 'nuthkitta.c@thestandard.co' },
-  ],
-  photo: [
-    { name: 'Mod · Saluk (Photographer)', email: 'saluk.k@thestandard.co' },
-  ],
-  switcher: [
-    { name: 'Dream · Kamonwan', email: 'kamonwan.l@thestandard.co' },
-    { name: 'Ting · Jaruwan', email: 'jaruwan.k@thestandard.co' },
-  ],
-  virtualProduction: [
-    { name: 'Famp · Assawapol (Virtual Production)', email: 'assawapol.t@thestandard.co' },
-  ],
-}
+// v1.31 — roster now lives in the DB (table `team_members`, managed at
+// /admin/team). We fetch it via /api/admin/team on mount; the hardcoded
+// INITIAL_TEAM_ROSTER from src/lib/team-roster.ts is kept ONLY as a
+// last-resort fallback if that API call fails (network blip, fresh DB
+// with no seed, etc.) so the assign UI is never blank.
+type RosterEntry = { name: string; email: string; role: string; active?: boolean }
+const FALLBACK_TEAM = groupByRole(INITIAL_TEAM_ROSTER)
 
 function TeamSection({ label, members, checked, onToggle }: {
   label: string
@@ -105,6 +72,24 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [flName, setFlName] = useState('')
   const [flContract, setFlContract] = useState('')
   const [flEmail, setFlEmail] = useState('')
+
+  // Team roster (v1.31 — fetched from /api/admin/team).
+  // We fetch once on mount and group by role for the assign sections.
+  // If the API call fails we keep FALLBACK_TEAM (hardcoded seed) so the
+  // UI is never blank — an admin can still assign people, just from a
+  // potentially-stale list.
+  const [team, setTeam] = useState<Record<RosterRole, RosterEntry[]>>(FALLBACK_TEAM)
+  useEffect(() => {
+    fetch('/api/admin/team', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+      .then(d => {
+        const active = (d.members || []).filter((m: RosterEntry) => m.active !== false)
+        setTeam(groupByRole(active))
+      })
+      .catch(e => {
+        console.warn('[admin/[id]] team fetch failed — keeping hardcoded fallback:', e)
+      })
+  }, [])
 
   // Edit Booking Details mode
   const [editMode, setEditMode] = useState(false)
@@ -575,13 +560,13 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           </div>
 
           {/* Video Team */}
-          <TeamSection label="Producer / Coordinator" members={TEAM.producer} checked={assignEmails} onToggle={toggleEmail} />
-          <TeamSection label="Videographer" members={TEAM.video} checked={assignEmails} onToggle={toggleEmail} />
-          <TeamSection label="Video Director" members={TEAM.director} checked={assignEmails} onToggle={toggleEmail} />
-          <TeamSection label="Sound Team" members={TEAM.sound} checked={assignEmails} onToggle={toggleEmail} />
-          <TeamSection label="Photographer" members={TEAM.photo} checked={assignEmails} onToggle={toggleEmail} />
-          <TeamSection label="Switcher" members={TEAM.switcher} checked={assignEmails} onToggle={toggleEmail} />
-          <TeamSection label="Virtual Production" members={TEAM.virtualProduction} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Producer / Coordinator" members={team.producer} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Videographer" members={team.video} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Video Director" members={team.director} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Sound Team" members={team.sound} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Photographer" members={team.photo} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Switcher" members={team.switcher} checked={assignEmails} onToggle={toggleEmail} />
+          <TeamSection label="Virtual Production" members={team.virtualProduction} checked={assignEmails} onToggle={toggleEmail} />
 
           {/* Freelance */}
           <div>
@@ -648,7 +633,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               members from the Videographer team. Hidden until at least one
               Videographer is ticked in the section above. */}
           {(() => {
-            const assignedVideographers = TEAM.video.filter(v => assignEmails.includes(v.email))
+            const assignedVideographers = team.video.filter(v => assignEmails.includes(v.email))
             if (assignedVideographers.length === 0) return null
             return (
               <div>

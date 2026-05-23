@@ -56,6 +56,34 @@ model User {
   @@map("users")
 }
 
+// Crew assignment roster shown on /admin/[id] when admin picks who to
+// assign to a booking. Previously a hardcoded TEAM constant in
+// admin/[id]/page.tsx (v1.30); v1.31 moves it to the DB so the
+// roster can be maintained at /admin/team without a code deploy.
+//
+// `role` is a free-form discriminator that maps to a TeamSection on
+// /admin/[id]. Valid values today:
+//   producer | video | director | sound | photo | switcher | virtualProduction
+// Anything new just appears as its own section once you wire it in
+// the page's section list.
+//
+// `email` is the canonical id (matches assignedEmails on Booking).
+// `active=false` hides the member from the assign UI without losing
+// historical assignments.
+model TeamMember {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String   // display name shown in the assign checkboxes
+  role      String   // see comment above for valid values
+  active    Boolean  @default(true)
+  sort      Int      @default(0)  // tie-breaker within a role group
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("team_members")
+  @@index([role, active, sort])
+}
+
 enum OTType {
   HOLIDAY  // เสาร์-อาทิตย์ / วันหยุดตามประกาศบริษัท (counts as 1 day)
   OVERTIME // ทำงานเกิน 8 ชั่วโมง (counts hours)

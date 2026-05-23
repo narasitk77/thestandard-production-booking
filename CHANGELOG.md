@@ -5,6 +5,109 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.31.0] — 2026-05-24
+
+### Added — `team_members` DB table + `/admin/team` CRUD (decouple crew roster from code)
+
+Crew assignment roster used to be a hardcoded `TEAM` constant inside
+`src/app/admin/[id]/page.tsx` — adding/removing a crew member required a
+code change + redeploy. v1.31 moves the roster to a Prisma table and
+gives admins a CRUD UI.
+
+**Schema — `TeamMember` model:**
+
+```
+model TeamMember {
+  id        String   @id @default(cuid())
+  email     String   @unique         // canonical id (matches assignedEmails)
+  name      String                   // display name in assign checkboxes
+  role      String                   // producer|video|director|sound|photo|switcher|virtualProduction
+  active    Boolean  @default(true)  // false = hide from assign UI (history preserved)
+  sort      Int      @default(0)     // tie-breaker within role group
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("team_members")
+  @@index([role, active, sort])
+}
+```
+
+`prisma db push --accept-data-loss` (in `start.sh`) creates the table
+on next container start. No data loss because the table is new.
+
+**Seed — `prisma/seed.ts`:**
+
+- Imports `INITIAL_TEAM_ROSTER` from the new
+  `src/lib/team-roster.ts` and **inserts only members missing from the
+  DB**. Edits made later via `/admin/team` survive subsequent seeds.
+
+**New module — `src/lib/team-roster.ts`:**
+
+- Centralized `RosterRole` type, `ROLE_ORDER`, `ROLE_LABEL` map,
+  `INITIAL_TEAM_ROSTER` seed data, and `groupByRole()` helper. Used by:
+  - `prisma/seed.ts` (seed insert)
+  - `src/app/api/admin/team/route.ts` (role validation)
+  - `src/app/admin/team/page.tsx` (UI labels + dropdowns)
+  - `src/app/admin/[id]/page.tsx` (fallback when API fails)
+
+**API — `/api/admin/team` (new):**
+
+- `GET` — list all members (active + inactive), sorted by ROLE_ORDER →
+  sort → name. Admin-only.
+- `POST` — create. Validates role against `ROLE_ORDER`; email must be
+  unique (409 on dup).
+- `PATCH /api/admin/team/[id]` — update `name`/`role`/`sort`/`active`
+  (email is immutable — it's the canonical id used by
+  `booking.assignedEmails`).
+- `DELETE /api/admin/team/[id]` — soft-delete (`active: false`).
+  Never hard-delete — historical bookings reference these emails.
+
+**UI — `/admin/team` (new page):**
+
+- Grouped by role with section headers (Producer / Coordinator,
+  Videographer, …). Counts shown per group.
+- Inline edit for each row (name + role). Email is read-only.
+- Add-member form at the top (email + name + role dropdown).
+- Soft-delete button (Trash icon) → confirmation → `active=false`.
+  Re-activate button (Rotate icon) on inactive rows.
+- "Show inactive" toggle so deactivated members can still be seen +
+  re-activated.
+- Linked from `/admin` header next to Permissions and Health.
+
+**`/admin/[id]` change:**
+
+- Removed the 40-line hardcoded `TEAM` constant.
+- Added `team` state populated via `/api/admin/team` on mount; falls
+  back to `groupByRole(INITIAL_TEAM_ROSTER)` if the API errors so the
+  assign UI is **never blank** (defensive — same pattern as
+  v1.29.4's calendar impersonate fallback).
+- Section list (`teamSection label="Videographer" members={team.video}`)
+  unchanged.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes — 3 new routes registered (`/admin/team`,
+  `/api/admin/team`, `/api/admin/team/[id]`).
+- `start.sh` runs `prisma db push` → table created. Then `tsx
+  prisma/seed.ts` → 26 initial team members inserted on first run.
+- After deploy, `/admin/team` shows the seeded list grouped by role.
+  Editing a member's name reflects on `/admin/[id]` assign UI
+  immediately (after page refresh).
+
+### Tradeoffs / follow-ups
+
+- The fallback (hardcoded `INITIAL_TEAM_ROSTER`) means if an admin
+  deactivates a member at `/admin/team` AND the API fetch happens to
+  fail on `/admin/[id]`, that member could still appear in the assign
+  UI. Acceptable trade — the alternative is an empty assign UI on
+  transient errors, which is worse for the assignment workflow.
+- Adding a brand-new role beyond the seven defined in `ROLE_ORDER`
+  still requires a one-line code change (add to `ROLE_ORDER` +
+  `ROLE_LABEL` + a `<TeamSection>` in `admin/[id]`). Worth doing only
+  if multiple new roles need to be supported.
+
+---
+
 ## [1.30.0] — 2026-05-24
 
 ### Added — single-source Producer Dashboard sheet config + `/admin/health` diagnostic page
