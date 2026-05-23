@@ -5,6 +5,29 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · Proposed GHA post-build smoke test (v1.32.0) — needs manual apply
+
+**Scope:** Proposed `smoke-test` job for
+`.github/workflows/docker-build.yml` that boots the just-built image
+against a throwaway Postgres and polls `/login` until ready. Catches
+startup-time regressions before operator pulls in Portainer.
+
+**⚠ Not yet applied to the workflow file:** the agent's GitHub PAT
+lacks `workflow` scope, so direct edits to `.github/workflows/*.yml`
+are rejected. Full YAML is at `docs/gha-smoke-test.yml.proposed`
+with copy-paste-into-GitHub-UI instructions. Apply once via the
+web UI (one-time, ~2 min) and it's done.
+
+**Portainer redeploy notes:** none — this is a CI change only. The
+running stack is unaffected.
+
+**Files changed:**
+
+- `docs/gha-smoke-test.yml.proposed` (new — full job YAML to paste).
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-24 · Cleanup + docs (v1.31.1) — no infra change, hygiene only
 
 **Scope:** ESLint config so `npm run lint` works, new

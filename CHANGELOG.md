@@ -5,6 +5,93 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.32.0] — 2026-05-24
+
+### Added — proposed GHA post-build smoke test (paste manually — token scope blocks auto-apply)
+
+Until v1.31, the GHA workflow only verified that `next build` passed.
+A commit could break startup (`start.sh` typo, prisma migration
+failure, runtime JS error in a server component, env var reads that
+explode without a fallback) and still get pushed to GHCR + tagged
+`latest`. Operator would only discover the breakage when redeploying
+in Portainer.
+
+**Proposed `smoke-test` job** (added to `docs/gha-smoke-test.yml.proposed`
+because the agent's PAT lacks `workflow` scope — see "How to apply"
+below):
+
+1. Spins up Postgres 16 as a GHA service container.
+2. Pulls the just-built `sha-<commit>` image from GHCR.
+3. Runs the image with `DATABASE_URL` pointing at the service Postgres
+   + minimal NextAuth env (real Google creds intentionally omitted —
+   we're not testing the Sheets/Calendar integration here, just
+   startup).
+4. Polls `GET /login` every 5 seconds for up to 180 seconds, waiting
+   for a 200/302/307.
+5. Fetches `/login` content + greps for the expected "Production
+   Booking" title to verify the page actually rendered.
+6. Surfaces the container log on both success and failure (with extra
+   container state inspection on failure).
+
+**What this catches** (once applied):
+
+- `start.sh` failures (DB readiness wait, schema sync, seed errors).
+- Prisma client mismatches (forgot to regenerate after schema change).
+- Server-side errors that build-time `tsc` + `next build` miss.
+- Container env contract drift (renamed env var with no fallback).
+
+**What this does NOT catch** (out of scope for smoke):
+
+- DWD / Google Calendar issues (no real creds in the smoke env).
+- Specific booking creation / approval / assign flows.
+- UI rendering issues past the login page.
+
+**Does not gate deploy** (by design): the job runs *after* the image
+is already pushed to GHCR. A failed smoke test marks the commit with
+a red ✗ in GitHub but does not delete the image. Operator sees the
+red status before pulling in Portainer. Future iteration: split into
+`build → smoke → tag-as-latest` so smoke gates `latest` specifically.
+
+### How to apply (manual one-time step)
+
+The agent's GitHub Personal Access Token does not have `workflow`
+scope, so it cannot modify `.github/workflows/*.yml`. Two options for
+the human:
+
+**Option A (easiest — via the web UI):**
+
+1. Open `docs/gha-smoke-test.yml.proposed` in the repo on GitHub.
+2. Copy the YAML below the comment header (starts with
+   `# v1.32+ — boots the just-built image...`).
+3. Open `.github/workflows/docker-build.yml` in the GitHub web UI →
+   click the pencil (Edit) icon.
+4. Paste the copied YAML as a second job in the `jobs:` block —
+   directly after the `build-and-push:` job.
+5. Commit directly to the branch via the web UI. (Web-UI commits use
+   your personal session, not the PAT, so they have `workflow` scope.)
+
+**Option B (give the PAT `workflow` scope):**
+
+1. Go to https://github.com/settings/tokens
+2. Find the PAT used for local pushes, click Edit.
+3. Tick the `workflow` scope checkbox, save.
+4. Re-run the push that adds the workflow file.
+
+Once applied, every push to `main` or
+`fix/assign-email-real-results` will produce two GHA jobs instead of
+one. Operator can glance at the smoke-test status before pulling in
+Portainer.
+
+### Verification
+
+- `docs/gha-smoke-test.yml.proposed` is valid YAML (verified
+  syntactically — no parsing test possible without applying).
+- Existing `build-and-push` job is unchanged on disk.
+- Once user applies the file, the very first smoke run on a fresh
+  commit will be the real verification.
+
+---
+
 ## [1.31.1] — 2026-05-24
 
 ### Added / cleanup — ESLint config, docs, legacy redirect

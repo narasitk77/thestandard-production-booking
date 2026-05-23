@@ -1,0 +1,130 @@
+# Proposed addition to .github/workflows/docker-build.yml
+#
+# Paste the `smoke-test:` job below as a second job in the `jobs:` block
+# of .github/workflows/docker-build.yml (right after the existing
+# `build-and-push:` job).
+#
+# Why this lives in docs/ instead of .github/workflows/:
+#   The token I (the agent) was using to push to GitHub lacks `workflow`
+#   scope, so it rejected a direct edit to .github/workflows/*.yml on
+#   security grounds. Adding this manually via the GitHub web UI (which
+#   uses your personal session, not a PAT) bypasses the restriction.
+#   Alternative: add `workflow` scope to the PAT in
+#   https://github.com/settings/tokens then re-run a push that touches
+#   the workflow file.
+#
+# What this job does:
+#   1. Spins up Postgres 16 as a GHA service.
+#   2. Pulls the just-built `sha-<commit>` image from GHCR.
+#   3. Runs the image with minimal NextAuth env (no real Google creds).
+#   4. Polls `GET /login` every 5s for up to 180s waiting for 200/302/307.
+#   5. Fetches /login + greps for "Production Booking" title.
+#   6. Surfaces container log on both success and failure.
+#
+# Catches: start.sh failures, prisma client mismatch, runtime JS errors,
+# env var contract drift.
+#
+# Does NOT gate deploy — image is already pushed before smoke runs.
+# Marks commit red in GitHub for visibility before operator pulls in
+# Portainer.
+
+  # v1.32+ — boots the just-built image against a throwaway Postgres
+  # and waits for the app to serve /login. Catches startup-time
+  # regressions BEFORE the operator pulls the tag in Portainer.
+  smoke-test:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: smoketest
+          POSTGRES_DB: production_booking
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=12
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE="ghcr.io/${{ github.repository_owner }}/thestandard-production-booking:sha-${SHORT_SHA}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Smoke testing image: $IMAGE"
+
+      - name: Pull the just-built image
+        run: docker pull "${{ steps.tag.outputs.image }}"
+
+      - name: Boot the app container
+        run: |
+          # Google creds intentionally omitted — testing startup + /login
+          # render, not the Sheets/Calendar integration.
+          docker run -d --name probook-smoke \
+            --network host \
+            -e DATABASE_URL="postgresql://postgres:smoketest@localhost:5432/production_booking" \
+            -e NEXTAUTH_URL="http://localhost:3000" \
+            -e NEXT_PUBLIC_APP_URL="http://localhost:3000" \
+            -e NEXTAUTH_SECRET="smoketest-secret-not-for-prod" \
+            -e AUTH_SECRET="smoketest-secret-not-for-prod" \
+            "${{ steps.tag.outputs.image }}"
+
+      - name: Wait for app to serve /login (timeout 180s)
+        run: |
+          for i in $(seq 1 36); do
+            if curl -sf -o /dev/null -w '%{http_code}' http://localhost:3000/login \
+                 | grep -qE '^(200|302|307)$'; then
+              echo "✓ App ready after ${i} polls (~$((i * 5))s)"
+              exit 0
+            fi
+            echo "  [${i}/36] not ready yet, sleeping 5s"
+            sleep 5
+          done
+          echo "✗ App did not respond to /login within 180s"
+          exit 1
+
+      - name: Smoke — fetch /login + check title
+        run: |
+          BODY=$(curl -sf http://localhost:3000/login)
+          if echo "$BODY" | grep -q "Production Booking"; then
+            echo "✓ /login returned expected title"
+          else
+            echo "✗ /login response did NOT contain expected title"
+            echo "--- response head ---"
+            echo "$BODY" | head -40
+            exit 1
+          fi
+
+      - name: Show container logs (always — useful even on success)
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "production-booking-app container log:"
+          echo "============================================================"
+          docker logs probook-smoke 2>&1 | tail -120
+
+      - name: Surface startup diagnostics on failure
+        if: failure()
+        run: |
+          echo "============================================================"
+          echo "Full container log (failure mode):"
+          echo "============================================================"
+          docker logs probook-smoke 2>&1
+          echo "============================================================"
+          echo "Container state:"
+          echo "============================================================"
+          docker inspect probook-smoke --format '{{json .State}}' | python3 -m json.tool
