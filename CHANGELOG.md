@@ -5,6 +5,77 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.29.3] — 2026-05-23
+
+### Fixed — surface the real reason `createCalendarEvent` failed (was: silently returning null)
+
+Direct follow-up to v1.29.2: when ops clicked **Re-sync** on two
+CONFIRMED bookings, both came back with the unhelpful chip
+`⚠ createCalendarEvent returned null`. That message was the wrapper
+saying "the underlying call gave me nothing" — the *actual* Google
+Calendar error was being eaten by `createCalendarEvent`'s broad
+`catch → return null` and a few defensive `return null`s on known
+failure modes (no credentials, DWD off, attendees rejected). The
+upstream reason only showed up in container logs / `AuditLog`, which
+defeats the whole point of the v1.29.2 admin Re-sync button.
+
+**Fix — `src/lib/google-calendar.ts` `createCalendarEvent`:**
+
+Every `return null` on a known failure path is now a `throw Error(...)`
+with a human-readable, action-oriented message:
+
+- **No service account credentials** →
+  `Google service account not configured — set GOOGLE_SERVICE_ACCOUNT_JSON …`
+- **`requireAttendees: true` + DWD off** →
+  `GOOGLE_IMPERSONATE_SUBJECT not set … set GOOGLE_IMPERSONATE_SUBJECT to a Workspace user (e.g. narasit.k@thestandard.co) … and redeploy.`
+- **`requireAttendees: true` + Google rejected the attendees array** →
+  `Google Calendar rejected event create with attendees: <upstream message>`
+  (the actual API error from Google, e.g. "Service accounts cannot
+  invite attendees without Domain-Wide Delegation of authority", or
+  "Calendar usage limits exceeded", etc.)
+
+The outer `catch` no longer swallows — it re-throws (wraps non-Error
+values with a `Calendar event create failed:` prefix). All known
+callers (`approve/route.ts`, `assign/route.ts`,
+`calendar-reconcile.ts → createVerifiedCalendarEvent`) already wrap
+the call in try/catch, so this is non-breaking for them — the
+difference is that the caught error now carries the real reason.
+
+**Fix — `src/lib/calendar-reconcile.ts`:**
+
+`createVerifiedCalendarEvent` kept the defensive
+`if (!eventId) throw new Error('createCalendarEvent returned null')`
+fallback as belt-and-suspenders for the unlikely case Google returns
+an event without an id. Replaced that generic message with a
+direction to retry / check AuditLog. The common configuration cases
+now bubble up specific messages instead.
+
+### Net effect on the admin Re-sync UX
+
+Before this fix:
+```
+⚠ createCalendarEvent returned null
+```
+
+After this fix (the same DWD-off booking):
+```
+⚠ GOOGLE_IMPERSONATE_SUBJECT not set (or env value is empty after trim)
+  — Domain-Wide Delegation is required to add calendar guests …
+```
+
+— and the admin knows exactly which Portainer env var to fix.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes.
+- No public API change — `createCalendarEvent` still returns
+  `Promise<string | null>` (the residual `null` is for the unexpected
+  Google-response-with-no-id case). The change is purely error-message
+  quality.
+
+---
+
 ## [1.29.2] — 2026-05-23
 
 ### Added — calendar link on admin booking cards + on-demand Re-sync button

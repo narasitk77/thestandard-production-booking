@@ -5,6 +5,62 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Surface real createCalendarEvent reason (v1.29.3) — diagnostic fix
+
+**Scope:** Bug fix. v1.29.2 added the Re-sync button + result chip, but
+the chip read "createCalendarEvent returned null" on the two affected
+bookings — useful only insofar as it confirmed the call failed.
+v1.29.3 changes `createCalendarEvent` to throw specific errors instead
+of silently returning null, so the chip carries the *actual* reason.
+
+**What admins will see after redeploy:**
+
+- Re-sync on the same booking now returns one of:
+  - `⚠ GOOGLE_IMPERSONATE_SUBJECT not set (or env value is empty after
+    trim) — Domain-Wide Delegation is required …` → fix the Portainer
+    env var.
+  - `⚠ Google Calendar rejected event create with attendees: <upstream
+    Google error>` → DWD scope drift / impersonated user lost calendar
+    access / quota — investigate based on the upstream text.
+  - `⚠ Google service account not configured — set
+    GOOGLE_SERVICE_ACCOUNT_JSON …` → missing creds in the stack env.
+  - `✓ event created with N guests` → it worked this time; the prior
+    failure was transient.
+
+**Portainer redeploy notes:**
+
+- Pull `sha-<this-commit>`. Stack env unchanged. No DB migration.
+- After deploy, Re-sync the two affected bookings (Content Agency
+  Short Clip PP-26-001-L01, Content Agency Long Form PP-26-006-L01).
+  The new chip will tell you exactly what's wrong. Most likely
+  candidate based on the symptom: `GOOGLE_IMPERSONATE_SUBJECT` is set
+  but has a trailing newline OR is set to a user that no longer has
+  calendar access OR DWD was revoked.
+
+**Verification:**
+
+1. Re-sync the two known-bad bookings → chip carries a specific reason
+   (not "returned null").
+2. Fix the reason in Portainer env → redeploy → Re-sync again → chip
+   turns green with `✓ event created with N guests`.
+3. `AuditLog action='calendar.invite_failed'` rows for these bookings
+   now include the same human-readable message in the `changes.error`
+   field.
+
+**Rollback trigger:** none expected — purely improves error messages.
+Revert to `sha-196fd68` (v1.29.2) if anything regresses.
+
+**Files changed:**
+
+- `src/lib/google-calendar.ts` — throw with specific message instead
+  of silent `return null` on known failure paths; re-throw in the
+  outer catch.
+- `src/lib/calendar-reconcile.ts` — friendlier message on the
+  defensive null fallback.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-23 · Calendar status + Re-sync button on /admin (v1.29.2) — visibility fix
 
 **Scope:** UI + endpoint for admins. No background worker / approve /

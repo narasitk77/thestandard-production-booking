@@ -94,10 +94,18 @@ async function createVerifiedCalendarEvent(booking: {
   agencyRef?: string | null
   notes?: string | null
 }): Promise<{ eventId: string; htmlLink: string | null }> {
+  // v1.29.3 — createCalendarEvent now throws specific errors instead of
+  // returning null silently. We still defend against an unexpected null
+  // (Google response without event.data.id) below, but the common
+  // configuration / API-rejection cases bubble a real message up to the UI.
   const eventId = await createCalendarEvent(booking, {
     requireAttendees: booking.assignedEmails.length > 0,
   })
-  if (!eventId) throw new Error('createCalendarEvent returned null')
+  if (!eventId) {
+    throw new Error(
+      'Google Calendar API returned an event with no id — likely a transient API anomaly; try Re-sync again, or check the AuditLog for the upstream details.',
+    )
+  }
 
   const calendarEvent = await getCalendarEventAttendees(eventId)
   if (!sameEmails(booking.assignedEmails, calendarEvent.attendees)) {
