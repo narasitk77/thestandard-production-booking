@@ -5,6 +5,29 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · Cleanup + docs (v1.31.1) — no infra change, hygiene only
+
+**Scope:** ESLint config so `npm run lint` works, new
+`docs/architecture.md` + `docs/runbook-backup.md` for onboarding +
+disaster recovery, legacy `/booking/[outlet]` route converted to a
+redirect. No app behavior change.
+
+**Portainer redeploy notes:** purely additive. Stack env unchanged.
+Pull `sha-<this-commit>` if you want the cleanup; nothing breaks if
+you don't.
+
+**Files changed:**
+
+- `.eslintrc.json` (new).
+- `docs/architecture.md` (new — read this first when onboarding).
+- `docs/runbook-backup.md` (new — backup PLAN; action items at the
+  bottom for the human to actually wire up).
+- `src/app/booking/[outlet]/page.tsx` — 400 lines → 10-line redirect
+  to `/new`.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-24 · TEAM roster → DB + /admin/team CRUD (v1.31.0) — schema change (additive)
 
 **Scope:** Move crew assignment roster from hardcoded `TEAM` constant

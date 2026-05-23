@@ -5,6 +5,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.31.1] — 2026-05-24
+
+### Added / cleanup — ESLint config, docs, legacy redirect
+
+Hygiene pass. No app behavior change.
+
+**`.eslintrc.json` (new):**
+
+- Extends `next/core-web-vitals`. Disables two noisy rules
+  (`react/no-unescaped-entities`, `@next/next/no-img-element`) that
+  fight our existing markup.
+- `npm run lint` now works without prompting for setup. Current
+  baseline: 0 errors, 2 warnings (both pre-existing: custom font in
+  `app/layout.tsx`, useEffect dep in `ot/admin/page.tsx`).
+
+**`docs/architecture.md` (new):**
+
+- One-page mental model for new developers. Stack, data sources,
+  booking lifecycle diagram, code map, background workers, auth
+  model, deploy flow, diagnostic checklist, roadmap of what's
+  deliberately not done yet. Read this first.
+
+**`docs/runbook-backup.md` (new):**
+
+- DB backup + restore procedure. **Currently the PLAN, not the
+  reality** — there's no automated backup running yet. Includes the
+  manual `pg_dump` commands, retention policy proposal, restore
+  procedure with safety steps, quarterly verification drill, and an
+  "in an actual emergency" section listing recovery paths if you have
+  no backup (replay from PD Sheet, scrape Google Calendar, audit_logs).
+- Action items list at the bottom — needs a target (S3 / GDrive /
+  USB), cron schedule, and credentials setup.
+
+**`src/app/booking/[outlet]/page.tsx` (rewrite — 400 lines → 10):**
+
+- Was the legacy pre-wizard per-outlet form. v1.28 replaced it with
+  the 5-step wizard at `/new` but kept the old page in the codebase.
+  No internal href referenced it, but external bookmarks (`/booking/AGN`,
+  `/booking/NWS`, etc.) may still exist in someone's notes/emails.
+- Now a thin redirect: `redirect('/new')`. Old bookmarks land
+  smoothly on the wizard instead of 404.
+
+### Verification
+
+- `next lint` runs clean (no errors).
+- `tsc --noEmit` clean.
+- `next build` passes — `/booking/[outlet]` still in the route table,
+  size dropped from 6.3 kB → ~140 B (just the redirect).
+
+---
+
 ## [1.31.0] — 2026-05-24
 
 ### Added — `team_members` DB table + `/admin/team` CRUD (decouple crew roster from code)
