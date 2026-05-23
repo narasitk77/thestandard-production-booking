@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { formatDisplayDate, statusColor, statusLabel } from '@/lib/utils'
+import { formatDisplayDate } from '@/lib/utils'
 import { OUTLETS } from '@/lib/data'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
-import { Download } from 'lucide-react'
+import { Download, Search } from 'lucide-react'
+import StatusPill from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string }
 interface Booking {
@@ -44,11 +45,14 @@ interface TeamRow {
   bookings: Booking[]
 }
 
+// Color values mirror the status palette in tailwind.config.ts so the donut
+// reads identically to StatusPill in the table below.
 const STATUS_PIE: { name: string; key: string; color: string }[] = [
-  { name: '[REQUESTED]', key: 'REQUESTED', color: '#ef4444' },
-  { name: 'Confirmed',   key: 'CONFIRMED', color: '#22c55e' },
-  { name: 'Completed',   key: 'COMPLETED', color: '#3b82f6' },
-  { name: 'Cancelled',   key: 'CANCELLED', color: '#9ca3af' },
+  { name: 'Requested', key: 'REQUESTED', color: '#EF4444' },
+  { name: 'Assigned',  key: 'ASSIGNED',  color: '#F59E0B' },
+  { name: 'Confirmed', key: 'CONFIRMED', color: '#10B981' },
+  { name: 'Completed', key: 'COMPLETED', color: '#3B82F6' },
+  { name: 'Cancelled', key: 'CANCELLED', color: '#94A3B8' },
 ]
 
 function todayISO(): string {
@@ -207,38 +211,31 @@ export default function DashboardPage() {
   const total = bookings.length
 
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
-      <div className="flex items-start sm:items-center justify-between gap-2 mb-2 flex-wrap">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+      <div className="flex items-start sm:items-center justify-between gap-2 mb-4 flex-wrap">
         <div>
-          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Admin Dashboard</h1>
-          <p className="text-xs sm:text-sm text-gray-500">
+          <h1>Admin Dashboard</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
             Org-wide booking metrics, team workload, and exports · {total} total · {filtered.length} shown
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={exportBookingsCSV}
-            className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
-            <Download className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Export</span> Bookings
+          <button onClick={exportBookingsCSV} className="ops-btn-secondary ops-btn-sm">
+            <Download className="w-3.5 h-3.5" /> Export Bookings
           </button>
-          <Link href="/" className="gf-submit text-xs sm:text-sm">+ New</Link>
+          <Link href="/new" className="ops-btn-primary ops-btn-sm">+ New Booking</Link>
         </div>
       </div>
 
       {/* Section: Booking Overview */}
-      <div className="pt-4 pb-1 px-1">
-        <div className="flex items-baseline gap-2">
-          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-[10px] font-mono font-medium text-gray-600 tabular-nums">1</span>
-          <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Booking Overview</h2>
-        </div>
-        <p className="text-xs text-gray-400 mt-1 ml-7 leading-snug">
-          คลิกที่ slice/แท่งเพื่อกรองตาราง · ดู Producer Dashboard ที่หน้า <Link href="/producer" className="text-[#673ab7] hover:underline">Producer</Link> สำหรับมุมมองส่วนตัว
-        </p>
-      </div>
+      <SectionLabel index={1} title="Booking Overview"
+        hint={<>คลิกที่ slice/แท่งเพื่อกรองตาราง · ดู Producer Dashboard ที่หน้า <Link href="/producer" className="text-brand-primary hover:underline">Producer</Link> สำหรับมุมมองส่วนตัว</>}
+      />
 
       {/* Charts row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2 mt-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2 mt-3">
         {/* Donut: bookings by status */}
-        <div className="gf-card p-5">
+        <div className="ops-card ops-card-pad">
           <div className="text-sm font-medium text-gray-700 mb-3">Bookings by Status</div>
           {loading ? (
             <div className="h-64 flex items-center justify-center text-sm text-gray-400">Loading…</div>
@@ -258,7 +255,7 @@ export default function DashboardPage() {
                 >
                   {statusData.map((d, i) => (
                     <Cell key={i} fill={d.color}
-                      stroke={statusFilter === d.key ? '#673ab7' : '#fff'}
+                      stroke={statusFilter === d.key ? '#111827' : '#fff'}
                       strokeWidth={statusFilter === d.key ? 3 : 2}
                       opacity={statusFilter && statusFilter !== d.key ? 0.4 : 1}
                     />
@@ -278,14 +275,14 @@ export default function DashboardPage() {
           )}
           {statusFilter && (
             <button onClick={() => setStatusFilter('')}
-              className="text-xs text-[#673ab7] hover:underline mt-1">
+              className="text-xs text-brand-primary hover:underline mt-1">
               Clear filter ({statusFilter}) ×
             </button>
           )}
         </div>
 
         {/* Bar: bookings by outlet */}
-        <div className="gf-card p-5">
+        <div className="ops-card ops-card-pad">
           <div className="text-sm font-medium text-gray-700 mb-3">Bookings by Outlet</div>
           {loading ? (
             <div className="h-64 flex items-center justify-center text-sm text-gray-400">Loading…</div>
@@ -320,7 +317,7 @@ export default function DashboardPage() {
           )}
           {outletFilter && (
             <button onClick={() => setOutletFilter('')}
-              className="text-xs text-[#673ab7] hover:underline mt-1">
+              className="text-xs text-brand-primary hover:underline mt-1">
               Clear filter ({outletFilter}) ×
             </button>
           )}
@@ -328,41 +325,33 @@ export default function DashboardPage() {
       </div>
 
       {/* Section: Team Workload */}
-      <div className="pt-4 pb-1 px-1">
-        <div className="flex items-baseline gap-2">
-          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-[10px] font-mono font-medium text-gray-600 tabular-nums">2</span>
-          <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Team Workload</h2>
-        </div>
-        <p className="text-xs text-gray-400 mt-1 ml-7 leading-snug">
-          ชั่วโมง assignment ของ crew ในช่วงที่เลือก · ใช้สำหรับวางแผน utilization และ exports
-        </p>
-      </div>
+      <SectionLabel index={2} title="Team Workload"
+        hint={<>ชั่วโมง assignment ของ crew ในช่วงที่เลือก · ใช้สำหรับวางแผน utilization และ exports</>}
+      />
 
-      {/* Team Workload */}
-      <div className="gf-card p-5 mt-3 mb-2">
+      <div className="ops-card ops-card-pad mt-3 mb-2">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-medium text-gray-700">Team Workload</div>
           <div className="flex items-center gap-2 flex-wrap">
             <input type="date" value={rangeFrom} onChange={e => setRangeFrom(e.target.value)}
-              className="border border-gray-300 rounded px-2 py-1 text-xs" />
+              className="border border-gray-300 rounded-lg px-2 py-1 text-xs" />
             <span className="text-xs text-gray-400">to</span>
             <input type="date" value={rangeTo} onChange={e => setRangeTo(e.target.value)}
-              className="border border-gray-300 rounded px-2 py-1 text-xs" />
+              className="border border-gray-300 rounded-lg px-2 py-1 text-xs" />
             <button onClick={() => { setRangeFrom(monthStartISO()); setRangeTo(todayISO()) }}
-              className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50">This month</button>
+              className="ops-btn-secondary ops-btn-sm">This month</button>
             <label className="flex items-center gap-1 text-xs text-gray-500 ml-2">
               <input type="checkbox" checked={includeRequested}
                 onChange={e => setIncludeRequested(e.target.checked)}
-                className="accent-[#673ab7]" />
-              Include [REQUESTED]
+                className="accent-brand-primary" />
+              Include Requested
             </label>
             <select value={teamSort} onChange={e => setTeamSort(e.target.value as any)}
-              className="text-xs border border-gray-300 rounded px-2 py-1">
+              className="text-xs border border-gray-300 rounded-lg px-2 py-1">
               <option value="hours">Sort: Hours</option>
               <option value="count">Sort: Bookings</option>
             </select>
-            <button onClick={exportTeamCSV}
-              className="text-xs px-3 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1">
+            <button onClick={exportTeamCSV} className="ops-btn-secondary ops-btn-sm">
               <Download className="w-3 h-3" /> Export CSV
             </button>
           </div>
@@ -372,7 +361,7 @@ export default function DashboardPage() {
           {teamTotals.people} people · {teamTotals.bookings} assignments · {teamTotals.hours} hours total
           {' · '}
           <span className="text-gray-400">
-            (Status counted: {includeRequested ? 'REQUESTED + CONFIRMED + COMPLETED' : 'CONFIRMED + COMPLETED only'})
+            (Status counted: {includeRequested ? 'Requested + Confirmed + Completed' : 'Confirmed + Completed only'})
           </span>
         </div>
 
@@ -439,89 +428,90 @@ export default function DashboardPage() {
       </div>
 
       {/* Section: All Bookings */}
-      <div className="pt-4 pb-1 px-1">
-        <div className="flex items-baseline gap-2">
-          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-[10px] font-mono font-medium text-gray-600 tabular-nums">3</span>
-          <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">All Bookings</h2>
-        </div>
-        <p className="text-xs text-gray-400 mt-1 ml-7 leading-snug">
-          ค้นหา/กรองตาม Outlet · Status · Episode ID · ใช้ Export ด้านบนเพื่อโหลด CSV ของผลลัพธ์
-        </p>
-      </div>
+      <SectionLabel index={3} title="All Bookings"
+        hint={<>ค้นหา/กรองตาม Outlet · Status · Episode ID · ใช้ Export ด้านบนเพื่อโหลด CSV ของผลลัพธ์</>}
+      />
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-3 mt-3">
-        <input
-          className="border border-gray-300 rounded px-3 py-1.5 text-sm flex-1 min-w-48 focus:outline-none focus:border-[#673ab7]"
-          placeholder="Search by Episode ID, program, producer…"
-          value={search} onChange={e => setSearch(e.target.value)}
-        />
-        <select className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[#673ab7]"
-          value={outletFilter} onChange={e => setOutletFilter(e.target.value)}>
+      <div className="flex flex-wrap gap-2 mb-3 mt-3">
+        <div className="relative flex-1 min-w-48">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+          <input
+            className="ops-input pl-8"
+            placeholder="Search by Episode ID, program, producer…"
+            value={search} onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <select className="ops-input w-auto" value={outletFilter} onChange={e => setOutletFilter(e.target.value)}>
           <option value="">All Outlets</option>
           {OUTLETS.map(o => <option key={o.code} value={o.code}>{o.name}</option>)}
         </select>
-        <select className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[#673ab7]"
-          value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <select className="ops-input w-auto" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="">All Status</option>
-          {['REQUESTED','CONFIRMED','COMPLETED','CANCELLED'].map(s =>
+          {['REQUESTED','ASSIGNED','CONFIRMED','COMPLETED','CANCELLED'].map(s =>
             <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+      <div className="ops-card overflow-hidden">
         {loading ? (
-          <div className="py-16 text-center text-gray-400 text-sm">Loading…</div>
+          <div className="ops-empty">Loading…</div>
         ) : filtered.length === 0 ? (
-          <div className="py-16 text-center text-gray-400 text-sm">
-            No bookings match these filters.
-          </div>
+          <div className="ops-empty">No bookings match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[600px]">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                {['Date', 'Outlet / Program', 'Episode IDs', 'Producer', 'Status', ''].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map(b => (
-                <tr key={b.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-800">{formatDisplayDate(b.shootDate)}</div>
-                    <div className="text-xs text-gray-400">{b.callTime}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-gray-800">{b.outlet.name}</div>
-                    <div className="text-xs text-gray-500">{b.program.name}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {b.episodes.slice(0, 2).map(ep => (
-                        <span key={ep.episodeId} className="episode-badge">{ep.episodeId}</span>
-                      ))}
-                      {b.episodes.length > 2 && <span className="text-xs text-gray-400 self-center">+{b.episodes.length - 2}</span>}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">{b.producer}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(b.status)}`}>
-                      {b.status === 'REQUESTED' ? '[REQUESTED]' : statusLabel(b.status)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/${b.id}`} className="gf-link text-xs">View →</Link>
-                  </td>
+            <table className="ops-table min-w-[640px]">
+              <thead>
+                <tr>
+                  {['Date', 'Outlet / Program', 'Episode IDs', 'Producer', 'Status', ''].map(h => (
+                    <th key={h}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filtered.map(b => (
+                  <tr key={b.id} className="hover:bg-gray-50">
+                    <td>
+                      <div className="font-medium text-gray-800">{formatDisplayDate(b.shootDate)}</div>
+                      <div className="text-xs text-gray-400 tabular-nums">{b.callTime}</div>
+                    </td>
+                    <td>
+                      <div className="text-gray-800">{b.outlet.name}</div>
+                      <div className="text-xs text-gray-500">{b.program.name}</div>
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {b.episodes.slice(0, 2).map(ep => (
+                          <span key={ep.episodeId} className="episode-badge">{ep.episodeId}</span>
+                        ))}
+                        {b.episodes.length > 2 && <span className="text-xs text-gray-400 self-center">+{b.episodes.length - 2}</span>}
+                      </div>
+                    </td>
+                    <td className="text-gray-700">{b.producer}</td>
+                    <td><StatusPill status={b.status} /></td>
+                    <td>
+                      <Link href={`/dashboard/${b.id}`} className="text-xs text-brand-primary hover:underline">View →</Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function SectionLabel({ index, title, hint }: { index: number; title: string; hint: React.ReactNode }) {
+  return (
+    <div className="pt-4 pb-1 px-1">
+      <div className="flex items-baseline gap-2">
+        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-[10px] font-mono font-medium text-gray-600 tabular-nums">{index}</span>
+        <h2 className="ops-section-title">{title}</h2>
+      </div>
+      <p className="text-xs text-gray-400 mt-1 ml-7 leading-snug">{hint}</p>
     </div>
   )
 }

@@ -5,6 +5,138 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.28.0] — 2026-05-23
+
+### Changed — operations-console UI redesign (Home, 5-step booking wizard, Calendar drawer, inbox-style My Bookings)
+
+A full visual + IA pass to move the app away from a "Google-Form-on-a-page"
+look toward a modern, dense, internal-operations console. **No API, schema,
+or POST-payload changes** — same `/api/bookings` POST body, same calendar
+event behavior, same email triggers, same Producer Dashboard sync.
+
+**Design system (`tailwind.config.ts`, `src/app/globals.css`):**
+
+- New cool-neutral app background (`#F6F7F9`) replacing the legacy
+  `#F0EBF8` light-purple — quieter surface that lets content lead.
+- **Canonical status palette** added to the Tailwind theme
+  (`status-{requested|assigned|confirmed|completed|cancelled}-{50|500|700}`)
+  and exposed through a new `<StatusPill>` shared component so every
+  page renders status identically (dot, soft fill, border, label).
+- New `.ops-*` primitive classes (card, input, label, button, tab, choice,
+  table, empty) — 8px radius across the board, no nested cards. **Legacy
+  `.gf-*` classes preserved** for pages still using the Google-Form look
+  (login, manual, changelog, admin detail, booking success, OT).
+- Font defaults to Google Sans then Inter (was Inter only).
+
+**Information architecture:**
+
+- `/` is no longer the booking form. New home is an **Overview** page with:
+  3 KPI cards (Today / This week / Needs attention), Today's schedule,
+  My upcoming, Needs attention (REQUESTED bookings — the operator's main
+  queue). Cards link through to their detail pages.
+- The booking form moved to **`/new`** and is reachable from a persistent
+  `+ New Booking` CTA in the nav.
+- Nav reorganized: Overview · Calendar · My Bookings · Producer (gated) ·
+  Dashboard (admin) · Admin (admin). Secondary links (OT, Manual,
+  Changelog, Upload) now sit in a "More" dropdown on desktop. Compact
+  brand mark replaces the long "THE STANDARD · Production" wordmark.
+  Active route gets a filled dark chip rather than an underline.
+
+**Booking wizard (`src/app/_components/booking/BookingWizard.tsx`, new):**
+
+- Long form replaced by a **5-step wizard**: Project → Schedule →
+  Location → People & Crew → Review. Each step is a single card with a
+  clear heading + per-step validation; only the Review step's "Confirm &
+  Submit" actually POSTs.
+- **Desktop layout: two columns** — form on the left, **sticky live
+  summary on the right** (auto-fills as the user types; dot turns green
+  per group once filled).
+- **Mobile layout: single column** with a **fixed bottom action bar**
+  (Back · Step counter · Next/Submit) and a tap-to-expand summary above
+  it. Form fields stack and inputs have larger tap targets.
+- Stepper at the top shows completion ticks per step and is **clickable**
+  for jumping between visited steps.
+- Per-step error display preserved (inline `AlertCircle` under the field,
+  `aria-invalid`, top-of-form summary banner).
+- All cascade logic preserved (Outlet change clears Episode Type /
+  Project / Producer / Director / Episode picks + amber warning banner;
+  CA Producer change clears Project ID; CA Project change clears Episode
+  picks).
+- Submission payload bit-for-bit identical to v1.27.
+
+**Calendar (`src/app/calendar/page.tsx`):**
+
+- **View toggle**: Month (desktop default) vs **Agenda** (mobile default,
+  auto-detected). Agenda is a 30-day list grouped by day with a "Today"
+  badge — much easier to scan on a phone than the dense month grid.
+- **Detail drawer** replaces the hover tooltip + selected-day list. Click
+  any event chip or row → a side-sheet slides in (right on desktop,
+  bottom on mobile) with status, schedule, location, people, episode
+  list, and an "Open detail →" CTA to the existing detail page. Closes
+  on Escape and scrim click.
+- Day cells: event chips use neutral borders + a single status-color
+  dot (rather than full-color tinted backgrounds) — denser and reads
+  better when a day has 3+ bookings.
+
+**My Bookings (`src/app/my-bookings/page.tsx`):**
+
+- Inbox-style **6 tabs**: Upcoming · Requested · Assigned · Confirmed ·
+  Completed · Cancelled. Each tab shows a count chip. Upcoming sorts
+  ascending (soonest first); status tabs use API order.
+- Full-text search across episode ID, program, producer, location.
+- One fetch (`scope=mine`, limit 200), client-side bucketing — no
+  separate request per tab.
+- Empty state per tab points the right way (Upcoming → "create one").
+
+**Dashboard (`src/app/dashboard/page.tsx`):**
+
+- Status palette colors aligned with the rest of the app (status-token
+  values); donut now includes ASSIGNED.
+- All cards/tables converted to the `.ops-card` / `.ops-table` look —
+  consistent with Overview, Calendar, My Bookings.
+- Status column uses `<StatusPill>`.
+- Charts and filtering behavior unchanged.
+
+**Shared (`src/app/_components/StatusPill.tsx`, new):**
+
+- Single source of truth for status visuals. Used by Overview, Calendar
+  (legend + drawer), My Bookings, Dashboard.
+
+### Changed — `package.json`
+
+Version bump 1.27.0 → 1.28.0.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes (33 routes built; only pre-existing dynamic-server
+  warnings on `/api/ot/export` and `/api/ot/summary` — unrelated to this
+  PR, they use `headers()` for session).
+- No automated tests added — project has no test runner configured.
+  Manual verification path documented in `docs/ops-log.md` for this
+  release.
+
+### Tradeoffs / follow-ups
+
+- The wizard's per-step validation is duplicated from the legacy
+  whole-form `validate()`; consolidating into a typed Zod schema is a
+  natural next step but out of scope for a UI-only PR.
+- Calendar still uses a hand-rolled grid + date-fns rather than a calendar
+  library — view-toggle + drawer were added without changing that
+  foundation. Week view is not implemented yet (spec mentioned it as
+  optional for desktop); the agenda view + month view cover the
+  scan-by-day use case for now.
+- The Overview page assumes "Needs attention" === REQUESTED bookings the
+  current user can see. Admins see org-wide REQUESTED; non-admins see
+  only their own + confirmed-everywhere (existing API behavior). If we
+  want admins-only items here, we'd add a server-side `attention=true`
+  flag — flagged for a follow-up.
+- The legacy `/booking/[outlet]/page.tsx` (outlet-scoped form) was not
+  touched and still uses the old `.gf-*` styling. Removal candidate
+  if it's unused — verify before deleting.
+
+---
+
 ## [1.27.0] — 2026-05-23
 
 ### Changed — booking flow UX overhaul (form sections, Review step, inline errors)

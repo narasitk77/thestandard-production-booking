@@ -5,6 +5,93 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Operations-console UI redesign (v1.28.0) — no infra change
+
+**Scope:** UI/UX-only refactor across the user-facing surfaces. No schema
+migration, no env-var change, no API breakage. Same Postgres rows, same
+Google Calendar behavior, same email triggers, same Producer Dashboard
+sync as v1.27.0. Safe to roll forward via the usual GHCR auto-build on
+push to `fix/assign-email-real-results` / `main`; rollback is a plain
+image revert in Portainer.
+
+**What deploys can expect to see:**
+
+- **`/` is no longer the booking form.** It is now an Overview page with
+  KPI cards (Today / This week / Needs attention) and three lists
+  (Today's schedule, My upcoming, Needs attention). The booking form
+  moved to `/new`.
+- A persistent **`+ New Booking`** button in the nav goes to `/new` from
+  anywhere.
+- The booking form is now a **5-step wizard** (Project → Schedule →
+  Location → People & Crew → Review) with a sticky live summary on the
+  right (desktop) and a fixed bottom action bar with collapsible summary
+  (mobile). Submit only fires on the Review step's *Confirm & Submit*
+  button — first-time returning users will likely notice the new flow.
+- `/calendar` gets a Month/Agenda view toggle (auto-switches to Agenda
+  on narrow viewports) and a slide-in detail drawer replaces the hover
+  tooltip. Clicking any event opens the drawer.
+- `/my-bookings` is now an inbox with **6 tabs** (Upcoming · Requested ·
+  Assigned · Confirmed · Completed · Cancelled) and full-text search.
+- App background is `#F6F7F9` (cool neutral) instead of `#F0EBF8` (light
+  purple). Status pills, buttons, cards, and inputs all use the new
+  8px-radius `.ops-*` primitives.
+
+**Verification after redeploy:**
+
+1. Open `/` while signed in → Overview page renders 3 KPI cards + 3 panels.
+   Click *New Booking* → routes to `/new` (the wizard).
+2. On `/new`:
+   - Try to click *Next* on step 1 with nothing filled → red inline errors
+     under each required field.
+   - Pick a CA outlet (AGN) → Project ID + Episodes UI appears in step 4
+     (was step 4 previously, location unchanged).
+   - Walk through to step 5 (Review) → values populate; click *Edit* on
+     any block → jumps back to the matching step.
+   - *Confirm & Submit* on step 5 → existing success page; calendar invite
+     fires with guests; Producer Dashboard sheet row appears (CA only).
+   - On a phone-sized viewport: bottom action bar visible; tap *Summary*
+     → expanded summary panel; tap *Next* → advances step.
+3. `/calendar` → Month view loads by default on desktop; on mobile, Agenda
+   view auto-selected. Click any event chip → drawer slides in
+   (right-side on desktop, bottom sheet on mobile). Press Esc → drawer
+   closes.
+4. `/my-bookings` → 6 tabs with count chips. *Requested* tab is the queue
+   for items awaiting coordinator action.
+5. `/dashboard` (admin) → status colors match the rest of the app; donut
+   includes ASSIGNED slice; status column in the table renders the new
+   pill.
+6. Confirm legacy pages still work: `/manual`, `/changelog`, `/login`,
+   `/admin/*`, `/ot/*`, `/booking/success`. These deliberately still use
+   the legacy `.gf-*` look — no visual regression intended there.
+
+**Rollback trigger:** any regression in booking POST payload, calendar
+event creation, Producer Dashboard sheet writes, or assignment email —
+revert image tag in Portainer to v1.27.0.
+
+**Files changed (UI only):**
+
+- `tailwind.config.ts` — added `status-*` palette + `app` bg + `card`
+  radius alias; safelisted dynamic status classes for purge.
+- `src/app/globals.css` — added `.ops-*` primitives (card, input, label,
+  button, tab, choice, table, empty). Legacy `.gf-*` kept.
+- `src/app/layout.tsx` — unchanged behavior; visual changes inherit
+  through globals.css.
+- `src/app/_components/Nav.tsx` — primary/secondary split, More
+  dropdown, compact brand, active-route chip, new CTA destination
+  (`/new`).
+- `src/app/_components/StatusPill.tsx` — new shared component.
+- `src/app/_components/booking/BookingWizard.tsx` — new wizard.
+- `src/app/page.tsx` — replaced legacy booking-form-as-home with
+  Overview.
+- `src/app/new/page.tsx` — new route renders the wizard.
+- `src/app/calendar/page.tsx` — view toggle, agenda list, detail drawer.
+- `src/app/my-bookings/page.tsx` — inbox-style multi-tab.
+- `src/app/dashboard/page.tsx` — refined chrome, status palette alignment,
+  StatusPill in table.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-23 · Booking flow UX overhaul (v1.27.0) — no infra change
 
 **Scope:** UI/UX-only refactor of the booking surfaces. No schema migration,

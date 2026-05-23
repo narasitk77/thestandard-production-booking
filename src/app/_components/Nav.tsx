@@ -2,130 +2,218 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { Menu, X, Plus } from 'lucide-react'
+import { usePathname } from 'next/navigation'
+import { Menu, X, Plus, ChevronDown } from 'lucide-react'
 import { signOut } from 'next-auth/react'
 
 interface NavProps {
   session: { email: string; role: 'USER' | 'ADMIN' } | null
-  // True only for Production-team members and admins — gates the OT menu.
   canSeeOT?: boolean
-  // True for admins + Producer/Co-Producer positions — gates the Producer menu.
   canSeeProducer?: boolean
 }
 
+/**
+ * Operations-console nav: compact, sticky, with a single primary CTA
+ * (+ New Booking) and a denser link row. Mobile uses a slide-down sheet.
+ *
+ * Pages a user touches daily live in `primary`; docs/dev utilities live
+ * in `secondary` behind a divider.
+ */
 export default function Nav({ session, canSeeOT = false, canSeeProducer = false }: NavProps) {
   const [open, setOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const pathname = usePathname() || '/'
   const isAdmin = session?.role === 'ADMIN'
+  const close = () => { setOpen(false); setMoreOpen(false) }
 
-  const close = () => setOpen(false)
+  const isActive = (href: string) =>
+    href === '/'
+      ? pathname === '/'
+      : pathname === href || pathname.startsWith(href + '/')
 
-  // Primary nav: actions a user reaches for daily. Order matters — left-to-right
-  // matches the typical task flow (book → check schedule → check status).
-  const primary = (
-    <>
-      <Link href="/calendar" onClick={close} className="gf-link block py-2 md:py-0">Calendar</Link>
-      {session && <Link href="/my-bookings" onClick={close} className="gf-link block py-2 md:py-0">My Bookings</Link>}
-      {canSeeProducer && <Link href="/producer" onClick={close} className="gf-link block py-2 md:py-0">Producer</Link>}
-      {isAdmin && <Link href="/dashboard" onClick={close} className="gf-link block py-2 md:py-0">Dashboard</Link>}
-      {isAdmin && (
-        <Link href="/admin" onClick={close} className="block py-2 md:py-0 text-[#db4437] text-sm hover:underline font-medium">
-          Admin
-        </Link>
-      )}
-    </>
-  )
+  // Active-link style — a subtle filled chip rather than an underline; reads
+  // well at small text sizes on dense nav.
+  const linkClass = (active: boolean, extra = '') =>
+    `px-2.5 py-1.5 text-sm rounded-md transition-colors ${
+      active
+        ? 'bg-gray-900 text-white'
+        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+    } ${extra}`
 
-  // Secondary nav: docs, team-tools, and dev utilities — rendered smaller and
-  // pushed behind a divider so they don't compete with the daily-use links.
-  const secondary = (
-    <>
-      {canSeeOT && <Link href="/ot" onClick={close} className="text-xs text-gray-500 hover:text-gray-800 block py-2 md:py-0">OT</Link>}
-      <Link href="/manual" onClick={close} className="text-xs text-gray-500 hover:text-gray-800 block py-2 md:py-0">คู่มือ</Link>
-      <Link href="/changelog" onClick={close} className="text-xs text-gray-500 hover:text-gray-800 block py-2 md:py-0">อัปเดต</Link>
-      {isAdmin && (
-        <Link href="/upload" onClick={close} className="text-xs text-gray-400 hover:text-gray-700 block py-2 md:py-0">
-          Upload <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded ml-0.5">DEV</span>
-        </Link>
-      )}
-    </>
-  )
+  type Item = { href: string; label: string; show: boolean; tone?: 'default' | 'danger' }
+  const primary: Item[] = ([
+    { href: '/', label: 'Overview', show: !!session },
+    { href: '/calendar', label: 'Calendar', show: true },
+    { href: '/my-bookings', label: 'My Bookings', show: !!session },
+    { href: '/producer', label: 'Producer', show: !!canSeeProducer },
+    { href: '/dashboard', label: 'Dashboard', show: !!isAdmin },
+    { href: '/admin', label: 'Admin', show: !!isAdmin, tone: 'danger' as const },
+  ] as Item[]).filter(i => i.show)
+
+  const secondary: Item[] = [
+    { href: '/ot', label: 'OT', show: !!canSeeOT },
+    { href: '/manual', label: 'คู่มือ', show: true },
+    { href: '/changelog', label: 'อัปเดต', show: true },
+    { href: '/upload', label: 'Upload', show: !!isAdmin },
+  ].filter(i => i.show)
 
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-30">
-      <div className="px-4 py-2 flex items-center justify-between text-sm gap-2">
-        <Link href={session ? '/' : '/login'} className="text-gray-600 font-medium whitespace-nowrap">
-          THE STANDARD · Production
+      <div className="px-3 sm:px-4 h-12 flex items-center gap-2">
+        {/* Brand */}
+        <Link
+          href={session ? '/' : '/login'}
+          className="flex items-center gap-2 text-gray-900 font-semibold text-sm whitespace-nowrap mr-2"
+          aria-label="THE STANDARD Production"
+        >
+          <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-gray-900 text-white text-[10px] font-bold tracking-wide">TS</span>
+          <span className="hidden sm:inline">Production</span>
         </Link>
 
-        {/* Desktop links */}
-        <div className="hidden md:flex gap-4 items-center">
-          {/* Persistent primary CTA — always one click away on every page. */}
+        {/* Desktop primary links */}
+        <div className="hidden md:flex items-center gap-1 flex-1 min-w-0">
+          {primary.map(item => (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={close}
+              className={linkClass(isActive(item.href), item.tone === 'danger' && !isActive(item.href) ? 'text-red-600 hover:text-red-700' : '')}
+            >
+              {item.label}
+            </Link>
+          ))}
+
+          {secondary.length > 0 && (
+            <div className="relative ml-1">
+              <button
+                onClick={() => setMoreOpen(o => !o)}
+                onBlur={() => setTimeout(() => setMoreOpen(false), 150)}
+                className={linkClass(false, 'inline-flex items-center')}
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+              >
+                More <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
+              </button>
+              {moreOpen && (
+                <div className="absolute top-full right-0 mt-1 min-w-[160px] bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-40">
+                  {secondary.map(item => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={close}
+                      className={`block px-3 py-1.5 text-sm ${isActive(item.href) ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
+                    >
+                      {item.label}
+                      {item.href === '/upload' && (
+                        <span className="text-[10px] bg-yellow-100 text-yellow-800 px-1 rounded ml-1.5">DEV</span>
+                      )}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right cluster: CTA + identity (desktop) */}
+        <div className="hidden md:flex items-center gap-2 ml-auto">
           {session && (
             <Link
-              href="/"
-              className="gf-submit text-xs inline-flex items-center gap-1 py-1.5"
+              href="/new"
+              className="ops-btn-primary ops-btn-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               New Booking
             </Link>
           )}
-          {primary}
-          {(canSeeOT || isAdmin) && <span className="text-gray-200">|</span>}
-          {secondary}
           {session ? (
-            <>
-              <span className="text-xs text-gray-400 border-l border-gray-200 pl-3 ml-1 truncate max-w-[180px]">
-                {session.email}
-              </span>
+            <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+              <span className="text-xs text-gray-500 truncate max-w-[160px]">{session.email}</span>
               <button
                 onClick={() => signOut({ callbackUrl: '/login' })}
                 className="text-xs text-gray-500 hover:text-red-600">
                 Sign out
               </button>
-            </>
+            </div>
           ) : (
-            <Link href="/login" className="gf-link">Sign in</Link>
+            <Link href="/login" className="ops-btn-secondary ops-btn-sm">Sign in</Link>
           )}
         </div>
 
-        {/* Mobile hamburger */}
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="md:hidden p-2 -mr-2 text-gray-600 hover:text-gray-900"
-          aria-label="Menu">
-          {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+        {/* Mobile right cluster: CTA + hamburger */}
+        <div className="md:hidden flex items-center gap-2 ml-auto">
+          {session && (
+            <Link
+              href="/new"
+              className="ops-btn-primary ops-btn-sm"
+              aria-label="New Booking"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden xs:inline">New</span>
+            </Link>
+          )}
+          <button
+            onClick={() => setOpen(o => !o)}
+            className="p-1.5 -mr-1 text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100"
+            aria-label="Menu"
+            aria-expanded={open}
+          >
+            {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </div>
 
-      {/* Mobile dropdown */}
+      {/* Mobile sheet */}
       {open && (
-        <div className="md:hidden border-t border-gray-100 px-4 py-2 bg-white shadow-sm">
-          <div className="flex flex-col gap-1 text-sm">
-            {session && (
-              <Link
-                href="/"
-                onClick={close}
-                className="gf-submit text-xs inline-flex items-center gap-1 self-start mb-2"
-              >
-                <Plus className="w-3.5 h-3.5" /> New Booking
-              </Link>
-            )}
-            {primary}
-            <div className="border-t border-gray-100 mt-2 pt-2 flex flex-col gap-1">
-              {secondary}
+        <div className="md:hidden border-t border-gray-100 bg-white shadow-sm">
+          <div className="px-3 py-2 flex flex-col">
+            <div className="flex flex-col">
+              {primary.map(item => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={close}
+                  className={`py-2.5 px-2 text-sm rounded-md ${
+                    isActive(item.href)
+                      ? 'bg-gray-900 text-white font-medium'
+                      : item.tone === 'danger'
+                        ? 'text-red-600 hover:bg-red-50'
+                        : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
             </div>
-            <div className="border-t border-gray-100 pt-2 mt-2">
+            {secondary.length > 0 && (
+              <div className="border-t border-gray-100 mt-2 pt-2 flex flex-col">
+                {secondary.map(item => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={close}
+                    className={`py-2 px-2 text-xs rounded-md ${isActive(item.href) ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'}`}
+                  >
+                    {item.label}
+                    {item.href === '/upload' && (
+                      <span className="text-[10px] bg-yellow-100 text-yellow-800 px-1 rounded ml-1.5">DEV</span>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            )}
+            <div className="border-t border-gray-100 mt-2 pt-2">
               {session ? (
-                <>
-                  <div className="text-xs text-gray-400 mb-2 truncate">{session.email}</div>
+                <div className="flex items-center justify-between px-2 py-1">
+                  <span className="text-xs text-gray-500 truncate flex-1">{session.email}</span>
                   <button
-                    onClick={() => { setOpen(false); signOut({ callbackUrl: '/login' }) }}
-                    className="text-sm text-red-600 py-2">
+                    onClick={() => { close(); signOut({ callbackUrl: '/login' }) }}
+                    className="text-xs text-red-600 px-2 py-1">
                     Sign out
                   </button>
-                </>
+                </div>
               ) : (
-                <Link href="/login" onClick={close} className="gf-link block py-2">Sign in</Link>
+                <Link href="/login" onClick={close} className="block py-2 px-2 text-sm text-gray-700">Sign in</Link>
               )}
             </div>
           </div>

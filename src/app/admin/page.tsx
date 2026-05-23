@@ -53,7 +53,7 @@ export default function AdminPage() {
             <Link href="/admin/permissions" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
               Permissions
             </Link>
-            <Link href="/" className="gf-submit text-xs sm:text-sm">+ New</Link>
+            <Link href="/new" className="gf-submit text-xs sm:text-sm">+ New</Link>
           </div>
         </div>
         <p className="text-xs sm:text-sm text-gray-500 mt-1">

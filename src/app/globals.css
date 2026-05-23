@@ -3,63 +3,143 @@
 @tailwind utilities;
 
 @layer base {
-  html { font-family: 'Google Sans', Roboto, Arial, sans-serif; }
-  body { @apply bg-[#F0EBF8] min-h-screen; }
+  html { font-family: 'Google Sans', 'Inter', Roboto, Arial, sans-serif; }
+  body {
+    @apply bg-app text-gray-800 min-h-screen antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
   /* Larger tap targets on touch devices */
   button, a, input[type="checkbox"], input[type="radio"] {
     @apply touch-manipulation;
   }
   /* Prevent horizontal scroll on mobile */
   html, body { @apply overflow-x-hidden; }
+
+  /* Restore native form control affordance — Tailwind's preflight strips it. */
+  select { background-image: none; }
+
+  /* Smaller, denser headings everywhere */
+  h1 { @apply text-lg sm:text-xl font-semibold text-gray-900 tracking-tight; }
+  h2 { @apply text-sm font-semibold text-gray-800; }
+  h3 { @apply text-sm font-medium text-gray-800; }
 }
 
 @layer components {
-  /* Google Form card */
+  /* ============================================================
+     Legacy .gf-* classes — preserved for pages that still use the
+     Google-Forms-inspired look (login, manual, changelog, admin
+     detail forms, success page, OT). New surfaces use .ops-* below.
+     ============================================================ */
   .gf-card {
     @apply bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden;
   }
-
-  /* Header card – red accent top bar */
   .gf-header {
     @apply bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden border-t-8 border-t-[#db4437];
   }
-
-  /* Underline-style input */
   .gf-input {
-    @apply w-full border-0 border-b border-gray-300 focus:border-b-2 focus:border-[#673ab7] outline-none bg-transparent py-1 text-sm text-gray-800 placeholder:text-gray-400 transition-colors;
+    @apply w-full border-0 border-b border-gray-300 focus:border-b-2 focus:border-brand-primary outline-none bg-transparent py-1 text-sm text-gray-800 placeholder:text-gray-400 transition-colors;
   }
-
   .gf-select {
-    @apply w-full border-0 border-b border-gray-300 focus:border-b-2 focus:border-[#673ab7] outline-none bg-transparent py-1 text-sm text-gray-800 transition-colors appearance-none cursor-pointer;
+    @apply w-full border-0 border-b border-gray-300 focus:border-b-2 focus:border-brand-primary outline-none bg-transparent py-1 text-sm text-gray-800 transition-colors appearance-none cursor-pointer;
   }
-
-  .gf-label {
-    @apply block text-sm text-gray-700 mb-3;
-  }
-
-  .gf-required {
-    @apply text-[#db4437] ml-0.5;
-  }
-
-  /* Radio / Checkbox row */
+  .gf-label { @apply block text-sm text-gray-700 mb-3; }
+  .gf-required { @apply text-[#db4437] ml-0.5; }
   .gf-option {
     @apply flex items-center gap-3 py-1.5 cursor-pointer hover:bg-gray-50 px-2 -mx-2 rounded;
   }
-
   .gf-submit {
-    @apply px-6 py-2 bg-[#673ab7] text-white text-sm font-medium rounded hover:bg-[#512da8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-4 py-2 bg-brand-primary text-white text-sm font-medium rounded-lg hover:bg-brand-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
   }
-
-  .gf-link {
-    @apply text-[#1a73e8] text-sm hover:underline;
-  }
-
+  .gf-link { @apply text-[#1a73e8] text-sm hover:underline; }
   .episode-badge {
     @apply inline-flex items-center px-2 py-0.5 rounded bg-gray-800 text-white text-xs font-mono;
   }
+  .gf-section { @apply gf-card p-4 sm:p-6; }
 
-  /* Responsive padding helper for booking form sections */
-  .gf-section {
-    @apply gf-card p-4 sm:p-6;
+  /* ============================================================
+     v1.28 operations-console primitives.
+     Used by: Home/Overview, New Booking wizard, Calendar, My Bookings,
+     and refined Dashboard. Compact, dense, work-focused.
+     ============================================================ */
+
+  /* Card — single elevation level, 8px radius, no nested cards. */
+  .ops-card { @apply bg-white rounded-lg border border-gray-200; }
+  .ops-card-pad { @apply p-4 sm:p-5; }
+
+  /* Section title above content blocks. */
+  .ops-section-title {
+    @apply text-[11px] font-semibold text-gray-500 uppercase tracking-wider;
   }
+
+  /* Text input / select / textarea. */
+  .ops-input {
+    @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800
+           placeholder:text-gray-400 outline-none bg-white
+           focus:border-brand-primary focus:ring-1 focus:ring-brand-primary
+           transition-colors
+           disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed;
+  }
+  .ops-input-invalid {
+    @apply border-red-400 focus:border-red-500 focus:ring-red-500;
+  }
+  .ops-label {
+    @apply block text-xs font-medium text-gray-600 mb-1.5;
+  }
+  .ops-required { @apply text-red-500 ml-0.5; }
+  .ops-help { @apply text-xs text-gray-500 mt-1.5 leading-snug; }
+
+  /* Buttons. */
+  .ops-btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium
+           rounded-lg transition-colors whitespace-nowrap
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .ops-btn-primary {
+    @apply ops-btn bg-brand-primary text-white hover:bg-brand-primary-hover active:bg-brand-primary-active;
+  }
+  .ops-btn-secondary {
+    @apply ops-btn border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100;
+  }
+  .ops-btn-ghost {
+    @apply ops-btn text-gray-600 hover:bg-gray-100;
+  }
+  .ops-btn-danger {
+    @apply ops-btn border border-red-200 text-red-700 bg-white hover:bg-red-50;
+  }
+  .ops-btn-sm { @apply px-2.5 py-1 text-xs; }
+
+  /* Tab row. */
+  .ops-tab {
+    @apply px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md text-gray-600
+           hover:bg-gray-100 transition-colors whitespace-nowrap;
+  }
+  .ops-tab-active { @apply bg-gray-900 text-white hover:bg-gray-800; }
+
+  /* Selectable choice (radio / checkbox row). Reused in Project / Location steps. */
+  .ops-choice {
+    @apply flex items-start gap-2.5 py-2 px-3 rounded-lg border border-gray-200 cursor-pointer
+           hover:border-gray-400 hover:bg-gray-50 transition-colors;
+  }
+  .ops-choice-selected {
+    @apply border-brand-primary bg-brand-primary/5;
+  }
+
+  /* Dense table primitive. */
+  .ops-table { @apply w-full text-sm; }
+  .ops-table thead tr {
+    @apply text-[11px] uppercase tracking-wider text-gray-500 bg-gray-50;
+  }
+  .ops-table th { @apply text-left px-3 py-2 font-medium; }
+  .ops-table td { @apply px-3 py-2.5 align-middle border-t border-gray-100; }
+
+  /* Empty / loading states. */
+  .ops-empty {
+    @apply text-center text-sm text-gray-400 py-10 px-4;
+  }
+}
+
+@layer utilities {
+  /* Hide horizontal scrollbars on tab row / chip strips without disabling scroll. */
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
 }

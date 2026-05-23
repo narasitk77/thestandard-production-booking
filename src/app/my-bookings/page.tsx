@@ -1,108 +1,211 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { formatDisplayDate, statusLabel } from '@/lib/utils'
+import { Loader2, Plus, Search, Inbox } from 'lucide-react'
+import { format, parseISO, startOfToday, isAfter, isToday } from 'date-fns'
+import StatusPill from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string }
 interface Booking {
-  id: string; shootDate: string; callTime: string; status: string
-  shootType: string; producer: string
+  id: string
+  shootDate: string
+  shootEndDate?: string | null
+  callTime: string
+  estimatedWrap?: string
+  status: string
+  shootType: string
+  locationName?: string
+  producer: string
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  REQUESTED: 'bg-red-100 text-red-700 border border-red-200',
-  ASSIGNED:  'bg-yellow-100 text-yellow-700 border border-yellow-200',
-  CONFIRMED: 'bg-green-100 text-green-700 border border-green-200',
-  CANCELLED: 'bg-gray-100 text-gray-500 border border-gray-200',
-  COMPLETED: 'bg-blue-100 text-blue-700 border border-blue-200',
-}
+type TabKey = 'upcoming' | 'REQUESTED' | 'ASSIGNED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED'
+
+const TABS: { key: TabKey; label: string; short: string }[] = [
+  { key: 'upcoming',  label: 'Upcoming',  short: 'Upcoming' },
+  { key: 'REQUESTED', label: 'Requested', short: 'Requested' },
+  { key: 'ASSIGNED',  label: 'Assigned',  short: 'Assigned' },
+  { key: 'CONFIRMED', label: 'Confirmed', short: 'Confirmed' },
+  { key: 'COMPLETED', label: 'Completed', short: 'Done' },
+  { key: 'CANCELLED', label: 'Cancelled', short: 'X' },
+]
 
 export default function MyBookingsPage() {
-  const [bookings, setBookings] = useState<Booking[]>([])
-  const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'mine' | 'confirmed'>('mine')
+  const [bookings, setBookings] = useState<Booking[] | null>(null)
+  const [tab, setTab] = useState<TabKey>('upcoming')
+  const [search, setSearch] = useState('')
 
+  // Fetch once with scope=mine, then filter client-side per tab. The API
+  // already handles "mine" vs "all confirmed" — for an inbox we want the
+  // user-owned/assigned set across all statuses.
   useEffect(() => {
-    setLoading(true)
-    const scope = tab === 'mine' ? 'mine' : ''
-    const status = tab === 'confirmed' ? 'CONFIRMED' : ''
-    const params = new URLSearchParams({ limit: '50', ...(scope && { scope }), ...(status && { status }) })
-    fetch(`/api/bookings?${params}`)
+    setBookings(null)
+    fetch('/api/bookings?scope=mine&limit=200')
       .then(r => r.json())
       .then(d => setBookings(d.bookings || []))
-      .finally(() => setLoading(false))
-  }, [tab])
+      .catch(() => setBookings([]))
+  }, [])
+
+  const loading = bookings === null
+
+  // Per-tab counts shown on tab pills.
+  const counts = useMemo(() => {
+    const b = bookings || []
+    const today0 = startOfToday()
+    return {
+      upcoming: b.filter(x => {
+        const d = parseISO(x.shootDate)
+        if (isNaN(d.getTime())) return false
+        if (x.status === 'CANCELLED') return false
+        return isToday(d) || isAfter(d, today0)
+      }).length,
+      REQUESTED: b.filter(x => x.status === 'REQUESTED').length,
+      ASSIGNED: b.filter(x => x.status === 'ASSIGNED').length,
+      CONFIRMED: b.filter(x => x.status === 'CONFIRMED').length,
+      COMPLETED: b.filter(x => x.status === 'COMPLETED').length,
+      CANCELLED: b.filter(x => x.status === 'CANCELLED').length,
+    } as Record<TabKey, number>
+  }, [bookings])
+
+  const filtered = useMemo(() => {
+    const b = bookings || []
+    const today0 = startOfToday()
+    let list = b
+    if (tab === 'upcoming') {
+      list = b.filter(x => {
+        const d = parseISO(x.shootDate)
+        if (isNaN(d.getTime())) return false
+        if (x.status === 'CANCELLED') return false
+        return isToday(d) || isAfter(d, today0)
+      })
+      // Upcoming sorts ascending — soonest first — opposite the API default.
+      list = [...list].sort((a, b) => a.shootDate.localeCompare(b.shootDate))
+    } else {
+      list = b.filter(x => x.status === tab)
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      list = list.filter(x => {
+        const hay = [
+          x.outlet.name, x.outlet.code, x.program.name,
+          x.producer, x.locationName || '',
+          ...x.episodes.map(e => `${e.episodeId} ${e.title}`),
+        ].join(' ').toLowerCase()
+        return hay.includes(q)
+      })
+    }
+    return list
+  }, [bookings, tab, search])
 
   return (
-    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
-      <div className="flex items-start sm:items-center justify-between gap-2 mb-4 flex-wrap">
+    <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+      <div className="flex items-start justify-between gap-2 mb-4 flex-wrap">
         <div>
-          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">My Bookings</h1>
-          <p className="text-xs sm:text-sm text-gray-500">Bookings you requested or are assigned to</p>
+          <h1>My Bookings</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Bookings you created or were assigned to.
+          </p>
         </div>
-        <Link href="/" className="gf-submit text-xs sm:text-sm">+ New</Link>
+        <Link href="/new" className="ops-btn-primary"><Plus className="w-4 h-4" /> New Booking</Link>
       </div>
 
-      <div className="flex gap-1 sm:gap-2 mb-4 border-b border-gray-200 overflow-x-auto -mx-3 sm:mx-0 px-3 sm:px-0">
-        {[
-          { key: 'mine', label: 'Mine (Requested + Assigned)', mobile: 'Mine' },
-          { key: 'confirmed', label: 'All Confirmed', mobile: 'Confirmed' },
-        ].map(t => (
-          <button key={t.key} onClick={() => setTab(t.key as any)}
-            className={`px-3 sm:px-4 py-2 text-xs sm:text-sm border-b-2 -mb-px whitespace-nowrap ${
-              tab === t.key
-                ? 'border-[#673ab7] text-[#673ab7] font-medium'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}>
-            <span className="sm:hidden">{t.mobile}</span>
-            <span className="hidden sm:inline">{t.label}</span>
-          </button>
-        ))}
+      {/* Tabs */}
+      <div className="flex items-center gap-1 overflow-x-auto scrollbar-none -mx-3 px-3 sm:mx-0 sm:px-0 mb-3 border-b border-gray-200">
+        {TABS.map(t => {
+          const active = tab === t.key
+          const count = counts[t.key]
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`whitespace-nowrap px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
+                active
+                  ? 'border-gray-900 text-gray-900 font-medium'
+                  : 'border-transparent text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              <span className="sm:hidden">{t.short}</span>
+              <span className="hidden sm:inline">{t.label}</span>
+              {count > 0 && (
+                <span className={`ml-1.5 text-[10px] tabular-nums px-1.5 py-0.5 rounded-full ${active ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-3">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search by episode ID, program, producer, location…"
+          className="ops-input pl-8"
+        />
       </div>
 
       {loading ? (
-        <div className="py-20 text-center text-gray-400 text-sm">Loading…</div>
-      ) : bookings.length === 0 ? (
-        <div className="py-20 text-center text-gray-400 text-sm">
-          No bookings here. <Link href="/" className="gf-link">Create one</Link>
+        <div className="ops-card ops-empty">
+          <Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="ops-card ops-empty">
+          <Inbox className="w-6 h-6 text-gray-300 mx-auto mb-2" />
+          {search.trim() ? (
+            <>
+              No bookings match &ldquo;{search}&rdquo;.
+              <button onClick={() => setSearch('')} className="ml-2 text-brand-primary hover:underline text-xs">Clear search</button>
+            </>
+          ) : tab === 'upcoming' ? (
+            <>No upcoming bookings — <Link href="/new" className="text-brand-primary hover:underline">create one</Link></>
+          ) : (
+            <>No {tab.toLowerCase()} bookings.</>
+          )}
         </div>
       ) : (
-        <div className="space-y-2">
-          {bookings.map(b => (
-            <Link key={b.id} href={`/dashboard/${b.id}`}
-              className="gf-card p-4 flex items-center gap-4 hover:border-[#673ab7] transition-colors">
-              <div className="flex-shrink-0 text-center w-20">
-                {(() => {
-                  const d = new Date(b.shootDate)
-                  const valid = !isNaN(d.getTime())
-                  return (
-                    <>
-                      <div className="text-xs text-gray-400">{valid ? formatDisplayDate(b.shootDate).split(' ')[0] : '—'}</div>
-                      <div className="text-lg font-medium text-gray-800">{valid ? String(d.getDate()).padStart(2,'0') : '--'}</div>
-                      <div className="text-xs text-gray-400">{b.callTime}</div>
-                    </>
-                  )
-                })()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-gray-800 font-medium truncate">{b.outlet.name} · {b.program.name}</div>
-                <div className="text-xs text-gray-500 mt-0.5">
-                  {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}
-                  {b.episodes.length > 2 && ` +${b.episodes.length - 2}`}
-                </div>
-                <div className="text-xs text-gray-400 mt-0.5">Producer: {b.producer}</div>
-              </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || ''}`}>
-                {statusLabel(b.status).replace(/[\[\]]/g, '')}
-              </span>
-            </Link>
-          ))}
-        </div>
+        <ul className="ops-card divide-y divide-gray-100 overflow-hidden">
+          {filtered.map(b => <BookingRow key={b.id} b={b} />)}
+        </ul>
       )}
     </div>
+  )
+}
+
+function BookingRow({ b }: { b: Booking }) {
+  const d = parseISO(b.shootDate)
+  const valid = !isNaN(d.getTime())
+  return (
+    <li>
+      <Link
+        href={`/dashboard/${b.id}`}
+        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex-shrink-0 w-14 text-center">
+          <div className="text-[10px] text-gray-400 uppercase">{valid ? format(d, 'EEE') : '—'}</div>
+          <div className="text-base font-semibold text-gray-800 tabular-nums leading-none">{valid ? format(d, 'd') : '--'}</div>
+          <div className="text-[10px] text-gray-400 tabular-nums mt-0.5">{b.callTime}</div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-gray-900 font-medium truncate">
+            <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
+            {b.program.name}
+          </div>
+          <div className="text-xs text-gray-500 truncate mt-0.5">
+            {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}
+            {b.episodes.length > 2 && ` +${b.episodes.length - 2}`}
+            {b.locationName && <> · {b.locationName}</>}
+          </div>
+          <div className="text-xs text-gray-400 truncate mt-0.5">Producer: {b.producer}</div>
+        </div>
+        <StatusPill status={b.status} />
+      </Link>
+    </li>
   )
 }
