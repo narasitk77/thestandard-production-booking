@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.28.1] — 2026-05-23
+
+### Changed — booking wizard step 4 field order
+
+In the People & Crew step (CA flow), the field order now reads top-to-bottom
+as the actual cascade chain: **Producer → Project ID → Episodes → Director →
+Crew → Notes**. Previously Director sat between Producer and Project, which
+made the "pick Producer first so the Project list filters" relationship
+harder to spot.
+
+No data-model, validation, or POST-payload changes — purely a JSX reorder
+in `src/app/_components/booking/BookingWizard.tsx`. Director is still
+required for CA bookings.
+
+---
+
 ## [1.28.0] — 2026-05-23
 
 ### Changed — operations-console UI redesign (Home, 5-step booking wizard, Calendar drawer, inbox-style My Bookings)

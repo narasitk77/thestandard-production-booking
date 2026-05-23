@@ -849,34 +849,9 @@ export default function BookingWizard() {
                   )}
                 </div>
 
-                {/* Director — CA only */}
-                {isContentAgency && (
-                  <div>
-                    <Label htmlFor="directorEmail" required>Director</Label>
-                    <select
-                      id="directorEmail"
-                      className={`ops-input ${fieldErrors.directorEmail ? 'ops-input-invalid' : ''}`}
-                      value={directorEmail}
-                      onChange={e => setDirectorEmail(e.target.value)}
-                      disabled={peopleLoading}
-                      aria-invalid={!!fieldErrors.directorEmail}
-                    >
-                      <option value="">
-                        {peopleLoading
-                          ? 'Loading…'
-                          : directors.length === 0
-                            ? '— No directors loaded (sheet unreachable) —'
-                            : '— Select Director —'}
-                      </option>
-                      {directors.map(d => (
-                        <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
-                      ))}
-                    </select>
-                    <FieldError message={fieldErrors.directorEmail} />
-                  </div>
-                )}
-
-                {/* Project ID + Episodes — CA only */}
+                {/* Project ID + Episodes — CA only.
+                    Ordered right after Producer so the project list filters by
+                    the selected Producer; Director comes after this block. */}
                 {isContentAgency && (
                   <div>
                     <Label htmlFor="projectId" required={projectSelectable}>Project ID
@@ -960,6 +935,36 @@ export default function BookingWizard() {
                         <FieldError message={fieldErrors.selectedEpisodeIds} />
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Director — CA only.
+                    Moved below Project so the producer→project filter chain
+                    reads top-to-bottom: pick Producer, then Project (filtered),
+                    then Episodes (depend on Project), then Director. */}
+                {isContentAgency && (
+                  <div>
+                    <Label htmlFor="directorEmail" required>Director</Label>
+                    <select
+                      id="directorEmail"
+                      className={`ops-input ${fieldErrors.directorEmail ? 'ops-input-invalid' : ''}`}
+                      value={directorEmail}
+                      onChange={e => setDirectorEmail(e.target.value)}
+                      disabled={peopleLoading}
+                      aria-invalid={!!fieldErrors.directorEmail}
+                    >
+                      <option value="">
+                        {peopleLoading
+                          ? 'Loading…'
+                          : directors.length === 0
+                            ? '— No directors loaded (sheet unreachable) —'
+                            : '— Select Director —'}
+                      </option>
+                      {directors.map(d => (
+                        <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
+                      ))}
+                    </select>
+                    <FieldError message={fieldErrors.directorEmail} />
                   </div>
                 )}
 
