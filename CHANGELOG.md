@@ -5,6 +5,154 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.29.0] — 2026-05-23
+
+### Added — calendar guest auto-reconciler + strict "no event without guests" path
+
+Layered on top of v1.28.2's synchronous-assign fix. After v1.28.2 went out,
+ops observed that the underlying Google Calendar invite path can still fail
+transiently (DWD impersonation token blip, network hiccup, attendees patch
+rejected mid-flight). Those events would heal only on the next manual
+re-assign. This release adds an **automated reconciliation loop** that
+detects and repairs guest drift on its own, plus a stricter create path so
+a missing-guest event is no longer treated as success.
+
+**New module — `src/lib/calendar-reconcile.ts`:**
+
+- `reconcileCalendarGuests({ limit, actorEmail, dryRun? })` pulls
+  CONFIRMED bookings that have `assignedEmails`, fetches each booking's
+  Google Calendar event, and reconciles drift:
+  - No `calendarEventId` on the booking → create event with guests baked
+    in, **verify the guests landed by re-fetching the event**, persist
+    `calendarEventId`. If the verification fails, delete the half-created
+    event and surface the error.
+  - Event exists but disappeared on Google's side (404) → same recreate +
+    verify path; old `calendarEventId` logged into the audit row.
+  - Event exists, guest list differs → `updateCalendarEventAttendees`
+    patch; if patch fails, fall back to delete + recreate so the result
+    matches `assignedEmails` exactly.
+  - Event exists and guests match → no-op (logged as `ok`).
+- Every action emits a typed `AuditLog` row:
+  `calendar.reconcile_created`, `calendar.reconcile_recreated`,
+  `calendar.reconcile_patched`, `calendar.reconcile_failed`. Actor is
+  `calendar-reconcile` (worker) or the admin's email (manual run).
+
+**New internal endpoint — `src/app/api/internal/calendar/reconcile/route.ts`:**
+
+- `GET /api/internal/calendar/reconcile?limit=N&dryRun=0` (and `POST`
+  alias) runs the reconciler.
+- Two auth modes:
+  1. **Worker auth** — `x-reconcile-secret: <secret>` or `Authorization:
+     Bearer <secret>`. Secret resolves to `CALENDAR_RECONCILE_SECRET` →
+     `NEXTAUTH_SECRET` → `AUTH_SECRET`.
+  2. **Admin auth** — signed-in admin session can hit the endpoint
+     directly from a browser to trigger a manual run.
+
+**New worker — `scripts/calendar-reconcile-worker.js`:**
+
+- Plain Node script, no framework. Spawned from `start.sh` as
+  `node scripts/calendar-reconcile-worker.js &` after the Next.js server
+  is up. Calls the internal endpoint every `CALENDAR_RECONCILE_INTERVAL_MS`
+  (default 600000 = 10 min), first run delayed 30s to let the server warm.
+- Re-entrant guard (`running` flag) so a slow run can't pile up.
+- Only logs when something actually changed (patched/created/failed > 0)
+  to keep container logs quiet.
+
+**`src/lib/google-calendar.ts` (+131 -24):**
+
+- `createCalendarEvent(booking, options)` now accepts
+  `{ requireAttendees?: boolean }`. When set, the function refuses to
+  create a guest-less event under any of:
+  - `GOOGLE_IMPERSONATE_SUBJECT` not configured (DWD off)
+  - Google rejects the attendees array (DWD scope drift, impersonation
+    user lost calendar access)
+  In strict mode the function returns `null` after writing a
+  `calendar.invite_failed` audit row with `fallbackCreated: false`, so
+  the caller can react instead of pretending the booking has a calendar
+  entry. Default behavior (unset) keeps the v1.26.5 fallback: create
+  guest-less event + alert.
+- `notifyCalendarAlert` gained a `fallbackCreated` flag so the alert
+  email distinguishes "we wrote an event but couldn't add guests" from
+  "we aborted; nothing was created".
+- New `getCalendarEventAttendees(eventId)` returns
+  `{ exists, attendees[], htmlLink? }`. Used by the reconciler to
+  diff what Google actually has against what the DB thinks.
+- `parseTime` replaced by `parseBangkokDateTime` + `addHoursInBangkok`.
+  Uses explicit `+07:00` strings in the dateTime field instead of
+  `.toISOString()` (which is UTC). The previous form was timezone-correct
+  if the server was in Asia/Bangkok but drifted on UTC containers — the
+  Portainer image runs UTC. This was a quiet bug hiding behind the
+  `timeZone: 'Asia/Bangkok'` hint on the event.
+- `getCalendarImpersonateSubject()` (used everywhere DWD is checked) now
+  trims the env var. Trailing newlines/spaces from Portainer's env
+  editor were silently disabling DWD.
+- `deleteCalendarEvent` adds `sendUpdates: 'none'` (don't email guests
+  about a recreate) and treats 404 as success (idempotent).
+
+**`src/app/api/admin/[id]/approve/route.ts`:**
+
+- Passes `requireAttendees: booking.assignedEmails.length > 0` when
+  calling `createCalendarEvent`. If admin approves a booking that
+  already has crew but DWD is broken, approve no longer silently
+  creates a guest-less event.
+
+**`src/app/api/admin/[id]/assign/route.ts`:**
+
+- Same `requireAttendees` flag passed to the auto-recover
+  `createCalendarEvent` branch.
+- Switched `process.env.GOOGLE_IMPERSONATE_SUBJECT` reads to
+  `getCalendarImpersonateSubject()` so the trimming applies here too.
+
+**`start.sh`:**
+
+- Spawns the reconcile worker after migrations + seed, before the Next.js
+  exec. Worker runs as a detached background process inside the
+  container; killing the container kills it.
+
+**`docker-compose.portainer.yml`:**
+
+- New env vars: `CALENDAR_RECONCILE_SECRET` (defaults to
+  `NEXTAUTH_SECRET`) and `CALENDAR_RECONCILE_INTERVAL_MS` (default 10
+  minutes).
+
+**`docker-compose.yml` (dev):**
+
+- Parity with the Portainer compose: added the two reconcile vars + the
+  `GOOGLE_IMPERSONATE_SUBJECT` / `CALENDAR_ALERT_EMAIL` defaults that
+  were already in the Portainer compose. Local dev now exercises the
+  same worker path as production.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes — `/api/internal/calendar/reconcile` appears in the
+  route table.
+- Codex's image build on this branch went green (`sha-452857f`).
+- **Manual QA still pending** for the full reconcile loop end-to-end on
+  the live Portainer stack. The plan in `docs/ops-log.md` for this
+  release lists the steps.
+
+### Tradeoffs / follow-ups
+
+- Reconcile worker is a separate process inside the container — if it
+  crashes it doesn't take the web server with it, but it also won't
+  restart on its own. Acceptable for v1; if needed, wrap with a tiny
+  supervisor (`while true; do node …; sleep 5; done`) later.
+- Worker auths against `localhost:3000`. If a future deploy changes the
+  internal port, set `CALENDAR_RECONCILE_URL`. Currently undocumented in
+  the compose file — add when actually needed.
+- `requireAttendees` is opt-in per call. Both server-side callers
+  (approve, assign) use it; the reconciler always uses it. The
+  legacy/external callers (if any) keep the old fallback behavior. A
+  future pass could make `requireAttendees: true` the default.
+- No automated tests for the reconciler. The Codex commits did not add
+  any; we're relying on AuditLog rows + manual verification. A small
+  Vitest suite for `reconcileCalendarGuests` (using fakes for Google +
+  Prisma) is the natural next step but out of scope for an emergency
+  reliability fix.
+
+---
+
 ## [1.28.2] — 2026-05-23
 
 ### Fixed — calendar guests now sync synchronously on Assign (regression)

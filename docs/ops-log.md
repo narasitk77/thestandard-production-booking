@@ -5,6 +5,95 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Calendar guest auto-reconciler (v1.29.0) — **infra change: new background worker**
+
+**Scope:** Layered on top of v1.28.2's synchronous-on-assign fix. After
+v1.28.2 deployed, ops still observed transient guest-loss (DWD blip,
+patch rejected mid-flight, etc.). This release adds an **automated
+reconciliation loop** so guests heal without manual re-assign, plus a
+stricter create path that refuses to ship a guest-less event when the
+booking already has assigned crew.
+
+**Heads-up — this release CHANGES THE CONTAINER:**
+
+1. `start.sh` now spawns a second process inside the container —
+   `node scripts/calendar-reconcile-worker.js &` — that runs every
+   `CALENDAR_RECONCILE_INTERVAL_MS` (default 600000 = 10 min). It hits
+   the new internal endpoint `GET /api/internal/calendar/reconcile`,
+   which pulls confirmed bookings and reconciles guest drift.
+2. The worker authenticates with a shared secret read from
+   `CALENDAR_RECONCILE_SECRET` → `NEXTAUTH_SECRET` → `AUTH_SECRET`.
+   The Portainer compose now sets both `CALENDAR_RECONCILE_SECRET` and
+   `CALENDAR_RECONCILE_INTERVAL_MS` (with sensible defaults), so the
+   stack works without explicitly setting either.
+3. Background worker logs only when it actually changes something
+   (e.g. `[calendar-reconcile] checked=23 ok=22 patched=1 created=0
+   failed=0`). Silent runs by design.
+
+**Portainer redeploy notes:**
+
+- Pull image `sha-452857f` (Codex's build) or whatever the latest GHCR
+  tag is after this commit, **plus** redeploy the stack so the new env
+  vars from `docker-compose.portainer.yml` get applied. The container
+  needs the new `CALENDAR_RECONCILE_*` env vars for the worker to auth
+  against the internal endpoint.
+- No DB migration. No new mounts. No port changes.
+- Existing `GOOGLE_IMPERSONATE_SUBJECT` env value should be checked —
+  v1.29.0's `getCalendarImpersonateSubject()` trims trailing whitespace
+  (which was silently disabling DWD before), but it doesn't fix a wrong
+  value. If guests still don't appear after deploy, that's the first
+  thing to inspect.
+
+**Verification after redeploy:**
+
+1. Container logs on startup should include
+   `[calendar-reconcile] worker started; interval=600000ms`.
+2. ~30 seconds after start, the first reconcile fires. With no drift
+   the log stays silent; with drift the worker logs one line per pass
+   and writes `calendar.reconcile_*` rows to `AuditLog`.
+3. **Force a drift test:** open a CONFIRMED booking in the DB, set its
+   `calendarEventId` to NULL (or to a known-bad id) by hand, wait ~10
+   min (or hit `GET /api/internal/calendar/reconcile?limit=10` directly
+   while signed in as admin). Booking should get a new event with the
+   right guests; `AuditLog action='calendar.reconcile_created'` (or
+   `_recreated`) row should appear.
+4. **Manual one-off run** (admin browser):
+   `https://probook.xtec9.xyz/api/internal/calendar/reconcile?limit=50`
+   returns JSON `{success, checked, ok, patched, created, failed,
+   items}`. Use `dryRun=1` first if you want to preview without
+   touching Google.
+5. **Strict-create test:** approve a booking that has crew assigned
+   while DWD is intentionally broken (temporarily change
+   `GOOGLE_IMPERSONATE_SUBJECT` to nonsense + restart). Approve should
+   NOT create an empty event; admin UI should warn; `AuditLog
+   action='calendar.invite_failed'` row should appear with
+   `fallbackCreated: false`. Restore the env, redeploy.
+
+**Rollback trigger:** if the reconciler creates duplicate events,
+deletes legitimate guests, or thrashes Google API quotas — revert image
+tag in Portainer to `sha-455b1af` (v1.28.2). The worker process simply
+won't exist in the older image.
+
+**Files changed:**
+
+- `src/lib/calendar-reconcile.ts` (new) — reconciler core.
+- `src/app/api/internal/calendar/reconcile/route.ts` (new) — worker
+  endpoint.
+- `scripts/calendar-reconcile-worker.js` (new) — background poller.
+- `src/lib/google-calendar.ts` — strict `requireAttendees`, trimmed
+  impersonation, Bangkok-aware datetime, `getCalendarEventAttendees`,
+  improved `deleteCalendarEvent`.
+- `src/app/api/admin/[id]/approve/route.ts`,
+  `src/app/api/admin/[id]/assign/route.ts` — pass `requireAttendees`
+  when crew is present, use `getCalendarImpersonateSubject()`.
+- `start.sh` — spawn the worker.
+- `docker-compose.portainer.yml` — new env vars.
+- `docker-compose.yml` — parity with portainer compose (dev runs the
+  same path).
+- `CHANGELOG.md`, `package.json` — version bump 1.28.2 → 1.29.0.
+
+---
+
 ## 2026-05-23 · Calendar guest sync fix (v1.28.2) — no infra change, behavior fix
 
 **Scope:** Bug fix for the "assigned crew not showing as Google Calendar

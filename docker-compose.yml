@@ -47,6 +47,8 @@ services:
       GOOGLE_PRIVATE_KEY: ${GOOGLE_PRIVATE_KEY:-}
       GOOGLE_SHEETS_ID: ${GOOGLE_SHEETS_ID:-}
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
+      GOOGLE_IMPERSONATE_SUBJECT: ${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}
+      CALENDAR_ALERT_EMAIL: ${CALENDAR_ALERT_EMAIL:-${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}}
       PRODUCER_DASHBOARD_SHEET_ID: ${PRODUCER_DASHBOARD_SHEET_ID:-}
       # Email (Gmail OAuth is primary; Resend optional fallback)
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
@@ -58,6 +60,14 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
+
+      # --- Calendar guest reconciliation (parity with docker-compose.portainer.yml) ---
+      # start.sh launches a small worker that calls the internal reconcile API every
+      # 10 minutes. Checks confirmed bookings and repairs missing or stale Google
+      # Calendar guests so transient approve/assign failures heal automatically.
+      CALENDAR_RECONCILE_SECRET: ${CALENDAR_RECONCILE_SECRET:-${NEXTAUTH_SECRET:-}}
+      CALENDAR_RECONCILE_INTERVAL_MS: ${CALENDAR_RECONCILE_INTERVAL_MS:-600000}
+
       UPLOAD_DIR: /app/uploads
     volumes:
       - uploads:/app/uploads
