@@ -5,6 +5,128 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.27.0] — 2026-05-23
+
+### Changed — booking flow UX overhaul (form sections, Review step, inline errors)
+
+A workflow-focused pass on the user-facing surfaces. No data-model, API, or
+submission-behavior changes — same fields, same POST payload, same downstream
+effects (calendar event, sheet write, OT sync). Internal QA only: typecheck +
+`next build` pass; no automated tests were added because the project has no
+test runner configured (deliberately deferred — see Tradeoffs below).
+
+**Booking form (`src/app/page.tsx`):**
+
+- Restructured the long single form into **6 numbered sections**: Project,
+  Schedule, Location, Production Details, People / Crew, Notes — each with a
+  short hint under the heading. Dense card layout preserved (no marketing
+  hero, no decorative spacing inflation).
+- **Review step before Submit.** Clicking the primary button now shows a
+  read-only summary of every field (Outlet, Episode Type, dates, times, room,
+  Producer/Director, Project ID, Episodes, crew, notes) split into the same 6
+  sections. The user can `← Back to edit` or `Confirm & Submit`. **No POST
+  fires until Confirm.** A two-dot step indicator (Fill → Review) lives in
+  the header so the user always knows where they are.
+- **Per-field error display.** Replaced the single top-of-form error string
+  with a `fieldErrors: Record<string, string>` map. Each invalid field shows
+  its own message with an `AlertCircle` icon right under the input, plus an
+  `aria-invalid` attribute for assistive tech. The top-of-form message becomes
+  a summary pointing the user to the highlighted fields.
+- **Date/time validation** is sharper: end-date error now sits on the end-date
+  field; estimated-wrap-before-call-time is caught when the shoot is a single
+  day.
+- **Outlet-change warning banner.** When Outlet changes and dependent fields
+  (Episode Type, Producer, Director, Project ID, Episode picks) get cleared,
+  a transient amber banner names exactly which fields were wiped and which
+  flow the user just switched into (Content Agency vs standard) — so silent
+  data loss is gone.
+- **Helper text on confusing fields:** Episode Type (L/S/A/T meaning),
+  Category (when to use each), Estimated Wrap (workload calc, optional),
+  Crew Required (videographer count guidance), Project ID (sheet source +
+  Producer filter), Shoot Type vs Location/Room (independence). Existing
+  Thai-only labels (แขก / Subject) preserved.
+
+**Calendar (`src/app/calendar/page.tsx`):**
+
+- Event chips now read `10:00 · AGN · Talk Show` (truncated full program
+  name) instead of the cryptic `10:00 AGN·T`. Time and outlet stay full;
+  program name takes the remaining width with truncation. Status color
+  coding preserved. The hover preview (already present) was left untouched —
+  it already shows program, time, producer, location, status, episode IDs.
+
+**Navigation (`src/app/_components/Nav.tsx`):**
+
+- **Persistent `+ New Booking` primary CTA** on every page (mobile and
+  desktop), styled with `.gf-submit` so it pops without being marketing-y.
+- Reordered primary links to match daily workflow: Calendar · My Bookings ·
+  Producer · Dashboard · Admin.
+- Pushed secondary items (OT, คู่มือ, อัปเดต, Upload [DEV]) behind a vertical
+  divider with smaller/greyer styling so they don't compete with daily-use
+  links. Same items, less visual weight.
+
+**Dashboard role clarity (`src/app/dashboard/page.tsx`):**
+
+- Renamed to **Admin Dashboard**, subtitle clarifies it's org-wide and points
+  Producer-role users to `/producer` for their personal view.
+- Three numbered sections with hints under each: **Booking Overview**
+  (charts), **Team Workload** (range + workload bar + table), **All Bookings**
+  (filters + table). Same content; clearer signposting.
+- Nav still gates this page to admins; producers continue to land on
+  `/producer` and everyone has `/my-bookings`.
+
+### Tradeoffs / deferred for a later phase
+
+- **No automated tests added.** The project has no Jest/Vitest/Playwright
+  setup; adding one purely to cover the new Review step and field validation
+  would have ballooned this change. Manual QA matrix recommended: validation
+  paths for both CA and non-CA flows, Outlet-change cascade, Review →
+  Back-to-edit → Confirm round trip, calendar chip readability across statuses.
+- **Conflict detection (room/crew/time overlap) was scoped OUT.** It needs
+  a backend overlap query against existing bookings and a client warning
+  surface; deferred to a follow-up. The current Outlet-change banner pattern
+  is the right home for it once the API endpoint exists.
+- **No 2-mode landing page (New Booking vs View Schedule).** The user
+  explicitly chose to keep `/` as the dense booking form, with the persistent
+  `+ New Booking` CTA + Calendar link in the nav serving the same need
+  without a hero-style landing.
+- Producer dashboard (`/producer`) was left structurally as-is — it already
+  filters to the producer's own bookings with status badges and history, which
+  is exactly the "my workload / my bookings" view the spec asked for.
+
+---
+
+## [1.26.5] — 2026-05-23
+
+### Added — monitoring + email alert when calendar guests fail to attach
+
+Calendar guests now work (v1.26.4), but the failure path is still silent: if
+DWD ever gets revoked, the impersonate user loses access, or the Workspace
+account is disabled, `createCalendarEvent` falls back to creating the event
+**without guests** and only logs a `console.warn`. Operators wouldn't notice
+until crew started missing invites. This change makes failures observable:
+
+- New helper `notifyCalendarAlert` in `src/lib/google-calendar.ts` —
+  fire-and-forget; never throws.
+  - Writes an `AuditLog` row with `action = "calendar.invite_failed"` (insert
+    fallback) or `"calendar.attendees_update_failed"` (patch failure), with
+    full context: `eventId`, attendee list, error message, current
+    `GOOGLE_IMPERSONATE_SUBJECT`.
+  - Emails a human-readable alert to `CALENDAR_ALERT_EMAIL` (new optional env
+    var); falls back to `GOOGLE_IMPERSONATE_SUBJECT` if unset. No-op when no
+    email provider is configured.
+- `createCalendarEvent` input now accepts an optional `bookingCode` so alerts
+  show the readable booking code, not just the CUID.
+- `updateCalendarEventAttendees(eventId, emails, meta?)` gained an optional
+  `meta` arg `{ bookingId, bookingCode }` so failed patches alert with the
+  same context.
+- Callers (`/api/admin/[id]/approve`, `/api/admin/[id]/assign`) now pass
+  `bookingCode` through.
+
+No schema changes, no new packages. Alerts piggyback on the existing AuditLog
+table (90-day retention) and `sendEmail` infra.
+
+---
+
 ## [1.26.4] — 2026-05-23
 
 ### Fixed — calendar guests now work out of the box (impersonate subject defaulted in compose)

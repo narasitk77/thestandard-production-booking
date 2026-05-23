@@ -153,8 +153,12 @@ export default function CalendarPage() {
                               setHovered({ booking: b, x: r.left + r.width / 2, y: r.top })
                             }}
                             onMouseLeave={() => setHovered(null)}
-                            className={`text-[10px] px-1.5 py-0.5 rounded truncate ${c.bg} ${c.text} border border-current/10 cursor-pointer`}>
-                            <span className="font-medium">{b.callTime}</span> {b.outlet.code}·{b.program.code}
+                            className={`flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded ${c.bg} ${c.text} border border-current/10 cursor-pointer leading-tight`}>
+                            <span className="font-medium tabular-nums flex-shrink-0">{b.callTime}</span>
+                            <span className="opacity-50 flex-shrink-0">·</span>
+                            <span className="font-medium flex-shrink-0">{b.outlet.code}</span>
+                            <span className="opacity-50 flex-shrink-0">·</span>
+                            <span className="truncate flex-1 opacity-90">{b.program.name}</span>
                           </div>
                         )
                       })}

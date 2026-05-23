@@ -208,10 +208,12 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
-      <div className="flex items-start sm:items-center justify-between gap-2 mb-4 sm:mb-5 flex-wrap">
+      <div className="flex items-start sm:items-center justify-between gap-2 mb-2 flex-wrap">
         <div>
-          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Dashboard</h1>
-          <p className="text-xs sm:text-sm text-gray-500">{total} total · {filtered.length} shown</p>
+          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Admin Dashboard</h1>
+          <p className="text-xs sm:text-sm text-gray-500">
+            Org-wide booking metrics, team workload, and exports · {total} total · {filtered.length} shown
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={exportBookingsCSV}
@@ -222,8 +224,19 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Section: Booking Overview */}
+      <div className="pt-4 pb-1 px-1">
+        <div className="flex items-baseline gap-2">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-[10px] font-mono font-medium text-gray-600 tabular-nums">1</span>
+          <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Booking Overview</h2>
+        </div>
+        <p className="text-xs text-gray-400 mt-1 ml-7 leading-snug">
+          คลิกที่ slice/แท่งเพื่อกรองตาราง · ดู Producer Dashboard ที่หน้า <Link href="/producer" className="text-[#673ab7] hover:underline">Producer</Link> สำหรับมุมมองส่วนตัว
+        </p>
+      </div>
+
       {/* Charts row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2 mt-3">
         {/* Donut: bookings by status */}
         <div className="gf-card p-5">
           <div className="text-sm font-medium text-gray-700 mb-3">Bookings by Status</div>
@@ -314,8 +327,19 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Section: Team Workload */}
+      <div className="pt-4 pb-1 px-1">
+        <div className="flex items-baseline gap-2">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-[10px] font-mono font-medium text-gray-600 tabular-nums">2</span>
+          <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Team Workload</h2>
+        </div>
+        <p className="text-xs text-gray-400 mt-1 ml-7 leading-snug">
+          ชั่วโมง assignment ของ crew ในช่วงที่เลือก · ใช้สำหรับวางแผน utilization และ exports
+        </p>
+      </div>
+
       {/* Team Workload */}
-      <div className="gf-card p-5 mb-6">
+      <div className="gf-card p-5 mt-3 mb-2">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-medium text-gray-700">Team Workload</div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -414,8 +438,19 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* Section: All Bookings */}
+      <div className="pt-4 pb-1 px-1">
+        <div className="flex items-baseline gap-2">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-[10px] font-mono font-medium text-gray-600 tabular-nums">3</span>
+          <h2 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">All Bookings</h2>
+        </div>
+        <p className="text-xs text-gray-400 mt-1 ml-7 leading-snug">
+          ค้นหา/กรองตาม Outlet · Status · Episode ID · ใช้ Export ด้านบนเพื่อโหลด CSV ของผลลัพธ์
+        </p>
+      </div>
+
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-3">
+      <div className="flex flex-wrap gap-3 mb-3 mt-3">
         <input
           className="border border-gray-300 rounded px-3 py-1.5 text-sm flex-1 min-w-48 focus:outline-none focus:border-[#673ab7]"
           placeholder="Search by Episode ID, program, producer…"

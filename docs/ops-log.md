@@ -5,6 +5,98 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Booking flow UX overhaul (v1.27.0) — no infra change
+
+**Scope:** UI/UX-only refactor of the booking surfaces. No schema migration,
+no env-var change, no API breakage. Same Postgres rows, same Google Calendar
+behavior, same email triggers as v1.26.5. Safe to roll forward via the usual
+GHCR auto-build on push to `fix/assign-email-real-results` / `main`; rollback
+is a plain image revert in Portainer.
+
+**What deploys can expect to see:**
+
+- `/` now shows a stepped booking form (6 sections, then a Review step) and a
+  step indicator (Fill → Review). Submit only fires on the Review step's
+  *Confirm & Submit* button — first-time users will likely notice this.
+- `/calendar` event labels now read like `10:00 · AGN · Talk Show` instead of
+  `10:00 AGN·T`. Hover preview unchanged.
+- Top nav has a persistent `+ New Booking` CTA + reordered links (Calendar,
+  My Bookings, Producer, Dashboard, Admin). Secondary items (OT, คู่มือ,
+  อัปเดต, Upload [DEV]) sit behind a divider.
+- `/dashboard` is renamed *Admin Dashboard* with three labelled sections.
+  Still admin-only (route gating unchanged).
+
+**Verification after redeploy:**
+
+1. Open `/`, click *Review* without filling anything → field-level red errors
+   appear under each empty required field (no top-of-form-only error).
+2. Fill a Content Agency booking → step 2 *Review* shows all values
+   correctly → *Confirm & Submit* creates the booking → calendar invite still
+   fires with guests (regression check on v1.26.5 monitoring).
+3. Open `/calendar` → confirm event chips show the full program name and
+   truncate gracefully on narrow days.
+4. Verify nav: non-admins should see *Calendar · My Bookings* (+ Producer if
+   they have a Producer role); admins additionally see *Dashboard · Admin*.
+
+**Rollback trigger:** any regression in booking POST payload, calendar event
+creation, or assignment email — revert image tag in Portainer to v1.26.5.
+
+**Files changed (UI only):**
+
+- `src/app/page.tsx` — booking form refactor + Review step.
+- `src/app/calendar/page.tsx` — event chip readability.
+- `src/app/_components/Nav.tsx` — primary/secondary nav split + persistent CTA.
+- `src/app/dashboard/page.tsx` — admin dashboard sectioning.
+
+---
+
+## 2026-05-23 · Calendar invite failures now observable (v1.26.5)
+
+**Background:** v1.26.4 made calendar guests work by defaulting
+`GOOGLE_IMPERSONATE_SUBJECT` in compose. But the failure mode is still silent:
+if DWD is revoked, the impersonate user loses calendar access, or the account
+is disabled, `createCalendarEvent` falls back to creating the event WITHOUT
+guests and only emits a `console.warn`. Operators would only notice once crew
+started missing invites in the wild.
+
+**What v1.26.5 adds (app-only, no compose change required):**
+
+- AuditLog rows on every failure — queryable from the admin audit page, kept
+  for 90 days. Actions: `calendar.invite_failed` (insert fallback) and
+  `calendar.attendees_update_failed` (patch failure on re-assign). Payload
+  includes `eventId`, attendees, error, and current `GOOGLE_IMPERSONATE_SUBJECT`.
+- Email alert to an admin, using the existing `sendEmail` infra. Recipient
+  resolves to `CALENDAR_ALERT_EMAIL` (new optional env var) → falls back to
+  `GOOGLE_IMPERSONATE_SUBJECT` → no-op if neither is set or no email provider
+  is configured.
+
+**New optional env var: `CALENDAR_ALERT_EMAIL`**
+
+- **Default behavior (unset):** alerts go to `GOOGLE_IMPERSONATE_SUBJECT`
+  (`narasit.k@thestandard.co`). No action needed.
+- **Override:** set in the Portainer stack env if a different on-call address
+  should receive alerts. Not added to `docker-compose.portainer.yml` because
+  the fallback already covers the common case.
+
+**How to verify post-deploy:**
+
+1. Confirm the next confirmed booking with assigned crew still adds guests
+   (regular success path — no AuditLog row, no email).
+2. To exercise the alert path safely: temporarily set
+   `GOOGLE_IMPERSONATE_SUBJECT` to a real Workspace user **without** calendar
+   access in a staging stack, approve a booking, then check `audit_logs` for
+   `action = 'calendar.invite_failed'` and the admin inbox for the alert.
+
+**Files changed:**
+
+- `src/lib/google-calendar.ts` — new `notifyCalendarAlert` helper; wired into
+  both failure points.
+- `src/app/api/admin/[id]/approve/route.ts`,
+  `src/app/api/admin/[id]/assign/route.ts` — pass `bookingCode` through so
+  alerts identify the booking by its readable code.
+
+---
+
 ## 2026-05-23 · Calendar guests FIXED — `GOOGLE_IMPERSONATE_SUBJECT` was unset
 
 **Symptom:** Approved bookings appear on the shared Google Calendar, but the

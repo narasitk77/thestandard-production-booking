@@ -69,7 +69,10 @@ export async function POST(
     // (added crew get an invite, removed crew a cancellation). Fire-and-forget;
     // no-op without Domain-Wide Delegation.
     if (booking.calendarEventId) {
-      updateCalendarEventAttendees(booking.calendarEventId, emailRecipients).catch(e =>
+      updateCalendarEventAttendees(booking.calendarEventId, emailRecipients, {
+        bookingId: booking.id,
+        bookingCode: booking.bookingCode,
+      }).catch(e =>
         console.error('updateCalendarEventAttendees error:', e?.message || e),
       )
     }

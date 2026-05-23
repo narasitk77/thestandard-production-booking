@@ -47,6 +47,7 @@ export async function POST(
       try {
         const calendarEventId = await createCalendarEvent({
           id: booking.id,
+          bookingCode: booking.bookingCode,
           shootDate: booking.shootDate,
           callTime: booking.callTime,
           estimatedWrap: booking.estimatedWrap,
