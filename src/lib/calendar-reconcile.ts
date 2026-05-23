@@ -47,6 +47,39 @@ function count(result: ReconcileResult, action: ReconcileAction) {
   result[action] += 1
 }
 
+async function createVerifiedCalendarEvent(booking: {
+  id: string
+  bookingCode?: string | null
+  shootDate: Date | string
+  callTime: string
+  estimatedWrap?: string | null
+  shootType: string
+  locationName?: string | null
+  producer: string
+  assignedEmails: string[]
+  outlet: { code: string; name: string }
+  program: { code: string; name: string }
+  episodes: Array<{ episodeId: string; title: string }>
+  crewRequired: string[]
+  agencyRef?: string | null
+  notes?: string | null
+}): Promise<string> {
+  const eventId = await createCalendarEvent(booking, {
+    requireAttendees: booking.assignedEmails.length > 0,
+  })
+  if (!eventId) throw new Error('createCalendarEvent returned null')
+
+  const calendarEvent = await getCalendarEventAttendees(eventId)
+  if (!sameEmails(booking.assignedEmails, calendarEvent.attendees)) {
+    await deleteCalendarEvent(eventId)
+    throw new Error(
+      `created calendar event is missing assigned attendees (${booking.assignedEmails.join(', ') || 'none'})`,
+    )
+  }
+
+  return eventId
+}
+
 export async function reconcileCalendarGuests(options: {
   limit?: number
   actorEmail?: string | null
@@ -103,7 +136,7 @@ export async function reconcileCalendarGuests(options: {
           count(result, 'created')
           continue
         }
-        const eventId = await createCalendarEvent({
+        const eventId = await createVerifiedCalendarEvent({
           id: booking.id,
           bookingCode: booking.bookingCode,
           shootDate: booking.shootDate,
@@ -120,7 +153,6 @@ export async function reconcileCalendarGuests(options: {
           agencyRef: booking.agencyRef,
           notes: booking.notes,
         })
-        if (!eventId) throw new Error('createCalendarEvent returned null')
         await prisma.booking.update({
           where: { id: booking.id },
           data: { calendarEventId: eventId },
@@ -150,7 +182,7 @@ export async function reconcileCalendarGuests(options: {
           count(result, 'created')
           continue
         }
-        const eventId = await createCalendarEvent({
+        const eventId = await createVerifiedCalendarEvent({
           id: booking.id,
           bookingCode: booking.bookingCode,
           shootDate: booking.shootDate,
@@ -167,7 +199,6 @@ export async function reconcileCalendarGuests(options: {
           agencyRef: booking.agencyRef,
           notes: booking.notes,
         })
-        if (!eventId) throw new Error('createCalendarEvent returned null after missing event')
         await prisma.booking.update({
           where: { id: booking.id },
           data: { calendarEventId: eventId },
@@ -201,7 +232,7 @@ export async function reconcileCalendarGuests(options: {
         })
         if (!ok) {
           const oldEventId = booking.calendarEventId
-          const eventId = await createCalendarEvent({
+          const eventId = await createVerifiedCalendarEvent({
             id: booking.id,
             bookingCode: booking.bookingCode,
             shootDate: booking.shootDate,
@@ -218,7 +249,6 @@ export async function reconcileCalendarGuests(options: {
             agencyRef: booking.agencyRef,
             notes: booking.notes,
           })
-          if (!eventId) throw new Error('update attendees failed and replacement create returned null')
           await prisma.booking.update({
             where: { id: booking.id },
             data: { calendarEventId: eventId },
