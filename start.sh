@@ -118,5 +118,8 @@ psql "$DATABASE_URL" -c "DELETE FROM audit_logs WHERE at < now() - INTERVAL '90 
 echo "==> Seeding database (idempotent)..."
 npx tsx prisma/seed.ts || echo "Seed skipped or already done"
 
+echo "==> Starting calendar guest reconcile worker..."
+node scripts/calendar-reconcile-worker.js &
+
 echo "==> Starting Next.js..."
 exec npm start

@@ -101,6 +101,13 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
 
+      # --- Calendar guest reconciliation ---
+      # start.sh launches a small worker that calls the internal reconcile API
+      # every 10 minutes. It checks confirmed bookings and repairs missing or
+      # stale Google Calendar guests so transient approve/assign failures heal.
+      CALENDAR_RECONCILE_SECRET: ${CALENDAR_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
+      CALENDAR_RECONCILE_INTERVAL_MS: ${CALENDAR_RECONCILE_INTERVAL_MS:-600000}
+
       # --- App ---
       UPLOAD_DIR: /app/uploads
     volumes:

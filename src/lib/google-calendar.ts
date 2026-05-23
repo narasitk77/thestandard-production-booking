@@ -260,6 +260,32 @@ export async function updateCalendarEventAttendees(
   }
 }
 
+export async function getCalendarEventAttendees(eventId: string): Promise<{
+  exists: boolean
+  attendees: string[]
+  htmlLink?: string | null
+}> {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    return { exists: false, attendees: [] }
+  }
+  try {
+    const calendar = google.calendar({ version: 'v3', auth: getAuth() })
+    const res = await calendar.events.get({ calendarId: CALENDAR_ID, eventId })
+    return {
+      exists: true,
+      attendees: (res.data.attendees || [])
+        .map(attendee => attendee.email?.trim().toLowerCase())
+        .filter((email): email is string => Boolean(email)),
+      htmlLink: res.data.htmlLink || null,
+    }
+  } catch (e: any) {
+    if (e?.code === 404 || e?.response?.status === 404) {
+      return { exists: false, attendees: [] }
+    }
+    throw e
+  }
+}
+
 export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
     return false
