@@ -260,6 +260,25 @@ export async function updateCalendarEventAttendees(
   }
 }
 
+export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    return false
+  }
+  try {
+    const calendar = google.calendar({ version: 'v3', auth: getAuth() })
+    await calendar.events.delete({
+      calendarId: CALENDAR_ID,
+      eventId,
+      sendUpdates: 'none',
+    })
+    return true
+  } catch (e: any) {
+    if (e?.code === 404 || e?.response?.status === 404) return true
+    console.error('deleteCalendarEvent error:', e?.message || e)
+    return false
+  }
+}
+
 export async function getCalendarEventAttendees(eventId: string): Promise<{
   exists: boolean
   attendees: string[]
@@ -283,21 +302,6 @@ export async function getCalendarEventAttendees(eventId: string): Promise<{
       return { exists: false, attendees: [] }
     }
     throw e
-  }
-}
-
-export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
-  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    return false
-  }
-  try {
-    const auth = getAuth()
-    const calendar = google.calendar({ version: 'v3', auth })
-    await calendar.events.delete({ calendarId: CALENDAR_ID, eventId })
-    return true
-  } catch (e) {
-    console.error('deleteCalendarEvent error:', e)
-    return false
   }
 }
 

@@ -2,6 +2,7 @@ import { prisma } from './db'
 import { logAudit } from './audit'
 import {
   createCalendarEvent,
+  deleteCalendarEvent,
   getCalendarEventAttendees,
   updateCalendarEventAttendees,
 } from './google-calendar'
@@ -198,7 +199,51 @@ export async function reconcileCalendarGuests(options: {
           bookingId: booking.id,
           bookingCode: booking.bookingCode,
         })
-        if (!ok) throw new Error('updateCalendarEventAttendees returned false')
+        if (!ok) {
+          const oldEventId = booking.calendarEventId
+          const eventId = await createCalendarEvent({
+            id: booking.id,
+            bookingCode: booking.bookingCode,
+            shootDate: booking.shootDate,
+            callTime: booking.callTime,
+            estimatedWrap: booking.estimatedWrap,
+            shootType: booking.shootType,
+            locationName: booking.locationName,
+            producer: booking.producer,
+            assignedEmails,
+            outlet: booking.outlet,
+            program: booking.program,
+            episodes: booking.episodes,
+            crewRequired: booking.crewRequired,
+            agencyRef: booking.agencyRef,
+            notes: booking.notes,
+          })
+          if (!eventId) throw new Error('update attendees failed and replacement create returned null')
+          await prisma.booking.update({
+            where: { id: booking.id },
+            data: { calendarEventId: eventId },
+          })
+          await deleteCalendarEvent(oldEventId)
+
+          item.action = 'created'
+          item.eventId = eventId
+          result.items.push(item)
+          count(result, 'created')
+          await logAudit({
+            actorEmail: options.actorEmail ?? 'calendar-reconcile',
+            action: 'calendar.reconcile_recreated',
+            entityType: 'Booking',
+            entityId: booking.id,
+            bookingCode: booking.bookingCode,
+            changes: {
+              oldEventId,
+              eventId,
+              assignedEmails,
+              reason: 'attendees_patch_failed',
+            },
+          })
+          continue
+        }
       }
 
       item.action = 'patched'
