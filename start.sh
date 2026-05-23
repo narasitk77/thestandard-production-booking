@@ -118,8 +118,19 @@ psql "$DATABASE_URL" -c "DELETE FROM audit_logs WHERE at < now() - INTERVAL '90 
 echo "==> Seeding database (idempotent)..."
 npx tsx prisma/seed.ts || echo "Seed skipped or already done"
 
-echo "==> Starting calendar guest reconcile worker..."
-node scripts/calendar-reconcile-worker.js &
+echo "==> Starting calendar guest reconcile worker (supervised)..."
+# Wrap the worker in a tiny restart loop so a crash doesn't take it out for
+# the rest of the container's lifetime. 5s back-off prevents a hot loop if
+# the script throws immediately. Runs in the background so we can `exec npm
+# start` next; the supervisor + worker tree gets reaped when the container
+# stops (the worker also installs SIGTERM/SIGINT handlers for clean exit).
+(
+  while true; do
+    node scripts/calendar-reconcile-worker.js
+    echo "[calendar-reconcile] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
 
 echo "==> Starting Next.js..."
 exec npm start

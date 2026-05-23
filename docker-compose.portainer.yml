@@ -107,6 +107,9 @@ services:
       # stale Google Calendar guests so transient approve/assign failures heal.
       CALENDAR_RECONCILE_SECRET: ${CALENDAR_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
       CALENDAR_RECONCILE_INTERVAL_MS: ${CALENDAR_RECONCILE_INTERVAL_MS:-600000}
+      # Override only if the Next.js server inside the container listens on
+      # something other than http://127.0.0.1:3000 (e.g. if you change PORT).
+      # CALENDAR_RECONCILE_URL: ${CALENDAR_RECONCILE_URL:-}
 
       # --- App ---
       UPLOAD_DIR: /app/uploads

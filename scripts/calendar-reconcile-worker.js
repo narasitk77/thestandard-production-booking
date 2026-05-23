@@ -1,14 +1,33 @@
+// Parse a numeric env var safely. `Number('abc')` is NaN, and `setInterval(fn,
+// NaN)` is silently clamped to ~1ms — i.e. a busy loop that hammers the API
+// and the DB. Guard against that by falling back to the default whenever the
+// value isn't a finite, positive number.
+function parsePositiveInt(envValue, fallback) {
+  if (envValue == null || envValue === '') return fallback
+  const n = Number(envValue)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
 const intervalMs = Math.max(
   60_000,
-  Number(process.env.CALENDAR_RECONCILE_INTERVAL_MS || 10 * 60_000),
+  parsePositiveInt(process.env.CALENDAR_RECONCILE_INTERVAL_MS, 10 * 60_000),
 )
-const baseUrl = process.env.CALENDAR_RECONCILE_URL || 'http://127.0.0.1:3000'
+const baseUrl = (process.env.CALENDAR_RECONCILE_URL || 'http://127.0.0.1:3000').trim()
 const secret = (
   process.env.CALENDAR_RECONCILE_SECRET ||
   process.env.NEXTAUTH_SECRET ||
   process.env.AUTH_SECRET ||
   ''
 ).trim()
+
+if (!secret) {
+  // The internal endpoint also accepts an admin session, but the worker runs
+  // headless — without a secret it will get 401s forever. Surface it loudly
+  // instead of silently looping.
+  console.warn(
+    '[calendar-reconcile] WARN: no secret configured (CALENDAR_RECONCILE_SECRET / NEXTAUTH_SECRET / AUTH_SECRET). Worker will keep polling but every request will 401.',
+  )
+}
 
 let running = false
 
@@ -39,6 +58,20 @@ async function runOnce() {
   }
 }
 
-console.log(`[calendar-reconcile] worker started; interval=${intervalMs}ms`)
+// Container-friendly shutdown: stop the timer on SIGTERM/SIGINT so the
+// process can exit cleanly when Docker stops the container instead of
+// hanging until the SIGKILL grace period expires.
+let timer
+function shutdown(signal) {
+  console.log(`[calendar-reconcile] received ${signal}, exiting`)
+  if (timer) clearInterval(timer)
+  process.exit(0)
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
+
+console.log(
+  `[calendar-reconcile] worker started; interval=${intervalMs}ms; baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`,
+)
 setTimeout(runOnce, 30_000)
-setInterval(runOnce, intervalMs)
+timer = setInterval(runOnce, intervalMs)

@@ -1,0 +1,36 @@
+# Build-time tarball sent to the Docker daemon. Everything here is omitted
+# from the image build context (and therefore from any `COPY .` in the
+# Dockerfile). Keep this list narrow — files the running app reads at
+# runtime MUST stay in the context.
+
+# Source control + CI metadata
+.git
+.github
+
+# Build outputs and dependency caches (rebuilt inside the image)
+.next
+node_modules
+
+# Runtime / operator data (must never bake into the image)
+backups
+uploads
+
+# Secrets
+.env
+.env.*
+
+# Log junk
+npm-debug.log*
+
+# Dockerfile + compose are read by the daemon/orchestrator, not by the image
+Dockerfile*
+docker-compose*.yml
+
+# Docs
+# README.md and docs/ are not read by the app at runtime — safe to omit.
+# CHANGELOG.md IS read at runtime by src/app/changelog/page.tsx
+#   (fs.readFileSync(process.cwd()+'/CHANGELOG.md')) so it MUST stay in
+#   the image. Likewise USER_MANUAL_TH.md is read by src/app/manual/page.tsx
+#   — also stays.
+README.md
+docs

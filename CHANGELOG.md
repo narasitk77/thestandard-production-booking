@@ -5,6 +5,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.29.1] — 2026-05-23
+
+### Fixed / hardened — reconcile worker resilience + Docker build hygiene
+
+Quick dev-audit pass on top of v1.29.0. No application-logic change; purely
+operational reliability + repo hygiene. Found by reading the freshly-shipped
+reconciler with a "what breaks at 3am" lens.
+
+**Reconcile worker (`scripts/calendar-reconcile-worker.js`):**
+
+- `parsePositiveInt()` helper guards the interval env var. Previously
+  `Number(process.env.CALENDAR_RECONCILE_INTERVAL_MS || 600000)` returned
+  `NaN` when the env value was a non-numeric string, and `setInterval(fn,
+  NaN)` is silently clamped to ~1ms — a runaway loop that would hammer
+  the internal endpoint, the DB, and Google Calendar. Now any non-finite
+  or non-positive value falls back to the 10-minute default.
+- Loud-fail when no secret is configured. The internal endpoint also
+  accepts admin sessions, but the worker is headless — without a secret
+  it 401s every request forever in silence. New startup warn line
+  surfaces that immediately so it shows up in `docker logs`.
+- Startup log now reports the resolved `baseUrl` and `secret=set/MISSING`
+  so a misconfiguration is obvious from line one of the container log.
+- SIGTERM / SIGINT handlers clear the timer and exit 0. Container stop
+  no longer waits for the SIGKILL grace period to take the worker out.
+
+**Supervisor wrapper (`start.sh`):**
+
+- Wraps the worker in `while true; do node …; sleep 5; done &` so a
+  crashed worker auto-restarts after 5 seconds instead of staying dead
+  for the rest of the container's lifetime. The 5-second back-off
+  prevents a hot loop if the script throws on require.
+
+**Docker build hygiene:**
+
+- `.dockerignore` (new — committed). Codex had created this locally but
+  never committed it, so every `docker build` was tarballing
+  `node_modules`, `.next`, `backups/`, and `.git` into the daemon
+  context. The committed file is more conservative than Codex's draft:
+  - **`CHANGELOG.md` is NOT excluded** — `src/app/changelog/page.tsx`
+    does `fs.readFileSync(cwd+'/CHANGELOG.md')` at runtime. Codex's
+    draft excluded it, which would have made `/changelog` show
+    "Changelog not found" in production.
+  - `USER_MANUAL_TH.md` also stays for the same reason
+    (`src/app/manual/page.tsx`).
+  - Inline comment explains the runtime-read invariant so future edits
+    don't regress this.
+- `.gitignore` now ignores `/backups`, `*.sql`, `*.dump`. The repo
+  already had a local `backups/` directory containing a real DB dump
+  (`production_booking_20260523_142436.sql`). That's user data — must
+  never get committed by accident.
+
+**Compose parity (`docker-compose*.yml`):**
+
+- Both composes now show `CALENDAR_RECONCILE_URL` as a commented-out
+  override. Default `http://127.0.0.1:3000` works for the standard
+  container layout; the override is needed only if `PORT` is changed.
+  Discoverable via comment instead of having to read the worker source.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes — no new routes (this was a hygiene pass).
+- No application-logic changes. Reconciler behavior unchanged; only its
+  resilience and discoverability improved.
+
+---
+
 ## [1.29.0] — 2026-05-23
 
 ### Added — calendar guest auto-reconciler + strict "no event without guests" path

@@ -27,6 +27,11 @@ yarn-error.log*
 .env
 .env*.local
 
+# DB dumps + local backup artifacts (never commit production data)
+/backups
+*.sql
+*.dump
+
 # vercel
 .vercel
 

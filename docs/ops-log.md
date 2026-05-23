@@ -5,6 +5,77 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Reconciler hardening + Docker hygiene (v1.29.1) — operational fix, no behavior change
+
+**Scope:** Dev-audit pass on v1.29.0's reconciler. Same feature surface —
+the auto-reconciler still runs every 10 minutes, the strict
+`requireAttendees` create path is unchanged, all AuditLog rows are
+identical. This release hardens the worker against silent failure modes
+and tightens the Docker build.
+
+**What changed for ops:**
+
+1. **Worker restarts itself.** `start.sh` now wraps
+   `node scripts/calendar-reconcile-worker.js` in
+   `while true; do …; sleep 5; done &`. A crash in the worker no longer
+   leaves it dead for the container's lifetime.
+2. **Worker logs config on boot.** First log line now reads e.g.
+   `[calendar-reconcile] worker started; interval=600000ms;
+   baseUrl=http://127.0.0.1:3000; secret=set`. If `secret=MISSING`
+   that's the smoking gun — the endpoint will 401 every poll.
+3. **Worker exits cleanly on SIGTERM.** Container stop now takes
+   ~instant instead of waiting for the SIGKILL grace period.
+4. **NaN interval bug fixed.** A non-numeric value in
+   `CALENDAR_RECONCILE_INTERVAL_MS` (e.g. someone typing `"10min"`)
+   used to silently turn into NaN → setInterval clamped to ~1ms → busy
+   loop hammering the internal endpoint. Now falls back to 600000.
+5. **`/changelog` no longer breaks if `.dockerignore` evolves.** New
+   inline comment in `.dockerignore` explicitly notes that
+   `CHANGELOG.md` and `USER_MANUAL_TH.md` are read at runtime by the
+   app and MUST stay in the image. Codex's draft had silently excluded
+   them.
+
+**Portainer redeploy notes:**
+
+- Pull image tagged `sha-<this-commit>` from GHCR. Stack env vars
+  unchanged from v1.29.0 — no compose edit required.
+- After deploy, the container log's first reconcile-related line should
+  be `[calendar-reconcile] worker started; interval=600000ms;
+  baseUrl=http://127.0.0.1:3000; secret=set`. If `secret=MISSING`,
+  set `CALENDAR_RECONCILE_SECRET` (or just `NEXTAUTH_SECRET`) in the
+  stack env and redeploy.
+
+**Verification after redeploy:**
+
+1. `docker logs <container>` shows the new worker startup line with
+   `secret=set` and a non-NaN interval.
+2. Kill the worker process inside the container (`docker exec ...
+   pkill -f calendar-reconcile-worker`) — supervisor logs
+   `supervisor: worker exited, restarting in 5s` and the new worker
+   logs its startup line ~5s later. Web server stays up the whole time.
+3. `docker stop <container>` exits in well under the 10-second default
+   grace period (was previously stretching toward SIGKILL because the
+   worker ignored SIGTERM).
+4. `/changelog` page still renders the full CHANGELOG (regression
+   check on the `.dockerignore` invariant).
+
+**Rollback trigger:** none expected — this is purely defensive. If
+needed, revert to `sha-c0c3e2f` (v1.29.0).
+
+**Files changed:**
+
+- `scripts/calendar-reconcile-worker.js` — NaN guard, startup log,
+  SIGTERM handler, missing-secret warn.
+- `start.sh` — supervisor loop around the worker.
+- `.dockerignore` (NEW — committed; CHANGELOG.md and USER_MANUAL_TH.md
+  deliberately stay in context).
+- `.gitignore` — ignore `/backups`, `*.sql`, `*.dump`.
+- `docker-compose.yml`, `docker-compose.portainer.yml` — document the
+  `CALENDAR_RECONCILE_URL` override knob.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-23 · Calendar guest auto-reconciler (v1.29.0) — **infra change: new background worker**
 
 **Scope:** Layered on top of v1.28.2's synchronous-on-assign fix. After
