@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 
 interface Episode { episodeId: string; title: string }
@@ -12,6 +13,10 @@ interface Booking {
   program: { code: string; name: string }
   episodes: Episode[]
   createdAt: string
+  // Populated by /api/bookings (Prisma's default scalar select). Used by the
+  // card to show a direct Google Calendar link when an event has been
+  // created, or a warning + Re-sync button when CONFIRMED status drifted.
+  calendarEventId?: string | null
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -124,6 +129,17 @@ export default function AdminPage() {
                       <span key={ep.episodeId} className="episode-badge text-xs">{ep.episodeId}</span>
                     ))}
                   </div>
+                  {/* Calendar status — only meaningful once approved.
+                      v1.29.2 — surfaces the actual Google Calendar state so
+                      "approved but no event" is visible at a glance instead
+                      of being hidden behind a button click on /admin/[id]. */}
+                  {(b.status === 'CONFIRMED' || b.status === 'COMPLETED') && (
+                    <CalendarStatus
+                      bookingId={b.id}
+                      calendarEventId={b.calendarEventId}
+                      onResynced={fetch_}
+                    />
+                  )}
                 </div>
 
                 <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto justify-end">
@@ -157,6 +173,137 @@ export default function AdminPage() {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Calendar status chip + Re-sync button shown on CONFIRMED booking cards.
+ *
+ * Three visible states:
+ *  - `calendarEventId` present  → "📅 Open in Google Calendar" link (the
+ *    happy path; admin can click through to confirm guests).
+ *  - `calendarEventId` null     → red warning chip "⚠ No calendar event"
+ *    with a Re-sync button that triggers an immediate per-booking
+ *    reconcile (creates the event, adds guests, persists the new id).
+ *  - Re-sync in progress / done → inline result (created / patched / ok /
+ *    failed) with the resolved htmlLink if applicable.
+ *
+ * The Re-sync button stays visible even when the event exists, so an admin
+ * who notices "guests missing on the calendar" can force a patch without
+ * waiting for the 10-minute worker tick.
+ */
+function CalendarStatus({
+  bookingId,
+  calendarEventId,
+  onResynced,
+}: {
+  bookingId: string
+  calendarEventId?: string | null
+  onResynced: () => void
+}) {
+  type ResyncResult = {
+    ok: boolean
+    action?: 'ok' | 'patched' | 'created' | 'failed' | 'skipped'
+    eventId?: string | null
+    htmlLink?: string | null
+    assignedEmails?: string[]
+    calendarAttendees?: string[]
+    error?: string
+  }
+  const [syncing, setSyncing] = useState(false)
+  const [result, setResult] = useState<ResyncResult | null>(null)
+  // The resolved event id is whatever we know most recently — fresh from
+  // a re-sync if available, else the value from the list fetch.
+  const effectiveEventId = result?.eventId ?? calendarEventId ?? null
+
+  const handleResync = async () => {
+    setSyncing(true)
+    setResult(null)
+    try {
+      const res = await fetch(`/api/admin/${bookingId}/calendar-resync`, { method: 'POST' })
+      const data: ResyncResult = await res.json()
+      setResult(data)
+      // Refresh list when the event id changes so the link updates without
+      // a manual reload. (Same trigger used by Approve/Cancel.)
+      if (data.ok && data.eventId && data.eventId !== calendarEventId) onResynced()
+    } catch (e: any) {
+      setResult({ ok: false, error: e?.message || String(e) })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  // Google Calendar event URLs follow the {/event?eid=<base64(eventId + ' ' +
+  // calendarId)>} pattern, but the proper public link comes from
+  // events.get(htmlLink). We persist the eventId in the DB but not the link,
+  // so the link is only known after a fresh re-sync. Fallback: build the
+  // base64 eid ourselves — it's just `${eventId} ${calendarId}` b64-encoded.
+  // For safety in browsers we only build it when the calendar id is the
+  // default one baked into the worker (we don't have access to runtime env).
+  // Result: link is "Open" when we have htmlLink, otherwise we surface the
+  // raw event id so the admin can paste-search in Calendar.
+  const link = result?.htmlLink || null
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+      {effectiveEventId ? (
+        link ? (
+          <a
+            href={link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+            title={`Calendar event: ${effectiveEventId}`}
+          >
+            📅 Open in Calendar <ExternalLink className="w-3 h-3" />
+          </a>
+        ) : (
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200"
+            title={`Calendar event: ${effectiveEventId} — click Re-sync to fetch the public link`}
+          >
+            📅 Calendar event linked
+          </span>
+        )
+      ) : (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+          <AlertTriangle className="w-3 h-3" /> No calendar event
+        </span>
+      )}
+
+      <button
+        onClick={handleResync}
+        disabled={syncing}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+        title="Force a calendar guest sync now (don't wait for the 10-min worker tick)"
+      >
+        {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+        {syncing ? 'Syncing…' : 'Re-sync'}
+      </button>
+
+      {result && !syncing && (
+        <span
+          className={`px-2 py-0.5 rounded-full ${
+            result.ok
+              ? result.action === 'created' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : result.action === 'patched' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : 'bg-gray-100 text-gray-600 border border-gray-200'
+              : 'bg-red-50 text-red-700 border border-red-200'
+          }`}
+          title={result.error || ''}
+        >
+          {result.ok
+            ? result.action === 'created'
+              ? `✓ event created with ${(result.assignedEmails || []).length} guest${(result.assignedEmails || []).length === 1 ? '' : 's'}`
+              : result.action === 'patched'
+                ? `✓ guests updated (${(result.assignedEmails || []).length})`
+                : result.action === 'ok'
+                  ? '✓ already in sync'
+                  : `✓ ${result.action}`
+            : `⚠ ${result.error || 'sync failed'}`}
+        </span>
       )}
     </div>
   )

@@ -5,6 +5,66 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-23 · Calendar status + Re-sync button on /admin (v1.29.2) — visibility fix
+
+**Scope:** UI + endpoint for admins. No background worker / approve /
+assign behavior change. Reaction to an ops report that a CONFIRMED
+booking had no Google Calendar event and the admin had no way to see
+*why* from inside the app.
+
+**What changed for ops:**
+
+1. Each CONFIRMED (and COMPLETED) booking card on `/admin` now shows
+   either a blue "📅 Open in Calendar" link (when an event exists) or
+   a red "⚠ No calendar event" chip (when it doesn't). No more guessing.
+2. Every such card also gets a "Re-sync" button. Clicking it runs the
+   exact same reconcile logic the background worker runs, but scoped to
+   one booking and synchronous so the result appears inline:
+   `✓ event created with 1 guest`, `✓ guests updated (3)`,
+   `✓ already in sync`, or `⚠ <reason>`. No more waiting up to 10
+   minutes for the worker tick.
+3. The on-screen reason for a calendar failure (DWD off, Google API
+   rejected, etc.) is now the *first place* admins see the diagnostic,
+   instead of having to SSH in to read container logs or query
+   `AuditLog`.
+
+**Portainer redeploy notes:**
+
+- Pull image tagged `sha-<this-commit>`. Stack env vars unchanged.
+- No DB migration, no port change, no new worker process (still the
+  one from v1.29.0).
+- After deploy, re-open `/admin`, filter `CONFIRMED`, find the affected
+  booking, click **Re-sync**. The inline result tells you what's wrong.
+
+**Verification after redeploy:**
+
+1. The Content Agency · Long Form booking from the ops report now shows
+   a calendar chip + Re-sync button. Clicking Re-sync either turns the
+   chip green ("📅 Open in Calendar" + `✓ event created with 1 guest`)
+   or shows the failure reason inline.
+2. New entry under `AuditLog action='calendar.reconcile_*'` for that
+   booking confirms the run executed.
+3. Re-sync on a booking that's already in sync returns
+   `✓ already in sync` and writes a `calendar.reconcile_patched`
+   row (no-op patch, dryRun=false).
+
+**Rollback trigger:** none expected — this is additive. If the
+`calendar-resync` endpoint misbehaves, revert to `sha-106ab50`
+(v1.29.1); the rest of the calendar fix chain stays.
+
+**Files changed:**
+
+- `src/lib/calendar-reconcile.ts` — extracted per-booking
+  `processBooking()` + added `reconcileSingleBooking(bookingId)`
+  export. Existing bulk worker behavior unchanged.
+- `src/app/api/admin/[id]/calendar-resync/route.ts` (new) — admin-auth
+  endpoint that triggers the per-booking reconcile.
+- `src/app/admin/page.tsx` — new `<CalendarStatus>` component on
+  CONFIRMED/COMPLETED cards.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-23 · Reconciler hardening + Docker hygiene (v1.29.1) — operational fix, no behavior change
 
 **Scope:** Dev-audit pass on v1.29.0's reconciler. Same feature surface —

@@ -5,6 +5,88 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.29.2] — 2026-05-23
+
+### Added — calendar link on admin booking cards + on-demand Re-sync button
+
+Ops report: a CONFIRMED booking (Content Agency · Long Form (project),
+1 assigned crew member) showed no Google Calendar event, and the admin
+had no way to see *why* without SSH'ing into the container to read logs.
+This release surfaces the calendar state directly on each booking card.
+
+**New: `<CalendarStatus>` on `/admin` cards** (CONFIRMED + COMPLETED):
+
+- **Has `calendarEventId`** → blue chip "📅 Open in Calendar" linking to
+  the public event URL (or "📅 Calendar event linked" tooltip with the
+  event id when the htmlLink isn't cached yet — first Re-sync click
+  fetches it).
+- **No `calendarEventId`** → red chip "⚠ No calendar event" so the
+  failure mode is impossible to miss.
+- **Always present** → "Re-sync" button. Triggers an immediate
+  per-booking reconcile (no waiting for the 10-minute worker tick).
+  Inline result chip after the call: `✓ event created with N guests`,
+  `✓ guests updated (N)`, `✓ already in sync`, or `⚠ <reason>`.
+
+The button is deliberately shown even when the event link is green, so
+an admin who hears "I didn't get the calendar invite" from crew can
+force a guest patch immediately without chasing logs.
+
+**New endpoint: `POST /api/admin/[id]/calendar-resync`**
+
+- Admin-auth only (`requireAdmin`).
+- Calls `reconcileSingleBooking(bookingId)` — same code path as the
+  background worker, just scoped to one booking.
+- Returns the full `ReconcileItem`: `{ ok, action, eventId, htmlLink,
+  assignedEmails, calendarAttendees, error? }`. Action is one of
+  `ok | patched | created | failed | skipped`.
+- `GET` alias provided for ad-hoc browser testing while signed in.
+
+**Refactor: `src/lib/calendar-reconcile.ts`**
+
+- Extracted the per-booking work into a private `processBooking()` that
+  takes a fully-included booking record and the reconcile options
+  (`actorEmail`, `dryRun`). The bulk worker
+  (`reconcileCalendarGuests`) now loops over `processBooking`; the new
+  single-booking entry point (`reconcileSingleBooking`) fetches one
+  booking and calls the same function. Same AuditLog rows
+  (`calendar.reconcile_created/_patched/_recreated/_failed`), same
+  verification semantics, same DB writes — but now reusable.
+- `reconcileSingleBooking` rejects non-CONFIRMED bookings with a
+  human-readable `skipped` reason instead of silently doing nothing.
+- `ReconcileItem` now exposes `htmlLink?: string | null` so the admin
+  UI can display the Google Calendar URL the moment a reconcile
+  completes.
+
+### Diagnosing the user-reported case
+
+After deploy, on the affected CONFIRMED booking:
+
+1. Click **Re-sync** on the card.
+2. Read the inline result chip:
+   - `✓ event created with 1 guest` → root cause was the approve
+     background create silently failing (DWD blip, network); the new
+     event is correct.
+   - `✓ guests updated (1)` → event existed but didn't have the
+     assigned email yet; just patched.
+   - `⚠ GOOGLE_IMPERSONATE_SUBJECT not set …` → DWD config issue. Set
+     the env var (or fix its value) in the Portainer stack and
+     redeploy.
+   - `⚠ <google api error message>` → likely Workspace-side: DWD scope
+     drift, impersonated user lost calendar access, or the calendar id
+     was changed. Cross-reference `AuditLog action='calendar.invite_*'`
+     for the same booking.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes — `/api/admin/[id]/calendar-resync` appears in
+  the route table.
+- No behavior changes to the background worker, approve, or assign
+  paths; this release adds a manual escape hatch + visibility, doesn't
+  touch the automated flow.
+
+---
+
 ## [1.29.1] — 2026-05-23
 
 ### Fixed / hardened — reconcile worker resilience + Docker build hygiene
