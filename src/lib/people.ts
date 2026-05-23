@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import { getProducerDashboardSheetId } from './google-config'
 
 /**
  * People layer — reads the Producer Dashboard "_Users" tab so the booking
@@ -11,7 +12,7 @@ import { google } from 'googleapis'
  *   col C : Role        (Producer / Director / Manager / …)
  */
 
-const DEFAULT_DASHBOARD_SHEET_ID = '10TnR03z7qx1gYf6yCqnFG3TDcvEAwXpZqSJTMNpSzL4'
+// Sheet id moved to src/lib/google-config.ts (v1.30 consolidation).
 const USERS_TAB = '_Users'
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -41,7 +42,7 @@ export async function listPeople(opts: { force?: boolean } = {}): Promise<Person
   if (!opts.force && cache && Date.now() - cache.ts < CACHE_TTL_MS) {
     return cache.rows
   }
-  const sheetId = process.env.PRODUCER_DASHBOARD_SHEET_ID || DEFAULT_DASHBOARD_SHEET_ID
+  const sheetId = getProducerDashboardSheetId()
   try {
     const auth = getAuth()
     const sheets = google.sheets({ version: 'v4', auth })

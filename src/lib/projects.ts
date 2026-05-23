@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import { getProducerDashboardSheetId } from './google-config'
 
 /**
  * Project ID layer — Producer Dashboard integration
@@ -20,7 +21,7 @@ import { google } from 'googleapis'
  * "Published" (work finished). Projects with no episodes yet stay bookable.
  */
 
-const DEFAULT_DASHBOARD_SHEET_ID = '10TnR03z7qx1gYf6yCqnFG3TDcvEAwXpZqSJTMNpSzL4'
+// Sheet id moved to src/lib/google-config.ts (v1.30 consolidation).
 const DEFAULT_PROJECTS_TAB = 'All Projects'
 const DEFAULT_EPS_TAB = '_EPs'
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
@@ -94,7 +95,7 @@ export async function listProjects(opts: { force?: boolean } = {}): Promise<Proj
     return cache.rows
   }
 
-  const sheetId = process.env.PRODUCER_DASHBOARD_SHEET_ID || DEFAULT_DASHBOARD_SHEET_ID
+  const sheetId = getProducerDashboardSheetId()
   const projectsTab = process.env.PRODUCER_DASHBOARD_TAB || DEFAULT_PROJECTS_TAB
   const epsTab = process.env.PRODUCER_DASHBOARD_EPS_TAB || DEFAULT_EPS_TAB
 

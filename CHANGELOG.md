@@ -5,6 +5,89 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.30.0] — 2026-05-24
+
+### Added — single-source Producer Dashboard sheet config + `/admin/health` diagnostic page
+
+Long-running setup: production deploys will eventually point at a real
+Producer Dashboard sheet (separate from today's sandbox). Two changes
+to make that swap safe + verifiable:
+
+**1. `src/lib/google-config.ts` (new) — single source of truth for
+sheet config:**
+
+- `SANDBOX_PRODUCER_DASHBOARD_SHEET_ID` constant + `getProducerDashboardSheetId()`
+  helper. Reads `PRODUCER_DASHBOARD_SHEET_ID` env first; falls back to
+  the sandbox id.
+- `isUsingSandboxSheet()` + `maskSheetId()` for safe display
+  ("10TnR0…pSzL4").
+- Inlined consumers: `google-sheets.ts`, `projects.ts`, `people.ts`,
+  `dashboard-episodes.ts` — all dropped their private 4-way duplicated
+  `DEFAULT_DASHBOARD_SHEET_ID = '10TnR0…'` constant and now `import {
+  getProducerDashboardSheetId } from './google-config'`. Future swaps
+  touch one file.
+
+**2. `GET /api/health` (new, admin-only):**
+
+Returns runtime config + live checks in one response:
+
+- **Config (masked):** version, NODE_ENV, sheet id (masked) +
+  source (`env` vs `hardcoded-fallback`) + sandbox flag, calendar id
+  (masked), impersonate subject + source, NextAuth + reconcile worker
+  secrets (set/missing booleans, never the values themselves), SMTP
+  config presence.
+- **Live checks (each timed):**
+  - DB — `prisma.booking.count()` round-trip.
+  - Google Calendar — DWD JWT → `calendars.get` on the configured
+    calendar id.
+  - Producer Dashboard sheet — DWD JWT → `spreadsheets.get` on the
+    configured sheet id; returns the sheet title + tab list.
+- Returns 200 if every check passes, 503 otherwise.
+
+**3. `/admin/health` (new page):**
+
+Pretty wrapper around `/api/health`. Shows:
+
+- Top-line "All systems operational" / "One or more checks failed"
+  banner.
+- **Amber SANDBOX warning** when the sheet env is unset / matches the
+  sandbox id — admins immediately see they're on the dev sheet, with
+  exact instructions for the production swap.
+- Live check results with latency + error details for failing checks.
+- Source badges (`env` green vs `hardcoded fallback` amber) so it's
+  obvious which knobs are explicitly configured vs. relying on a
+  safety-net default.
+- Linked from `/admin` header next to Permissions.
+
+**4. `docs/runbook-sheet-swap.md` (new):**
+
+Step-by-step procedure for swapping the Producer Dashboard sheet
+(sandbox → production) with a verification checklist + rollback steps.
+Covers the failure modes (service account access, wrong id, forgetting
+to redeploy) and notes the 5-min cache TTL.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes — new route `/api/health` registered.
+- No behavior changes to the booking / approve / assign / calendar
+  flows. This release adds infrastructure (config consolidation +
+  observability), not user-visible features.
+
+### Tradeoffs / follow-ups
+
+- `/admin/health` does live network calls (DB + Calendar + Sheets) per
+  page load. Cheap (~50–500ms) but don't auto-poll it; the Re-check
+  button is manual on purpose.
+- The Calendar / Sheet checks reuse the same DWD JWT used by the
+  worker, so a healthy /admin/health implies the worker can talk to
+  Google too.
+- `GOOGLE_SHEETS_ID` env var present in the Portainer stack is not
+  consumed by any code (verified). Documented in
+  `runbook-sheet-swap.md` notes; safe to leave or remove.
+
+---
+
 ## [1.29.4] — 2026-05-24
 
 ### Fixed — hardcoded fallback for the impersonated Workspace user

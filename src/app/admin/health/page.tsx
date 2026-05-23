@@ -1,0 +1,237 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { ArrowLeft, RefreshCw, Loader2, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react'
+
+/* =============================================================================
+   /admin/health — diagnostic dashboard
+   Pulls /api/health and renders live config + check results.
+   Primary use case: verify a sheet-swap deploy actually pointed the running
+   container at the right Producer Dashboard sheet.
+   ============================================================================= */
+
+type CheckResult =
+  | { ok: true; latencyMs: number; detail?: string }
+  | { ok: false; latencyMs: number; error: string }
+
+type HealthResponse = {
+  ok: boolean
+  checkedAt: string
+  config: {
+    nodeEnv: string
+    version: string
+    producerDashboardSheet: {
+      id: string
+      source: 'env' | 'hardcoded-fallback'
+      isSandbox: boolean
+      sandboxId: string
+      bookingsTab: string
+    }
+    calendar: {
+      id: string
+      impersonateSubject: string
+      impersonateSource: 'env' | 'hardcoded-fallback'
+    }
+    auth: {
+      nextauthUrl: string
+      nextauthSecretSet: boolean
+      calendarReconcileSecretSet: boolean
+    }
+    email: {
+      provider: string
+      smtpHost: string
+      smtpUserSet: boolean
+      smtpPassSet: boolean
+    }
+  }
+  checks: {
+    db: CheckResult
+    googleCalendar: CheckResult
+    producerDashboardSheet: CheckResult
+  }
+}
+
+export default function HealthPage() {
+  const [data, setData] = useState<HealthResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string>('')
+
+  const fetch_ = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' })
+      const json = await res.json()
+      if (!res.ok && !json.config) throw new Error(json.error || `HTTP ${res.status}`)
+      setData(json)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetch_() }, [])
+
+  return (
+    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
+        <ArrowLeft className="w-4 h-4" /> Admin Console
+      </Link>
+
+      <div className="flex items-start justify-between gap-2 mb-4 flex-wrap">
+        <div>
+          <h1>System Health</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Runtime config + live checks. Use after a deploy to verify
+            production is pointed at the right sheets, DWD is alive, and
+            DB/Calendar/Sheets API round-trips succeed.
+          </p>
+        </div>
+        <button onClick={fetch_} disabled={loading} className="ops-btn-secondary ops-btn-sm">
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          Re-check
+        </button>
+      </div>
+
+      {error && (
+        <div className="ops-card p-3 mb-3 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">
+          {error}
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Top-line status */}
+          <div className={`ops-card ops-card-pad mb-3 ${data.ok ? '' : 'border-red-200'}`}>
+            <div className="flex items-center gap-3">
+              {data.ok ? (
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 flex-shrink-0" />
+              ) : (
+                <AlertTriangle className="w-8 h-8 text-red-500 flex-shrink-0" />
+              )}
+              <div>
+                <div className={`text-base font-semibold ${data.ok ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {data.ok ? 'All systems operational' : 'One or more checks failed'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  Checked {new Date(data.checkedAt).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok' })} BKK
+                  {' · '}v{data.config.version}{' · '}NODE_ENV={data.config.nodeEnv}
+                </div>
+              </div>
+            </div>
+
+            {/* Sandbox warning */}
+            {data.config.producerDashboardSheet.isSandbox && (
+              <div className="mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>
+                  This deploy is pointed at the <strong>SANDBOX</strong> Producer Dashboard sheet
+                  ({data.config.producerDashboardSheet.sandboxId}). To switch to production,
+                  set <code className="px-1 bg-amber-100 rounded">PRODUCER_DASHBOARD_SHEET_ID</code> in
+                  the Portainer stack env and redeploy.
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Live checks */}
+          <Section title="Live checks">
+            <CheckRow name="Database (Postgres)" result={data.checks.db} />
+            <CheckRow name="Google Calendar API (DWD)" result={data.checks.googleCalendar} />
+            <CheckRow name="Producer Dashboard sheet" result={data.checks.producerDashboardSheet} />
+          </Section>
+
+          {/* Config */}
+          <Section title="Producer Dashboard sheet">
+            <KV k="Sheet ID" v={<code className="text-xs">{data.config.producerDashboardSheet.id}</code>} />
+            <KV k="Source" v={<SourceBadge source={data.config.producerDashboardSheet.source} />} />
+            <KV k="Bookings tab" v={data.config.producerDashboardSheet.bookingsTab} />
+            <KV k="Mode" v={data.config.producerDashboardSheet.isSandbox
+              ? <span className="text-amber-700">⚠ SANDBOX</span>
+              : <span className="text-emerald-700">✓ Production</span>} />
+          </Section>
+
+          <Section title="Google Calendar">
+            <KV k="Calendar ID" v={<code className="text-xs">{data.config.calendar.id}</code>} />
+            <KV k="Impersonate subject" v={data.config.calendar.impersonateSubject} />
+            <KV k="Source" v={<SourceBadge source={data.config.calendar.impersonateSource} />} />
+          </Section>
+
+          <Section title="Auth">
+            <KV k="NEXTAUTH_URL" v={data.config.auth.nextauthUrl} />
+            <KV k="NEXTAUTH_SECRET" v={<SetBadge set={data.config.auth.nextauthSecretSet} />} />
+            <KV k="Reconcile worker secret" v={<SetBadge set={data.config.auth.calendarReconcileSecretSet} />} />
+          </Section>
+
+          <Section title="Email">
+            <KV k="Provider" v={data.config.email.provider} />
+            <KV k="SMTP host" v={data.config.email.smtpHost} />
+            <KV k="SMTP user" v={<SetBadge set={data.config.email.smtpUserSet} />} />
+            <KV k="SMTP pass" v={<SetBadge set={data.config.email.smtpPassSet} />} />
+          </Section>
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ---------- presentational helpers ---------- */
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="ops-card overflow-hidden mb-3">
+      <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+        <div className="ops-section-title">{title}</div>
+      </div>
+      <div className="divide-y divide-gray-100">{children}</div>
+    </div>
+  )
+}
+
+function KV({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[180px_1fr] gap-3 px-4 py-2 text-sm">
+      <div className="text-xs text-gray-500 uppercase tracking-wide pt-0.5">{k}</div>
+      <div className="text-gray-800 break-words">{v}</div>
+    </div>
+  )
+}
+
+function CheckRow({ name, result }: { name: string; result: CheckResult }) {
+  return (
+    <div className="grid grid-cols-[1fr_auto] gap-3 px-4 py-2 text-sm">
+      <div>
+        <div className="flex items-center gap-2">
+          {result.ok ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+          )}
+          <span className="text-gray-800">{name}</span>
+          <span className="text-xs text-gray-400 tabular-nums">{result.latencyMs}ms</span>
+        </div>
+        {result.ok && result.detail && (
+          <div className="text-xs text-gray-500 ml-6 mt-0.5">{result.detail}</div>
+        )}
+        {!result.ok && (
+          <div className="text-xs text-red-700 ml-6 mt-0.5 break-words">{result.error}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SourceBadge({ source }: { source: 'env' | 'hardcoded-fallback' }) {
+  if (source === 'env') {
+    return <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">env</span>
+  }
+  return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">hardcoded fallback</span>
+}
+
+function SetBadge({ set }: { set: boolean }) {
+  return set
+    ? <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">set</span>
+    : <span className="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">missing</span>
+}

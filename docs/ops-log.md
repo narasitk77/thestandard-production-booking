@@ -5,6 +5,84 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · Sheet config consolidation + /admin/health (v1.30.0) — no infra change, infrastructure for sandbox↔prod sheet swap
+
+**Scope:** Internal-tooling release that paves the way for switching
+the Producer Dashboard sheet from sandbox to a real production sheet
+without code changes or surprises.
+
+**What admins gain:**
+
+- `/admin/health` — new page (linked from `/admin` header next to
+  Permissions). Shows runtime config (sheet ids masked) plus live
+  round-trip checks to the DB, Google Calendar, and Producer Dashboard
+  sheet. Use it after every deploy / env change to confirm the
+  container is actually pointed where you intended.
+- Big amber **SANDBOX** banner on `/admin/health` when the deploy is
+  using the fallback sheet id — impossible to miss before going live.
+- `docs/runbook-sheet-swap.md` — checklist for the swap.
+
+**What changed internally:**
+
+- `src/lib/google-config.ts` — new single source of truth for the
+  Producer Dashboard sheet id. The previously-duplicated
+  `DEFAULT_DASHBOARD_SHEET_ID` in google-sheets.ts / projects.ts /
+  people.ts / dashboard-episodes.ts is gone; all four now call
+  `getProducerDashboardSheetId()`.
+- `GET /api/health` — admin-only diagnostic endpoint that the
+  `/admin/health` page consumes.
+
+**Portainer redeploy notes:**
+
+- Pull image `sha-<this-commit>`. Stack env unchanged from v1.29.4.
+- No DB migration, no port change, no worker change.
+- After deploy, hit `/admin/health` — confirm sheet section shows
+  current config (masked) and live checks are green.
+
+**Verification:**
+
+1. Open `/admin/health` while signed in as admin. Page renders.
+2. Top-line status reads "All systems operational" (green check).
+3. Producer Dashboard sheet section shows:
+   - Sheet ID (masked, e.g. `1rMLmQ…lARw`).
+   - Source: `env`.
+   - Mode: `✓ Production` (or `⚠ SANDBOX` if env unset — that's the
+     banner up top).
+4. Live checks all green:
+   - Database — returns booking count.
+   - Google Calendar — returns calendar title.
+   - Producer Dashboard sheet — returns sheet title + tab list.
+5. Click Re-check button — same response in ~200–500ms.
+
+**Production sheet swap procedure** (when ready): see
+`docs/runbook-sheet-swap.md`. Summary:
+
+1. Share new sheet with service account
+   `production-booking@production-booking-494605.iam.gserviceaccount.com`
+   (Editor).
+2. In Portainer stack env, set `PRODUCER_DASHBOARD_SHEET_ID` to the
+   new id, Save settings, Pull and redeploy.
+3. Verify on `/admin/health`: amber SANDBOX warning gone, sheet title
+   updated, live check green.
+4. Smoke-test with a CA booking.
+
+**Rollback trigger:** none expected — this release is purely additive.
+If `/admin/health` itself misbehaves, revert to `sha-4a9b5a9`
+(v1.29.4); the underlying calendar fix stays.
+
+**Files changed:**
+
+- `src/lib/google-config.ts` (new) — sheet config helpers.
+- `src/lib/google-sheets.ts`, `src/lib/projects.ts`, `src/lib/people.ts`,
+  `src/lib/dashboard-episodes.ts` — switched to shared helpers.
+- `src/app/api/health/route.ts` (new) — admin-only diagnostic endpoint.
+- `src/app/admin/health/page.tsx` (new) — UI dashboard.
+- `src/app/admin/page.tsx` — added Health link in header.
+- `docs/runbook-sheet-swap.md` (new) — swap procedure.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-24 · Hardcoded impersonate fallback (v1.29.4) — fix for stale-compose deploy
 
 **Scope:** Defensive bug fix for the long-running "calendar guests not

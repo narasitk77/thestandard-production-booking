@@ -1,0 +1,89 @@
+# Runbook — swap Producer Dashboard sheet (sandbox ↔ production)
+
+## TL;DR
+
+1. Find the new sheet's **spreadsheet id** (the long random string in the
+   Google Sheets URL after `/d/` and before `/edit`).
+2. Share the new sheet with **both**:
+   - `production-booking@production-booking-494605.iam.gserviceaccount.com`
+     (the service account — needs **Editor** access so the app can write
+     the Bookings tab back to it).
+   - The DWD impersonate user (`narasit.k@thestandard.co`) with
+     **Editor** access if you want to bypass the service account path.
+3. Verify the new sheet has the required tabs:
+   `All Projects` · `_Users` · `_EPs` · (`Bookings` is created on first
+   write, no need to pre-make it)
+4. In Portainer → `production-booking` stack → **Environment variables**:
+   - Edit `PRODUCER_DASHBOARD_SHEET_ID` → paste the new id.
+   - Click **Save settings**.
+   - Click **Pull and redeploy** (no need to toggle "Re-pull image"
+     unless you also want a fresh image build).
+5. After deploy, open `/admin/health` and confirm:
+   - `Producer Dashboard sheet` section → `Source: env`,
+     `Mode: ✓ Production` (the amber `SANDBOX` warning should be gone).
+   - `Live checks → Producer Dashboard sheet` → green check, returns
+     the sheet's title.
+6. Create one test booking with outlet **Content Agency (AGN)** to
+   exercise the new sheet end-to-end. Confirm a row appears in the
+   `Bookings` tab of the new sheet.
+7. Approve + assign crew → calendar event should still fire (DWD path
+   is independent of the Producer Dashboard sheet).
+
+## Why this is risky if done wrong
+
+- **Service account loses access** → app silently fails to read Project
+  IDs / Episodes / Users for Content Agency bookings. Wizard step 4
+  shows "No projects loaded (sheet unreachable)".
+- **Wrong sheet id pasted** → reads work but against the wrong data.
+  CA bookings get written into someone else's sheet — and CA users see
+  ghost projects from someone else's pipeline.
+- **Forgetting to redeploy** → env var saved in Portainer UI but stale
+  container keeps the old value.
+
+## What's centralized vs. what isn't
+
+As of **v1.30** all sheet-id reads go through
+`src/lib/google-config.ts` → `getProducerDashboardSheetId()`. There is
+no longer a hardcoded sheet id duplicated across `google-sheets.ts`,
+`projects.ts`, `people.ts`, `dashboard-episodes.ts`. The only hardcoded
+value is the **sandbox fallback** in `google-config.ts`
+(`SANDBOX_PRODUCER_DASHBOARD_SHEET_ID`), used when the env var is
+unset — which `/admin/health` flags as `⚠ SANDBOX`.
+
+## Verification checklist (copy this into a Slack/Notion message after a swap)
+
+```
+Swap done at: <timestamp>
+Old sheet id (masked): <from /admin/health before swap>
+New sheet id (masked): <from /admin/health after swap>
+
+/admin/health checks:
+  [ ] Database round-trip green
+  [ ] Google Calendar green
+  [ ] Producer Dashboard sheet green — title: <expected title>
+  [ ] "Mode: ✓ Production" (not SANDBOX)
+
+Smoke booking:
+  [ ] Created test CA booking with outlet AGN
+  [ ] Project list loaded from NEW sheet (no "no projects" warning)
+  [ ] Producer/Director dropdowns loaded from NEW sheet
+  [ ] After approve+assign, calendar event created with assigned crew
+  [ ] Row appears in NEW sheet "Bookings" tab
+
+Rollback plan (if anything broke):
+  - In Portainer stack env, revert PRODUCER_DASHBOARD_SHEET_ID to old id
+  - Save settings + Pull and redeploy
+  - Cancel + restore the test booking via /admin/[id] (calendar event
+    will be re-deleted)
+```
+
+## Notes
+
+- The app caches sheet reads for ~5 min (`CACHE_TTL_MS` in
+  `projects.ts` / `people.ts`). If you don't see the new sheet's data
+  immediately after a swap, give it 5 min or restart the container.
+- The "Bookings" tab name can be overridden via `BOOKINGS_TAB` env if
+  the new sheet uses a different tab name.
+- `GOOGLE_SHEETS_ID` env var (separate from `PRODUCER_DASHBOARD_SHEET_ID`)
+  exists in the Portainer stack env but is **not currently consumed by
+  any app code** (verified 2026-05-24). Safe to leave or remove.

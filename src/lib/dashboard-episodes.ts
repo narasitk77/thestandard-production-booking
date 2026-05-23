@@ -21,8 +21,9 @@
  *   All Projects: A ProjectID · B ProjectName · … · F Producer · G Director
  */
 import { google } from 'googleapis'
+import { getProducerDashboardSheetId } from './google-config'
 
-const DEFAULT_DASHBOARD_SHEET_ID = '10TnR03z7qx1gYf6yCqnFG3TDcvEAwXpZqSJTMNpSzL4'
+// Sheet id moved to src/lib/google-config.ts (v1.30 consolidation).
 
 export type GenerateResult =
   | { ok: true; episodeIds: string[] }
@@ -31,7 +32,7 @@ export type GenerateResult =
 const VALID_TYPES = ['L', 'S', 'A', 'T']
 
 function getSheetId(): string {
-  return process.env.PRODUCER_DASHBOARD_SHEET_ID || DEFAULT_DASHBOARD_SHEET_ID
+  return getProducerDashboardSheetId()
 }
 
 function hasCredentials(): boolean {

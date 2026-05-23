@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import { getProducerDashboardSheetId, getBookingsTabName } from './google-config'
 
 /**
  * Bookings → Producer Dashboard sync
@@ -14,12 +15,10 @@ import { google } from 'googleapis'
  * updateBookingRow's colMap hardcodes indices, so new columns go to the right.
  */
 
-const DEFAULT_DASHBOARD_SHEET_ID = '10TnR03z7qx1gYf6yCqnFG3TDcvEAwXpZqSJTMNpSzL4'
-const SHEET_TAB = process.env.BOOKINGS_TAB || 'Bookings'
-
-function getSheetId(): string {
-  return process.env.PRODUCER_DASHBOARD_SHEET_ID || DEFAULT_DASHBOARD_SHEET_ID
-}
+// Sheet id + tab now centralized in src/lib/google-config.ts so sandbox ↔
+// production swaps are a one-line env change instead of a 4-file grep.
+const getSheetId = getProducerDashboardSheetId
+const SHEET_TAB = getBookingsTabName()
 
 // 28 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
 // *Email columns keep the canonical id so Airtable can join on either.
