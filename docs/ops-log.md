@@ -5,6 +5,76 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · Hardcoded impersonate fallback (v1.29.4) — fix for stale-compose deploy
+
+**Scope:** Defensive bug fix for the long-running "calendar guests not
+added" issue. After v1.29.3 made the real error message visible, live
+diagnosis via Portainer + Google Admin confirmed:
+
+1. ✓ Service account creds set in stack env.
+2. ✓ Google Admin DWD granted for client `106117530552798836735` with
+   `https://www.googleapis.com/auth/calendar` (full r/w).
+3. ✓ Shared calendar "THE STANDARD Production Bookings" shared with
+   `narasit.k@thestandard.co` with "Make changes and manage sharing".
+4. ✓ Stack env editor shows `GOOGLE_IMPERSONATE_SUBJECT=
+   narasit.k@thestandard.co`.
+5. ❌ **Running container `process.env.GOOGLE_IMPERSONATE_SUBJECT`
+   is undefined.**
+
+Root cause: Portainer is Repository-mode, and the box's git fetch has
+been failing intermittently — Portainer keeps reusing a stale cached
+`docker-compose.portainer.yml` that pre-dates v1.26.4's
+`${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}` default. Stack
+env edits never reach the container because the cached compose has no
+`GOOGLE_IMPERSONATE_SUBJECT:` line under the `environment:` block at all.
+
+**Fix:** code-level fallback in `src/lib/google-calendar.ts`. The
+`getCalendarImpersonateSubject()` helper now returns
+`narasit.k@thestandard.co` (the same default that's already in the
+Portainer compose) when the env var is missing/empty, with a
+one-time-per-process warning logged to the container log. Env var still
+wins when set.
+
+**Portainer redeploy notes:**
+
+- Pull image `sha-<this-commit>`. Stack env unchanged.
+- No DB migration. No worker change.
+- After deploy:
+  1. Container log's first calendar-related line should be
+     `[calendar] GOOGLE_IMPERSONATE_SUBJECT env not set — using built-in
+     fallback "narasit.k@thestandard.co" so DWD still works.` (or no
+     line at all if a future Portainer redeploy successfully sets the
+     env var — in which case the line is silenced, also fine.)
+  2. On `/admin`, Re-sync the two known-bad bookings
+     (PP-26-001-L01, PP-26-006-L01) — chips must turn green
+     "✓ event created with N guests".
+  3. Open the THE STANDARD Production Bookings calendar in Google
+     Calendar — the new events should appear with the assigned crew
+     as guests.
+
+**Follow-up — fix Portainer's stale compose (separately):**
+
+- Investigate why `Failed to fetch latest commit id of the stack 125`
+  appeared in Portainer Notifications. Likely DNS or outbound network
+  issue from the Portainer host to github.com. Verify with
+  `docker exec portainer wget -O- https://github.com/narasitk77/thestandard-production-booking`.
+- Once git fetch works, "Pull and redeploy" will refresh the compose
+  and the env var will flow naturally. The code-level fallback can
+  stay as a safety net.
+
+**Rollback trigger:** none expected. The fallback only activates when
+the env is missing, which currently is the only known state. Reverting
+to `sha-9041ff5` (v1.29.3) brings back the diagnostic surface but not
+the fix.
+
+**Files changed:**
+
+- `src/lib/google-calendar.ts` — `DEFAULT_IMPERSONATE_SUBJECT` constant,
+  `getCalendarImpersonateSubject()` falls back with a one-time warning.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-23 · Surface real createCalendarEvent reason (v1.29.3) — diagnostic fix
 
 **Scope:** Bug fix. v1.29.2 added the Re-sync button + result chip, but

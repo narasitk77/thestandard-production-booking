@@ -5,6 +5,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.29.4] — 2026-05-24
+
+### Fixed — hardcoded fallback for the impersonated Workspace user
+
+Confirmed root cause of the long-running "calendar guests not added" issue
+via live Portainer inspection on 2026-05-24:
+
+- Service account creds: ✓ set
+- Google Admin DWD: ✓ granted (client id `106117530552798836735`, scope
+  `https://www.googleapis.com/auth/calendar` — full read/write)
+- Shared calendar "THE STANDARD Production Bookings": ✓ shared with
+  `narasit.k@thestandard.co` with "Make changes and manage sharing"
+- Portainer stack env editor: shows `GOOGLE_IMPERSONATE_SUBJECT=
+  narasit.k@thestandard.co` (51 chars, no whitespace)
+- **Running container env vars: GOOGLE_IMPERSONATE_SUBJECT is MISSING**
+
+The Portainer stack is Repository-mode (deploys from
+`docker-compose.portainer.yml` in git). That compose has the default
+`${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}` since v1.26.4,
+which should set the env var either way. But git fetch has been failing
+intermittently (saw `Failed to fetch latest commit id` and `Failed to
+pull images of the stack` toasts) and Portainer kept using a stale
+cached compose file that pre-dates the default — so the var never made
+it into the container.
+
+**Fix:** hardcode the same fallback at the application layer in
+`src/lib/google-calendar.ts`:
+
+- `DEFAULT_IMPERSONATE_SUBJECT = 'narasit.k@thestandard.co'`.
+- `getCalendarImpersonateSubject()` returns the env value when set
+  (trimmed); otherwise returns the default and logs a one-time warning
+  to the container log so the misconfig is still discoverable.
+
+Net effect: calendar guest sync now works whatever shape the Portainer
+stack is in, as long as DWD itself is healthy. The env var still wins
+when set (so multi-Workspace deploys or different impersonators can
+override).
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes.
+- After deploying `sha-<this-commit>`, Re-sync on the affected bookings
+  (PP-26-001-L01, PP-26-006-L01) must turn the chip green:
+  `✓ event created with N guests` — and the events appear on Google
+  Calendar "THE STANDARD Production Bookings" with the assigned crew
+  as guests.
+
+### Follow-up
+
+- Portainer's stale-compose issue should still be fixed for hygiene:
+  either fix the box's DNS/git connectivity so `Failed to fetch latest
+  commit id` stops happening, or detach the stack from Git and re-add
+  it. The code fix is defensive — it doesn't address the underlying
+  Portainer/git plumbing.
+
+---
+
 ## [1.29.3] — 2026-05-23
 
 ### Fixed — surface the real reason `createCalendarEvent` failed (was: silently returning null)

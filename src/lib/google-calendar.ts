@@ -6,10 +6,29 @@ import { isEmailConfigured, sendEmail } from './email'
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID ||
   '72bf6ae390fb09d1e0a117dbaf421799be6bcc3b21ec2b7c3e2d7a65e65f9dc5@group.calendar.google.com'
 
+// v1.29.4 — hardcoded fallback for the impersonated Workspace user. Same
+// value as the default baked into docker-compose.portainer.yml. Single-tenant
+// internal tool, so safe to hardcode; this guards against the deploy class of
+// bugs where Portainer's stale-compose cache drops the env var entirely
+// (observed in prod on 2026-05-24 — the stack env editor showed the value
+// but the running container had no GOOGLE_IMPERSONATE_SUBJECT). Override via
+// the env var when running multi-tenant or in a different Workspace.
+const DEFAULT_IMPERSONATE_SUBJECT = 'narasit.k@thestandard.co'
+// Module-scope flag for the once-per-process warning when we fall back.
+let _impersonateFallbackWarned = false
+
 type CalendarAlertKind = 'invite_failed' | 'attendees_update_failed'
 
 export function getCalendarImpersonateSubject(): string | undefined {
-  return process.env.GOOGLE_IMPERSONATE_SUBJECT?.trim() || undefined
+  const fromEnv = process.env.GOOGLE_IMPERSONATE_SUBJECT?.trim()
+  if (fromEnv) return fromEnv
+  if (!_impersonateFallbackWarned) {
+    console.warn(
+      `[calendar] GOOGLE_IMPERSONATE_SUBJECT env not set — using built-in fallback "${DEFAULT_IMPERSONATE_SUBJECT}" so DWD still works. Set the env var to silence this warning or to point at a different Workspace user.`,
+    )
+    _impersonateFallbackWarned = true
+  }
+  return DEFAULT_IMPERSONATE_SUBJECT
 }
 
 // Fire-and-forget alert when calendar guests fail to attach. Writes an AuditLog
