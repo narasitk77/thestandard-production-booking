@@ -5,6 +5,7 @@ import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { updateBookingRow } from '@/lib/google-sheets'
 import {
   createCalendarEvent,
+  getCalendarImpersonateSubject,
   getCalendarEventLink,
   updateCalendarEventAttendees,
 } from '@/lib/google-calendar'
@@ -106,7 +107,7 @@ export async function POST(
             ok: false,
             eventId: booking.calendarEventId,
             action: 'patched',
-            error: process.env.GOOGLE_IMPERSONATE_SUBJECT
+            error: getCalendarImpersonateSubject()
               ? 'Google Calendar API rejected the attendees update (see AuditLog calendar.attendees_update_failed)'
               : 'GOOGLE_IMPERSONATE_SUBJECT not set — cannot add calendar guests without Domain-Wide Delegation',
           }
