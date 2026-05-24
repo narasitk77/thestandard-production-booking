@@ -24,9 +24,24 @@ export function getCalendarImpersonateSubject(): string | undefined {
   if (fromEnv) return fromEnv
   if (!_impersonateFallbackWarned) {
     console.warn(
-      `[calendar] GOOGLE_IMPERSONATE_SUBJECT env not set — using built-in fallback "${DEFAULT_IMPERSONATE_SUBJECT}" so DWD still works. Set the env var to silence this warning or to point at a different Workspace user.`,
+      `[calendar] GOOGLE_IMPERSONATE_SUBJECT env not set — using built-in fallback "${DEFAULT_IMPERSONATE_SUBJECT}" so DWD still works. Set the env var to silence this warning or to point at a different Workspace user. See docs/runbook-impersonate-swap.md.`,
     )
     _impersonateFallbackWarned = true
+    // v1.32.4 — also durably record the fallback usage in the audit
+    // log so the audit-email alert path (v1.26.5) flags it. The
+    // import is lazy to avoid a require-cycle with audit.ts which
+    // doesn't depend on this module but may in the future.
+    import('./audit').then(({ logAudit }) => {
+      logAudit({
+        actorEmail: 'calendar-impersonate-fallback',
+        action: 'calendar.impersonate_fallback_in_use',
+        entityType: 'System',
+        changes: {
+          fallbackSubject: DEFAULT_IMPERSONATE_SUBJECT,
+          message: 'GOOGLE_IMPERSONATE_SUBJECT env not set — falling back to hardcoded default. See docs/runbook-impersonate-swap.md.',
+        },
+      })
+    }).catch(() => {})
   }
   return DEFAULT_IMPERSONATE_SUBJECT
 }

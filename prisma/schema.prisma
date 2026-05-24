@@ -29,6 +29,15 @@ enum BookingStatus {
   COMPLETED
 }
 
+// v1.32.2 — async calendar sync state for CONFIRMED bookings. Updated
+// by approve route (PENDING→OK/FAILED), the assign route's auto-recover
+// path (OK/FAILED), and the 10-min reconciler worker (OK/FAILED).
+enum CalendarSyncStatus {
+  PENDING
+  OK
+  FAILED
+}
+
 enum UploadStatus {
   PENDING
   UPLOADING
@@ -194,6 +203,17 @@ model Booking {
   status           BookingStatus @default(REQUESTED)
   createdByEmail   String?
   calendarEventId  String?
+  // v1.32.2 — async calendar sync visibility. Approve sets PENDING
+  // before kicking off the background create; the background task
+  // writes OK on success or FAILED (with calendarSyncError) on error.
+  // The 10-min reconciler retries FAILED rows and updates timestamps
+  // on every pass. UI surfaces this state on the admin booking cards
+  // so admins see at a glance when a CONFIRMED booking is missing its
+  // calendar event. Nullable: legacy bookings stay NULL until
+  // start.sh's one-time backfill or the next reconciler pass.
+  calendarSyncStatus    CalendarSyncStatus?
+  calendarSyncError     String?
+  calendarLastSyncedAt  DateTime?
   sheetRowIndex    Int?
   approvedAt       DateTime?
   outlet           Outlet        @relation(fields: [outletId], references: [id])

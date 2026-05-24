@@ -5,6 +5,146 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.32.2] — 2026-05-24
+
+### Added — `calendarSyncStatus` field + guest-list verification on booking detail + impersonate fallback warning
+
+Bundles the remaining 3 Codex-review fixes (issues #3, #2, #4) into a
+single release because the UI changes share the same components.
+
+#### Issue #3 — async calendar sync visibility (schema change, additive)
+
+Approve sets `status='CONFIRMED'` instantly, then fires calendar create
+in a background IIFE. Pre-v1.32: if calendar failed, booking showed
+CONFIRMED but `calendarEventId` was null and error was only in container
+logs. No DB field tracked the failure.
+
+**Schema (`prisma/schema.prisma`) — all nullable adds, no data loss:**
+
+```
+enum CalendarSyncStatus { PENDING, OK, FAILED }
+
+model Booking {
+  …existing fields…
+  calendarSyncStatus    CalendarSyncStatus?
+  calendarSyncError     String?
+  calendarLastSyncedAt  DateTime?
+}
+```
+
+Applied via existing `prisma db push --accept-data-loss` in `start.sh`.
+New table column writes never touch existing data.
+
+**State writers:**
+
+- `src/app/api/admin/[id]/approve/route.ts` — sets `PENDING` synchronously
+  before kicking off the background create; the IIFE writes `OK` on
+  success or `FAILED` (with `calendarSyncError`) on caught error. Adds
+  a `calendar.approve_failed` audit row on failure.
+- `src/lib/calendar-reconcile.ts` `processBooking()` — every successful
+  patch / create writes `OK + lastSyncedAt + clears error`; the catch
+  writes `FAILED + error`. The "already in sync" path also refreshes
+  the OK timestamp.
+- `src/lib/calendar-reconcile.ts` reconciler WHERE clause — extended
+  to also pick up rows orphaned by a mid-task container restart:
+  `(status=CONFIRMED AND assigned non-empty) OR (status=PENDING AND
+  lastSyncedAt < now - 5 min)`.
+- `src/app/api/admin/[id]/assign/route.ts` — both the patch-existing
+  path and the auto-recover create path write `OK`/`FAILED` based on
+  outcome.
+- `start.sh` — one-time backfill for legacy CONFIRMED bookings:
+  `OK` if `calendarEventId IS NOT NULL`, `FAILED` otherwise. Guarded
+  by `WHERE calendarSyncStatus IS NULL` so it's idempotent.
+
+**UI:**
+
+- `src/app/admin/page.tsx` `<CalendarStatus>` — primary chip now driven
+  by the new status field, not just the existence of `calendarEventId`.
+  Three explicit states (PENDING gray spinner / OK no-chip + green link
+  / FAILED red + tooltip error). Last-checked timestamp shown as a
+  small relative-time hint. Legacy bookings (NULL status) fall through
+  to the old "infer from eventId" path.
+- `src/app/admin/[id]/page.tsx` — Confirmed card replaced with a new
+  `<BookingConfirmedCard>` (see Issue #2 below) that shows the sync
+  status badge + last-synced timestamp + error inline + Open in
+  Calendar link.
+
+#### Issue #2 — guest-list verification on booking detail
+
+`/admin/[id]` Confirmed card previously showed only "Calendar event
+created · ID: …" — never verified the assigned crew were actually on
+the event. Easy to silently miss missing guests.
+
+**Endpoint — `GET /api/admin/[id]/calendar-resync?dryRun=1`:**
+
+- Reuses existing `reconcileSingleBooking()` with `dryRun: true`.
+  Returns the same `ReconcileItem` shape (assignedEmails,
+  calendarAttendees, htmlLink, action) without modifying anything.
+- POST behavior unchanged (still writes). GET without `?dryRun` also
+  still writes for backwards compat.
+
+**UI — new `<BookingConfirmedCard>` in `/admin/[id]/page.tsx`:**
+
+- On mount (when booking is CONFIRMED), fetches dry-run verification.
+- Renders: assigned crew list vs calendar guests list with counts.
+- If `missing.length > 0`: red box "⚠ Missing N guests on calendar:
+  alice@, bob@" so the admin sees the problem immediately.
+- If `extra.length > 0`: amber box flags guests on the event that
+  aren't in the assigned list.
+- If all in sync: green "✓ All N crew are on the calendar".
+- "Re-sync calendar guests" button always available; on success it
+  re-runs the dry-run so the diff updates without a page reload.
+
+#### Issue #4 — visible warning when impersonate falls back to hardcoded default
+
+The v1.29.4 hardcoded `narasit.k@thestandard.co` fallback (added after
+Portainer dropped the env var) creates an invisible single-person
+dependency. v1.32.4 makes it visible:
+
+- `src/app/admin/health/page.tsx` — under the Google Calendar section,
+  when `impersonateSource === 'hardcoded-fallback'`, render an amber
+  warning explaining: "If `narasit.k@thestandard.co` leaves the company
+  or loses Workspace access, calendar invites will break. To swap: set
+  `GOOGLE_IMPERSONATE_SUBJECT` in Portainer stack env and redeploy.
+  See `docs/runbook-impersonate-swap.md`."
+- `src/lib/google-calendar.ts` `getCalendarImpersonateSubject()` — the
+  existing once-per-process `console.warn` now also writes a one-time
+  `AuditLog` row (action `calendar.impersonate_fallback_in_use`) so
+  the audit-email alert path (v1.26.5) picks up the fallback usage
+  durably, not just in transient logs.
+- New `docs/runbook-impersonate-swap.md` — step-by-step swap procedure
+  (when, how, what survives, troubleshooting, rollback, long-term
+  multi-fallback list option).
+
+### Verification
+
+- `tsc --noEmit` clean.
+- `next build` passes — all routes + page sizes within expected range.
+- `prisma db push --accept-data-loss` in dev creates the new column +
+  enum without touching existing data.
+- After deploy:
+  1. `/admin` Confirmed cards show PENDING immediately after approve,
+     flip to OK in 1-3 seconds, or FAILED with red chip + error
+     tooltip if calendar fails.
+  2. `/admin/[id]` for CONFIRMED bookings shows the new
+     `<BookingConfirmedCard>` with calendar sync status badge + live
+     guest verification + Re-sync button.
+  3. `/admin/health` shows amber warning under Google Calendar
+     section if `GOOGLE_IMPERSONATE_SUBJECT` env unset.
+  4. `start.sh` log shows one-time backfill of legacy CONFIRMED rows.
+
+### Risk
+
+- Medium — adds DB writes on every approve/reconcile/assign success
+  and failure. All conditional updates on existing rows, no new
+  indexes. Stale-PENDING reconciler clause prevents rows getting stuck.
+- The `BookingConfirmedCard` adds 1 Google Calendar API call per
+  `/admin/[id]` page load. Admin-only, ~200-500ms. Acceptable.
+- Auto-recover paths in assign route now also write status — slight
+  performance cost on assign (~5-10ms extra DB write). Negligible.
+
+---
+
 ## [1.32.1] — 2026-05-24
 
 ### Fixed — `/api/health` now exercises the same auth models production uses

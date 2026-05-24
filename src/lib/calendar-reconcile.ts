@@ -165,7 +165,14 @@ async function processBooking(
       })
       await prisma.booking.update({
         where: { id: booking.id },
-        data: { calendarEventId: eventId },
+        data: {
+          calendarEventId: eventId,
+          // v1.32.2 — record sync state alongside the event id so UI
+          // and reconciler queries can rely on a single source of truth.
+          calendarSyncStatus: 'OK',
+          calendarSyncError: null,
+          calendarLastSyncedAt: new Date(),
+        },
       })
       item.action = 'created'
       item.eventId = eventId
@@ -209,7 +216,12 @@ async function processBooking(
       })
       await prisma.booking.update({
         where: { id: booking.id },
-        data: { calendarEventId: eventId },
+        data: {
+          calendarEventId: eventId,
+          calendarSyncStatus: 'OK',
+          calendarSyncError: null,
+          calendarLastSyncedAt: new Date(),
+        },
       })
       item.action = 'created'
       item.eventId = eventId
@@ -226,6 +238,19 @@ async function processBooking(
     }
 
     if (sameEmails(assignedEmails, calendarEvent.attendees)) {
+      // Even when nothing changes, refresh the OK timestamp so the UI
+      // can show "last verified N min ago" and the stale-PENDING
+      // reconciler clause works correctly.
+      if (!options.dryRun) {
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            calendarSyncStatus: 'OK',
+            calendarSyncError: null,
+            calendarLastSyncedAt: new Date(),
+          },
+        })
+      }
       item.action = 'ok'
       return item
     }
@@ -256,7 +281,12 @@ async function processBooking(
         })
         await prisma.booking.update({
           where: { id: booking.id },
-          data: { calendarEventId: eventId },
+          data: {
+            calendarEventId: eventId,
+            calendarSyncStatus: 'OK',
+            calendarSyncError: null,
+            calendarLastSyncedAt: new Date(),
+          },
         })
         await deleteCalendarEvent(oldEventId)
 
@@ -281,6 +311,16 @@ async function processBooking(
     }
 
     item.action = 'patched'
+    if (!options.dryRun) {
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          calendarSyncStatus: 'OK',
+          calendarSyncError: null,
+          calendarLastSyncedAt: new Date(),
+        },
+      })
+    }
     await logAudit({
       actorEmail: options.actorEmail ?? 'calendar-reconcile',
       action: 'calendar.reconcile_patched',
@@ -297,7 +337,20 @@ async function processBooking(
     return item
   } catch (e: any) {
     item.action = 'failed'
-    item.error = e?.message || String(e)
+    const errMsg = e?.message || String(e)
+    item.error = errMsg
+    // v1.32.2 — record FAILED on the booking row so the admin UI flips
+    // to a red chip; the next 10-min reconciler tick will retry.
+    if (!options.dryRun) {
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          calendarSyncStatus: 'FAILED',
+          calendarSyncError: errMsg.slice(0, 500),
+          calendarLastSyncedAt: new Date(),
+        },
+      }).catch(err => console.error('save FAILED status error:', err?.message))
+    }
     await logAudit({
       actorEmail: options.actorEmail ?? 'calendar-reconcile',
       action: 'calendar.reconcile_failed',
@@ -330,10 +383,23 @@ export async function reconcileCalendarGuests(options: {
     items: [],
   }
 
+  // v1.32.2 — also pick up rows orphaned by a mid-task container restart
+  // (calendarSyncStatus stays PENDING because the background task never
+  // completed). 5-minute staleness threshold so a normal in-flight approve
+  // isn't double-processed by the next reconciler tick.
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
   const bookings = await prisma.booking.findMany({
     where: {
-      status: 'CONFIRMED',
-      assignedEmails: { isEmpty: false },
+      OR: [
+        {
+          status: 'CONFIRMED',
+          assignedEmails: { isEmpty: false },
+        },
+        {
+          calendarSyncStatus: 'PENDING',
+          calendarLastSyncedAt: { lt: fiveMinutesAgo },
+        },
+      ],
     },
     include: {
       outlet: true,

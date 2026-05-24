@@ -99,6 +99,15 @@ export async function POST(
         })
         if (ok) {
           calendarSync = { ok: true, eventId: booking.calendarEventId, action: 'patched' }
+          // v1.32.2 — record sync state on successful patch.
+          await prisma.booking.update({
+            where: { id: params.id },
+            data: {
+              calendarSyncStatus: 'OK',
+              calendarSyncError: null,
+              calendarLastSyncedAt: new Date(),
+            },
+          }).catch(() => {})
         } else {
           // Two reasons updateCalendarEventAttendees returns false without throwing:
           //   - GOOGLE_IMPERSONATE_SUBJECT not set (DWD off — can't manage attendees)
@@ -111,6 +120,14 @@ export async function POST(
               ? 'Google Calendar API rejected the attendees update (see AuditLog calendar.attendees_update_failed)'
               : 'GOOGLE_IMPERSONATE_SUBJECT not set — cannot add calendar guests without Domain-Wide Delegation',
           }
+          await prisma.booking.update({
+            where: { id: params.id },
+            data: {
+              calendarSyncStatus: 'FAILED',
+              calendarSyncError: calendarSync.error,
+              calendarLastSyncedAt: new Date(),
+            },
+          }).catch(() => {})
         }
       } catch (e: any) {
         calendarSync = {
@@ -119,6 +136,14 @@ export async function POST(
           action: 'patched',
           error: e?.message || String(e),
         }
+        await prisma.booking.update({
+          where: { id: params.id },
+          data: {
+            calendarSyncStatus: 'FAILED',
+            calendarSyncError: (e?.message || String(e)).slice(0, 500),
+            calendarLastSyncedAt: new Date(),
+          },
+        }).catch(() => {})
       }
     } else if (nextStatus === 'CONFIRMED') {
       // (2) Auto-recover: booking already CONFIRMED but has no event (race
@@ -148,7 +173,13 @@ export async function POST(
         if (newEventId) {
           await prisma.booking.update({
             where: { id: params.id },
-            data: { calendarEventId: newEventId },
+            data: {
+              calendarEventId: newEventId,
+              // v1.32.2 — record sync state on auto-recover create.
+              calendarSyncStatus: 'OK',
+              calendarSyncError: null,
+              calendarLastSyncedAt: new Date(),
+            },
           }).catch(e => console.error('save recovered calendarEventId error:', e?.message || e))
           resolvedCalendarEventId = newEventId
           calendarSync = { ok: true, eventId: newEventId, action: 'created' }
@@ -159,9 +190,26 @@ export async function POST(
             action: 'created',
             error: 'createCalendarEvent returned null — check GOOGLE_SERVICE_ACCOUNT credentials',
           }
+          // v1.32.2 — also flag on the booking so the admin list shows FAILED.
+          await prisma.booking.update({
+            where: { id: params.id },
+            data: {
+              calendarSyncStatus: 'FAILED',
+              calendarSyncError: calendarSync.error,
+              calendarLastSyncedAt: new Date(),
+            },
+          }).catch(() => {})
         }
       } catch (e: any) {
         calendarSync = { ok: false, eventId: null, action: 'created', error: e?.message || String(e) }
+        await prisma.booking.update({
+          where: { id: params.id },
+          data: {
+            calendarSyncStatus: 'FAILED',
+            calendarSyncError: (e?.message || String(e)).slice(0, 500),
+            calendarLastSyncedAt: new Date(),
+          },
+        }).catch(() => {})
       }
     }
 

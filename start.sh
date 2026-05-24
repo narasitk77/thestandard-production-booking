@@ -115,6 +115,47 @@ echo "==> Purging audit_logs older than 90 days..."
 psql "$DATABASE_URL" -c "DELETE FROM audit_logs WHERE at < now() - INTERVAL '90 days'" \
   || echo "Audit purge skipped (table missing)"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# v1.32.2 — one-time backfill of calendarSyncStatus for pre-existing
+# CONFIRMED bookings. After this runs once, every CONFIRMED row has a
+# value (OK if it has an event, FAILED if it doesn't), so the admin
+# UI never shows a NULL "legacy" state. The WHERE NULL guard makes the
+# UPDATE a no-op on subsequent restarts and on rows already touched by
+# the reconciler.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Backfilling calendarSyncStatus for legacy CONFIRMED bookings..."
+psql "$DATABASE_URL" <<'SQL' || echo "calendarSyncStatus backfill skipped (column missing — old image)"
+DO $$
+DECLARE
+  filled_ok INT;
+  filled_failed INT;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'bookings' AND column_name = 'calendarSyncStatus'
+  ) THEN
+    UPDATE bookings
+       SET "calendarSyncStatus" = 'OK',
+           "calendarLastSyncedAt" = NOW()
+     WHERE status = 'CONFIRMED'
+       AND "calendarEventId" IS NOT NULL
+       AND "calendarSyncStatus" IS NULL;
+    GET DIAGNOSTICS filled_ok = ROW_COUNT;
+
+    UPDATE bookings
+       SET "calendarSyncStatus" = 'FAILED',
+           "calendarSyncError" = 'Backfilled at startup — CONFIRMED but no calendarEventId. Reconciler will retry.',
+           "calendarLastSyncedAt" = NOW()
+     WHERE status = 'CONFIRMED'
+       AND "calendarEventId" IS NULL
+       AND "calendarSyncStatus" IS NULL;
+    GET DIAGNOSTICS filled_failed = ROW_COUNT;
+
+    RAISE NOTICE 'calendarSyncStatus backfill: % rows OK, % rows FAILED', filled_ok, filled_failed;
+  END IF;
+END $$;
+SQL
+
 echo "==> Seeding database (idempotent)..."
 npx tsx prisma/seed.ts || echo "Seed skipped or already done"
 

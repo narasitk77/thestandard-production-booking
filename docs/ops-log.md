@@ -5,6 +5,72 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · calendarSyncStatus + guest verification + impersonate fallback warning (v1.32.2) — schema change (additive)
+
+**Scope:** Three remaining Codex-review fixes bundled — adds DB
+visibility for async calendar sync state, live guest-list verification
+on the booking detail page, and a visible warning when DWD impersonate
+is falling back to the hardcoded default.
+
+**Schema change (additive, safe):**
+
+- New enum `CalendarSyncStatus { PENDING, OK, FAILED }`
+- Three new nullable columns on `bookings`:
+  `calendarSyncStatus`, `calendarSyncError`, `calendarLastSyncedAt`
+- Applied via existing `prisma db push --accept-data-loss` in start.sh.
+  No existing data touched.
+
+**Portainer redeploy notes:**
+
+- Pull image tagged `sha-<this-commit>`. Stack env unchanged.
+- `start.sh` will run the new prisma db push → 3 new columns created.
+- Then runs the v1.32.2 backfill block — every CONFIRMED booking gets
+  `calendarSyncStatus='OK'` if it has an event id, `'FAILED'` if not.
+  Idempotent; guarded by `WHERE calendarSyncStatus IS NULL`.
+
+**Verification after redeploy:**
+
+1. `/admin` — confirmed booking cards show the new sync status chip
+   (no chip / green link if OK, red chip if FAILED, gray spinner if
+   approve is in flight). Cards with broken sync show the error in
+   the tooltip + a Re-sync button.
+2. Approve a new booking → card shows "Calendar sync pending…"
+   immediately, flips to green within 1-3s once background task
+   completes. If you break DWD intentionally (unset env temporarily),
+   it flips to red with the real error and the 10-min reconciler
+   self-heals once the env is restored.
+3. `/admin/[id]` for any CONFIRMED booking — shows the new
+   `<BookingConfirmedCard>` with sync badge, calendar event link,
+   live attendee diff (assigned vs actual), and Re-sync button.
+4. `/admin/health` — amber warning under Google Calendar section if
+   the impersonate is using the hardcoded fallback. Source badge
+   shows `env` (green) or `hardcoded fallback` (amber).
+5. AuditLog grows `calendar.approve_failed`,
+   `calendar.impersonate_fallback_in_use`, and existing
+   `calendar.reconcile_*` rows.
+
+**Rollback trigger:** any regression in approve / assign / reconcile
+behavior. Revert to `sha-a1ec653` (v1.32.1); the 3 new DB columns stay
+(harmless, ignored by old code).
+
+**Files changed:**
+
+- `prisma/schema.prisma` — `CalendarSyncStatus` enum + 3 fields on Booking.
+- `start.sh` — one-time backfill block.
+- `src/lib/calendar-reconcile.ts` — status writes on every action +
+  stale-PENDING WHERE clause.
+- `src/lib/google-calendar.ts` — durable audit log on fallback usage.
+- `src/app/api/admin/[id]/approve/route.ts` — PENDING → OK/FAILED writes.
+- `src/app/api/admin/[id]/assign/route.ts` — OK/FAILED on patch + recover.
+- `src/app/api/admin/[id]/calendar-resync/route.ts` — `?dryRun=1` mode for GET.
+- `src/app/admin/page.tsx` — `<CalendarStatus>` reads new fields.
+- `src/app/admin/[id]/page.tsx` — new `<BookingConfirmedCard>`.
+- `src/app/admin/health/page.tsx` — amber warning when fallback in use.
+- `docs/runbook-impersonate-swap.md` (new) — swap procedure.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-24 · /api/health auth pattern fix (v1.32.1) — false-alarm fix
 
 **Scope:** `/admin/health` was showing `unauthorized_client` on

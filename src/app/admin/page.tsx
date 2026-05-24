@@ -17,6 +17,12 @@ interface Booking {
   // card to show a direct Google Calendar link when an event has been
   // created, or a warning + Re-sync button when CONFIRMED status drifted.
   calendarEventId?: string | null
+  // v1.32.2 — async calendar sync visibility. PENDING right after
+  // approve, OK once background create finishes, FAILED on Google API
+  // error (with calendarSyncError + lastSyncedAt for the UI tooltip).
+  calendarSyncStatus?: 'PENDING' | 'OK' | 'FAILED' | null
+  calendarSyncError?: string | null
+  calendarLastSyncedAt?: string | null
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -143,6 +149,9 @@ export default function AdminPage() {
                     <CalendarStatus
                       bookingId={b.id}
                       calendarEventId={b.calendarEventId}
+                      syncStatus={b.calendarSyncStatus}
+                      syncError={b.calendarSyncError}
+                      lastSyncedAt={b.calendarLastSyncedAt}
                       onResynced={fetch_}
                     />
                   )}
@@ -203,10 +212,16 @@ export default function AdminPage() {
 function CalendarStatus({
   bookingId,
   calendarEventId,
+  syncStatus,
+  syncError,
+  lastSyncedAt,
   onResynced,
 }: {
   bookingId: string
   calendarEventId?: string | null
+  syncStatus?: 'PENDING' | 'OK' | 'FAILED' | null
+  syncError?: string | null
+  lastSyncedAt?: string | null
   onResynced: () => void
 }) {
   type ResyncResult = {
@@ -252,9 +267,38 @@ function CalendarStatus({
   // raw event id so the admin can paste-search in Calendar.
   const link = result?.htmlLink || null
 
+  // v1.32.2 — primary status chip now comes from the DB-tracked
+  // calendarSyncStatus field (PENDING / OK / FAILED) instead of just
+  // inferring from calendarEventId. Approve writes PENDING; background
+  // task / reconciler / assign write OK or FAILED. The chip shows the
+  // sync state; the link chip (separate, below) shows the actual
+  // Google Calendar event if there is one.
+  const effectiveStatus = syncStatus ?? (effectiveEventId ? 'OK' : null)
+
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-      {effectiveEventId ? (
+      {/* Sync-state chip */}
+      {effectiveStatus === 'PENDING' && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+          <Loader2 className="w-3 h-3 animate-spin" /> Calendar sync pending…
+        </span>
+      )}
+      {effectiveStatus === 'FAILED' && (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
+          title={syncError || 'Calendar sync failed — click Re-sync to retry'}
+        >
+          <AlertTriangle className="w-3 h-3" /> Calendar sync FAILED
+        </span>
+      )}
+      {effectiveStatus === null && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+          <AlertTriangle className="w-3 h-3" /> No calendar event
+        </span>
+      )}
+
+      {/* Calendar event link chip — only when an event id exists, regardless of sync state */}
+      {effectiveEventId && (
         link ? (
           <a
             href={link}
@@ -273,9 +317,12 @@ function CalendarStatus({
             📅 Calendar event linked
           </span>
         )
-      ) : (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
-          <AlertTriangle className="w-3 h-3" /> No calendar event
+      )}
+
+      {/* Last synced timestamp — small relative-time hint */}
+      {lastSyncedAt && (
+        <span className="text-[10px] text-gray-400" title={new Date(lastSyncedAt).toLocaleString()}>
+          last checked {relativeTime(lastSyncedAt)}
         </span>
       )}
 
@@ -313,6 +360,25 @@ function CalendarStatus({
       )}
     </div>
   )
+}
+
+/**
+ * Compact relative-time formatter used by the calendar sync chip.
+ * Examples: "12s", "5m", "2h", "3d". Anything older falls back to a
+ * short ISO date.
+ */
+function relativeTime(iso: string): string {
+  const t = new Date(iso).getTime()
+  if (isNaN(t)) return ''
+  const sec = Math.max(1, Math.floor((Date.now() - t) / 1000))
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day < 7) return `${day}d ago`
+  return new Date(iso).toISOString().slice(0, 10)
 }
 
 function RestoreButton({ bookingId, onDone }: { bookingId: string; onDone: () => void }) {

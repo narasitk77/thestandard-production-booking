@@ -180,6 +180,24 @@ export default function HealthPage() {
             <KV k="Calendar ID" v={<code className="text-xs">{data.config.calendar.id}</code>} />
             <KV k="Impersonate subject" v={data.config.calendar.impersonateSubject} />
             <KV k="Source" v={<SourceBadge source={data.config.calendar.impersonateSource} />} />
+            {/* v1.32.4 — explicit warning when DWD impersonate falls back to the
+                hardcoded narasit.k@thestandard.co default. The fallback exists
+                for resilience (Portainer dropped the env var in v1.29.4 — that
+                bug shipped to production) but it creates a single-person
+                dependency. Surface it visibly so a future admin knows to
+                set the env var before the current impersonate user leaves. */}
+            {data.config.calendar.impersonateSource === 'hardcoded-fallback' && (
+              <div className="px-4 py-3 bg-amber-50 border-t border-amber-200 text-xs text-amber-800">
+                <strong>⚠ Using built-in fallback for the impersonate subject.</strong>{' '}
+                If <code className="px-1 bg-amber-100 rounded">{data.config.calendar.impersonateSubject}</code>{' '}
+                leaves the company or loses Workspace access, calendar invites
+                will break. To swap: set{' '}
+                <code className="px-1 bg-amber-100 rounded">GOOGLE_IMPERSONATE_SUBJECT</code>{' '}
+                in the Portainer stack env to a different Workspace user (with
+                Editor access to the shared calendar) and redeploy.{' '}
+                See <code className="px-1 bg-amber-100 rounded">docs/runbook-impersonate-swap.md</code>.
+              </div>
+            )}
           </Section>
 
           <Section title="Auth">

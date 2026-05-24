@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
@@ -17,6 +17,10 @@ interface BookingDetail {
   program: { code: string; name: string }
   episodes: Episode[]
   calendarEventId?: string
+  // v1.32.2 — calendar sync visibility fields (see Booking model in schema.prisma).
+  calendarSyncStatus?: 'PENDING' | 'OK' | 'FAILED' | null
+  calendarSyncError?: string | null
+  calendarLastSyncedAt?: string | null
 }
 
 interface Freelancer { id: string; name: string; contract: string; email: string }
@@ -687,20 +691,226 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {/* Confirmed */}
+      {/* Confirmed card — v1.32.2 + v1.32.3:
+          shows the DB-tracked calendarSyncStatus, then (if v1.32.3
+          dry-run completed) the live guest-list verification + Re-sync. */}
       {isConfirmed && (
-        <div className="gf-card p-5 border-l-4 border-green-400">
-          <div className="flex items-center gap-2 text-green-700 font-medium mb-2">
-            <CheckCircle2 className="w-5 h-5" /> Booking Confirmed
-          </div>
-          {booking.calendarEventId && (
-            <p className="text-sm text-gray-600">Calendar event created · ID: <code className="text-xs">{booking.calendarEventId}</code></p>
-          )}
-          {booking.assignedEmails.length > 0 && (
-            <p className="text-sm text-gray-500 mt-1">Assigned: {booking.assignedEmails.join(', ')}</p>
-          )}
-        </div>
+        <BookingConfirmedCard
+          booking={booking}
+          onResynced={() => {
+            // After a Re-sync POST, reload booking + verification
+            fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => setBooking(d))
+          }}
+        />
       )}
     </div>
   )
+}
+
+/* ───────────────────────────────────────────────────────────────────────── */
+/* Confirmed card (v1.32.2 + v1.32.3)                                       */
+/* Shows DB-tracked calendarSyncStatus + a live dry-run guest verification.  */
+/* The dry-run fetches the actual Google Calendar event attendees and       */
+/* diffs them against booking.assignedEmails so admins can see at a glance  */
+/* whether the team will actually receive the calendar invite.              */
+/* ───────────────────────────────────────────────────────────────────────── */
+function BookingConfirmedCard({
+  booking,
+  onResynced,
+}: {
+  booking: BookingDetail
+  onResynced: () => void
+}) {
+  type Verification = {
+    ok: boolean
+    action?: 'ok' | 'patched' | 'created' | 'failed' | 'skipped'
+    eventId?: string | null
+    htmlLink?: string | null
+    assignedEmails?: string[]
+    calendarAttendees?: string[]
+    error?: string
+  }
+  const [verif, setVerif] = useState<Verification | null>(null)
+  const [verifLoading, setVerifLoading] = useState(false)
+  const [verifError, setVerifError] = useState<string>('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState<string>('')
+
+  const fetchVerification = useCallback(async () => {
+    setVerifLoading(true)
+    setVerifError('')
+    try {
+      // v1.32.3 — GET aliases POST in dryRun mode (set by the route).
+      const res = await fetch(`/api/admin/${booking.id}/calendar-resync?dryRun=1`, { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok && !data.assignedEmails) throw new Error(data.error || `HTTP ${res.status}`)
+      setVerif(data)
+    } catch (e: any) {
+      setVerifError(e?.message || String(e))
+    } finally {
+      setVerifLoading(false)
+    }
+  }, [booking.id])
+
+  useEffect(() => { fetchVerification() }, [fetchVerification])
+
+  const handleResync = async () => {
+    setSyncing(true)
+    setSyncError('')
+    try {
+      const res = await fetch(`/api/admin/${booking.id}/calendar-resync`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      onResynced()
+      await fetchVerification()
+    } catch (e: any) {
+      setSyncError(e?.message || String(e))
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  // Diff display — what's assigned vs what's actually on the event.
+  const assigned = new Set((verif?.assignedEmails || booking.assignedEmails).map(e => e.toLowerCase()))
+  const onEvent = new Set((verif?.calendarAttendees || []).map(e => e.toLowerCase()))
+  const missing = Array.from(assigned).filter(e => !onEvent.has(e))
+  const extra = Array.from(onEvent).filter(e => !assigned.has(e))
+  const allInSync = verif && missing.length === 0 && extra.length === 0 && assigned.size > 0
+
+  return (
+    <div className="gf-card p-5 border-l-4 border-green-400">
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-2 text-green-700 font-medium">
+          <CheckCircle2 className="w-5 h-5" /> Booking Confirmed
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Sync status badge from v1.32.2 calendarSyncStatus field */}
+          {booking.calendarSyncStatus === 'PENDING' && (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+              <Loader2 className="w-3 h-3 animate-spin" /> Sync pending…
+            </span>
+          )}
+          {booking.calendarSyncStatus === 'OK' && (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+              <CheckCircle2 className="w-3 h-3" /> Sync OK
+            </span>
+          )}
+          {booking.calendarSyncStatus === 'FAILED' && (
+            <span
+              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
+              title={booking.calendarSyncError || ''}
+            >
+              <AlertTriangle className="w-3 h-3" /> Sync FAILED
+            </span>
+          )}
+          {booking.calendarLastSyncedAt && (
+            <span
+              className="text-[10px] text-gray-400"
+              title={new Date(booking.calendarLastSyncedAt).toLocaleString()}
+            >
+              last checked {compactRelativeTime(booking.calendarLastSyncedAt)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Sync error inline */}
+      {booking.calendarSyncStatus === 'FAILED' && booking.calendarSyncError && (
+        <div className="mb-3 px-3 py-2 rounded text-xs bg-red-50 border border-red-200 text-red-700">
+          {booking.calendarSyncError}
+        </div>
+      )}
+
+      {/* Calendar event ID + Open link */}
+      {booking.calendarEventId && (
+        <p className="text-sm text-gray-600 mb-2">
+          Calendar event · ID: <code className="text-xs">{booking.calendarEventId}</code>
+          {verif?.htmlLink && (
+            <> · <a href={verif.htmlLink} target="_blank" rel="noopener noreferrer" className="text-brand-primary hover:underline">Open in Calendar ↗</a></>
+          )}
+        </p>
+      )}
+
+      {/* Guest verification (v1.32.3) */}
+      <div className="mt-3 pt-3 border-t border-gray-100">
+        <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Calendar guests</div>
+        {verifLoading && (
+          <div className="text-sm text-gray-400 flex items-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking attendees on Google Calendar…
+          </div>
+        )}
+        {verifError && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            Verification failed: {verifError}
+          </div>
+        )}
+        {verif && !verifLoading && (
+          <div className="space-y-2 text-sm">
+            <div className="grid grid-cols-[140px_1fr] gap-2">
+              <div className="text-gray-500">Assigned crew</div>
+              <div className="text-gray-800 break-words">
+                {assigned.size === 0 ? <span className="text-gray-400">none</span> : Array.from(assigned).join(', ')}
+                <span className="text-xs text-gray-400 ml-2">({assigned.size})</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-[140px_1fr] gap-2">
+              <div className="text-gray-500">Calendar guests</div>
+              <div className="text-gray-800 break-words">
+                {onEvent.size === 0 ? <span className="text-gray-400">none</span> : Array.from(onEvent).join(', ')}
+                <span className="text-xs text-gray-400 ml-2">({onEvent.size})</span>
+              </div>
+            </div>
+            {missing.length > 0 && (
+              <div className="px-3 py-2 rounded bg-red-50 border border-red-200 text-sm text-red-700 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-medium">Missing {missing.length} guest{missing.length === 1 ? '' : 's'} on calendar:</div>
+                  <div className="text-xs break-words mt-0.5">{missing.join(', ')}</div>
+                </div>
+              </div>
+            )}
+            {extra.length > 0 && (
+              <div className="px-3 py-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                <strong>{extra.length} extra guest{extra.length === 1 ? '' : 's'} on calendar</strong> (not in assigned list): {extra.join(', ')}
+              </div>
+            )}
+            {allInSync && (
+              <div className="px-3 py-2 rounded bg-green-50 border border-green-200 text-sm text-green-700 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                ✓ All {assigned.size} crew {assigned.size === 1 ? 'is' : 'are'} on the calendar
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Re-sync action */}
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={handleResync}
+            disabled={syncing}
+            className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1 disabled:opacity-50"
+            title="Force a calendar guest sync now (don't wait for the 10-min worker tick)"
+          >
+            {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+            {syncing ? 'Syncing…' : 'Re-sync calendar guests'}
+          </button>
+          {syncError && (
+            <span className="text-xs text-red-700">⚠ {syncError}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function compactRelativeTime(iso: string): string {
+  const t = new Date(iso).getTime()
+  if (isNaN(t)) return ''
+  const sec = Math.max(1, Math.floor((Date.now() - t) / 1000))
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  return `${Math.floor(hr / 24)}d ago`
 }
