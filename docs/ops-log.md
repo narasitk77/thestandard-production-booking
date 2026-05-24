@@ -5,6 +5,47 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · v1.32.2 deployed to production — all 4 Codex-review fixes live
+
+**Deploy mechanics:**
+
+- Stack 125 `IMAGE_TAG` updated `sha-22a805a` (v1.31.1) → `sha-4441b50` (v1.32.2)
+  via Portainer REST API (`PUT /api/stacks/125/git/redeploy?endpointId=2`,
+  `pullImage:true`, `repositoryReferenceName:'refs/heads/main'`).
+- Container rebuild took ~70s end-to-end (pull image + `prisma db push` +
+  backfill SQL + `next start`).
+- `production-booking-app` came up clean. No restart loop.
+
+**Schema migration applied automatically by start.sh:**
+
+- Added enum `CalendarSyncStatus { PENDING, OK, FAILED }`.
+- Added 3 nullable columns on `bookings` table — no data touched.
+- Backfill block updated all 4 existing CONFIRMED bookings to
+  `calendarSyncStatus='OK'` (all had valid `calendarEventId`).
+
+**Verified live on `https://probook.xtec9.xyz` after deploy:**
+
+1. `/api/health` returns `200 ok:true`, `version:"1.32.2"`. All 4 checks
+   green — db (51ms / 22 bookings), googleCalendarDwd (557ms / "THE
+   STANDARD Production Bookings"), producerDashboardSheetWrite (1043ms),
+   producerDashboardSheetRead (792ms).
+2. `/admin/health` UI — Codex's two-auth-models legend renders. Amber
+   warning under Calendar section confirms `impersonateSource:
+   "hardcoded-fallback"` is being announced visibly (v1.32.4).
+3. `/admin?status=CONFIRMED` — all 4 legacy CONFIRMED bookings have
+   `calendarSyncStatus:'OK'` (backfill ran). No FAILED rows.
+4. `/admin/[id]` for `AGN-260527-STD-01` (known-good booking) — new
+   `<BookingConfirmedCard>` renders: "Sync OK · last checked Xm ago",
+   "Calendar event · ID: nbm2s4secmf3a8gpt7icd4rttk · Open in Calendar",
+   guest verification block shows "Assigned crew (1) · Calendar guests
+   (1) · ✓ All 1 crew is on the calendar", Re-sync button present.
+
+**Outcome:** All 4 Codex-review issues closed in production. No rollback
+needed. Next deploy can re-use `sha-22a805a` as a known-good rollback
+target — the 3 new DB columns are nullable so old code ignores them.
+
+---
+
 ## 2026-05-24 · calendarSyncStatus + guest verification + impersonate fallback warning (v1.32.2) — schema change (additive)
 
 **Scope:** Three remaining Codex-review fixes bundled — adds DB
