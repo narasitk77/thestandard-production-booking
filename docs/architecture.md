@@ -1,6 +1,6 @@
 # Architecture overview
 
-One-page mental model for new developers (or future-me). Last updated v1.31.
+One-page mental model for new developers (or future-me). Last updated v1.32.2.
 
 ## What this is
 
@@ -28,7 +28,7 @@ Deploy: self-hosted Portainer on `thestandard.fortiddns.com:9000`
 
 | Where | What |
 |---|---|
-| **Postgres** (`booking`, `episode`, `outlet`, `program`, `user`, `team_members`, `ot_records`, `audit_logs`, `uploads`) | Source of truth for everything once submitted |
+| **Postgres** (`booking`, `episode`, `outlet`, `program`, `user`, `team_members`, `ot_records`, `audit_logs`, `uploads`) | Source of truth for everything once submitted. `booking.calendarSyncStatus` (`PENDING`/`OK`/`FAILED`) is the canonical sync state per v1.32.2 — written by approve, assign, and the reconciler. |
 | **Producer Dashboard sheet** (Google Sheets) | Source of truth for Project IDs (`All Projects` tab), Episodes (`_EPs` tab), Producer/Director roster (`_Users` tab). Read-only from the app's perspective, except the `Bookings` tab which the app writes for CA bookings only. Sheet id is env-driven — see `docs/runbook-sheet-swap.md`. |
 | **Google Calendar** "THE STANDARD Production Bookings" | One event per approved booking. Source of truth for crew invites + RSVPs. |
 | **Hardcoded in `src/lib/data.ts`** | OUTLETS + programs master list (9 outlets × 56 programs). Rarely changes; seeded into Postgres on container start. |
@@ -100,9 +100,9 @@ src/
 │   ├── ot/                    Overtime module (team members only)
 │   └── api/                   All API routes
 │       ├── bookings/          CRUD + export
-│       ├── admin/[id]/        approve, assign, restore, calendar-resync
+│       ├── admin/[id]/        approve, assign, restore, calendar-resync (POST=write, GET?dryRun=1=verify-only)
 │       ├── admin/team/        Roster CRUD
-│       ├── health/            Diagnostic endpoint
+│       ├── health/            Diagnostic endpoint (4 checks: db, calendar DWD, sheets WRITE, sheets READ)
 │       └── internal/calendar/reconcile/   Worker entry point
 ├── lib/
 │   ├── google-config.ts       Sheet id + tab name resolver (v1.30)
@@ -128,6 +128,10 @@ src/
     ├── Nav.tsx                Top nav w/ + New CTA + role-gated links
     ├── StatusPill.tsx         Canonical status visual (v1.28)
     └── booking/BookingWizard.tsx   The 5-step wizard
+
+(BookingConfirmedCard is currently inline inside src/app/admin/[id]/page.tsx —
+candidate for extraction once /admin list page also moves to a shared
+<CalendarSyncBadge> component. See CHANGELOG v1.32.2 "Cross-cutting follow-ups".)
 ```
 
 ## Background work
@@ -176,20 +180,24 @@ src/
 | Symptom | First look |
 |---|---|
 | Booking submit fails | Browser console + `POST /api/bookings` response. Likely validation. |
-| Approve doesn't create Calendar event | `/admin/health` → Google Calendar check. Re-sync button on the card. |
-| Calendar event has no guests | `/admin/[id]` Re-sync chip. If "GOOGLE_IMPERSONATE_SUBJECT not set" → check `/admin/health` config section. |
+| Approve doesn't create Calendar event | `/admin/[id]` Confirmed card → `<BookingConfirmedCard>` shows `Sync FAILED` chip with the actual error inline. Re-sync button right there. Backstop: `/admin/health` → Google Calendar check. |
+| Calendar event has no guests | `/admin/[id]` Confirmed card shows assigned-vs-calendar diff under "CALENDAR GUESTS". Click Re-sync. Worker also reconciles every 10 min. |
+| GOOGLE_IMPERSONATE_SUBJECT issue | `/admin/health` Calendar section — `SOURCE` should be `env`. If `hardcoded fallback`, amber warning explains the swap procedure; see `docs/runbook-impersonate-swap.md`. |
 | Crew not in roster | `/admin/team` — possibly deactivated. Toggle "Show inactive". |
-| PD Sheet writes failing | `/admin/health` → Producer Dashboard sheet check. Verify sheet is shared with service account. |
+| PD Sheet writes failing | `/admin/health` → Producer Dashboard sheet (write) check. Verify sheet is shared with service account. |
+| PD Sheet reads failing | `/admin/health` → Producer Dashboard sheet (read) check. v1.32.1 separates this from writes — different auth model. |
 | Email not sending | Container log for `[email]` lines. Check `EMAIL_PROVIDER` env + Gmail OAuth token state. |
 | Container won't start | Container log first 30 lines → diagnostics section + Postgres readiness check. |
+| Sync stuck in PENDING | Container restart mid-approve orphaned the row. Reconciler's stale-PENDING WHERE clause picks it up within 10 min. |
 
 ## What's NOT done yet (deliberate, on the roadmap)
 
-- **Proper Prisma migrations** (currently `prisma db push --accept-data-loss`)
-- **Automated tests** (no test runner configured)
-- **Sentry / structured logging** (just console.log)
-- **Multi-tenant config** (hardcoded `narasit.k@thestandard.co` fallback for DWD)
-- **Staging environment** (push → prod direct via Portainer)
-- **Outlets/Programs to DB-only** (currently DB seeded from hardcoded `src/lib/data.ts`)
+- **Proper Prisma migrations** — currently `prisma db push --accept-data-loss`. All schema changes so far have been additive (nullable adds), so no data loss in practice; but a real migration history would make rollback safer.
+- **Automated tests** — no test runner configured. Manual verification via `/admin/health` after each deploy.
+- **Sentry / structured logging** — just `console.log`. AuditLog table covers business events (calendar create/patch, impersonate fallback, etc.) but not application errors.
+- **Multi-tenant DWD config** — hardcoded `narasit.k@thestandard.co` fallback in `src/lib/google-calendar.ts`. v1.32.4 added an amber warning on `/admin/health` + `docs/runbook-impersonate-swap.md` so the dependency is at least visible. Upgrade path: an env-driven list of fallbacks.
+- **Staging environment** — push → prod direct via Portainer. Mitigated by GHA build providing per-commit SHA tags (any prior `sha-<short>` is a known-good rollback target).
+- **Outlets/Programs to DB-only** — currently DB seeded from hardcoded `src/lib/data.ts` on every container start. Idempotent, but adding a new program means a code change + redeploy.
+- **`<CalendarSyncBadge>` extraction** — the same chip styling lives in `/admin/page.tsx` (list) and `/admin/[id]/page.tsx` (detail, as `<BookingConfirmedCard>`). Pull into a single component once a third caller appears.
 
 See `CHANGELOG.md` for what's actually shipped and ops-log.md for deploy notes.
