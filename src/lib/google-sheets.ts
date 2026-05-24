@@ -41,7 +41,19 @@ const COL = {
   updatedAt: 28,
 } as const
 
-function getAuth() {
+/**
+ * Canonical write-path auth used by the Producer Dashboard sheet sync.
+ *
+ * Exported so `/api/health` exercises the same model the booking-create
+ * write path actually uses (v1.32.1 — Codex review fix).
+ *
+ * Scope: `https://www.googleapis.com/auth/spreadsheets` (full read+write).
+ * Impersonate: NONE — the Producer Dashboard sheet is shared directly
+ * with the service account (Editor), so DWD is not needed for writes.
+ * Trying to impersonate causes `unauthorized_client` because the DWD
+ * grant in Workspace is scoped to calendar only.
+ */
+export function getSheetsWriteAuth() {
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {
@@ -52,6 +64,38 @@ function getAuth() {
     email: credentials.client_email,
     key: credentials.private_key,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  })
+}
+// Internal alias kept so existing callsites (appendBookingRow,
+// updateBookingRow) don't need to change.
+const getAuth = getSheetsWriteAuth
+
+/**
+ * Canonical read-path auth used by `projects.ts`, `people.ts`, and
+ * `dashboard-episodes.ts` to read "All Projects" / "_Users" / "_EPs"
+ * tabs. v1.32.1 exports it from one place so `/api/health` can
+ * exercise the same model (separate from the write path above — they
+ * use different scopes).
+ *
+ * Scope: `spreadsheets.readonly`.
+ * Impersonate: NONE (same as the write path).
+ *
+ * NOTE: the existing read-side callers still have their own local
+ * copies of this auth setup — refactoring them to use this helper is
+ * a desirable cleanup but out of scope for v1.32.1. /api/health uses
+ * this directly to verify the read auth model.
+ */
+export function getSheetsReadAuth() {
+  const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+    ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+    : {
+        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }
+  return new google.auth.JWT({
+    email: credentials.client_email,
+    key: credentials.private_key,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
   })
 }
 

@@ -5,6 +5,40 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-24 · /api/health auth pattern fix (v1.32.1) — false-alarm fix
+
+**Scope:** `/admin/health` was showing `unauthorized_client` on
+Calendar + Sheets checks even though real booking flows were green
+(Codex review of booking `AGN-260527-STD-01`). Root cause: the health
+endpoint was using mismatched scope + impersonate combinations
+compared to the real production code paths. False alarm.
+
+**Portainer redeploy notes:** purely additive. No env / schema /
+infra change. After redeploy, `/admin/health` should turn all green
+on prod.
+
+**Verification after redeploy:**
+
+1. `/admin/health` shows 4 live checks (DB + Calendar DWD + Sheets
+   WRITE + Sheets READ), each labeled with the auth model exercised.
+2. All 4 green on prod (proves the health page now accurately
+   reflects what booking flows actually do).
+3. If any row goes red post-deploy, the row label tells you which
+   auth model has the problem (e.g. "Sheets WRITE failed" → service
+   account access to the sheet was revoked; "Calendar DWD failed" →
+   GOOGLE_IMPERSONATE_SUBJECT or DWD grant issue).
+
+**Files changed:**
+
+- `src/lib/google-calendar.ts` — exported `getCalendarAuth()`.
+- `src/lib/google-sheets.ts` — exported `getSheetsWriteAuth()` +
+  `getSheetsReadAuth()`.
+- `src/app/api/health/route.ts` — uses new helpers + 3 distinct checks.
+- `src/app/admin/health/page.tsx` — relabeled + legend.
+- `CHANGELOG.md`, `package.json` — version bump.
+
+---
+
 ## 2026-05-24 · Proposed GHA post-build smoke test (v1.32.0) — needs manual apply
 
 **Scope:** Proposed `smoke-test` job for

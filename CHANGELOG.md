@@ -5,6 +5,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.32.1] — 2026-05-24
+
+### Fixed — `/api/health` now exercises the same auth models production uses
+
+Codex production review (booking `AGN-260527-STD-01`) found that
+`/admin/health` was reporting `unauthorized_client` failures on both
+the Google Calendar and Producer Dashboard sheet checks **even though
+real booking flows were working**. Root cause: the health endpoint
+hand-rolled its own JWT auth with scopes/impersonate that didn't match
+what `src/lib/google-calendar.ts` and `src/lib/google-sheets.ts`
+actually use.
+
+**Mismatch (before):**
+
+| Path | Real prod code | Health was testing |
+|------|----------------|--------------------|
+| Calendar | `calendar` (full) + DWD impersonate | `calendar.readonly` + impersonate |
+| Sheets WRITE | `spreadsheets` (full) + NO impersonate | `spreadsheets.readonly` + impersonate |
+| Sheets READ | `spreadsheets.readonly` + NO impersonate | (not tested) |
+
+The DWD grant in Workspace is scoped to **calendar only** — impersonating
+on a sheets call returns `unauthorized_client`. The health endpoint was
+asking Google "can you impersonate this user for sheets?" — and Google
+correctly said no. But that's not what production code does; sheets
+goes service-account-direct, which IS authorized.
+
+**Fix:**
+
+- `src/lib/google-calendar.ts` — exported new helper `getCalendarAuth()`.
+  Existing internal `getAuth` renamed to a private alias of it. Callsites
+  unchanged.
+- `src/lib/google-sheets.ts` — exported new helpers `getSheetsWriteAuth()`
+  (full scope, no impersonate — used by `appendBookingRow` /
+  `updateBookingRow`) and `getSheetsReadAuth()` (readonly scope, no
+  impersonate — same model used by `projects.ts`, `people.ts`,
+  `dashboard-episodes.ts`).
+- `src/app/api/health/route.ts` — replaced 3 inline `new google.auth.JWT(...)`
+  blocks with calls to those helpers. Now produces 3 distinct check
+  results matching the 3 distinct auth models in the code.
+- `src/app/admin/health/page.tsx` — relabeled rows to make the auth
+  model visible in each check name. Added a one-line legend above the
+  Live Checks list. Response shape change: `googleCalendar` →
+  `googleCalendarDwd`; `producerDashboardSheet` →
+  `producerDashboardSheetWrite` + new `producerDashboardSheetRead`.
+
+### Verification
+
+- `tsc --noEmit` clean.
+- After deploy, `/admin/health` should show 4 green checks (DB +
+  Calendar DWD + Sheets WRITE + Sheets READ) — they all match what
+  the booking flows actually exercise.
+- If a check fails, the row label tells you exactly which auth model
+  broke, so the fix is unambiguous.
+
+### Risk
+
+Low. Widens health scopes from `.readonly` to write — service account
+already has the broader grants because production code uses them. The
+two new exported helpers are referenced only by `/api/health`; existing
+production callsites still go through the same code paths via the
+private alias `const getAuth = getCalendarAuth/getSheetsWriteAuth`.
+
+---
+
 ## [1.32.0] — 2026-05-24
 
 ### Added — proposed GHA post-build smoke test (paste manually — token scope blocks auto-apply)

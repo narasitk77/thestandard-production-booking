@@ -47,8 +47,12 @@ type HealthResponse = {
   }
   checks: {
     db: CheckResult
-    googleCalendar: CheckResult
-    producerDashboardSheet: CheckResult
+    // v1.32.1 — keys renamed to expose the auth model. The same sheet
+    // is checked twice (write-path + read-path) because production code
+    // uses BOTH auth models for different operations.
+    googleCalendarDwd: CheckResult
+    producerDashboardSheetWrite: CheckResult
+    producerDashboardSheetRead: CheckResult
   }
 }
 
@@ -138,9 +142,28 @@ export default function HealthPage() {
 
           {/* Live checks */}
           <Section title="Live checks">
+            {/* v1.32.1 — two distinct Google auth models in this app:
+                calendar uses DWD impersonate, sheets uses the service
+                account directly. Surfacing them separately so a green
+                row means production code's matching path actually works. */}
+            <div className="px-4 py-2 text-[11px] text-gray-500 border-b border-gray-100 bg-gray-50/60">
+              Two Google auth models below: Calendar uses DWD impersonate
+              (needed to invite attendees). Sheets use the service account
+              directly (it's shared with the sheet as Editor).
+            </div>
             <CheckRow name="Database (Postgres)" result={data.checks.db} />
-            <CheckRow name="Google Calendar API (DWD)" result={data.checks.googleCalendar} />
-            <CheckRow name="Producer Dashboard sheet" result={data.checks.producerDashboardSheet} />
+            <CheckRow
+              name="Google Calendar — full scope · DWD impersonate"
+              result={data.checks.googleCalendarDwd}
+            />
+            <CheckRow
+              name="Producer Dashboard sheet — writes (full scope · service-account direct)"
+              result={data.checks.producerDashboardSheetWrite}
+            />
+            <CheckRow
+              name="Producer Dashboard sheet — reads (readonly scope · service-account direct)"
+              result={data.checks.producerDashboardSheetRead}
+            />
           </Section>
 
           {/* Config */}

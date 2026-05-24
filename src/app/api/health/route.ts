@@ -9,7 +9,8 @@ import {
   maskSheetId,
   SANDBOX_PRODUCER_DASHBOARD_SHEET_ID,
 } from '@/lib/google-config'
-import { getCalendarImpersonateSubject } from '@/lib/google-calendar'
+import { getCalendarImpersonateSubject, getCalendarAuth } from '@/lib/google-calendar'
+import { getSheetsWriteAuth, getSheetsReadAuth } from '@/lib/google-sheets'
 
 export const dynamic = 'force-dynamic'
 
@@ -87,25 +88,27 @@ export async function GET(_req: NextRequest) {
   }
 
   // --- Live checks -------------------------------------------------------
-  // Run in parallel. Each check is wrapped in `timed` so a slow upstream
-  // doesn't hold the response forever (Node's default fetch has its own
-  // timeout; we surface latency so admin can spot creeping slowness).
-  const [db, calendar, sheet] = await Promise.all([
+  // v1.32.1 — checks now use the SAME auth helpers production code uses.
+  // Previously this endpoint built its own JWT inline with .readonly scopes
+  // + impersonate everywhere, which mismatched prod (calendar uses full
+  // scope + impersonate; sheets uses full scope + NO impersonate) and
+  // produced false `unauthorized_client` failures even when real flows
+  // worked. Codex review 2026-05-24.
+  //
+  // Three checks, one per distinct auth model:
+  //   1. Calendar       — full scope, DWD impersonate (matches google-calendar.ts)
+  //   2. Sheets WRITE   — full scope, service-account direct (matches google-sheets.ts)
+  //   3. Sheets READ    — readonly scope, service-account direct (matches projects/people/dashboard-episodes)
+  const [db, calendarCheck, sheetsWrite, sheetsRead] = await Promise.all([
     timed(async () => {
-      // Cheapest possible round-trip — just count one table.
       const n = await prisma.booking.count()
       return `${n} bookings`
     }),
     timed(async () => {
-      const subject = getCalendarImpersonateSubject()
-      if (!subject) throw new Error('no impersonate subject configured (DWD off)')
-      const auth = new google.auth.JWT({
-        email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
-        subject,
-      })
-      const cal = google.calendar({ version: 'v3', auth })
+      if (!getCalendarImpersonateSubject()) {
+        throw new Error('no impersonate subject configured (DWD off)')
+      }
+      const cal = google.calendar({ version: 'v3', auth: getCalendarAuth() })
       const res = await cal.calendars.get({
         calendarId: process.env.GOOGLE_CALENDAR_ID ||
           '72bf6ae390fb09d1e0a117dbaf421799be6bcc3b21ec2b7c3e2d7a65e65f9dc5@group.calendar.google.com',
@@ -113,33 +116,43 @@ export async function GET(_req: NextRequest) {
       return res.data.summary || '(no summary)'
     }),
     timed(async () => {
-      const subject = getCalendarImpersonateSubject()
-      const auth = new google.auth.JWT({
-        email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-        subject,
-      })
-      const sheets = google.sheets({ version: 'v4', auth })
+      // Write-auth metadata read. Verifies the auth model production
+      // uses to APPEND rows to the Bookings tab.
+      const sheets = google.sheets({ version: 'v4', auth: getSheetsWriteAuth() })
       const res = await sheets.spreadsheets.get({
         spreadsheetId: getProducerDashboardSheetId(),
         fields: 'properties.title,sheets.properties.title',
       })
       const title = res.data.properties?.title || '(no title)'
-      const tabs = (res.data.sheets || [])
-        .map(s => s.properties?.title)
-        .filter(Boolean)
+      const tabs = (res.data.sheets || []).map(s => s.properties?.title).filter(Boolean)
       return `"${title}" · ${tabs.length} tabs (${tabs.slice(0, 5).join(', ')}${tabs.length > 5 ? '…' : ''})`
+    }),
+    timed(async () => {
+      // Read-auth metadata read. Verifies the auth model used by the
+      // booking-form dropdowns (projects/people/dashboard-episodes).
+      const sheets = google.sheets({ version: 'v4', auth: getSheetsReadAuth() })
+      const res = await sheets.spreadsheets.get({
+        spreadsheetId: getProducerDashboardSheetId(),
+        fields: 'properties.title',
+      })
+      return res.data.properties?.title || '(no title)'
     }),
   ])
 
-  const allOk = db.ok && calendar.ok && sheet.ok
+  const allOk = db.ok && calendarCheck.ok && sheetsWrite.ok && sheetsRead.ok
   return NextResponse.json(
     {
       ok: allOk,
       checkedAt: new Date().toISOString(),
       config,
-      checks: { db, googleCalendar: calendar, producerDashboardSheet: sheet },
+      checks: {
+        db,
+        // Renamed to expose the auth model in the key so the UI / docs
+        // / log lines never confuse them again.
+        googleCalendarDwd: calendarCheck,
+        producerDashboardSheetWrite: sheetsWrite,
+        producerDashboardSheetRead: sheetsRead,
+      },
     },
     { status: allOk ? 200 : 503 },
   )

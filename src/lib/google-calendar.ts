@@ -100,7 +100,20 @@ function notifyCalendarAlert(input: {
   )
 }
 
-function getAuth() {
+/**
+ * Canonical auth used by every Google Calendar call in this app.
+ *
+ * Exported so `/api/health` can exercise the exact same auth model
+ * production uses, instead of approximating with a different scope /
+ * impersonate combination (which caused v1.32.0 to report false
+ * `unauthorized_client` failures even though calendar guest sync was
+ * working — Codex review 2026-05-24).
+ *
+ * Scope: `https://www.googleapis.com/auth/calendar` (full read+write).
+ * Impersonate: `GOOGLE_IMPERSONATE_SUBJECT` env (DWD) — required to
+ * attach attendees to events; a bare service account cannot.
+ */
+export function getCalendarAuth() {
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {
@@ -121,6 +134,10 @@ function getAuth() {
     subject,
   })
 }
+// Internal alias kept so the existing callsites (createCalendarEvent,
+// updateCalendarEventAttendees, deleteCalendarEvent, getCalendarEventLink,
+// getCalendarEventAttendees) don't need to change.
+const getAuth = getCalendarAuth
 
 function formatBangkokDate(date: Date): string {
   return format(date, 'yyyy-MM-dd')
