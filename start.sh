@@ -74,6 +74,54 @@ BEGIN
 END $$;
 SQL
 
+# ──────────────────────────────────────────────────────────────────────────────
+# v1.33.0 — pre-push migration for OT signature workflow.
+#
+# Old enum: OTApprovalStatus { PENDING, APPROVED }
+# New enum: OTApprovalStatus { DRAFT, SUBMITTED, APPROVED, REJECTED }
+#
+# Strategy: add new enum values first (committed in their own transaction so
+# they're usable below), migrate PENDING rows to SUBMITTED, then let
+# `prisma db push --accept-data-loss` drop the unused PENDING label.
+# Idempotent — `IF NOT EXISTS` guards make re-runs no-ops.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Adding new OTApprovalStatus enum values (DRAFT, SUBMITTED, REJECTED)..."
+psql "$DATABASE_URL" <<'SQL' || echo "OT enum extension skipped (type missing — fresh DB)"
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'OTApprovalStatus') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'DRAFT' AND enumtypid = '"OTApprovalStatus"'::regtype) THEN
+      ALTER TYPE "OTApprovalStatus" ADD VALUE 'DRAFT';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'SUBMITTED' AND enumtypid = '"OTApprovalStatus"'::regtype) THEN
+      ALTER TYPE "OTApprovalStatus" ADD VALUE 'SUBMITTED';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'REJECTED' AND enumtypid = '"OTApprovalStatus"'::regtype) THEN
+      ALTER TYPE "OTApprovalStatus" ADD VALUE 'REJECTED';
+    END IF;
+  END IF;
+END $$;
+SQL
+
+echo "==> Migrating PENDING OT records to SUBMITTED (legacy status removal)..."
+psql "$DATABASE_URL" <<'SQL' || echo "PENDING migration skipped (table missing or already migrated)"
+DO $$
+DECLARE
+  migrated INT;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ot_records' AND column_name = 'approvalStatus'
+  ) AND EXISTS (
+    SELECT 1 FROM pg_enum WHERE enumlabel = 'PENDING' AND enumtypid = '"OTApprovalStatus"'::regtype
+  ) THEN
+    UPDATE ot_records SET "approvalStatus" = 'SUBMITTED' WHERE "approvalStatus" = 'PENDING';
+    GET DIAGNOSTICS migrated = ROW_COUNT;
+    RAISE NOTICE 'Migrated % PENDING OT record(s) to SUBMITTED', migrated;
+  END IF;
+END $$;
+SQL
+
 echo "==> Syncing database schema..."
 npx prisma db push --accept-data-loss
 

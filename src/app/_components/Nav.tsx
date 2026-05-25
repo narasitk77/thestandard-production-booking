@@ -52,6 +52,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false 
 
   const secondary: Item[] = [
     { href: '/ot', label: 'OT', show: !!canSeeOT },
+    { href: '/profile/signature', label: 'ลายเซ็น', show: !!session },
     { href: '/manual', label: 'คู่มือ', show: true },
     { href: '/changelog', label: 'อัปเดต', show: true },
     { href: '/upload', label: 'Upload', show: !!isAdmin },

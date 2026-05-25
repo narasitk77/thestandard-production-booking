@@ -17,8 +17,14 @@ interface PersonSummary {
   totalDays: number
   totalAmount: number          // THB
   totalRecords: number         // raw OT entries logged this month (any status)
-  pendingRecords: number       // entries awaiting manager approval
-  approvedRecords: number      // entries already signed off
+  draftRecords: number         // user still editing — not in approval queue
+  submittedRecords: number     // user signed; awaiting manager approval
+  approvedRecords: number      // manager signed off
+  rejectedRecords: number      // pushed back to user; awaiting their edit + resubmit
+  // Legacy alias for v1.32.x clients still polling this endpoint. Counts
+  // SUBMITTED + REJECTED — anything that's "in flight, not yet approved".
+  // Safe to remove once all clients are on the new field names.
+  pendingRecords: number
 }
 
 export async function GET(request: NextRequest) {
@@ -46,17 +52,24 @@ export async function GET(request: NextRequest) {
       dayMap.get(key)!.recs.push(r)
     }
 
-    // Track raw record counts per user (independent of qualifying-day logic).
-    // "totalRecords" includes both qualifying and non-qualifying entries so
-    // the admin sees every record the user logged, not just paid days.
-    const personRecordCounts = new Map<string, { total: number; pending: number; approved: number }>()
+    // Track raw record counts per user broken down by status (independent of
+    // qualifying-day logic). "totalRecords" includes both qualifying and
+    // non-qualifying entries so the admin sees every record the user logged,
+    // not just paid days.
+    type StatusCounts = { total: number; draft: number; submitted: number; approved: number; rejected: number }
+    const emptyCounts = (): StatusCounts => ({ total: 0, draft: 0, submitted: 0, approved: 0, rejected: 0 })
+    const personRecordCounts = new Map<string, StatusCounts>()
     for (const r of records) {
       const key = r.userEmail.toLowerCase()
-      if (!personRecordCounts.has(key)) personRecordCounts.set(key, { total: 0, pending: 0, approved: 0 })
+      if (!personRecordCounts.has(key)) personRecordCounts.set(key, emptyCounts())
       const c = personRecordCounts.get(key)!
       c.total += 1
-      if (r.approvalStatus === 'APPROVED') c.approved += 1
-      else c.pending += 1
+      switch (r.approvalStatus) {
+        case 'DRAFT':     c.draft += 1; break
+        case 'SUBMITTED': c.submitted += 1; break
+        case 'APPROVED':  c.approved += 1; break
+        case 'REJECTED':  c.rejected += 1; break
+      }
     }
 
     const personTotals = new Map<string, { wh: number; wd: number; amt: number }>()
@@ -81,7 +94,7 @@ export async function GET(request: NextRequest) {
 
     const summary: PersonSummary[] = users.map(u => {
       const t = personTotals.get(u.email.toLowerCase()) || { wh: 0, wd: 0, amt: 0 }
-      const c = personRecordCounts.get(u.email.toLowerCase()) || { total: 0, pending: 0, approved: 0 }
+      const c = personRecordCounts.get(u.email.toLowerCase()) || emptyCounts()
       return {
         userId: u.id,
         email: u.email,
@@ -95,8 +108,11 @@ export async function GET(request: NextRequest) {
         totalDays: t.wh + t.wd,
         totalAmount: t.amt,
         totalRecords: c.total,
-        pendingRecords: c.pending,
+        draftRecords: c.draft,
+        submittedRecords: c.submitted,
         approvedRecords: c.approved,
+        rejectedRecords: c.rejected,
+        pendingRecords: c.submitted + c.rejected,
       }
     })
 
@@ -104,7 +120,7 @@ export async function GET(request: NextRequest) {
     const userEmails = new Set(users.map(u => u.email.toLowerCase()))
     Array.from(personTotals.entries()).forEach(([email, t]) => {
       if (!userEmails.has(email)) {
-        const c = personRecordCounts.get(email) || { total: 0, pending: 0, approved: 0 }
+        const c = personRecordCounts.get(email) || emptyCounts()
         summary.push({
           userId: null,
           email,
@@ -118,8 +134,11 @@ export async function GET(request: NextRequest) {
           totalDays: t.wh + t.wd,
           totalAmount: t.amt,
           totalRecords: c.total,
-          pendingRecords: c.pending,
+          draftRecords: c.draft,
+          submittedRecords: c.submitted,
           approvedRecords: c.approved,
+          rejectedRecords: c.rejected,
+          pendingRecords: c.submitted + c.rejected,
         })
       }
     })

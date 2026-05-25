@@ -14,6 +14,8 @@ export async function GET() {
       employeeId: user.employeeId,
       position: user.position,
       role: user.role,
+      hasSignature: !!user.signaturePng,
+      signatureUpdatedAt: user.signatureUpdatedAt,
     } : null,
   })
 }

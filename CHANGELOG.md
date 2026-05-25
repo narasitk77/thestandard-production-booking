@@ -5,6 +5,121 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.0] — 2026-05-25
+
+### Added — OT signature workflow (Phase 1: schema + signature profile)
+
+Opens the v1.33 line that replaces the two-state OT approval flow
+(`PENDING → APPROVED`) with a four-state workflow that captures both the
+requester's and the manager's e-signature on every record. Phase 1 lays
+the schema and lets every user set their saved signature; Phases 2–4
+follow with the user submit flow, the manager bulk-approve UI, and the
+PDF export.
+
+#### Schema (`prisma/schema.prisma`) — additive, with one enum migration
+
+```
+model User {
+  …existing fields…
+  signaturePng        String?   @db.Text   // base64 PNG data URL
+  signatureUpdatedAt  DateTime?
+}
+
+enum OTApprovalStatus {
+  DRAFT      // user is still filling out — not visible to managers
+  SUBMITTED  // user signed; awaiting manager sign-off (was: PENDING)
+  APPROVED   // manager signed off
+  REJECTED   // manager pushed back with rejectionNote; user can resubmit
+}
+
+model OTRecord {
+  …existing fields…
+  approvalStatus         OTApprovalStatus @default(DRAFT)  // was: PENDING
+  submittedAt            DateTime?
+  requesterSignaturePng  String? @db.Text
+  approverSignaturePng   String? @db.Text
+  rejectionNote          String?
+}
+```
+
+**Migration (`start.sh`, runs before `prisma db push`):**
+
+1. `ALTER TYPE "OTApprovalStatus" ADD VALUE` for `DRAFT`, `SUBMITTED`,
+   `REJECTED` — idempotent via `IF NOT EXISTS` guards.
+2. `UPDATE ot_records SET "approvalStatus" = 'SUBMITTED' WHERE
+   "approvalStatus" = 'PENDING'` so the old label has no rows referencing
+   it.
+3. `prisma db push --accept-data-loss` then reconciles the enum (drops
+   the unused `PENDING` label) and adds the new columns as additive
+   nullable fields.
+
+No existing approved/pending data is lost: previously-PENDING records
+land in the new `SUBMITTED` state (awaiting manager sign-off), and
+previously-APPROVED records stay APPROVED. New columns
+(`submittedAt`, `requesterSignaturePng`, `approverSignaturePng`,
+`rejectionNote`) start NULL and only fill in as users submit/reject
+through the new flow.
+
+#### Signature snapshots — historical immutability
+
+`OTRecord.requesterSignaturePng` and `approverSignaturePng` are
+**snapshots** taken from `User.signaturePng` at submit/approve time. A
+user updating their signature later does not retroactively change any
+historical OT report.
+
+#### `/api/me/signature` (new)
+
+- `GET` → `{ signaturePng, signatureUpdatedAt }` — the signed-in user's
+  saved signature data URL (or `null`).
+- `POST { png }` — saves or replaces the signature. Validates the value
+  is `data:image/png;base64,…` with a base64 payload, caps storage at
+  200KB raw base64 (~150KB binary). `POST { png: null }` clears it.
+
+#### `/api/me` — extended
+
+Adds `hasSignature: boolean` and `signatureUpdatedAt: string | null` to
+the existing response so client code can detect "user hasn't set a
+signature yet" without pulling the full image.
+
+#### `/api/ot/summary` — extended status counts
+
+The summary endpoint that powers `/ot/admin` now returns
+`draftRecords`, `submittedRecords`, `approvedRecords`, `rejectedRecords`
+per person. `pendingRecords` is preserved as a backward-compat alias
+that sums `submitted + rejected` ("anything in flight, not yet
+approved"), so the v1.32 admin UI keeps working unchanged in Phase 1.
+
+#### `/api/ot/admin/approve` — now snapshots approver signature
+
+The existing `{email, month}` bulk-approve endpoint now reads the
+approver's `User.signaturePng` and writes it into every record's
+`approverSignaturePng` at approval time. Approvers with no saved
+signature can still approve — `approverSignaturePng` will be NULL and
+the future PDF export will fall back to a typed name.
+
+The endpoint also now filters on `approvalStatus: 'SUBMITTED'` rather
+than the old `'PENDING'`. Phases 2–3 will extend it with two new modes
+(`{recordIds: []}` and `{month, allSubmitted: true}`).
+
+#### `/profile/signature` (new page)
+
+Reachable from the `More → ลายเซ็น` nav entry. Mobile-friendly
+canvas-based signature pad (mouse + touch) with smoothed strokes, plus a
+PNG upload alternative. Save persists to the user's account; "ลบออกจาก
+บัญชี" clears it. The `SignaturePad` component
+(`src/app/_components/SignaturePad.tsx`) is reusable — Phase 2 will use
+it inside the submit modal.
+
+#### Known gap until Phase 2 lands
+
+With the default now `DRAFT`, newly-created OT records do not appear in
+the manager's approval queue until the user clicks "ส่งให้ approve"
+(Phase 2). The feature branch `feat/ot-signature` bundles all four
+phases before merging to `main`, so production is unaffected until the
+full flow ships together.
+
+---
+
 ## [1.32.2] — 2026-05-24
 
 ### Added — `calendarSyncStatus` field + guest-list verification on booking detail + impersonate fallback warning
