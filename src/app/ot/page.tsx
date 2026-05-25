@@ -2,10 +2,12 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
-import { Calendar, Clock, Plus, Trash2, Loader2, Lock, Info, AlertTriangle } from 'lucide-react'
+import { Calendar, Clock, Plus, Trash2, Loader2, Lock, Info, AlertTriangle, Send, CheckCircle2, XCircle, FileSignature } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { summarizeDay, formatTHB, WEEKDAY_THRESHOLD_HOURS, type DaySummary } from '@/lib/ot-calc'
 import { isThaiHoliday, getHolidayName } from '@/lib/thai-holidays'
+
+type ApprovalStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
 
 interface OTRecord {
   id: string
@@ -16,6 +18,11 @@ interface OTRecord {
   endTime: string | null
   jobTask: string | null
   justification: string | null
+  approvalStatus: ApprovalStatus
+  submittedAt: string | null
+  approvedAt: string | null
+  approvedByEmail: string | null
+  rejectionNote: string | null
   // legacy
   type: 'HOLIDAY' | 'OVERTIME' | null
   hours: number
@@ -29,6 +36,7 @@ interface Profile {
   employeeId: string | null
   position: string | null
   role: string
+  hasSignature?: boolean
 }
 
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
@@ -122,6 +130,53 @@ export default function OTPage() {
     }
     return { amount, qualifyingDays, weekendHoliday, weekdayOT }
   }, [days])
+
+  // Status counts for the month-level submit banner. SUBMITTED + APPROVED
+  // are read-only from the user's POV; DRAFT + REJECTED need action.
+  const statusCounts = useMemo(() => {
+    const c = { draft: 0, submitted: 0, approved: 0, rejected: 0 }
+    for (const r of records) {
+      switch (r.approvalStatus) {
+        case 'DRAFT':     c.draft += 1; break
+        case 'SUBMITTED': c.submitted += 1; break
+        case 'APPROVED':  c.approved += 1; break
+        case 'REJECTED':  c.rejected += 1; break
+      }
+    }
+    return c
+  }, [records])
+
+  // Rejected records the user needs to fix. Surfaced as a banner so the
+  // user doesn't have to scan the day list to find the rejection reason.
+  const rejectedRecords = useMemo(
+    () => records.filter(r => r.approvalStatus === 'REJECTED'),
+    [records]
+  )
+
+  const [submitOpen, setSubmitOpen] = useState(false)
+  const [submitting2, setSubmitting2] = useState(false)
+  const needsSubmit = statusCounts.draft + statusCounts.rejected
+  const submitDisabled = needsSubmit === 0 || !editable
+
+  const doSubmit = async () => {
+    setError('')
+    setSubmitting2(true)
+    try {
+      const res = await fetch('/api/ot/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to submit')
+      setSubmitOpen(false)
+      load(month)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSubmitting2(false)
+    }
+  }
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -219,6 +274,63 @@ export default function OTPage() {
 
       {error && <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
 
+      {/* Approval status strip + submit button */}
+      {records.length > 0 && (
+        <div className="gf-card p-3 flex items-center gap-2 flex-wrap">
+          <div className="text-xs text-gray-500 mr-1">สถานะ:</div>
+          {statusCounts.draft > 0 && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+              <FileSignature className="w-3 h-3" /> Draft {statusCounts.draft}
+            </span>
+          )}
+          {statusCounts.submitted > 0 && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+              <Send className="w-3 h-3" /> Submitted {statusCounts.submitted}
+            </span>
+          )}
+          {statusCounts.approved > 0 && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+              <CheckCircle2 className="w-3 h-3" /> Approved {statusCounts.approved}
+            </span>
+          )}
+          {statusCounts.rejected > 0 && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+              <XCircle className="w-3 h-3" /> Rejected {statusCounts.rejected}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setSubmitOpen(true)}
+            disabled={submitDisabled}
+            className="ml-auto text-xs px-3 py-1.5 border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1">
+            <Send className="w-3 h-3" />
+            {statusCounts.rejected > 0 ? `แก้แล้วส่งใหม่ (${needsSubmit})` : `ส่งให้ approve (${needsSubmit})`}
+          </button>
+        </div>
+      )}
+
+      {/* Rejection banner — surface every rejected record + manager's note */}
+      {rejectedRecords.length > 0 && (
+        <div className="gf-card p-3 border-l-4 border-red-400 bg-red-50/40 space-y-2">
+          <div className="text-sm font-medium text-red-700 flex items-center gap-2">
+            <XCircle className="w-4 h-4" /> Manager ตีกลับ {rejectedRecords.length} รายการ
+          </div>
+          <ul className="text-xs text-gray-700 space-y-1 pl-1">
+            {rejectedRecords.map(r => (
+              <li key={r.id} className="border-l-2 border-red-300 pl-2">
+                <span className="font-medium">{r.date.slice(0, 10)}</span>
+                {' · '}
+                <span className="text-gray-500">{r.startTime}–{r.endTime}</span>
+                {r.rejectionNote && <div className="text-red-700 mt-0.5">📝 {r.rejectionNote}</div>}
+              </li>
+            ))}
+          </ul>
+          <div className="text-[11px] text-gray-500">
+            แก้ไขรายการที่ตีกลับ (คลิกที่แถวด้านล่าง) แล้วกด <strong>แก้แล้วส่งใหม่</strong> ด้านบน
+          </div>
+        </div>
+      )}
+
       {/* Total summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="gf-card p-4">
@@ -303,6 +415,17 @@ export default function OTPage() {
         days.map(d => <DayCard key={d.date} date={d.date} records={d.records} summary={d.summary} editable={editable} onDelete={handleDelete} />)
       )}
 
+      {submitOpen && (
+        <SubmitModal
+          month={month}
+          needsSubmit={needsSubmit}
+          onClose={() => setSubmitOpen(false)}
+          onConfirm={doSubmit}
+          submitting={submitting2}
+          monthLabel={monthLabel(month)}
+        />
+      )}
+
       {/* Info banner */}
       <div className="gf-card p-3 text-xs text-gray-500 border-l-4 border-blue-200 space-y-1">
         <p className="flex items-center gap-1"><Info className="w-3 h-3 text-blue-400" /> <strong>กฎ OT:</strong></p>
@@ -316,6 +439,19 @@ export default function OTPage() {
       </div>
     </div>
   )
+}
+
+function statusChip(status: ApprovalStatus) {
+  switch (status) {
+    case 'DRAFT':
+      return <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200"><FileSignature className="w-2.5 h-2.5" /> Draft</span>
+    case 'SUBMITTED':
+      return <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"><Send className="w-2.5 h-2.5" /> Submitted</span>
+    case 'APPROVED':
+      return <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200"><CheckCircle2 className="w-2.5 h-2.5" /> Approved</span>
+    case 'REJECTED':
+      return <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"><XCircle className="w-2.5 h-2.5" /> Rejected</span>
+  }
 }
 
 function DayCard({ date, records, summary, editable, onDelete }: {
@@ -358,28 +494,121 @@ function DayCard({ date, records, summary, editable, onDelete }: {
       </div>
 
       <div className="divide-y divide-gray-100">
-        {records.map(r => (
-          <div key={r.id} className="py-2 flex items-start gap-3 flex-wrap">
-            <div className="text-xs text-gray-500 font-mono flex-shrink-0 w-24">
-              {r.startTime || '—'} → {r.endTime || '—'}
-            </div>
-            <div className="flex-1 min-w-[150px]">
-              <div className="text-sm text-gray-800">{r.jobTask || r.description || '—'}</div>
-              {r.justification && (
-                <div className="text-xs text-gray-500 mt-0.5">📝 {r.justification}</div>
-              )}
-              <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                {r.bookingId && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">auto</span>}
+        {records.map(r => {
+          // APPROVED rows are locked for the owner — delete is hidden, edit
+          // disabled. Pre-v1.33 rows that came in via the PENDING→SUBMITTED
+          // migration still show their badge so the user knows the status.
+          const locked = r.approvalStatus === 'APPROVED'
+          return (
+            <div key={r.id} className={`py-2 flex items-start gap-3 flex-wrap ${r.approvalStatus === 'REJECTED' ? 'bg-red-50/40 -mx-2 px-2 rounded' : ''}`}>
+              <div className="text-xs text-gray-500 font-mono flex-shrink-0 w-24">
+                {r.startTime || '—'} → {r.endTime || '—'}
               </div>
+              <div className="flex-1 min-w-[150px]">
+                <div className="text-sm text-gray-800">{r.jobTask || r.description || '—'}</div>
+                {r.justification && (
+                  <div className="text-xs text-gray-500 mt-0.5">📝 {r.justification}</div>
+                )}
+                {r.approvalStatus === 'REJECTED' && r.rejectionNote && (
+                  <div className="text-xs text-red-700 mt-0.5">⚠️ Manager: {r.rejectionNote}</div>
+                )}
+                <div className="flex items-center gap-1 mt-1 flex-wrap">
+                  {statusChip(r.approvalStatus)}
+                  {r.bookingId && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">auto</span>}
+                  {r.submittedAt && r.approvalStatus !== 'DRAFT' && r.approvalStatus !== 'APPROVED' && (
+                    <span className="text-[9px] text-gray-400">ส่ง {new Date(r.submittedAt).toLocaleDateString('th-TH')}</span>
+                  )}
+                  {r.approvedAt && r.approvalStatus === 'APPROVED' && (
+                    <span className="text-[9px] text-gray-400">อนุมัติ {new Date(r.approvedAt).toLocaleDateString('th-TH')}</span>
+                  )}
+                </div>
+              </div>
+              {editable && !r.bookingId && !locked && (
+                <button onClick={() => onDelete(r.id)}
+                  className="text-gray-400 hover:text-red-500 p-1 flex-shrink-0"
+                  title={r.approvalStatus === 'SUBMITTED' ? 'ลบ (จะกลับเป็น Draft)' : 'ลบ'}>
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+              {locked && (
+                <span className="text-[10px] text-gray-400 flex-shrink-0 inline-flex items-center gap-0.5">
+                  <Lock className="w-3 h-3" /> ล็อก
+                </span>
+              )}
             </div>
-            {editable && !r.bookingId && (
-              <button onClick={() => onDelete(r.id)}
-                className="text-gray-400 hover:text-red-500 p-1 flex-shrink-0">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        ))}
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function SubmitModal({ month, monthLabel, needsSubmit, onClose, onConfirm, submitting }: {
+  month: string
+  monthLabel: string
+  needsSubmit: number
+  onClose: () => void
+  onConfirm: () => void
+  submitting: boolean
+}) {
+  const [sigUrl, setSigUrl] = useState<string | null>(null)
+  const [sigLoading, setSigLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/me/signature')
+      .then(r => r.json())
+      .then(d => setSigUrl(d.signaturePng || null))
+      .catch(() => setSigUrl(null))
+      .finally(() => setSigLoading(false))
+  }, [])
+
+  const noSig = !sigLoading && !sigUrl
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <div>
+          <h2 className="text-lg font-medium text-gray-800">ยืนยันส่ง OT ให้ approve</h2>
+          <p className="text-xs text-gray-500 mt-1">
+            ส่งคำขอ OT {needsSubmit} รายการของ <strong>{monthLabel}</strong> ให้ manager เซ็นอนุมัติ
+          </p>
+        </div>
+
+        <div className="border border-gray-200 rounded p-3 bg-gray-50">
+          <div className="text-xs text-gray-500 mb-2">ลายเซ็นที่จะแนบ:</div>
+          {sigLoading ? (
+            <div className="py-6 text-center"><Loader2 className="w-4 h-4 animate-spin text-gray-400 mx-auto" /></div>
+          ) : sigUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={sigUrl} alt="signature" className="max-h-24 mx-auto" />
+          ) : (
+            <div className="text-center py-3">
+              <AlertTriangle className="w-5 h-5 text-amber-500 mx-auto mb-1" />
+              <div className="text-xs text-gray-700 mb-2">ยังไม่ได้ตั้งลายเซ็น</div>
+              <Link href="/profile/signature" className="text-xs text-[#673ab7] hover:underline">
+                ไปตั้งลายเซ็น →
+              </Link>
+            </div>
+          )}
+        </div>
+
+        <p className="text-[11px] text-gray-500">
+          เมื่อกด <strong>ยืนยัน</strong> ระบบจะ snapshot ลายเซ็นข้างบนใส่ทุกแถวที่ submit
+          และส่งเข้าคิวให้ manager — หลังจากนี้แก้ไขรายการได้ แต่จะกลับเป็น Draft ต้องส่งใหม่
+        </p>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose}
+            className="text-xs px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50">
+            ยกเลิก
+          </button>
+          <button type="button" onClick={onConfirm}
+            disabled={submitting || noSig}
+            className="text-xs px-4 py-1.5 border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] disabled:opacity-40 inline-flex items-center gap-1">
+            {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+            ยืนยัน + ส่ง
+          </button>
+        </div>
       </div>
     </div>
   )

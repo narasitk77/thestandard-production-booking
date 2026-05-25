@@ -27,6 +27,16 @@ export async function PATCH(
       return NextResponse.json({ error: 'Auto records from bookings cannot be edited — change the booking instead' }, { status: 400 })
     }
 
+    // Approval-state gate (v1.33.0):
+    //   - APPROVED: locked for the owner; admin can still edit (correction path).
+    //   - SUBMITTED: owner edits silently revert the record to DRAFT so the
+    //     manager isn't asked to approve content they haven't seen. Cleared
+    //     submission metadata forces a re-submit + re-sign.
+    //   - DRAFT/REJECTED: fully editable.
+    if (existing.approvalStatus === 'APPROVED' && session.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'รายการนี้อนุมัติแล้ว — ไม่สามารถแก้ไขได้ (ติดต่อ admin หากต้องการแก้)' }, { status: 400 })
+    }
+
     const body = await request.json()
     const { date, startTime, endTime, jobTask, justification } = body
 
@@ -41,6 +51,9 @@ export async function PATCH(
       }
     }
 
+    const ownerEditingSubmitted =
+      existing.userEmail === session.email && existing.approvalStatus === 'SUBMITTED'
+
     const updated = await prisma.oTRecord.update({
       where: { id: params.id },
       data: {
@@ -49,6 +62,11 @@ export async function PATCH(
         ...(endTime !== undefined && { endTime }),
         ...(jobTask !== undefined && { jobTask: jobTask?.trim() || null }),
         ...(justification !== undefined && { justification: justification?.trim() || null }),
+        ...(ownerEditingSubmitted && {
+          approvalStatus: 'DRAFT' as const,
+          submittedAt: null,
+          requesterSignaturePng: null,
+        }),
       },
     })
 
@@ -78,6 +96,13 @@ export async function DELETE(
     }
     if (existing.bookingId && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Auto records from bookings — sync via the booking, not manual delete' }, { status: 400 })
+    }
+    // Approval-state gate (v1.33.0): owner cannot delete an APPROVED record;
+    // admins can (correction path). SUBMITTED/REJECTED/DRAFT are deletable
+    // by the owner — the record disappears entirely so there's no half-state
+    // to reconcile.
+    if (existing.approvalStatus === 'APPROVED' && session.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'รายการนี้อนุมัติแล้ว — ไม่สามารถลบได้ (ติดต่อ admin หากต้องการลบ)' }, { status: 400 })
     }
 
     await prisma.oTRecord.delete({ where: { id: params.id } })

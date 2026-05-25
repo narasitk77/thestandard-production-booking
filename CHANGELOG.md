@@ -5,6 +5,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.1] — 2026-05-25
+
+### Added — OT signature workflow (Phase 2: user submit flow)
+
+Closes the v1.33.0 "Known gap": new OT records now have a path out of
+`DRAFT` and into the manager's approval queue, plus a recovery path for
+records the manager pushes back.
+
+#### `/api/ot/submit` (new)
+
+`POST { month: "YYYY-MM" }` — flips every `DRAFT` or `REJECTED` record
+owned by the signed-in user in the given month to `SUBMITTED`, stamping
+`submittedAt = now()` and snapshotting `User.signaturePng` onto each
+record's `requesterSignaturePng`. Previous `rejectionNote`s are cleared
+so the manager sees a clean queue on the resubmit. `APPROVED` and
+already-`SUBMITTED` rows are untouched (idempotent re-clicks).
+
+The endpoint blocks submission if the user has no saved signature
+(returns `400` with `code: 'NO_SIGNATURE'`) — the signature is the
+legal sign-off, so submitting without one is rejected at the API level.
+
+#### `/api/ot/[id]` PATCH/DELETE — status-aware gates
+
+- `APPROVED` rows are locked for the owner. Admins can still edit/delete
+  (correction path — preserves existing override behavior).
+- Owner edits on a `SUBMITTED` row silently revert the row to `DRAFT`
+  and clear `submittedAt + requesterSignaturePng`, forcing a re-sign +
+  re-submit. The manager is never asked to approve content they haven't
+  seen.
+- `DRAFT` and `REJECTED` rows are fully editable / deletable by the
+  owner.
+
+#### `/ot` page — status visibility + submit modal
+
+- **Status strip** at the top of the records list shows per-month counts
+  (`Draft N · Submitted N · Approved N · Rejected N`) plus a primary
+  action button that becomes "ส่งให้ approve (N)" when there are draft
+  records, or "แก้แล้วส่งใหม่ (N)" when the user has rejected records to
+  re-submit. Disabled when there's nothing to send.
+- **Rejection banner** (only when rejected records exist) lists each
+  rejected row with the manager's note so the user doesn't have to scan
+  the day list to find what needs fixing.
+- **Per-row badge** on every record card showing its current status,
+  plus the submit/approve date when applicable.
+- **Submit confirm modal** previews the signature that will be
+  snapshotted onto each row. If the user has no signature, the modal
+  surfaces a deep link to `/profile/signature` instead of letting the
+  user submit without one.
+- **APPROVED rows hide the delete button** for the owner and show a
+  small lock icon, with a tooltip "ติดต่อ admin หากต้องการแก้".
+
+#### Behavioural change worth flagging
+
+`POST /api/ot` (create record) now creates records in `DRAFT` (via the
+schema default change from Phase 1). The v1.32 behavior of "every new
+entry immediately enters the manager queue" is gone — users explicitly
+opt in by clicking the submit button on `/ot`. This is the intended
+two-step "fill, then sign and send" workflow.
+
+---
+
 ## [1.33.0] — 2026-05-25
 
 ### Added — OT signature workflow (Phase 1: schema + signature profile)
