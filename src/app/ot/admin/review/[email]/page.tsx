@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, AlertTriangle, Lock, Send } from 'lucide-react'
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, AlertTriangle, Lock, Send, Download } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { summarizeDay, formatTHB, type DaySummary } from '@/lib/ot-calc'
 
@@ -155,9 +155,17 @@ export default function OTReviewPage() {
         <ArrowLeft className="w-4 h-4" /> กลับ Admin
       </Link>
 
-      <div className="gf-header p-4 sm:p-6">
-        <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Review OT</h1>
-        <p className="text-xs sm:text-sm text-gray-500">{email} · {monthLabel(month)}</p>
+      <div className="gf-header p-4 sm:p-6 flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Review OT</h1>
+          <p className="text-xs sm:text-sm text-gray-500">{email} · {monthLabel(month)}</p>
+        </div>
+        <a
+          href={`/api/ot/export/pdf?month=${month}&email=${encodeURIComponent(email)}`}
+          download
+          className="px-3 py-1.5 text-xs border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] inline-flex items-center gap-1 self-start">
+          <Download className="w-3 h-3" /> PDF
+        </a>
       </div>
 
       {error && (

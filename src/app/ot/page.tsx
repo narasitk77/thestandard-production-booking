@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
-import { Calendar, Clock, Plus, Trash2, Loader2, Lock, Info, AlertTriangle, Send, CheckCircle2, XCircle, FileSignature } from 'lucide-react'
+import { Calendar, Clock, Plus, Trash2, Loader2, Lock, Info, AlertTriangle, Send, CheckCircle2, XCircle, FileSignature, Download } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { summarizeDay, formatTHB, WEEKDAY_THRESHOLD_HOURS, type DaySummary } from '@/lib/ot-calc'
 import { isThaiHoliday, getHolidayName } from '@/lib/thai-holidays'
@@ -245,9 +245,17 @@ export default function OTPage() {
           <span className="font-medium text-gray-800">{profile.thaiName || profile.email}</span>
           {profile.employeeId && <span className="text-gray-400">{profile.employeeId}</span>}
           {profile.position && <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-600">{profile.position}</span>}
-          {profile.role === 'ADMIN' && (
-            <Link href="/ot/admin" className="ml-auto text-[#673ab7] hover:underline text-xs">→ Admin / Cover Sheet</Link>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            {records.length > 0 && (
+              <a href={`/api/ot/export/pdf?month=${month}&email=${encodeURIComponent(profile.email)}`} download
+                className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+                <Download className="w-3 h-3" /> PDF
+              </a>
+            )}
+            {profile.role === 'ADMIN' && (
+              <Link href="/ot/admin" className="text-[#673ab7] hover:underline text-xs">→ Admin / Cover Sheet</Link>
+            )}
+          </div>
         </div>
       )}
 

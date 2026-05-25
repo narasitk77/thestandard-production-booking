@@ -5,6 +5,78 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.3] — 2026-05-25
+
+### Added — OT signature workflow (Phase 4: PDF export with embedded signatures)
+
+Closes the v1.33 line. The OT cover sheet now renders as a real signed
+artifact suitable for HR/finance hand-off — one A4 page per person,
+table of OT entries, totals, and both signatures (requester + manager)
+embedded as actual PNG images at the bottom of the page.
+
+#### `GET /api/ot/export/pdf?month=YYYY-MM[&email=...]` (new)
+
+- `month=YYYY-MM` (admin-only) → multi-page PDF, one page per user
+  who has records in the month.
+- `month=YYYY-MM&email=...` → single-person, single-page PDF;
+  accessible to the owner of `email` or any admin.
+
+Each page contains:
+
+- Header row with company label + month
+- Person info block (ชื่อ-นามสกุล / รหัสพนักงาน / ตำแหน่ง / email)
+- Table: date / day-type / time-range / job task / status / THB,
+  with a small "เหตุผล: …" line under each row when present.
+- Totals strip (วันหยุด/Hol days · วันธรรมดา days · รวม THB).
+- Two signature boxes at the bottom:
+  - **ผู้ขอ (Requester)** — embeds the most recent
+    `requesterSignaturePng` snapshot from the user's records, with
+    their printed name and submission date.
+  - **ผู้อนุมัติ (Manager)** — embeds the most recent
+    `approverSignaturePng` snapshot, with the approver's email and
+    approve date. Falls back to "(รออนุมัติ)" when not yet signed.
+
+Signatures are taken from the per-row snapshots stamped in Phases 2–3
+so the PDF is internally consistent with the database state — a user
+or manager updating their saved signature later does not change PDFs
+that were exported under the old signature.
+
+#### Thai rendering — embedded Sarabun font (OFL)
+
+`pdf-lib`'s built-in fonts have no Thai glyphs, so the API embeds
+Sarabun Regular + Bold (SIL Open Font License, by Cadson Demak) with
+glyph subsetting enabled. Per-PDF font payload is ~5–10KB; total
+typical export size is 15–25KB for a single-person sheet.
+
+- `public/fonts/Sarabun-Regular.ttf` (~88KB)
+- `public/fonts/Sarabun-Bold.ttf` (~88KB)
+- `public/fonts/SARABUN-OFL.txt` — license attribution
+
+New runtime deps: `pdf-lib ^1.17.1`, `@pdf-lib/fontkit ^1.1.1`.
+
+#### UI surfaces
+
+- `/ot/admin` — primary "Cover Sheet PDF (พร้อมลายเซ็น)" button next
+  to the existing CSV exports.
+- `/ot/admin/review/[email]?month=…` — header "PDF" button generates
+  the single-person sheet for the currently-viewed person + month.
+- `/ot` — when the user has any records for the visible month, a
+  small "PDF" button in their profile strip downloads their own
+  signed cover sheet without involving an admin.
+
+#### Verification
+
+`scripts/test-ot-pdf.ts` is a one-shot smoke test that generates a
+PDF for a synthetic person (mix of APPROVED/SUBMITTED/REJECTED rows,
+both signature snapshots present) — useful for manual inspection
+when iterating on the PDF layout. Run via
+`npx tsx scripts/test-ot-pdf.ts`.
+
+This commit closes the v1.33 signature workflow line. The full
+feature branch `feat/ot-signature` is now ready to merge to `main`.
+
+---
+
 ## [1.33.2] — 2026-05-25
 
 ### Added — OT signature workflow (Phase 3: manager bulk approve + review page)

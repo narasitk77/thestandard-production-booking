@@ -326,9 +326,13 @@ export default function OTAdminPage() {
         </label>
 
         <div className="ml-auto flex gap-2 flex-wrap">
+          <a href={`/api/ot/export/pdf?month=${month}`} download
+            className="px-3 py-1.5 text-xs border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] inline-flex items-center gap-1">
+            <Download className="w-3 h-3" /> Cover Sheet PDF (พร้อมลายเซ็น)
+          </a>
           <a href={`/api/ot/export?month=${month}`} download
             className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1">
-            <Download className="w-3 h-3" /> Cover Sheet CSV
+            <Download className="w-3 h-3" /> CSV
           </a>
           <a href={`/api/ot/export?month=${month}&detail=1`} download
             className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
