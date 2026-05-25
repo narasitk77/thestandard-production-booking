@@ -37,6 +37,7 @@ interface Profile {
   position: string | null
   role: string
   hasSignature?: boolean
+  canApproveOT?: boolean
 }
 
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
@@ -252,8 +253,10 @@ export default function OTPage() {
                 <Download className="w-3 h-3" /> PDF
               </a>
             )}
-            {profile.role === 'ADMIN' && (
-              <Link href="/ot/admin" className="text-[#673ab7] hover:underline text-xs">→ Admin / Cover Sheet</Link>
+            {profile.canApproveOT && (
+              <Link href="/ot/admin" className="text-[#673ab7] hover:underline text-xs">
+                {profile.role === 'ADMIN' ? '→ Admin / Cover Sheet' : '→ Approve / Cover Sheet'}
+              </Link>
             )}
           </div>
         </div>

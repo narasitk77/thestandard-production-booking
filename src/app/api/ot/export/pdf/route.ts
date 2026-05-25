@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin, getSession } from '@/lib/session'
+import { requireOTApprover, getOTApproverAccess, getSession } from '@/lib/session'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
 import { generateOTCoverSheetPdf, type OTPdfPerson, type OTPdfRecord } from '@/lib/ot-pdf'
 
@@ -28,17 +28,20 @@ export async function GET(request: NextRequest) {
     }
     const emailParam = (searchParams.get('email') || '').trim().toLowerCase()
 
-    // Access control: single-person mode is open to the owner OR an admin;
-    // bulk export is admin-only.
+    // Access control: single-person mode is open to the owner OR any OT
+    // approver (admin or manager). Bulk export (no email param) is OT-
+    // approver-only — managers can pull the month-wide PDF for finance
+    // hand-off without needing full admin rights.
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     if (emailParam) {
-      if (session.email !== emailParam && session.role !== 'ADMIN') {
+      const isApprover = await getOTApproverAccess(session.email)
+      if (session.email !== emailParam && !isApprover) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
     } else {
-      if (!(await requireAdmin())) {
-        return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+      if (!(await requireOTApprover())) {
+        return NextResponse.json({ error: 'OT approver only' }, { status: 403 })
       }
     }
 

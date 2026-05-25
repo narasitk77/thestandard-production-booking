@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireOTApprover } from '@/lib/session'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
 import { summarizeDay } from '@/lib/ot-calc'
 
@@ -29,8 +29,8 @@ interface PersonSummary {
 
 export async function GET(request: NextRequest) {
   try {
-    if (!(await requireAdmin())) {
-      return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+    if (!(await requireOTApprover())) {
+      return NextResponse.json({ error: 'OT approver only' }, { status: 403 })
     }
 
     const { searchParams } = new URL(request.url)

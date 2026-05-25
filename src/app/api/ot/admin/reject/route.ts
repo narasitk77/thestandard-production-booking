@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireOTApprover } from '@/lib/session'
 
 /**
  * POST /api/ot/admin/reject  { recordId, note }
@@ -19,9 +19,9 @@ import { requireAdmin } from '@/lib/session'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAdmin()
+    const session = await requireOTApprover()
     if (!session) {
-      return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+      return NextResponse.json({ error: 'OT approver only' }, { status: 403 })
     }
 
     const body = await request.json().catch(() => ({}))

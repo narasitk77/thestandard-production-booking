@@ -5,6 +5,90 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.4] — 2026-05-25
+
+### Added — OT Approver role (Manager scope, no schema change)
+
+Introduces a position-based **OT Approver** gate so a designated Manager
+can approve/reject OT and see the cover-sheet overview without being
+granted the full ADMIN role (which also grants `/admin` booking console,
+user roster CRUD, GHA + sheet config, dashboard, upload — all of which
+the Manager doesn't need).
+
+#### `getOTApproverAccess(email)` + `requireOTApprover()` — new in `src/lib/session.ts`
+
+Returns true when the user is:
+
+1. `role === 'ADMIN'`, **or**
+2. their `User.position` field (case-insensitive) contains `"manager"`
+
+Mirrors the existing `getProducerAccess` pattern so the gate is set by
+filling in the person's profile, not by toggling a separate flag. The
+gate also rejects `active === false` users.
+
+Today this picks up:
+
+- `narasit.k@thestandard.co` — `role=ADMIN` (set by `INITIAL_ADMINS` in
+  `src/lib/auth.ts` + seed). Full access, unchanged.
+- `chonlathorn.j@thestandard.co` — `position='Video Production Manager'`
+  (already in `TEAM_PROFILES` and re-asserted on every seed run). Gains
+  OT approver access; no other role changes.
+
+Anyone else whose position is later set to include "manager" (e.g. "OT
+Manager", "Production Manager") automatically picks up the same gate
+without a code change.
+
+#### Routes flipped from `requireAdmin()` → `requireOTApprover()`
+
+- `GET  /api/ot/summary`         — admin cover sheet data
+- `POST /api/ot/admin/approve`   — bulk approve (all 3 modes)
+- `POST /api/ot/admin/reject`    — reject with note
+- `GET  /api/ot/export`          — CSV export
+- `GET  /api/ot/export/pdf`      — PDF cover sheet (bulk mode)
+  - single-person mode (`&email=...`) now also accepts the owner OR any
+    OT approver
+
+`GET /api/ot` was updated so `?email=` and `?all=1` queries also work
+for managers, not just admins — required for the manager's review page
+to load other users' records.
+
+#### UI surfaces
+
+- `Nav` → adds "OT · Approve" link in the More dropdown for anyone who
+  passes `canApproveOT`. ADMIN-only `/admin` link is unchanged.
+- `/ot` (user page) → the right-hand admin shortcut is now visible to
+  any approver, labelled "→ Approve / Cover Sheet" for managers and
+  "→ Admin / Cover Sheet" for admins.
+- `/ot/admin` (cover sheet) → still loads identically, but for non-
+  ADMIN approvers the **Add user**, **Edit user**, **Toggle role**,
+  and **Toggle active** controls are hidden. A small "Manager view —
+  read-only roster" tag in the Roster header explains why. Approve /
+  reject / review / PDF / CSV all work as before.
+- `/ot/admin/review/[email]?month=…` → no UI change; the page was
+  already gated by the underlying API, which now accepts approvers.
+- `/api/me` now ships `canApproveOT: boolean` so client pages can
+  conditionally render approver-only UI without a second round-trip.
+
+#### What's intentionally *not* extended to the Manager role
+
+- `/admin` (booking admin console) — still ADMIN-only.
+- `/dashboard` — still ADMIN-only.
+- `/api/admin/users` (user roster CRUD) — still ADMIN-only on the
+  server. Frontend now hides the buttons that hit it, so a Manager
+  doesn't get a 403 in the face.
+- `/upload` — still ADMIN-only.
+
+#### Deploy + rollout notes
+
+- Pure additive change. No schema migration. `start.sh` already seeds
+  `chonlathorn.j`'s `position='Video Production Manager'` from
+  `TEAM_PROFILES` on every restart via `prisma/seed.ts upsert`, so the
+  gate flips on at first deploy of v1.33.4 without manual DB work.
+- Rollback to v1.33.3 simply re-narrows the gate to ADMIN-only — no
+  data fix needed.
+
+---
+
 ## [1.33.3] — 2026-05-25
 
 ### Added — OT signature workflow (Phase 4: PDF export with embedded signatures)

@@ -45,6 +45,9 @@ export default function OTAdminPage() {
   const [includeInactive, setIncludeInactive] = useState(false)
   const [error, setError] = useState('')
   const [meId, setMeId] = useState<string | undefined>()
+  // v1.33.4 — gate user-roster CRUD (add/edit/role/active) to ADMINs only.
+  // OT managers see the approval surface but can't reshape the team.
+  const [meIsAdmin, setMeIsAdmin] = useState(false)
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -75,6 +78,7 @@ export default function OTAdminPage() {
 
       const me = await fetch('/api/me').then(r => r.json()).catch(() => null)
       if (me?.user) {
+        setMeIsAdmin(me.user.role === 'ADMIN')
         const u = (data.summary || []).find((s: PersonSummary) => s.email === me.user.email)
         if (u) setMeId(u.userId || undefined)
       }
@@ -366,14 +370,19 @@ export default function OTAdminPage() {
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-medium text-gray-700 flex items-center gap-2">
             <Users className="w-4 h-4 text-[#673ab7]" /> Roster ({summary.length} คน)
+            {!meIsAdmin && (
+              <span className="ml-1 text-[10px] text-gray-400">(Manager view — read-only roster)</span>
+            )}
           </div>
-          <button onClick={() => setShowAdd(!showAdd)}
-            className="text-xs px-3 py-1.5 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1">
-            <UserPlus className="w-3 h-3" /> เพิ่มชื่อ
-          </button>
+          {meIsAdmin && (
+            <button onClick={() => setShowAdd(!showAdd)}
+              className="text-xs px-3 py-1.5 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1">
+              <UserPlus className="w-3 h-3" /> เพิ่มชื่อ
+            </button>
+          )}
         </div>
 
-        {showAdd && (
+        {showAdd && meIsAdmin && (
           <div className="bg-purple-50 border border-purple-200 rounded p-3 mb-3 space-y-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input type="email" className="gf-input" placeholder="email@thestandard.co"
@@ -543,17 +552,19 @@ export default function OTAdminPage() {
                                 ตีกลับ {s.rejectedRecords}
                               </span>
                             )}
-                            <button onClick={() => startEdit(s)} title="แก้ไข"
-                              className="text-xs p-1.5 border border-gray-300 rounded hover:bg-gray-50">
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            {!isMe && (
+                            {meIsAdmin && (
+                              <button onClick={() => startEdit(s)} title="แก้ไข"
+                                className="text-xs p-1.5 border border-gray-300 rounded hover:bg-gray-50">
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
+                            {meIsAdmin && !isMe && (
                               <button onClick={() => toggleRole(s)} title={s.role === 'ADMIN' ? 'Demote' : 'Make Admin'}
                                 className="text-xs p-1.5 border border-gray-300 rounded hover:bg-gray-50">
                                 {s.role === 'ADMIN' ? <ShieldOff className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
                               </button>
                             )}
-                            {!isMe && (
+                            {meIsAdmin && !isMe && (
                               <button onClick={() => toggleActive(s)}
                                 title={s.active ? 'ลบออก' : 'นำกลับ'}
                                 className={`text-xs p-1.5 border rounded hover:bg-gray-50 ${
