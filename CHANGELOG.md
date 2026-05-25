@@ -5,6 +5,418 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.4] — 2026-05-25
+
+### Added — OT Approver role (Manager scope, no schema change)
+
+Introduces a position-based **OT Approver** gate so a designated Manager
+can approve/reject OT and see the cover-sheet overview without being
+granted the full ADMIN role (which also grants `/admin` booking console,
+user roster CRUD, GHA + sheet config, dashboard, upload — all of which
+the Manager doesn't need).
+
+#### `getOTApproverAccess(email)` + `requireOTApprover()` — new in `src/lib/session.ts`
+
+Returns true when the user is:
+
+1. `role === 'ADMIN'`, **or**
+2. their `User.position` field (case-insensitive) contains `"manager"`
+
+Mirrors the existing `getProducerAccess` pattern so the gate is set by
+filling in the person's profile, not by toggling a separate flag. The
+gate also rejects `active === false` users.
+
+Today this picks up:
+
+- `narasit.k@thestandard.co` — `role=ADMIN` (set by `INITIAL_ADMINS` in
+  `src/lib/auth.ts` + seed). Full access, unchanged.
+- `chonlathorn.j@thestandard.co` — `position='Video Production Manager'`
+  (already in `TEAM_PROFILES` and re-asserted on every seed run). Gains
+  OT approver access; no other role changes.
+
+Anyone else whose position is later set to include "manager" (e.g. "OT
+Manager", "Production Manager") automatically picks up the same gate
+without a code change.
+
+#### Routes flipped from `requireAdmin()` → `requireOTApprover()`
+
+- `GET  /api/ot/summary`         — admin cover sheet data
+- `POST /api/ot/admin/approve`   — bulk approve (all 3 modes)
+- `POST /api/ot/admin/reject`    — reject with note
+- `GET  /api/ot/export`          — CSV export
+- `GET  /api/ot/export/pdf`      — PDF cover sheet (bulk mode)
+  - single-person mode (`&email=...`) now also accepts the owner OR any
+    OT approver
+
+`GET /api/ot` was updated so `?email=` and `?all=1` queries also work
+for managers, not just admins — required for the manager's review page
+to load other users' records.
+
+#### UI surfaces
+
+- `Nav` → adds "OT · Approve" link in the More dropdown for anyone who
+  passes `canApproveOT`. ADMIN-only `/admin` link is unchanged.
+- `/ot` (user page) → the right-hand admin shortcut is now visible to
+  any approver, labelled "→ Approve / Cover Sheet" for managers and
+  "→ Admin / Cover Sheet" for admins.
+- `/ot/admin` (cover sheet) → still loads identically, but for non-
+  ADMIN approvers the **Add user**, **Edit user**, **Toggle role**,
+  and **Toggle active** controls are hidden. A small "Manager view —
+  read-only roster" tag in the Roster header explains why. Approve /
+  reject / review / PDF / CSV all work as before.
+- `/ot/admin/review/[email]?month=…` → no UI change; the page was
+  already gated by the underlying API, which now accepts approvers.
+- `/api/me` now ships `canApproveOT: boolean` so client pages can
+  conditionally render approver-only UI without a second round-trip.
+
+#### What's intentionally *not* extended to the Manager role
+
+- `/admin` (booking admin console) — still ADMIN-only.
+- `/dashboard` — still ADMIN-only.
+- `/api/admin/users` (user roster CRUD) — still ADMIN-only on the
+  server. Frontend now hides the buttons that hit it, so a Manager
+  doesn't get a 403 in the face.
+- `/upload` — still ADMIN-only.
+
+#### Deploy + rollout notes
+
+- Pure additive change. No schema migration. `start.sh` already seeds
+  `chonlathorn.j`'s `position='Video Production Manager'` from
+  `TEAM_PROFILES` on every restart via `prisma/seed.ts upsert`, so the
+  gate flips on at first deploy of v1.33.4 without manual DB work.
+- Rollback to v1.33.3 simply re-narrows the gate to ADMIN-only — no
+  data fix needed.
+
+---
+
+## [1.33.3] — 2026-05-25
+
+### Added — OT signature workflow (Phase 4: PDF export with embedded signatures)
+
+Closes the v1.33 line. The OT cover sheet now renders as a real signed
+artifact suitable for HR/finance hand-off — one A4 page per person,
+table of OT entries, totals, and both signatures (requester + manager)
+embedded as actual PNG images at the bottom of the page.
+
+#### `GET /api/ot/export/pdf?month=YYYY-MM[&email=...]` (new)
+
+- `month=YYYY-MM` (admin-only) → multi-page PDF, one page per user
+  who has records in the month.
+- `month=YYYY-MM&email=...` → single-person, single-page PDF;
+  accessible to the owner of `email` or any admin.
+
+Each page contains:
+
+- Header row with company label + month
+- Person info block (ชื่อ-นามสกุล / รหัสพนักงาน / ตำแหน่ง / email)
+- Table: date / day-type / time-range / job task / status / THB,
+  with a small "เหตุผล: …" line under each row when present.
+- Totals strip (วันหยุด/Hol days · วันธรรมดา days · รวม THB).
+- Two signature boxes at the bottom:
+  - **ผู้ขอ (Requester)** — embeds the most recent
+    `requesterSignaturePng` snapshot from the user's records, with
+    their printed name and submission date.
+  - **ผู้อนุมัติ (Manager)** — embeds the most recent
+    `approverSignaturePng` snapshot, with the approver's email and
+    approve date. Falls back to "(รออนุมัติ)" when not yet signed.
+
+Signatures are taken from the per-row snapshots stamped in Phases 2–3
+so the PDF is internally consistent with the database state — a user
+or manager updating their saved signature later does not change PDFs
+that were exported under the old signature.
+
+#### Thai rendering — embedded Sarabun font (OFL)
+
+`pdf-lib`'s built-in fonts have no Thai glyphs, so the API embeds
+Sarabun Regular + Bold (SIL Open Font License, by Cadson Demak) with
+glyph subsetting enabled. Per-PDF font payload is ~5–10KB; total
+typical export size is 15–25KB for a single-person sheet.
+
+- `public/fonts/Sarabun-Regular.ttf` (~88KB)
+- `public/fonts/Sarabun-Bold.ttf` (~88KB)
+- `public/fonts/SARABUN-OFL.txt` — license attribution
+
+New runtime deps: `pdf-lib ^1.17.1`, `@pdf-lib/fontkit ^1.1.1`.
+
+#### UI surfaces
+
+- `/ot/admin` — primary "Cover Sheet PDF (พร้อมลายเซ็น)" button next
+  to the existing CSV exports.
+- `/ot/admin/review/[email]?month=…` — header "PDF" button generates
+  the single-person sheet for the currently-viewed person + month.
+- `/ot` — when the user has any records for the visible month, a
+  small "PDF" button in their profile strip downloads their own
+  signed cover sheet without involving an admin.
+
+#### Verification
+
+`scripts/test-ot-pdf.ts` is a one-shot smoke test that generates a
+PDF for a synthetic person (mix of APPROVED/SUBMITTED/REJECTED rows,
+both signature snapshots present) — useful for manual inspection
+when iterating on the PDF layout. Run via
+`npx tsx scripts/test-ot-pdf.ts`.
+
+This commit closes the v1.33 signature workflow line. The full
+feature branch `feat/ot-signature` is now ready to merge to `main`.
+
+---
+
+## [1.33.2] — 2026-05-25
+
+### Added — OT signature workflow (Phase 3: manager bulk approve + review page)
+
+Gives the manager the tools to actually work through the SUBMITTED queue
+v1.33.1 fills up: bulk-approve multiple people at once, drill into a
+single person's report for per-row decisions, and push individual rows
+back to the user with a reason.
+
+#### `/api/ot/admin/approve` — extended to three modes
+
+The existing `{email, month}` shape is preserved; two new shapes are
+added so the same endpoint serves all approve flows:
+
+- `{ recordIds: string[] }` — approve a hand-picked set of rows. Used
+  by the bulk-select footer on `/ot/admin` and per-row approve on the
+  review page.
+- `{ month, allSubmitted: true }` — month-wide "approve every
+  SUBMITTED row across all users". Powers the one-click Inbox banner
+  on `/ot/admin`.
+- `{ email, month }` — legacy mode for one user × one month.
+
+Modes are mutually exclusive — `recordIds` takes precedence, then
+`allSubmitted`, then the legacy `{email, month}`. All three only flip
+rows currently in SUBMITTED (idempotent re-clicks; DRAFT/REJECTED rows
+never silently jump past the user). The approver's saved signature is
+snapshotted onto every approved row in every mode.
+
+#### `/api/ot/admin/reject` (new)
+
+`POST { recordId, note }` — flips one SUBMITTED row to REJECTED with
+the manager's note attached. Non-SUBMITTED rows are no-ops (returns
+`rejected: 0`), so managers don't accidentally re-reject rows the user
+has already updated. `note` is required, non-empty, ≤500 chars —
+silent rejects don't give the user enough to act on.
+
+#### `/ot/admin` — Inbox + bulk select + sticky footer
+
+- **Inbox banner** at the top: `N รายการรออนุมัติจาก M คน` with a
+  primary one-click "อนุมัติทุกคนในเดือนนี้" button. When the queue is
+  empty, shows a green "ไม่มีคำขอ OT รออนุมัติ" confirmation instead.
+- **Per-row checkbox** (only enabled when the row has SUBMITTED
+  records); header checkbox toggles all selectable rows.
+- **Per-row "Review N" link** replaces the old direct "Approve N"
+  action — manager goes through the review page rather than blind-
+  approving. The old direct approve is still reachable from the
+  review page's "อนุมัติทั้งหมด + เซ็น" footer button.
+- **Rejected count badge** on rows where the manager has pushed
+  records back; clarifies why the SUBMITTED count is lower than the
+  total in-flight count.
+- **Sticky bottom bar** appears whenever any checkbox is selected,
+  with "อนุมัติที่เลือก (N)" — fires `{email, month}` approves in
+  parallel across selected users (idempotent endpoint, partial
+  failures leave clean state).
+- Clicking a person's name links to the review page.
+
+#### `/ot/admin/review/[email]?month=YYYY-MM` (new)
+
+Per-person, per-month review surface for managers who want to act at
+row granularity rather than bulk-approve the whole report.
+
+- Per-row Approve / Reject buttons (only on SUBMITTED rows).
+- Reject opens a modal asking for a note (≤500 chars); user sees this
+  back on `/ot` and resubmits via Phase 2's flow.
+- Approved rows show a lock icon + the approver email + timestamp.
+- The user's submitted signature is rendered at the top so the
+  manager can sanity-check it against past sign-offs.
+- Sticky footer mirrors the admin page pattern: "อนุมัติทั้งหมด +
+  เซ็น" for one-click approve of every still-SUBMITTED row for this
+  person.
+
+#### Backward-compat note
+
+`/api/ot/summary` continues to ship the `pendingRecords` field; the
+v1.33.0 admin UI consumers can still read it. The new admin page reads
+`submittedRecords` and `rejectedRecords` directly to surface the
+correct counts in the new badges.
+
+---
+
+## [1.33.1] — 2026-05-25
+
+### Added — OT signature workflow (Phase 2: user submit flow)
+
+Closes the v1.33.0 "Known gap": new OT records now have a path out of
+`DRAFT` and into the manager's approval queue, plus a recovery path for
+records the manager pushes back.
+
+#### `/api/ot/submit` (new)
+
+`POST { month: "YYYY-MM" }` — flips every `DRAFT` or `REJECTED` record
+owned by the signed-in user in the given month to `SUBMITTED`, stamping
+`submittedAt = now()` and snapshotting `User.signaturePng` onto each
+record's `requesterSignaturePng`. Previous `rejectionNote`s are cleared
+so the manager sees a clean queue on the resubmit. `APPROVED` and
+already-`SUBMITTED` rows are untouched (idempotent re-clicks).
+
+The endpoint blocks submission if the user has no saved signature
+(returns `400` with `code: 'NO_SIGNATURE'`) — the signature is the
+legal sign-off, so submitting without one is rejected at the API level.
+
+#### `/api/ot/[id]` PATCH/DELETE — status-aware gates
+
+- `APPROVED` rows are locked for the owner. Admins can still edit/delete
+  (correction path — preserves existing override behavior).
+- Owner edits on a `SUBMITTED` row silently revert the row to `DRAFT`
+  and clear `submittedAt + requesterSignaturePng`, forcing a re-sign +
+  re-submit. The manager is never asked to approve content they haven't
+  seen.
+- `DRAFT` and `REJECTED` rows are fully editable / deletable by the
+  owner.
+
+#### `/ot` page — status visibility + submit modal
+
+- **Status strip** at the top of the records list shows per-month counts
+  (`Draft N · Submitted N · Approved N · Rejected N`) plus a primary
+  action button that becomes "ส่งให้ approve (N)" when there are draft
+  records, or "แก้แล้วส่งใหม่ (N)" when the user has rejected records to
+  re-submit. Disabled when there's nothing to send.
+- **Rejection banner** (only when rejected records exist) lists each
+  rejected row with the manager's note so the user doesn't have to scan
+  the day list to find what needs fixing.
+- **Per-row badge** on every record card showing its current status,
+  plus the submit/approve date when applicable.
+- **Submit confirm modal** previews the signature that will be
+  snapshotted onto each row. If the user has no signature, the modal
+  surfaces a deep link to `/profile/signature` instead of letting the
+  user submit without one.
+- **APPROVED rows hide the delete button** for the owner and show a
+  small lock icon, with a tooltip "ติดต่อ admin หากต้องการแก้".
+
+#### Behavioural change worth flagging
+
+`POST /api/ot` (create record) now creates records in `DRAFT` (via the
+schema default change from Phase 1). The v1.32 behavior of "every new
+entry immediately enters the manager queue" is gone — users explicitly
+opt in by clicking the submit button on `/ot`. This is the intended
+two-step "fill, then sign and send" workflow.
+
+---
+
+## [1.33.0] — 2026-05-25
+
+### Added — OT signature workflow (Phase 1: schema + signature profile)
+
+Opens the v1.33 line that replaces the two-state OT approval flow
+(`PENDING → APPROVED`) with a four-state workflow that captures both the
+requester's and the manager's e-signature on every record. Phase 1 lays
+the schema and lets every user set their saved signature; Phases 2–4
+follow with the user submit flow, the manager bulk-approve UI, and the
+PDF export.
+
+#### Schema (`prisma/schema.prisma`) — additive, with one enum migration
+
+```
+model User {
+  …existing fields…
+  signaturePng        String?   @db.Text   // base64 PNG data URL
+  signatureUpdatedAt  DateTime?
+}
+
+enum OTApprovalStatus {
+  DRAFT      // user is still filling out — not visible to managers
+  SUBMITTED  // user signed; awaiting manager sign-off (was: PENDING)
+  APPROVED   // manager signed off
+  REJECTED   // manager pushed back with rejectionNote; user can resubmit
+}
+
+model OTRecord {
+  …existing fields…
+  approvalStatus         OTApprovalStatus @default(DRAFT)  // was: PENDING
+  submittedAt            DateTime?
+  requesterSignaturePng  String? @db.Text
+  approverSignaturePng   String? @db.Text
+  rejectionNote          String?
+}
+```
+
+**Migration (`start.sh`, runs before `prisma db push`):**
+
+1. `ALTER TYPE "OTApprovalStatus" ADD VALUE` for `DRAFT`, `SUBMITTED`,
+   `REJECTED` — idempotent via `IF NOT EXISTS` guards.
+2. `UPDATE ot_records SET "approvalStatus" = 'SUBMITTED' WHERE
+   "approvalStatus" = 'PENDING'` so the old label has no rows referencing
+   it.
+3. `prisma db push --accept-data-loss` then reconciles the enum (drops
+   the unused `PENDING` label) and adds the new columns as additive
+   nullable fields.
+
+No existing approved/pending data is lost: previously-PENDING records
+land in the new `SUBMITTED` state (awaiting manager sign-off), and
+previously-APPROVED records stay APPROVED. New columns
+(`submittedAt`, `requesterSignaturePng`, `approverSignaturePng`,
+`rejectionNote`) start NULL and only fill in as users submit/reject
+through the new flow.
+
+#### Signature snapshots — historical immutability
+
+`OTRecord.requesterSignaturePng` and `approverSignaturePng` are
+**snapshots** taken from `User.signaturePng` at submit/approve time. A
+user updating their signature later does not retroactively change any
+historical OT report.
+
+#### `/api/me/signature` (new)
+
+- `GET` → `{ signaturePng, signatureUpdatedAt }` — the signed-in user's
+  saved signature data URL (or `null`).
+- `POST { png }` — saves or replaces the signature. Validates the value
+  is `data:image/png;base64,…` with a base64 payload, caps storage at
+  200KB raw base64 (~150KB binary). `POST { png: null }` clears it.
+
+#### `/api/me` — extended
+
+Adds `hasSignature: boolean` and `signatureUpdatedAt: string | null` to
+the existing response so client code can detect "user hasn't set a
+signature yet" without pulling the full image.
+
+#### `/api/ot/summary` — extended status counts
+
+The summary endpoint that powers `/ot/admin` now returns
+`draftRecords`, `submittedRecords`, `approvedRecords`, `rejectedRecords`
+per person. `pendingRecords` is preserved as a backward-compat alias
+that sums `submitted + rejected` ("anything in flight, not yet
+approved"), so the v1.32 admin UI keeps working unchanged in Phase 1.
+
+#### `/api/ot/admin/approve` — now snapshots approver signature
+
+The existing `{email, month}` bulk-approve endpoint now reads the
+approver's `User.signaturePng` and writes it into every record's
+`approverSignaturePng` at approval time. Approvers with no saved
+signature can still approve — `approverSignaturePng` will be NULL and
+the future PDF export will fall back to a typed name.
+
+The endpoint also now filters on `approvalStatus: 'SUBMITTED'` rather
+than the old `'PENDING'`. Phases 2–3 will extend it with two new modes
+(`{recordIds: []}` and `{month, allSubmitted: true}`).
+
+#### `/profile/signature` (new page)
+
+Reachable from the `More → ลายเซ็น` nav entry. Mobile-friendly
+canvas-based signature pad (mouse + touch) with smoothed strokes, plus a
+PNG upload alternative. Save persists to the user's account; "ลบออกจาก
+บัญชี" clears it. The `SignaturePad` component
+(`src/app/_components/SignaturePad.tsx`) is reusable — Phase 2 will use
+it inside the submit modal.
+
+#### Known gap until Phase 2 lands
+
+With the default now `DRAFT`, newly-created OT records do not appear in
+the manager's approval queue until the user clicks "ส่งให้ approve"
+(Phase 2). The feature branch `feat/ot-signature` bundles all four
+phases before merging to `main`, so production is unaffected until the
+full flow ships together.
+
+---
+
 ## [1.32.2] — 2026-05-24
 
 ### Added — `calendarSyncStatus` field + guest-list verification on booking detail + impersonate fallback warning

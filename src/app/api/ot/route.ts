@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getSession, getOTApproverAccess } from '@/lib/session'
 import { cleanupOTRecords, currentMonthYYYYMM, isMonthEditable } from '@/lib/ot-cleanup'
 import { parseTimeToMinutes } from '@/lib/ot-calc'
 
@@ -20,7 +20,11 @@ export async function GET(request: NextRequest) {
     const email = searchParams.get('email')
     const all = searchParams.get('all') === '1'
 
-    const targetEmail = (session.role === 'ADMIN' && (email || all))
+    // v1.33.4 — OT approvers (ADMIN || position contains "manager") can
+    // query other users' records via ?email=... so the review page works
+    // for managers, not just admins.
+    const canSeeOthers = session.role === 'ADMIN' || (await getOTApproverAccess(session.email))
+    const targetEmail = (canSeeOthers && (email || all))
       ? email
       : session.email
 

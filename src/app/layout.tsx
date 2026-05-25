@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
-import { getSession, getProducerAccess } from '@/lib/session'
+import { getSession, getProducerAccess, getOTApproverAccess } from '@/lib/session'
 import { isTeamMember } from '@/lib/team-profiles'
 import Nav from './_components/Nav'
 
@@ -22,6 +22,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const canSeeOT = !!session && (session.role === 'ADMIN' || isTeamMember(session.email))
   // Producer Dashboard — admins + users with a Producer/Co-Producer position.
   const canSeeProducer = await getProducerAccess(session?.email)
+  // OT Approver — ADMIN or anyone with "manager" in their position. Surfaces
+  // the /ot/admin link in the nav so managers can reach the review surface
+  // without being told the URL.
+  const canApproveOT = await getOTApproverAccess(session?.email)
 
   return (
     <html lang="th">
@@ -35,6 +39,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           session={session ? { email: session.email, role: session.role } : null}
           canSeeOT={canSeeOT}
           canSeeProducer={canSeeProducer}
+          canApproveOT={canApproveOT}
         />
         {children}
       </body>

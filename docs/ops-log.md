@@ -5,6 +5,54 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-25 · v1.33.0–v1.33.3 prepared on `feat/ot-signature` (not yet deployed)
+
+OT signature workflow built across four phases on a feature branch. Not
+merged to `main` — auto-build is gated on this branch's lifecycle, so
+production stays on v1.32.2 until merge.
+
+**Schema migration (runs in start.sh before `prisma db push`):**
+
+1. `ALTER TYPE "OTApprovalStatus" ADD VALUE` for `DRAFT`, `SUBMITTED`,
+   `REJECTED` (idempotent via `IF NOT EXISTS`).
+2. `UPDATE ot_records SET "approvalStatus" = 'SUBMITTED'
+   WHERE "approvalStatus" = 'PENDING'` — empties out the old PENDING
+   label so `prisma db push --accept-data-loss` can drop it.
+3. Additive nullable columns on `users` (`signaturePng` Text,
+   `signatureUpdatedAt`) and `ot_records` (`submittedAt`,
+   `requesterSignaturePng` Text, `approverSignaturePng` Text,
+   `rejectionNote`).
+
+**New runtime deps (auto-installed by Dockerfile `npm install`):**
+
+- `pdf-lib ^1.17.1`
+- `@pdf-lib/fontkit ^1.1.1`
+
+**New static assets bundled in the image (`public/fonts/`):**
+
+- `Sarabun-Regular.ttf` (~88KB)
+- `Sarabun-Bold.ttf` (~88KB)
+- `SARABUN-OFL.txt` (SIL OFL license attribution)
+
+Loaded at runtime by `/api/ot/export/pdf` via `fs.readFile` from the
+project root — no CDN dependency, no network call from the container.
+
+**Rollback notes:**
+
+- Schema changes are additive + nullable; rolling back to v1.32.x leaves
+  the new columns harmless. The dropped `PENDING` enum label cannot be
+  re-added cheaply, but no v1.32.x code path needs it after rollback —
+  all previously-PENDING rows are now SUBMITTED, which v1.32.x reads
+  as an unknown enum value (Prisma surfaces it as a generic string).
+  If a rollback happens, do a one-time `UPDATE ot_records SET
+  "approvalStatus" = 'APPROVED' WHERE ...` cleanup to absorb in-flight
+  SUBMITTED rows; v1.32.x doesn't have a UI to action them.
+- Deploy gate: merge `feat/ot-signature` → `main` triggers the GHCR
+  auto-build. Stack 125 redeploy via the standard Portainer
+  `git/redeploy` flow as in v1.32.2.
+
+---
+
 ## 2026-05-24 · v1.32.2 deployed to production — all 4 Codex-review fixes live
 
 **Deploy mechanics:**

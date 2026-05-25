@@ -59,6 +59,15 @@ model User {
   position   String?  // Producer / Videographer / etc
   role       UserRole @default(USER)
   active     Boolean  @default(true)
+
+  // Saved e-signature, used to sign OT submissions (requester) and approvals
+  // (manager). Stored as a base64-encoded PNG data URL — small image, set once
+  // per user at /profile/signature and reused at sign time. A snapshot is
+  // embedded into OTRecord on each sign so updating this later does not
+  // retroactively change historical signatures.
+  signaturePng        String?   @db.Text
+  signatureUpdatedAt  DateTime?
+
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -99,8 +108,10 @@ enum OTType {
 }
 
 enum OTApprovalStatus {
-  PENDING   // logged by the user, awaiting manager sign-off
-  APPROVED  // signed off by an admin/manager
+  DRAFT      // user is still filling out — not visible to managers
+  SUBMITTED  // user signed and pushed the report; awaiting manager sign-off
+  APPROVED   // manager signed off
+  REJECTED   // manager pushed back with a rejectionNote; user can edit and resubmit
 }
 
 model OTRecord {
@@ -115,10 +126,22 @@ model OTRecord {
   jobTask         String?  // description of work performed
   justification   String?  // why OT/standby was necessary
 
-  // Approval — manager/admin signs off the report per person per month
-  approvalStatus  OTApprovalStatus @default(PENDING)
-  approvedByEmail String?
-  approvedAt      DateTime?
+  // Approval workflow — see OTApprovalStatus enum for state machine.
+  // New records start as DRAFT. User clicks "ส่งให้ approve" → SUBMITTED
+  // (snapshots requesterSignaturePng). Manager signs → APPROVED
+  // (snapshots approverSignaturePng). Manager pushes back → REJECTED
+  // (with rejectionNote). User edits + resubmits → back to SUBMITTED.
+  //
+  // Signature snapshots are stored on the record itself so that changing
+  // the canonical User.signaturePng later does not retroactively change
+  // historical OT reports.
+  approvalStatus         OTApprovalStatus @default(DRAFT)
+  submittedAt            DateTime?
+  approvedByEmail        String?
+  approvedAt             DateTime?
+  requesterSignaturePng  String? @db.Text
+  approverSignaturePng   String? @db.Text
+  rejectionNote          String?
 
   // Legacy fields (kept for backward compat with old data; not used for new entries)
   type            OTType?

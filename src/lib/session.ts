@@ -36,3 +36,42 @@ export async function getProducerAccess(email: string | null | undefined): Promi
     return false
   }
 }
+
+// OT approver access (v1.33.4): the set of users who can approve/reject OT
+// records and see the cover-sheet overview at /ot/admin.
+//
+// Granted to:
+//   - any ADMIN (so narasit.k and other full admins keep full access), or
+//   - any user whose `position` field contains "manager" (case-insensitive)
+//
+// The position-based path matches the existing `getProducerAccess` pattern.
+// It picks up chonlathorn.j ("Video Production Manager") and any other
+// future manager without needing a code change — the admin sets their
+// position and the gate flips automatically. Approver scope is narrow on
+// purpose: they can act on OT and see the OT overview, but the booking
+// `/admin` console + dashboard + user roster CRUD stay ADMIN-only.
+export async function getOTApproverAccess(email: string | null | undefined): Promise<boolean> {
+  if (!email) return false
+  try {
+    const u = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+      select: { role: true, position: true, active: true },
+    })
+    if (!u || !u.active) return false
+    if (u.role === 'ADMIN') return true
+    return (u.position || '').toLowerCase().includes('manager')
+  } catch {
+    return false
+  }
+}
+
+// Server-side gate for OT approver routes — analogous to requireAdmin().
+// Returns the session when the caller is an OT approver, null otherwise.
+// Replaces `requireAdmin()` everywhere the gate is "can act on OT" rather
+// than "full admin".
+export async function requireOTApprover() {
+  const s = await getSession()
+  if (!s) return null
+  const ok = await getOTApproverAccess(s.email)
+  return ok ? s : null
+}
