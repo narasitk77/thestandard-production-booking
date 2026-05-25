@@ -5,6 +5,86 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.2] — 2026-05-25
+
+### Added — OT signature workflow (Phase 3: manager bulk approve + review page)
+
+Gives the manager the tools to actually work through the SUBMITTED queue
+v1.33.1 fills up: bulk-approve multiple people at once, drill into a
+single person's report for per-row decisions, and push individual rows
+back to the user with a reason.
+
+#### `/api/ot/admin/approve` — extended to three modes
+
+The existing `{email, month}` shape is preserved; two new shapes are
+added so the same endpoint serves all approve flows:
+
+- `{ recordIds: string[] }` — approve a hand-picked set of rows. Used
+  by the bulk-select footer on `/ot/admin` and per-row approve on the
+  review page.
+- `{ month, allSubmitted: true }` — month-wide "approve every
+  SUBMITTED row across all users". Powers the one-click Inbox banner
+  on `/ot/admin`.
+- `{ email, month }` — legacy mode for one user × one month.
+
+Modes are mutually exclusive — `recordIds` takes precedence, then
+`allSubmitted`, then the legacy `{email, month}`. All three only flip
+rows currently in SUBMITTED (idempotent re-clicks; DRAFT/REJECTED rows
+never silently jump past the user). The approver's saved signature is
+snapshotted onto every approved row in every mode.
+
+#### `/api/ot/admin/reject` (new)
+
+`POST { recordId, note }` — flips one SUBMITTED row to REJECTED with
+the manager's note attached. Non-SUBMITTED rows are no-ops (returns
+`rejected: 0`), so managers don't accidentally re-reject rows the user
+has already updated. `note` is required, non-empty, ≤500 chars —
+silent rejects don't give the user enough to act on.
+
+#### `/ot/admin` — Inbox + bulk select + sticky footer
+
+- **Inbox banner** at the top: `N รายการรออนุมัติจาก M คน` with a
+  primary one-click "อนุมัติทุกคนในเดือนนี้" button. When the queue is
+  empty, shows a green "ไม่มีคำขอ OT รออนุมัติ" confirmation instead.
+- **Per-row checkbox** (only enabled when the row has SUBMITTED
+  records); header checkbox toggles all selectable rows.
+- **Per-row "Review N" link** replaces the old direct "Approve N"
+  action — manager goes through the review page rather than blind-
+  approving. The old direct approve is still reachable from the
+  review page's "อนุมัติทั้งหมด + เซ็น" footer button.
+- **Rejected count badge** on rows where the manager has pushed
+  records back; clarifies why the SUBMITTED count is lower than the
+  total in-flight count.
+- **Sticky bottom bar** appears whenever any checkbox is selected,
+  with "อนุมัติที่เลือก (N)" — fires `{email, month}` approves in
+  parallel across selected users (idempotent endpoint, partial
+  failures leave clean state).
+- Clicking a person's name links to the review page.
+
+#### `/ot/admin/review/[email]?month=YYYY-MM` (new)
+
+Per-person, per-month review surface for managers who want to act at
+row granularity rather than bulk-approve the whole report.
+
+- Per-row Approve / Reject buttons (only on SUBMITTED rows).
+- Reject opens a modal asking for a note (≤500 chars); user sees this
+  back on `/ot` and resubmits via Phase 2's flow.
+- Approved rows show a lock icon + the approver email + timestamp.
+- The user's submitted signature is rendered at the top so the
+  manager can sanity-check it against past sign-offs.
+- Sticky footer mirrors the admin page pattern: "อนุมัติทั้งหมด +
+  เซ็น" for one-click approve of every still-SUBMITTED row for this
+  person.
+
+#### Backward-compat note
+
+`/api/ot/summary` continues to ship the `pendingRecords` field; the
+v1.33.0 admin UI consumers can still read it. The new admin page reads
+`submittedRecords` and `rejectedRecords` directly to surface the
+correct counts in the new badges.
+
+---
+
 ## [1.33.1] — 2026-05-25
 
 ### Added — OT signature workflow (Phase 2: user submit flow)

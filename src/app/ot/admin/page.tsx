@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users, CheckCircle2, Inbox, FileSignature, Eye } from 'lucide-react'
 import { WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
 
 interface PersonSummary {
@@ -18,7 +18,11 @@ interface PersonSummary {
   totalDays: number
   totalAmount: number
   totalRecords: number
-  pendingRecords: number
+  // v1.33.0+ status breakdown — replaces the old single `pendingRecords`
+  draftRecords?: number
+  submittedRecords?: number
+  rejectedRecords?: number
+  pendingRecords: number   // legacy alias = submitted + rejected; kept for safety
   approvedRecords: number
 }
 
@@ -54,6 +58,12 @@ export default function OTAdminPage() {
   const [newPos, setNewPos] = useState('')
   const [newRole, setNewRole] = useState<'USER' | 'ADMIN'>('USER')
 
+  // v1.33.0 — bulk approve state. Selection is keyed by userId since
+  // PersonSummary rows are per-user; on bulk approve we expand each
+  // selected user to "every SUBMITTED row for this person, this month".
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkActing, setBulkActing] = useState(false)
+
   const load = async () => {
     setLoading(true)
     setError('')
@@ -75,6 +85,8 @@ export default function OTAdminPage() {
     }
   }
 
+  // Reset selection whenever the underlying dataset changes
+  useEffect(() => { setSelected(new Set()) }, [month, includeInactive])
   useEffect(() => { load() }, [month, includeInactive])
 
   const totals = summary.reduce(
@@ -86,6 +98,95 @@ export default function OTAdminPage() {
     }),
     { wh: 0, wd: 0, amount: 0, people: 0 }
   )
+
+  // Inbox totals — surfaced as the top-of-page banner so a manager
+  // landing here immediately sees "do I have approval work?"
+  const inbox = useMemo(() => {
+    let pendingRows = 0
+    let pendingPeople = 0
+    for (const s of summary) {
+      const sub = s.submittedRecords ?? s.pendingRecords // fallback for transition window
+      if (sub > 0) {
+        pendingRows += sub
+        pendingPeople += 1
+      }
+    }
+    return { pendingRows, pendingPeople }
+  }, [summary])
+
+  const selectableRows = useMemo(
+    () => summary.filter(s => s.userId && (s.submittedRecords ?? s.pendingRecords) > 0),
+    [summary]
+  )
+  const allSelected = selectableRows.length > 0 && selectableRows.every(s => selected.has(s.userId!))
+
+  const toggleOne = (userId: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(userId)) next.delete(userId)
+      else next.add(userId)
+      return next
+    })
+  }
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set())
+    else setSelected(new Set(selectableRows.map(s => s.userId!)))
+  }
+
+  // Bulk approve the selected people. For each selected user with
+  // SUBMITTED records this month, fire a {email, month} approve. We do
+  // these in parallel — the approve endpoint is idempotent so a partial
+  // failure leaves clean state.
+  const approveSelected = async () => {
+    const targets = summary.filter(s => s.userId && selected.has(s.userId!) && (s.submittedRecords ?? s.pendingRecords) > 0)
+    if (targets.length === 0) return
+    const totalRows = targets.reduce((a, s) => a + (s.submittedRecords ?? s.pendingRecords), 0)
+    if (!confirm(`อนุมัติ OT ${totalRows} รายการจาก ${targets.length} คน (${monthLabel(month)})?`)) return
+    setBulkActing(true)
+    setError('')
+    try {
+      const results = await Promise.allSettled(targets.map(s =>
+        fetch('/api/ot/admin/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: s.email, month }),
+        }).then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error) }))
+      ))
+      const failed = results.filter(r => r.status === 'rejected')
+      if (failed.length > 0) {
+        setError(`${failed.length} จาก ${results.length} คน อนุมัติไม่สำเร็จ — ลองอีกครั้ง`)
+      }
+      setSelected(new Set())
+      load()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setBulkActing(false)
+    }
+  }
+
+  // One-click "approve every SUBMITTED row in this month across all users"
+  const approveEveryone = async () => {
+    if (inbox.pendingRows === 0) return
+    if (!confirm(`อนุมัติ OT ทั้งหมด ${inbox.pendingRows} รายการของ ${inbox.pendingPeople} คน (${monthLabel(month)})?\n\nการกระทำนี้จะ snapshot ลายเซ็นของคุณใส่ทุกแถว`)) return
+    setBulkActing(true)
+    setError('')
+    try {
+      const res = await fetch('/api/ot/admin/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, allSubmitted: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setSelected(new Set())
+      load()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setBulkActing(false)
+    }
+  }
 
   const startEdit = (s: PersonSummary) => {
     setEditingId(s.userId)
@@ -147,22 +248,6 @@ export default function OTAdminPage() {
     } catch (e: any) { setError(e.message) }
   }
 
-  const approveAll = async (s: PersonSummary) => {
-    if (!s.pendingRecords) return
-    if (!confirm(`อนุมัติ OT ${s.pendingRecords} รายการของ ${s.thaiName || s.email} (${monthLabel(month)})?`)) return
-    setError('')
-    try {
-      const res = await fetch('/api/ot/admin/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: s.email, month }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      load()
-    } catch (e: any) { setError(e.message) }
-  }
-
   const addUser = async () => {
     if (!newEmail) return
     setError('')
@@ -187,7 +272,7 @@ export default function OTAdminPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3 pb-24">
       <Link href="/ot" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
         <ArrowLeft className="w-4 h-4" /> กลับหน้า OT
       </Link>
@@ -198,6 +283,28 @@ export default function OTAdminPage() {
           สรุปการขออนุมัติการทำงานวันหยุด · Production · {monthLabel(month)}
         </p>
       </div>
+
+      {/* Inbox banner — manager's "do I have work?" at-a-glance */}
+      {inbox.pendingRows > 0 ? (
+        <div className="gf-card p-3 border-l-4 border-amber-400 bg-amber-50/60 flex items-center gap-3 flex-wrap">
+          <Inbox className="w-5 h-5 text-amber-600 shrink-0" />
+          <div className="text-sm text-amber-900">
+            <strong>{inbox.pendingRows}</strong> รายการรออนุมัติจาก <strong>{inbox.pendingPeople}</strong> คน
+          </div>
+          <button
+            type="button"
+            onClick={approveEveryone}
+            disabled={bulkActing}
+            className="ml-auto text-xs px-3 py-1.5 border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] disabled:opacity-40 inline-flex items-center gap-1">
+            {bulkActing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+            อนุมัติทุกคนในเดือนนี้
+          </button>
+        </div>
+      ) : (
+        <div className="gf-card p-3 border-l-4 border-green-300 bg-green-50/40 flex items-center gap-2 text-sm text-green-800">
+          <CheckCircle2 className="w-4 h-4" /> ไม่มีคำขอ OT รออนุมัติในเดือนนี้
+        </div>
+      )}
 
       {error && <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
 
@@ -299,9 +406,16 @@ export default function OTAdminPage() {
           <div className="py-12 text-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" /></div>
         ) : (
           <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm min-w-[950px]">
               <thead className="border-b border-gray-200">
                 <tr className="text-xs text-gray-500">
+                  <th className="text-left py-2 pr-2 w-8">
+                    <input type="checkbox" checked={allSelected}
+                      onChange={toggleAll}
+                      disabled={selectableRows.length === 0}
+                      title="เลือก/ยกเลิกเลือกทุกคนที่รออนุมัติ"
+                      className="accent-[#673ab7]" />
+                  </th>
                   <th className="text-left py-2 pr-2 w-8">#</th>
                   <th className="text-left py-2 pr-2">ชื่อ-นามสกุล</th>
                   <th className="text-left py-2 pr-2">Email</th>
@@ -311,21 +425,38 @@ export default function OTAdminPage() {
                   <th className="text-right py-2 pr-2">หยุด/Hol</th>
                   <th className="text-right py-2 pr-2">WD &gt;{WEEKDAY_THRESHOLD_HOURS}h</th>
                   <th className="text-right py-2 pr-2">THB</th>
-                  <th className="text-right py-2 pr-2 w-32">Actions</th>
+                  <th className="text-right py-2 pr-2 w-40">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {summary.map((s, i) => {
                   const editing = editingId === s.userId
                   const isMe = meId && s.userId === meId
+                  const submittedCount = s.submittedRecords ?? s.pendingRecords
+                  const canSelect = !!s.userId && submittedCount > 0
+                  const isSelected = !!s.userId && selected.has(s.userId)
                   return (
-                    <tr key={s.userId || s.email} className={!s.active ? 'opacity-50' : ''}>
+                    <tr key={s.userId || s.email} className={!s.active ? 'opacity-50' : isSelected ? 'bg-purple-50/50' : ''}>
+                      <td className="py-2 pr-2">
+                        <input type="checkbox"
+                          checked={isSelected}
+                          onChange={() => s.userId && toggleOne(s.userId)}
+                          disabled={!canSelect}
+                          title={canSelect ? 'เลือกเพื่อ bulk approve' : 'ไม่มีรายการรออนุมัติ'}
+                          className="accent-[#673ab7]" />
+                      </td>
                       <td className="py-2 pr-2 text-gray-400">{i + 1}</td>
 
                       <td className="py-2 pr-2">
                         {editing ? (
                           <input className="gf-input" value={editValues.thaiName ?? ''}
                             onChange={e => setEditValues({ ...editValues, thaiName: e.target.value })} />
+                        ) : s.userId ? (
+                          <Link
+                            href={`/ot/admin/review/${encodeURIComponent(s.email)}?month=${month}`}
+                            className="text-gray-800 hover:text-[#673ab7] hover:underline">
+                            {s.thaiName || s.email}
+                          </Link>
                         ) : (
                           <span className="text-gray-800">{s.thaiName || '—'}</span>
                         )}
@@ -388,17 +519,24 @@ export default function OTAdminPage() {
                           </div>
                         ) : (
                           <div className="inline-flex gap-1">
-                            {s.pendingRecords > 0 && (
-                              <button onClick={() => approveAll(s)}
-                                title={`อนุมัติ OT ${s.pendingRecords} รายการ`}
+                            {submittedCount > 0 && (
+                              <Link
+                                href={`/ot/admin/review/${encodeURIComponent(s.email)}?month=${month}`}
+                                title={`ตรวจ ${submittedCount} รายการแบบรายแถว`}
                                 className="text-xs px-2 py-1 border border-amber-400 text-amber-700 rounded hover:bg-amber-100 inline-flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3" /> Approve {s.pendingRecords}
-                              </button>
+                                <Eye className="w-3 h-3" /> Review {submittedCount}
+                              </Link>
                             )}
-                            {s.pendingRecords === 0 && s.approvedRecords > 0 && (
+                            {submittedCount === 0 && s.approvedRecords > 0 && (
                               <span title={`${s.approvedRecords} รายการอนุมัติแล้ว`}
                                 className="text-xs px-2 py-1 border border-green-300 text-green-700 rounded inline-flex items-center gap-1 bg-green-50">
                                 <CheckCircle2 className="w-3 h-3" /> {s.approvedRecords}
+                              </span>
+                            )}
+                            {(s.rejectedRecords ?? 0) > 0 && (
+                              <span title={`${s.rejectedRecords} รายการตีกลับรอ user แก้`}
+                                className="text-[10px] px-1.5 py-1 border border-red-200 text-red-600 rounded bg-red-50">
+                                ตีกลับ {s.rejectedRecords}
                               </span>
                             )}
                             <button onClick={() => startEdit(s)} title="แก้ไข"
@@ -429,7 +567,7 @@ export default function OTAdminPage() {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-300 font-medium">
-                  <td colSpan={6} className="py-2 pr-2 text-right text-gray-700">รวม</td>
+                  <td colSpan={7} className="py-2 pr-2 text-right text-gray-700">รวม</td>
                   <td className="py-2 pr-2 text-right tabular-nums">{totals.wh}</td>
                   <td className="py-2 pr-2 text-right tabular-nums">{totals.wd}</td>
                   <td className="py-2 pr-2 text-right tabular-nums text-green-700">฿{totals.amount.toLocaleString('th-TH')}</td>
@@ -442,8 +580,38 @@ export default function OTAdminPage() {
       </div>
 
       <div className="gf-card p-3 text-xs text-gray-500 border-l-4 border-blue-200">
-        💡 ลบคนออกจากรายการ = soft delete (ยังเก็บประวัติ OT) · กดปุ่ม "↺" เพื่อนำกลับมา
+        💡 ลบคนออกจากรายการ = soft delete (ยังเก็บประวัติ OT) · กดปุ่ม "↺" เพื่อนำกลับมา ·
+        คลิกชื่อคนเพื่อ <strong>review รายแถว</strong> · ติ๊ก checkbox เพื่อ <strong>bulk approve</strong>
       </div>
+
+      {/* Sticky footer — only when bulk-select has something */}
+      {selected.size > 0 && (() => {
+        const targets = summary.filter(s => s.userId && selected.has(s.userId!) && (s.submittedRecords ?? s.pendingRecords) > 0)
+        const totalRows = targets.reduce((a, s) => a + (s.submittedRecords ?? s.pendingRecords), 0)
+        return (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-40">
+            <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3 flex items-center gap-3 flex-wrap">
+              <div className="text-sm text-gray-700">
+                เลือก <strong>{targets.length}</strong> คน · รวม <strong className="text-amber-700">{totalRows}</strong> รายการรออนุมัติ
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="text-xs text-gray-500 hover:text-gray-800 px-2 py-1">
+                ยกเลิกเลือก
+              </button>
+              <button
+                type="button"
+                onClick={approveSelected}
+                disabled={bulkActing || totalRows === 0}
+                className="ml-auto text-sm px-4 py-2 border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] disabled:opacity-40 inline-flex items-center gap-1">
+                {bulkActing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                อนุมัติที่เลือก ({totalRows})
+              </button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
