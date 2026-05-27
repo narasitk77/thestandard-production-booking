@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.6] — 2026-05-25
+
+### Changed — Backfill legacy bookings: crewRequired MUA → Virtual Production
+
+Follow-on to v1.33.5, which only swapped the wizard option list. This
+release adds a one-shot data backfill in `start.sh` that rewrites
+`bookings.crewRequired` arrays containing `"MUA"` to `"Virtual
+Production"`, so existing booking detail views display the new label
+instead of mixing both terms.
+
+```sql
+UPDATE bookings
+   SET "crewRequired" = array_replace("crewRequired", 'MUA', 'Virtual Production')
+ WHERE 'MUA' = ANY("crewRequired");
+```
+
+Idempotent: `array_replace` is a no-op when MUA isn't present, and the
+WHERE clause limits scanning to rows that still contain MUA. Re-runs on
+every container start are safe and free after the first pass.
+
+No schema change — `crewRequired` was already a free-form `String[]`.
+
+---
+
 ## [1.33.5] — 2026-05-25
 
 ### Changed — Booking wizard "Crew Required": MUA → Virtual Production

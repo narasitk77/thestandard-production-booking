@@ -204,6 +204,35 @@ BEGIN
 END $$;
 SQL
 
+# ──────────────────────────────────────────────────────────────────────────────
+# v1.33.6 — rename "MUA" → "Virtual Production" in legacy bookings'
+# `crewRequired` String[] column. v1.33.5 already swapped the wizard option
+# list (so new bookings can't add MUA anymore); this backfill cleans up
+# rows that were created before the rename so the booking detail UI no
+# longer shows both labels side-by-side.
+#
+# Idempotent: `array_replace` is a no-op when MUA isn't present, and the
+# WHERE clause limits scanning to rows that actually contain MUA.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Renaming Booking.crewRequired MUA → Virtual Production..."
+psql "$DATABASE_URL" <<'SQL' || echo "MUA rename skipped (table missing or already migrated)"
+DO $$
+DECLARE
+  affected INT;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'bookings' AND column_name = 'crewRequired'
+  ) THEN
+    UPDATE bookings
+       SET "crewRequired" = array_replace("crewRequired", 'MUA', 'Virtual Production')
+     WHERE 'MUA' = ANY("crewRequired");
+    GET DIAGNOSTICS affected = ROW_COUNT;
+    RAISE NOTICE 'Backfilled % booking(s): crewRequired MUA -> Virtual Production', affected;
+  END IF;
+END $$;
+SQL
+
 echo "==> Seeding database (idempotent)..."
 npx tsx prisma/seed.ts || echo "Seed skipped or already done"
 
