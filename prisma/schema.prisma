@@ -311,3 +311,35 @@ model Upload {
 
   @@map("uploads")
 }
+
+// v1.34.1 — append-only ledger of Drive files seen by the footage-sheet
+// sync worker. One row per Drive file (keyed by driveFileId), regardless
+// of whether the filename parsed into a Production ID or matched a
+// booking. The worker uses this for dedupe: before appending a row to
+// the user's footage sheet, it checks if the file's driveFileId already
+// has a FootageLog row — skips if yes.
+//
+// parseStatus values (kept as plain String, not enum, so we can add
+// states without a Prisma migration):
+//   'matched'           — filename parsed AND booking found
+//   'parsed_no_booking' — filename parsed but no Booking has that code
+//   'unparsed'          — filename didn't match the Production ID format
+//
+// productionId / bookingId stay null when the corresponding status
+// signals "didn't get that far" — makes triage queries trivial.
+model FootageLog {
+  id              String   @id @default(cuid())
+  driveFileId     String   @unique
+  productionId    String?
+  bookingId       String?
+  filename        String
+  driveUrl        String?
+  parseStatus     String   @db.VarChar(32)
+  sheetRowWritten Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([productionId])
+  @@index([parseStatus])
+  @@map("footage_log")
+}

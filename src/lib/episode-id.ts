@@ -8,6 +8,19 @@
  * - Sequence resets per shoot date per program
  */
 
+/**
+ * Anchored format: matches a string that is *exactly* a Production /
+ * Episode ID. Used by parseEpisodeId for full-string validation.
+ */
+export const EPISODE_ID_RE = /^([A-Z]{2,4})-(\d{6})-([A-Z0-9]{1,4})-(\d{2})$/
+
+/**
+ * Non-anchored format: matches a Production ID embedded inside a longer
+ * string (e.g. a filename like `AGN-260423-EVT-01_Cam1_001.mp4`).
+ * Used by src/lib/production-id.ts to pull the ID out of filenames.
+ */
+export const EPISODE_ID_RE_LOOSE = /([A-Z]{2,4}-\d{6}-[A-Z0-9]{1,4}-\d{2})/
+
 export function generateEpisodeId(
   outletCode: string,
   shootDate: Date,
@@ -40,7 +53,7 @@ export function parseEpisodeId(episodeId: string): {
   sequence: number
   shootDate: Date
 } | null {
-  const match = episodeId.match(/^([A-Z]{2,4})-(\d{6})-([A-Z0-9]{1,4})-(\d{2})$/)
+  const match = episodeId.match(EPISODE_ID_RE)
   if (!match) return null
 
   const [, outletCode, dateStr, programCode, seqStr] = match

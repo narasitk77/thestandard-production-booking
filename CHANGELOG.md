@@ -5,6 +5,81 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.34.1] — 2026-05-25
+
+### Added — Footage matcher library scaffold (no behavior change yet)
+
+Lays the groundwork for the Drive footage → sheet auto-matcher that
+ships fully in v1.34.2. This release adds the library code, the
+`FootageLog` ledger table, and a diagnostic script — nothing scans or
+writes to the user's sheet until `FOOTAGE_WORKER_ENABLED=1` flips in
+Portainer env (default `0` so this release is a pure no-op).
+
+#### New files
+
+| Path | Purpose |
+|---|---|
+| `src/lib/production-id.ts` | `parseProductionId(filename)` — pulls a Production ID out of a filename. Tolerates path prefixes, camera suffixes, extensions. Returns `null` on no match. |
+| `src/lib/booking-lookup.ts` | `findBookingByProductionId(code)` — single Prisma `findUnique` against the existing `bookingCode @unique` index. Returns booking + outlet + program + producer + assigned crew (sheet writer enrichment). |
+| `src/lib/google-drive.ts` | `getDriveReadAuth()` + `listFilesRecursive(rootFolderId, opts?)`. DWD-impersonated (reuses `getCalendarImpersonateSubject()` — single source of truth for the impersonated user). Scope: `drive.readonly`. `supportsAllDrives + includeItemsFromAllDrives` so Shared Drives work. Soft cap at 5,000 files per run to protect worker memory. |
+| `src/lib/footage-sheet.ts` | `probeSheet()` + `appendFootageRows(rows)`. Adaptive writer — reads row 1, normalizes each header (lowercase, strip non-alnum), maps to canonical keys via an alias table (`'productionid'`, `'bookingid'`, `'bookingcode'`, etc. all collapse to the same logical column). Sparse-row strategy means user-owned extra columns stay untouched and missing canonical columns silently skip. Module-level cache with 5-min TTL keeps API pressure low. |
+| `scripts/inspect-footage-sheet.ts` | Run-once diagnostic. Prints sheet id (masked), tab name, raw headers, canonical-key map, unrecognized headers. Run via `npx tsx scripts/inspect-footage-sheet.ts` **before** flipping the worker on. |
+
+#### Schema
+
+```prisma
+model FootageLog {
+  id              String   @id @default(cuid())
+  driveFileId     String   @unique
+  productionId    String?
+  bookingId       String?
+  filename        String
+  driveUrl        String?
+  parseStatus     String   @db.VarChar(32) // 'matched' | 'parsed_no_booking' | 'unparsed'
+  sheetRowWritten Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([productionId])
+  @@index([parseStatus])
+  @@map("footage_log")
+}
+```
+
+Applied via `prisma db push --accept-data-loss` per project convention.
+Pure additive — no existing data touched.
+
+The worker (v1.34.2) uses this as a dedupe ledger: before appending a
+row to the footage sheet, it checks `findUnique({where: {driveFileId}})`.
+Files that didn't parse or didn't match are still recorded (with
+`parseStatus = 'unparsed'` / `'parsed_no_booking'`) so we can triage
+filename-format misses without re-walking Drive.
+
+#### Reused utilities
+
+- `EPISODE_ID_RE` + `EPISODE_ID_RE_LOOSE` exported from `src/lib/episode-id.ts` — the anchored regex powers `parseEpisodeId`; the loose regex powers the new `parseProductionId`. Single source of truth, no drift.
+- `getSheetsWriteAuth()` from `src/lib/google-sheets.ts` — same SA auth model used by the existing Producer Dashboard write path.
+- `getCalendarImpersonateSubject()` from `src/lib/google-calendar.ts` — Drive read auth impersonates the same Workspace user that already powers Calendar attendee invites.
+- `maskSheetId()` from `src/lib/google-config.ts` — used by the inspect script's output.
+
+#### New env vars (`.env.portainer.example`)
+
+| Var | Default | Notes |
+|---|---|---|
+| `FOOTAGE_LOG_SHEET_ID` | (unset) | The user's footage-log sheet id. Worker is a no-op when unset. |
+| `FOOTAGE_LOG_TAB` | `Sheet1` | Tab name inside the sheet. |
+| `DRIVE_FOOTAGE_ROOT` | (unset) | Shared Drive folder id the worker scans. |
+| `FOOTAGE_WORKER_ENABLED` | `0` | Master switch. Stays `0` for v1.34.1 ship. |
+| `FOOTAGE_WORKER_INTERVAL_MS` | `600000` | 10 min, matches the calendar reconcile worker. |
+
+#### Rollout sequence (next step is v1.34.2)
+
+1. **Now (v1.34.1):** Schema migrates, library code deploys, worker stays dormant.
+2. **User runs** `npx tsx scripts/inspect-footage-sheet.ts` against the prod env to confirm column mapping.
+3. **User sets** `DRIVE_FOOTAGE_ROOT` + `FOOTAGE_LOG_TAB` in the Portainer stack env.
+4. **v1.34.2** ships the worker + `start.sh` supervisor entry. Flip `FOOTAGE_WORKER_ENABLED=1` and redeploy.
+
+---
+
 ## [1.34.0] — 2026-05-25
 
 ### Changed — Renamed "Booking ID" → "Production ID" in all user-facing surfaces
