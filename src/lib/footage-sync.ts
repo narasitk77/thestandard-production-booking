@@ -29,7 +29,7 @@
 
 import { prisma } from './db'
 import { listFilesRecursive, hasDriveCredentials, type DriveFile } from './google-drive'
-import { parseProductionId } from './production-id'
+import { findProductionIdInPath } from './production-id'
 import { findBookingByProductionId, type ProductionIdLookup } from './booking-lookup'
 import { appendFootageRows, probeSheet, type FootageInput } from './footage-sheet'
 
@@ -121,7 +121,10 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
       out.seen += 1
       continue  // fully done — skip
     }
-    const productionId = parseProductionId(file.name)
+    // Production ID lives on the FOLDER name, not the filename
+    // (`episode-id.ts` policy: "ID on folder name, not individual files").
+    // Walk the file's folderPath leaf → root and pick the closest match.
+    const productionId = findProductionIdInPath(file.folderPath)
     let booking: Decision['booking'] = null
     let status: ParseStatus
     if (!productionId) {
@@ -177,7 +180,10 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
   const rows: FootageInput[] = matchedDecisions.map(d => ({
     productionId: d.productionId,
     filename: d.file.name,
-    camera: cameraFromFilename(d.file.name),
+    // Camera convention: check folder names first (e.g.
+    // AGN-…/Cam1/001.mp4), then fall back to filename tokens
+    // (Cam1_001.mp4). Folder-first matches the team's actual layout.
+    camera: cameraFromPath(d.file.folderPath) ?? cameraFromFilename(d.file.name),
     timestamp: d.file.modifiedTime || d.file.createdTime || null,
     driveLink: d.file.webViewLink,
     driveFileId: d.file.id,
@@ -221,18 +227,39 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
   return out
 }
 
-/**
- * Best-effort camera derivation from filename. Looks for the conventional
- * `_<token>_` segment after the Production ID and matches against known
- * camera tokens. Falls back to null — the sheet row's Camera cell stays
- * blank instead of guessing wrong.
- */
-function cameraFromFilename(filename: string): string | null {
-  const CAMERA_TOKENS = /(?:^|[_\-.\s])(Cam\d+|Sound|Drone|BTS|Atem|Switcher|Multi|Master|Proxy)(?:[_\-.\s]|$)/i
-  const m = filename.match(CAMERA_TOKENS)
-  if (!m) return null
-  // Normalize Cam1/CAM1/cam1 → Cam1; others → first-letter-capitalized
-  const tok = m[1]
+// Known camera/source tokens — matched against either a folder name
+// (whole-string) or a filename segment between separators. Adding a new
+// camera is a one-line change to this regex source.
+const CAMERA_TOKEN_RE = /^(Cam\d+|Sound|Drone|BTS|Atem|Switcher|Multi|Master|Proxy)$/i
+const CAMERA_FILENAME_RE = /(?:^|[_\-.\s])(Cam\d+|Sound|Drone|BTS|Atem|Switcher|Multi|Master|Proxy)(?:[_\-.\s]|$)/i
+
+function normalizeCameraToken(tok: string): string {
   if (/^cam\d+$/i.test(tok)) return 'Cam' + tok.slice(3)
   return tok.charAt(0).toUpperCase() + tok.slice(1).toLowerCase()
+}
+
+/**
+ * Best-effort camera derivation from the file's ancestor folder names.
+ * Used first because the team's real layout puts camera in a folder:
+ *   AGN-260423-EVT-01/Cam1/001.mp4
+ * Returns the closest matching folder name (leaf → root walk), or null
+ * if none of the ancestor folders is a known camera token.
+ */
+function cameraFromPath(folderPath: string[]): string | null {
+  if (!folderPath || folderPath.length === 0) return null
+  for (let i = folderPath.length - 1; i >= 0; i--) {
+    const name = folderPath[i]
+    if (CAMERA_TOKEN_RE.test(name)) return normalizeCameraToken(name)
+  }
+  return null
+}
+
+/**
+ * Fallback camera derivation from the filename itself. Used only when
+ * the folder structure didn't carry the camera info — e.g.
+ *   AGN-260423-EVT-01/Cam1_001.mp4    ← Cam1 lives in filename
+ */
+function cameraFromFilename(filename: string): string | null {
+  const m = filename.match(CAMERA_FILENAME_RE)
+  return m ? normalizeCameraToken(m[1]) : null
 }

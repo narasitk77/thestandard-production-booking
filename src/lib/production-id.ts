@@ -20,8 +20,34 @@
 
 import { EPISODE_ID_RE_LOOSE } from './episode-id'
 
-export function parseProductionId(filename: string | null | undefined): string | null {
-  if (!filename) return null
-  const m = filename.match(EPISODE_ID_RE_LOOSE)
+export function parseProductionId(text: string | null | undefined): string | null {
+  if (!text) return null
+  const m = text.match(EPISODE_ID_RE_LOOSE)
   return m ? m[1] : null
+}
+
+/**
+ * Scan an ordered list of folder names (root → leaf, as produced by
+ * `listFilesRecursive`'s `folderPath`) and return the **closest**
+ * Production ID — i.e. the nearest ancestor folder whose name contains
+ * a valid Production ID.
+ *
+ * Closest-wins because of real-world nesting like
+ *   ROOT / AGN-260423-EVT-01 / Cam1 / 001.mp4
+ * where the file's immediate parent is "Cam1" (no ID), the next level
+ * up is "AGN-260423-EVT-01" (matches). Walking leaf → root naturally
+ * picks the right one.
+ *
+ * Returns null when no segment matches (file lives in an unnamed
+ * structure, or no folder above it has a Production ID). The sync
+ * worker then records the file with `parseStatus = 'unparsed'` for
+ * triage.
+ */
+export function findProductionIdInPath(folderPath: string[]): string | null {
+  if (!folderPath || folderPath.length === 0) return null
+  for (let i = folderPath.length - 1; i >= 0; i--) {
+    const id = parseProductionId(folderPath[i])
+    if (id) return id
+  }
+  return null
 }

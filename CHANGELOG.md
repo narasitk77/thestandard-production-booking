@@ -5,6 +5,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.34.3] — 2026-05-27
+
+### Fixed — Footage matcher reads Production ID from FOLDER name, not filename
+
+v1.34.1/v1.34.2 parsed the Production ID from the filename itself —
+that's the wrong convention. `src/lib/episode-id.ts` line 6 already
+states the rule: **"Folder-only policy (ID on folder name, not
+individual files)"**. The team's real Drive layout matches that:
+
+```
+DRIVE_FOOTAGE_ROOT/
+└── AGN-260423-EVT-01/        ← Production ID here
+    ├── Cam1_001.mp4
+    ├── Cam1_002.mp4
+    └── Sound/
+        └── audio.wav
+```
+
+Filename-based parsing would miss the `AGN-260423-EVT-01` here because
+the actual file is named `Cam1_001.mp4` with no ID embedded.
+
+#### Changes
+
+- **`src/lib/google-drive.ts`** — `listFilesRecursive` now tracks
+  ancestor folder names as it walks. Each returned `DriveFile` carries a
+  `folderPath: string[]` (root → leaf, root itself excluded). The walk
+  queue now propagates `{ folderId, path }` instead of just an ID so
+  every file knows the full chain of folders it lives under.
+- **`src/lib/production-id.ts`** — new helper
+  `findProductionIdInPath(folderPath)` that walks the array
+  **leaf → root** and returns the closest match. Handles real-world
+  nesting like `2026-04/AGN-260423-EVT-01/Cam1/001.mp4` — the file's
+  immediate parent ("Cam1") doesn't match, the next level
+  ("AGN-260423-EVT-01") does → that's what we return.
+- **`src/lib/footage-sync.ts`** — replaces `parseProductionId(file.name)`
+  with `findProductionIdInPath(file.folderPath)`. Files that live
+  directly in the scan root (no production folder above them) now
+  correctly land in `parseStatus = 'unparsed'`.
+- **Camera derivation also goes folder-first** — `Cam1` in a folder
+  name (`AGN-…/Cam1/001.mp4`) wins over a `Cam1_` token in a filename.
+  Filename token stays as the fallback for the
+  `AGN-260423-EVT-01/Cam1_001.mp4` layout (flat camera in the
+  filename).
+
+#### Behavior change for `parseStatus`
+
+Files whose folder structure doesn't contain a Production ID — but
+whose **filename** happens to include one — are now `unparsed` instead
+of `matched`. This is the correct strict reading of the convention; if
+the user wants those rescued, they'd move the file into a properly-
+named folder. The `FootageLog` row carries the filename + folder path
+context so triage is straightforward:
+
+```sql
+SELECT filename, "parseStatus" FROM footage_log
+ WHERE "parseStatus" = 'unparsed'
+ ORDER BY "createdAt" DESC;
+```
+
+No schema change. No env-var change. Worker still defaults off
+(`FOOTAGE_WORKER_ENABLED=0`) — flip when ready per v1.34.2 rollout.
+
+---
+
 ## [1.34.2] — 2026-05-25
 
 ### Added — Footage sheet sync worker (supervised, off by default)

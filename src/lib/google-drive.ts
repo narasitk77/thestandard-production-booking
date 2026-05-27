@@ -58,6 +58,20 @@ export interface DriveFile {
   size: number | null
   createdTime: string | null
   modifiedTime: string | null
+  /**
+   * Names of all ancestor folders from the scan root → immediate parent,
+   * collected as we walk the tree. Root folder itself is NOT included
+   * (its name is meaningless to the Production ID match — we only care
+   * about the structure underneath).
+   *
+   * Used by the footage sync to enforce the folder-only convention from
+   * `episode-id.ts`: the Production ID lives on a *folder name*, not the
+   * filename. So a file at `ROOT/2026-04/AGN-260423-EVT-01/Cam1/001.mp4`
+   * has folderPath `['2026-04', 'AGN-260423-EVT-01', 'Cam1']` — the
+   * matcher walks from the closest parent (`Cam1`) upward until it hits
+   * a folder name that parses as a Production ID.
+   */
+  folderPath: string[]
 }
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
@@ -92,11 +106,14 @@ export async function listFilesRecursive(
   const drive = google.drive({ version: 'v3', auth })
 
   const out: DriveFile[] = []
-  const queue: string[] = [rootFolderId]
+  // Walk queue carries the parent folder ID + the path of ancestor names
+  // accumulated from the root downward (excluding the root itself).
+  type WalkEntry = { folderId: string; path: string[] }
+  const queue: WalkEntry[] = [{ folderId: rootFolderId, path: [] }]
   const visited = new Set<string>()
 
   while (queue.length > 0 && out.length < maxFiles) {
-    const parentId = queue.shift()!
+    const { folderId: parentId, path } = queue.shift()!
     if (visited.has(parentId)) continue
     visited.add(parentId)
 
@@ -118,7 +135,10 @@ export async function listFilesRecursive(
       for (const f of res.data.files ?? []) {
         if (!f.id || !f.name || !f.mimeType) continue
         if (f.mimeType === FOLDER_MIME) {
-          queue.push(f.id)
+          // Push child folder onto the queue with its name appended to the
+          // accumulated path. We enqueue ONCE per folder (visited guard
+          // catches the rare case where Drive returns a folder twice).
+          queue.push({ folderId: f.id, path: [...path, f.name] })
         } else {
           out.push({
             id: f.id,
@@ -129,6 +149,7 @@ export async function listFilesRecursive(
             size: f.size ? Number(f.size) : null,
             createdTime: f.createdTime ?? null,
             modifiedTime: f.modifiedTime ?? null,
+            folderPath: path,
           })
           if (out.length >= maxFiles) break
         }
