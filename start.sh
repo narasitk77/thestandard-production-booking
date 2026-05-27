@@ -250,5 +250,17 @@ echo "==> Starting calendar guest reconcile worker (supervised)..."
   done
 ) &
 
+# v1.34.2 — footage sheet sync worker. Stays dormant when
+# FOOTAGE_WORKER_ENABLED is unset/0; supervisor still re-launches so
+# flipping the env var live in Portainer is enough to turn it on.
+echo "==> Starting footage sheet sync worker (supervised)..."
+(
+  while true; do
+    node scripts/footage-sheet-sync-worker.js
+    echo "[footage-sync] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start

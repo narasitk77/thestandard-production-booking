@@ -5,6 +5,102 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.34.2] — 2026-05-25
+
+### Added — Footage sheet sync worker (supervised, off by default)
+
+Closes the v1.34 footage line: a supervised worker now scans the
+configured Shared Drive root every 10 min, parses each new filename for
+a Production ID, looks up the matching Booking, and appends a row to
+the user's footage-log sheet (`FOOTAGE_LOG_SHEET_ID`) using the
+adaptive writer from v1.34.1.
+
+#### New files
+
+| Path | Purpose |
+|---|---|
+| `src/lib/footage-sync.ts` | `runFootageSync({ dryRun? })` — pure-logic core. Drive walk → classify (`matched` / `parsed_no_booking` / `unparsed`) → upsert `FootageLog` ledger → batch-append matched rows to sheet → patch `sheetRowWritten=true`. Crash-safe: log row is written BEFORE the sheet append so a half-completed run retries on the next tick without double-rows. |
+| `src/app/api/internal/footage/sync/route.ts` | GET endpoint poked by the worker. Auth mirrors `/api/internal/calendar/reconcile`: shared secret header (`x-footage-sync-secret`) or admin session. `?dryRun=1` for safe inspection. |
+| `scripts/footage-sheet-sync-worker.js` | Polling loop. Reads `FOOTAGE_WORKER_ENABLED` (default off — stays dormant when unset/`0`/`false`). When on, hits the internal endpoint every `FOOTAGE_WORKER_INTERVAL_MS`. SIGTERM/SIGINT handlers. |
+
+#### `start.sh` change
+
+Adds a supervised loop alongside the existing calendar-reconcile
+supervisor (around line 245-251). Both workers share the same restart
+pattern: 5s back-off, foreground `exec npm start` reaps them when the
+container stops.
+
+```sh
+echo "==> Starting footage sheet sync worker (supervised)..."
+(
+  while true; do
+    node scripts/footage-sheet-sync-worker.js
+    echo "[footage-sync] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+```
+
+#### Behavior contract
+
+The worker is **off by default** — `FOOTAGE_WORKER_ENABLED` is unset
+or `0`. In that state the script logs once and sleeps 30s before
+exiting, the supervisor loops, and nothing else happens. The route
+itself still works (admins can hit `?dryRun=1` to inspect classification
+output without flipping the env var on).
+
+When on, the worker:
+
+1. `listFilesRecursive(DRIVE_FOOTAGE_ROOT)` — walks the Shared Drive
+2. Loads existing `FootageLog` rows for those `driveFileId`s in one query
+3. Skips files where `sheetRowWritten=true` (true dedupe)
+4. Classifies the rest, upserts `FootageLog` with the new state
+5. For `matched` files, batches them into one `appendFootageRows` call
+6. Patches `sheetRowWritten=true` on success
+
+Files with status `parsed_no_booking` or `unparsed` are recorded but
+never written to the sheet — the sheet is the **matched** footage log,
+not the raw Drive inventory. Query
+`SELECT * FROM footage_log WHERE "parseStatus" != 'matched'` to triage
+filename-format misses.
+
+Camera column is best-effort derived from the filename via a
+conventional `_<token>_` segment match (Cam1, Sound, Drone, BTS, Atem,
+Switcher, Multi, Master, Proxy). Falls back to blank if no recognized
+token — no guessing.
+
+#### Rollout
+
+1. Deploy v1.34.2 — schema unchanged from v1.34.1; only new files +
+   `start.sh` change. Worker stays dormant.
+2. User runs `npx tsx scripts/inspect-footage-sheet.ts` against prod
+   env. Confirm canonical-key map covers all of the user's columns.
+3. User sets in Portainer stack env:
+   - `FOOTAGE_LOG_SHEET_ID=1KMmbPjbRnd6Deb-ct253YMmoINuLgTDnS4Id2lPA5VI`
+   - `FOOTAGE_LOG_TAB=<the tab name from inspect step>`
+   - `DRIVE_FOOTAGE_ROOT=<Shared Drive folder id>`
+   - `FOOTAGE_WORKER_ENABLED=1`
+4. Pull and redeploy. Container logs should show
+   `[footage-sync] worker started; interval=600000ms; baseUrl=http://127.0.0.1:3000; secret=set`.
+5. Drop a test file `AGN-260423-EVT-01_Cam1_test.mp4` into the Shared
+   Drive folder. Within ~10 min the worker logs
+   `[footage-sync] scanned=N matched=1 …` and a row appears in the sheet.
+
+#### Out of scope (deferred)
+
+- Modified-time incremental scanning — `listFilesRecursive` accepts a
+  `modifiedAfter` option (v1.34.1) but the worker currently does a full
+  walk every tick. Fine for thousands of files; revisit if we hit
+  Drive rate limits.
+- /upload page Drive push — the worker covers files that arrive via
+  NAS-to-Drive transfer or direct Drive upload. The current `/upload`
+  flow (local disk + Upload model) stays untouched.
+- UI surface showing FootageLog rows — managers query the sheet
+  directly. A future admin page could expose `parse_status != matched`
+  for filename-format triage.
+
+---
+
 ## [1.34.1] — 2026-05-25
 
 ### Added — Footage matcher library scaffold (no behavior change yet)
