@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.33.5] — 2026-05-25
+
+### Changed — Booking wizard "Crew Required": MUA → Virtual Production
+
+`CREW_OPTIONS` in `src/lib/data.ts` replaces `'MUA'` with
+`'Virtual Production'` so the New Booking wizard's "Crew Required"
+checkbox group reflects the actual crew categories used by THE
+STANDARD's production team.
+
+```
+Before: ['Videographer', 'Sound', 'DIT', 'Lighting', 'MUA', 'Art Director']
+After:  ['Videographer', 'Sound', 'DIT', 'Lighting', 'Virtual Production', 'Art Director']
+```
+
+`Booking.crewRequired` is a free-form `String[]` — no schema change.
+Existing bookings whose `crewRequired` array still contains
+`"MUA"` are unaffected by this change (the string is preserved as-is
+on the booking detail view). The booking wizard simply no longer
+offers MUA as a tickable option for new bookings.
+
+No backfill applied — historical bookings with MUA stay as MUA so
+audit + reporting against past data remains accurate.
+
+---
+
 ## [1.33.4] — 2026-05-25
 
 ### Added — OT Approver role (Manager scope, no schema change)

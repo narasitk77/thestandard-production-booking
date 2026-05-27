@@ -218,7 +218,7 @@ export const PRODUCERS = [
   'ต้น', 'โบ', 'เจน', 'แอม', 'พลอย', 'ฝ้าย', 'มิ้น', 'ออ', 'บี', 'ปิ๊ก',
 ]
 
-export const CREW_OPTIONS = ['Videographer', 'Sound', 'DIT', 'Lighting', 'MUA', 'Art Director']
+export const CREW_OPTIONS = ['Videographer', 'Sound', 'DIT', 'Lighting', 'Virtual Production', 'Art Director']
 
 export const CATEGORY_OPTIONS = [
   { value: 'ORIGINAL_CONTENT', label: 'Original Content' },
