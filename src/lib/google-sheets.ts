@@ -24,7 +24,10 @@ const SHEET_TAB = getBookingsTabName()
 // *Email columns keep the canonical id so Airtable can join on either.
 // PD Phone is filled only for non-Content-Agency outlets (free-text producer).
 const HEADERS = [
-  'Booking ID', 'Project ID', 'Project Name', 'Outlet', 'Program',
+  // v1.34.0 — "Booking ID" → "Production ID" (the human-readable code, e.g.
+  // AGN-260423-EVT-01). Column position unchanged; `ensureSheetTab` will
+  // rewrite the live header row on the next boot.
+  'Production ID', 'Project ID', 'Project Name', 'Outlet', 'Program',
   'Shoot Date', 'Shoot End Date', 'Call Time', 'Wrap Time', 'Shoot Type',
   'Location', 'PD', 'PD Email', 'PD Phone', 'DIR', 'DIR Email',
   'Episode IDs', 'Crew Required', 'Category', 'Creative/Host', 'Assigned Emails',
@@ -188,8 +191,9 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
 
     const now = fmtDateTime(new Date())
     const row = [
-      // "Booking ID" column = the human-readable code shown in the app (the
-      // Production ID, e.g. AGN-260522-EVT-01) — NOT the internal CUID.
+      // "Production ID" column (renamed from "Booking ID" in v1.34.0) — the
+      // human-readable code shown in the app (e.g. AGN-260522-EVT-01), NOT
+      // the internal CUID. Falls back to CUID if a legacy row has no code.
       booking.bookingCode || booking.id,
       booking.projectId || '',
       booking.projectName || '',

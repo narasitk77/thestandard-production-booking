@@ -5,6 +5,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.34.0] — 2026-05-25
+
+### Changed — Renamed "Booking ID" → "Production ID" in all user-facing surfaces
+
+Aligns the app's terminology with the team's spoken convention: the
+human-readable code (`AGN-260423-EVT-01` etc.) is the **Production
+ID**. The internal Prisma column `Booking.bookingCode` is intentionally
+**not** renamed — 71 references, no functional gain, high migration
+risk. This release is label-only and ships in one shot because nothing
+runtime-coupled changes.
+
+#### Label updates
+
+| Surface | Before | After |
+|---|---|---|
+| Producer Dashboard sheet, row 1 col A | `Booking ID` | `Production ID` |
+| `/admin/[id]` booking detail header chip | `Booking ID` | `Production ID` |
+| `/dashboard` team workload CSV | `Booking IDs` | `Production IDs` |
+| `/dashboard` bookings CSV | `Booking ID` | `Production ID` |
+| `/api/bookings/export` CSV | `Production / Booking ID` | `Production ID` |
+| Google Calendar event description | `Booking ID: ${booking.id}` | `Production ID: ${booking.bookingCode \|\| booking.id}` |
+
+The Calendar description change is a **2-part fix**:
+
+1. Label rename (consistent with the rest of v1.34.0).
+2. Value flip from the internal CUID (`clxxxxxxxxx…`) to the
+   human-readable code. The previous body printed
+   `"Booking ID: clxxxxxxx…"` which was confusing — the label
+   suggested the readable code but the value was the database row id.
+   Pre-`bookingCode` bookings fall back to the CUID to keep history
+   safe.
+
+#### How the live Producer Dashboard sheet updates without a manual migration
+
+`ensureSheetTab` in `src/lib/google-sheets.ts` rewrites the entire row
+1 of the Bookings tab on **every** container boot (see line 121-139).
+So the moment v1.34.0 boots, the live sheet's first cell flips from
+"Booking ID" to "Production ID" — no batch UPDATE call needed, no
+data orphaning (column position unchanged, only the cell text). Any
+downstream Airtable sync that keys off the column header will see the
+new name on the next sync after deploy.
+
+#### Out of scope (explicitly)
+
+- `Booking.bookingCode` Prisma field rename — kept as-is per user
+  decision. 71 references including audit, calendar reconcile, csv,
+  google-sheets writers and admin/producer routes.
+- `bookingId` API/form param names — internal contract, no user
+  visibility.
+- Email subjects, notification copy — grep confirms none currently
+  emit "Booking ID" string.
+
+---
+
 ## [1.33.6] — 2026-05-25
 
 ### Changed — Backfill legacy bookings: crewRequired MUA → Virtual Production

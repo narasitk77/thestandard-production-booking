@@ -11,7 +11,7 @@ import { getSession } from '@/lib/session'
 import { buildCSVHeader, rowToCSV, csvFilename } from '@/lib/csv'
 
 const COLUMNS = [
-  'Production / Booking ID',
+  'Production ID',
   'Project ID',
   'Status',
   'Shoot Date',

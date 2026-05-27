@@ -359,7 +359,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         </h1>
         {booking.bookingCode && (
           <div className="flex items-center gap-2 mt-1.5">
-            <span className="text-xs text-gray-400 uppercase tracking-wide">Booking ID</span>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">Production ID</span>
             <span className="episode-badge">{booking.bookingCode}</span>
           </div>
         )}

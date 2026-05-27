@@ -147,7 +147,7 @@ export default function DashboardPage() {
   }), [teamData])
 
   const exportTeamCSV = () => {
-    const header = ['Email', 'Bookings Assigned', 'Total Hours', 'Avg Hours per Booking', 'Date Range', 'Booking IDs']
+    const header = ['Email', 'Bookings Assigned', 'Total Hours', 'Avg Hours per Booking', 'Date Range', 'Production IDs']
     const rows = teamData.map(r => [
       r.email,
       String(r.bookingCount),
@@ -169,7 +169,7 @@ export default function DashboardPage() {
   }
 
   const exportBookingsCSV = () => {
-    const header = ['Date', 'Call Time', 'Wrap', 'Status', 'Outlet', 'Program', 'Shoot Type', 'Producer', 'Episodes', 'Assigned', 'Booking ID']
+    const header = ['Date', 'Call Time', 'Wrap', 'Status', 'Outlet', 'Program', 'Shoot Type', 'Producer', 'Episodes', 'Assigned', 'Production ID']
     const rows = filtered.map(b => [
       b.shootDate.slice(0, 10),
       b.callTime,
