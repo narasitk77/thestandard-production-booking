@@ -6,6 +6,7 @@ import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
+import UploadSection from '@/app/_components/booking/UploadSection'
 
 interface Episode { id: string; episodeId: string; title: string }
 interface BookingDetail {
@@ -13,7 +14,7 @@ interface BookingDetail {
   status: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]; videographerCount?: number
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
-  outlet: { code: string; name: string }
+  outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
   program: { code: string; name: string }
   episodes: Episode[]
   calendarEventId?: string
@@ -83,6 +84,18 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   // UI is never blank — an admin can still assign people, just from a
   // potentially-stale list.
   const [team, setTeam] = useState<Record<RosterRole, RosterEntry[]>>(FALLBACK_TEAM)
+  // v1.35.2 — who's looking at this page? Drives the Upload tab visibility.
+  const [meCanUpload, setMeCanUpload] = useState(false)
+  const [meEmail, setMeEmail] = useState<string>('')
+  useEffect(() => {
+    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.user) {
+        setMeCanUpload(!!d.user.canUpload)
+        setMeEmail(d.user.email || '')
+      }
+    }).catch(() => {})
+  }, [])
+
   useEffect(() => {
     fetch('/api/admin/team', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
@@ -702,6 +715,25 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => setBooking(d))
           }}
         />
+      )}
+
+      {/* v1.35.2 — Upload section. Visible only to video/sound crew (or admin)
+          AND only when the booking is CONFIRMED or COMPLETED. Booking context
+          is implicit via this page's URL, so the upload form is prefilled
+          and the user can't accidentally upload to the wrong booking. */}
+      {meCanUpload && (booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') && (
+        <div id="upload" className="gf-card p-3 border-l-4 border-[#673ab7] bg-purple-50/30">
+          <div className="text-sm font-medium text-[#673ab7] mb-2 flex items-center gap-1">
+            📹 Upload footage
+            <span className="text-[10px] text-gray-500 ml-1">— ผู้ใช้: {meEmail}</span>
+          </div>
+          <UploadSection booking={{
+            id: booking.id,
+            bookingCode: booking.bookingCode ?? null,
+            status: booking.status,
+            outlet: booking.outlet,
+          }} />
+        </div>
       )}
     </div>
   )

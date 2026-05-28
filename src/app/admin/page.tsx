@@ -40,6 +40,13 @@ export default function AdminPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('REQUESTED')
+  // v1.35.2 — only show the "Upload" shortcut on cards to crew that can use it.
+  const [canUpload, setCanUpload] = useState(false)
+  useEffect(() => {
+    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.user?.canUpload) setCanUpload(true)
+    }).catch(() => {})
+  }, [])
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
@@ -170,6 +177,13 @@ export default function AdminPage() {
                   )}
                   {b.status === 'CONFIRMED' && (
                     <>
+                      {canUpload && (
+                        <Link href={`/admin/${b.id}#upload`}
+                          title="Upload footage — form prefilled with this booking"
+                          className="px-3 py-1.5 text-xs border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] inline-flex items-center gap-1">
+                          📹 Upload
+                        </Link>
+                      )}
                       <Link href={`/admin/${b.id}`}
                         className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
                         EDIT
@@ -177,6 +191,24 @@ export default function AdminPage() {
                       <CancelButton bookingId={b.id} onDone={fetch_} />
                       <span className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded border border-green-200">
                         ✓ Approved
+                      </span>
+                    </>
+                  )}
+                  {b.status === 'COMPLETED' && (
+                    <>
+                      {canUpload && (
+                        <Link href={`/admin/${b.id}#upload`}
+                          title="Upload footage — form prefilled with this booking"
+                          className="px-3 py-1.5 text-xs border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] inline-flex items-center gap-1">
+                          📹 Upload
+                        </Link>
+                      )}
+                      <Link href={`/admin/${b.id}`}
+                        className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50">
+                        View
+                      </Link>
+                      <span className="px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded border border-blue-200">
+                        ✓ Completed
                       </span>
                     </>
                   )}

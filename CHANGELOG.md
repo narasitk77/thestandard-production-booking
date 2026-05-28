@@ -5,6 +5,95 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.2] — 2026-05-28
+
+### Added — Upload UI on `/admin/[id]` (crew-only, status-gated, booking-prefilled)
+
+Frontend for the v1.35.1 backend. Crew now upload footage directly
+from the booking detail page — booking + outlet context come from the
+URL, so there's no dropdown to misclick and the upload always lands in
+the right Drive/Wasabi folder.
+
+#### Visibility rules
+
+The Upload section renders only when **both** conditions hold:
+
+1. **User has upload access** — checked via `/api/me.canUpload`:
+   - any `User.role === 'ADMIN'`, OR
+   - `TeamMember.role` is `video` or `sound` (active members only)
+2. **Booking is CONFIRMED or COMPLETED** — REQUESTED / ASSIGNED /
+   CANCELLED bookings don't get the section at all
+
+This means: a Producer / Director / Photographer can still see the
+booking detail page, but the Upload section is hidden. The server
+enforces the same rule via `getUploadAccess()` in `src/lib/session.ts`
++ a `BAD_BOOKING_STATUS` check in `/api/upload/init`, so a
+hand-crafted POST would still fail.
+
+#### `UploadSection` component (`src/app/_components/booking/UploadSection.tsx`)
+
+- **Camera dropdown** — defaults to `Cam1`. Supported: Cam1–4, Sound,
+  Drone, BTS.
+- **Wasabi checkbox** — auto-checked + locked for DUAL_WRITE outlets
+  (AGN, TSS, NWS). DRIVE_ONLY outlets get an optional opt-in toggle.
+- **Multi-file file picker** — drops files into a queue; each file
+  runs the full `init → parallel cloud PUTs → complete` cycle one at
+  a time (parallel chunks within a file via 4-concurrent presigned
+  PUTs; sequential between files to not saturate the uplink).
+- **Per-file progress bars** — separate Drive + Wasabi tracks so the
+  user sees which cloud is the bottleneck. Driven by
+  `XHR.upload.onprogress` for both clouds.
+- **Cancel button** — calls `POST /api/upload/[id]/cancel` to abort
+  multipart + delete the reserved Drive slot.
+- **History table** — pulls `GET /api/upload/list?bookingId=...` and
+  shows previously-uploaded files for this booking with Drive link +
+  status chip + uploader email.
+
+#### Booking cards (`/admin`)
+
+CONFIRMED + COMPLETED rows now show a primary **📹 Upload** button
+that links to `/admin/[id]#upload`. The anchor scrolls the page to the
+upload section so the crew lands on the right control with one click.
+
+```
+[CONFIRMED]   [📹 Upload] [EDIT] [Cancel] [✓ Approved]
+[COMPLETED]   [📹 Upload] [View] [✓ Completed]
+```
+
+Visible only to users where `/api/me.canUpload === true`.
+
+#### Server changes
+
+- `src/lib/session.ts` — `getUploadAccess(email)`: returns true for
+  ADMIN or active TeamMember with role in `{video, sound}`.
+- `/api/me` — exposes `canUpload: boolean`.
+- `/api/upload/init` — new gates:
+  - `getUploadAccess` (403 `NO_UPLOAD_ACCESS`)
+  - booking status must be CONFIRMED or COMPLETED (400 `BAD_BOOKING_STATUS`)
+- `/api/upload/list?bookingId=...` (new) — returns Upload rows for a
+  booking, newest first. Same auth gate.
+
+#### What the user sees end-to-end
+
+1. Crew opens `/admin` → sees a CONFIRMED booking they're working on
+2. Clicks **📹 Upload** on the card → lands on `/admin/[id]#upload`
+3. Upload section is pre-scrolled into view, booking already shown
+4. Picks camera (Cam1 default), drags files in
+5. Two progress bars per file (Drive + Wasabi if DUAL_WRITE)
+6. Files finish → history table refreshes, Drive link clickable
+
+No way to upload to the wrong booking — the context is in the URL.
+
+#### Out of scope (deferred)
+
+- SHA-256 browser-side integrity check (v1.35.4)
+- Resume after browser close / tab crash (v1.35.4 reconciler will
+  surface ORPHANED uploads for manual cleanup)
+- Drag-and-drop UX polish (file picker works; drag-drop is convenience)
+- Removal of legacy `/upload` page (v1.35.5)
+
+---
+
 ## [1.35.1] — 2026-05-27
 
 ### Added — Wasabi + Drive write libs + `/api/upload/{init,complete,cancel}`

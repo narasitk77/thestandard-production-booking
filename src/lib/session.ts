@@ -37,6 +37,35 @@ export async function getProducerAccess(email: string | null | undefined): Promi
   }
 }
 
+// Upload access (v1.35.2): the set of users who can upload footage via the
+// booking detail page. Limited to people who actually shoot/record:
+//   - any ADMIN (for ops + override)
+//   - any TeamMember whose roster role is 'video' or 'sound'
+//
+// Visibility on `/admin/[id]` is further gated on the booking having a
+// CONFIRMED or COMPLETE status — uploads to PENDING/CANCELLED bookings
+// don't make sense.
+export async function getUploadAccess(email: string | null | undefined): Promise<boolean> {
+  if (!email) return false
+  try {
+    const lower = email.toLowerCase()
+    const user = await prisma.user.findUnique({
+      where: { email: lower },
+      select: { role: true, active: true },
+    })
+    if (!user || !user.active) return false
+    if (user.role === 'ADMIN') return true
+    const member = await prisma.teamMember.findUnique({
+      where: { email: lower },
+      select: { role: true, active: true },
+    })
+    if (!member || !member.active) return false
+    return member.role === 'video' || member.role === 'sound'
+  } catch {
+    return false
+  }
+}
+
 // OT approver access (v1.33.4): the set of users who can approve/reject OT
 // records and see the cover-sheet overview at /ot/admin.
 //

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getSession, getUploadAccess } from '@/lib/session'
 import { buildStoragePath, hasOutletFolderMapping, outletFolderName } from '@/lib/outlet-folders'
 import {
   isWasabiConfigured,
@@ -45,6 +45,14 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // v1.35.2 — defense in depth. UI hides the Upload tab for non-crew, but
+    // a hand-crafted POST would still land here without this gate.
+    if (!(await getUploadAccess(session.email))) {
+      return NextResponse.json({
+        error: 'Upload access requires video/sound team role or admin',
+        code: 'NO_UPLOAD_ACCESS',
+      }, { status: 403 })
+    }
 
     const body = await request.json().catch(() => ({}))
     const bookingId = String(body.bookingId || '').trim()
@@ -80,12 +88,23 @@ export async function POST(request: NextRequest) {
       select: {
         id: true,
         bookingCode: true,
+        status: true,
         outlet: { select: { code: true, name: true, storagePolicy: true } },
       },
     })
     if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     if (!booking.bookingCode) {
       return NextResponse.json({ error: 'Booking has no Production ID — assign one before uploading' }, { status: 400 })
+    }
+    // v1.35.2 — only CONFIRMED + COMPLETED bookings can receive footage.
+    // REQUESTED isn't approved yet; CANCELLED shouldn't get new files.
+    // (Note: BookingStatus enum spells it 'COMPLETED', not 'COMPLETE' —
+    //  UploadStatus is separate and does spell its own state 'COMPLETE'.)
+    if (booking.status !== 'CONFIRMED' && booking.status !== 'COMPLETED') {
+      return NextResponse.json({
+        error: `Cannot upload to a ${booking.status} booking — upload is only allowed for CONFIRMED or COMPLETED`,
+        code: 'BAD_BOOKING_STATUS',
+      }, { status: 400 })
     }
     if (!hasOutletFolderMapping(booking.outlet.code)) {
       return NextResponse.json({

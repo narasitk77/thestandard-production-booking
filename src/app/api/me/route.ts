@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession, getOTApproverAccess } from '@/lib/session'
+import { getSession, getOTApproverAccess, getUploadAccess } from '@/lib/session'
 
 export async function GET() {
   const session = await getSession()
@@ -10,6 +10,9 @@ export async function GET() {
   // v1.33.4 — surface OT approver flag so the client can show the
   // "→ Admin / Cover Sheet" shortcut to managers, not just full admins.
   const canApproveOT = user ? await getOTApproverAccess(user.email) : false
+  // v1.35.2 — surface upload flag so /admin/[id] knows whether to show
+  // the Upload tab. Limited to video/sound crew + admins.
+  const canUpload = user ? await getUploadAccess(user.email) : false
   return NextResponse.json({
     user: user ? {
       email: user.email,
@@ -20,6 +23,7 @@ export async function GET() {
       hasSignature: !!user.signaturePng,
       signatureUpdatedAt: user.signatureUpdatedAt,
       canApproveOT,
+      canUpload,
     } : null,
   })
 }
