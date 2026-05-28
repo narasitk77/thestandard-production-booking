@@ -30,7 +30,7 @@
 import { prisma } from './db'
 import { listFilesRecursive, hasDriveCredentials, type DriveFile } from './google-drive'
 import { findProductionIdInPath } from './production-id'
-import { findBookingByProductionId, type ProductionIdLookup } from './booking-lookup'
+import { findBookingsByProductionIds, type ProductionIdLookup } from './booking-lookup'
 import { appendFootageRows, probeSheet, type FootageInput } from './footage-sheet'
 
 export type ParseStatus = 'matched' | 'parsed_no_booking' | 'unparsed'
@@ -106,14 +106,16 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
   const logByFileId = new Map(existingLogs.map(l => [l.driveFileId, l]))
 
   // 3. Classify each file
-  type Decision = {
+  // First pass: parse Production ID from folder path, surface look-alikes
+  // (lowercase typos, near-miss formats) as warnings so the operator can
+  // fix the folder name instead of watching files sit in `unparsed` forever.
+  type FirstPass = {
     file: DriveFile
     productionId: string | null
-    booking: NonNullable<ProductionIdLookup> | null
-    status: ParseStatus
     existingLog: typeof existingLogs[number] | undefined
   }
-  const decisions: Decision[] = []
+  const firstPass: FirstPass[] = []
+  const lookAlikeWarnings = new Map<string, string>()  // folder → normalized guess
 
   for (const file of driveFiles) {
     const existing = logByFileId.get(file.id)
@@ -123,18 +125,40 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
     }
     // Production ID lives on the FOLDER name, not the filename
     // (`episode-id.ts` policy: "ID on folder name, not individual files").
-    // Walk the file's folderPath leaf → root and pick the closest match.
-    const productionId = findProductionIdInPath(file.folderPath)
-    let booking: Decision['booking'] = null
-    let status: ParseStatus
-    if (!productionId) {
-      status = 'unparsed'
-    } else {
-      booking = await findBookingByProductionId(productionId)
-      status = booking ? 'matched' : 'parsed_no_booking'
-    }
-    decisions.push({ file, productionId, booking, status, existingLog: existing })
+    // Walk the file's folderPath leaf → root and pick the closest match;
+    // also collect look-alikes (e.g. lowercase typos) for triage.
+    const pathMatch = findProductionIdInPath(file.folderPath)
+    for (const la of pathMatch.lookAlikes) lookAlikeWarnings.set(la.folder, la.normalized)
+    firstPass.push({ file, productionId: pathMatch.productionId, existingLog: existing })
   }
+
+  // Surface look-alike folder names ONCE per tick (deduped via map). The
+  // operator sees them in container logs and can rename the folder so the
+  // next tick picks the file up properly.
+  lookAlikeWarnings.forEach((normalized, folder) => {
+    console.warn(`[footage-sync] folder "${folder}" looks like a Production ID — strict format requires "${normalized}". Check for case/separator typo.`)
+  })
+
+  // Second pass: single batched Prisma query for all distinct production
+  // IDs across the tick. Replaces N sequential findUniques with 1
+  // findMany — matters when a first-time scan hits 1000+ matched files.
+  const allCodes = firstPass.map(p => p.productionId).filter((v): v is string => !!v)
+  const bookingMap = await findBookingsByProductionIds(allCodes)
+
+  type Decision = {
+    file: DriveFile
+    productionId: string | null
+    booking: NonNullable<ProductionIdLookup> | null
+    status: ParseStatus
+    existingLog: typeof existingLogs[number] | undefined
+  }
+  const decisions: Decision[] = firstPass.map(p => {
+    const booking = p.productionId ? (bookingMap.get(p.productionId) ?? null) : null
+    let status: ParseStatus
+    if (!p.productionId) status = 'unparsed'
+    else status = booking ? 'matched' : 'parsed_no_booking'
+    return { file: p.file, productionId: p.productionId, booking, status, existingLog: p.existingLog }
+  })
 
   if (opts.dryRun) {
     for (const d of decisions) {

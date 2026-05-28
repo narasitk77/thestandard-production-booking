@@ -76,6 +76,24 @@ export interface DriveFile {
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
+// MIME types we explicitly skip when collecting files. Shortcuts point
+// elsewhere (could double-count the target) and Google-native docs
+// aren't media footage — both would just clutter the footage log.
+// Defensive against accidents: someone drops a Google Doc with notes
+// into a Production ID folder, the worker still skips it.
+const SKIP_FILE_MIME = new Set([
+  'application/vnd.google-apps.shortcut',
+  'application/vnd.google-apps.document',
+  'application/vnd.google-apps.spreadsheet',
+  'application/vnd.google-apps.presentation',
+  'application/vnd.google-apps.form',
+  'application/vnd.google-apps.drawing',
+  'application/vnd.google-apps.site',
+  'application/vnd.google-apps.script',
+  'application/vnd.google-apps.fusiontable',
+  'application/vnd.google-apps.jam',
+])
+
 /**
  * Recursively list every non-folder file under `rootFolderId`. Works on
  * both personal folders and Shared Drives (`supportsAllDrives` +
@@ -139,6 +157,9 @@ export async function listFilesRecursive(
           // accumulated path. We enqueue ONCE per folder (visited guard
           // catches the rare case where Drive returns a folder twice).
           queue.push({ folderId: f.id, path: [...path, f.name] })
+        } else if (SKIP_FILE_MIME.has(f.mimeType)) {
+          // Shortcuts + Google-native docs aren't real footage — skip.
+          continue
         } else {
           out.push({
             id: f.id,

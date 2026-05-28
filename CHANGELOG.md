@@ -5,6 +5,129 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.34.4] — 2026-05-27
+
+### Hardened — Defensive footage matching (accidents + out-of-rule inputs)
+
+Closes the v1.34 hardening pass. No behavior change for the well-formed
+inputs from v1.34.3 — every change here protects against accident /
+typo / scale edge cases that would have silently produced wrong rows
+or missed files.
+
+Rollback is safe: no schema change. Bump `IMAGE_TAG` back to
+`sha-1d21d9f` (v1.34.3) in Portainer and the previous behavior returns.
+
+#### 1. Regex word-boundary protection (`src/lib/episode-id.ts`)
+
+```diff
+- EPISODE_ID_RE_LOOSE = /([A-Z]{2,4}-\d{6}-[A-Z0-9]{1,4}-\d{2})/
++ EPISODE_ID_RE_LOOSE = /(?<![A-Za-z0-9])([A-Z]{2,4}-\d{6}-[A-Z0-9]{1,4}-\d{2})(?!\d)/
+```
+
+Stops two classes of false matches:
+
+- `XAGN-260423-EVT-01` no longer extracts `AGN-260423-EVT-01` (a letter
+  butting against the ID is now treated as "not a match").
+- `AGN-260423-EVT-100` no longer extracts `AGN-260423-EVT-10` (the
+  trailing 3rd digit invalidates the match — format is 2-digit seq).
+
+Acceptable boundaries (still match): space, `_`, `-`, `(`, `[`, `/`,
+Thai chars, start/end of string. So real folders like
+`[Final] AGN-260423-EVT-01 master` or
+`งานวันแม่_AGN-260423-EVT-01_เสร็จแล้ว` continue to work.
+
+#### 2. Dash + whitespace normalization (`src/lib/production-id.ts`)
+
+```ts
+normalizeForMatch(text)
+  = text.replace(/[–—‑]/g, '-').trim()
+```
+
+Folders accidentally named with macOS-autocorrected en/em dashes
+(`AGN–260423–EVT–01`) or non-breaking hyphens now match. Trim absorbs
+trailing whitespace that copy-paste sometimes introduces.
+
+#### 3. Look-alike (lowercase / near-miss) warning (`src/lib/production-id.ts`)
+
+New helper `looksLikeProductionId(text)` detects strings that would
+have matched if the case had been uppercase — `agn-260423-evt-01`,
+`Agn-260423-Evt-01`. The sync worker collects these per tick and emits
+
+```
+[footage-sync] folder "agn-260423-evt-01" looks like a Production ID —
+strict format requires "AGN-260423-EVT-01". Check for case/separator typo.
+```
+
+once per unique folder to the container log. Strict parsing still
+returns null for these (they don't match the booking DB which stores
+uppercase), so they land in `unparsed` — but the operator now has a
+breadcrumb to fix the folder name.
+
+#### 4. Skip Drive shortcuts + Google-native non-media files (`src/lib/google-drive.ts`)
+
+`listFilesRecursive` now filters out:
+
+```
+application/vnd.google-apps.shortcut       — would double-count targets
+application/vnd.google-apps.document       — notes, not footage
+application/vnd.google-apps.spreadsheet
+application/vnd.google-apps.presentation
+application/vnd.google-apps.form
+application/vnd.google-apps.drawing
+application/vnd.google-apps.site
+application/vnd.google-apps.script
+application/vnd.google-apps.fusiontable
+application/vnd.google-apps.jam
+```
+
+A user dropping a Google Doc with shot notes into the production
+folder no longer creates a `FootageLog` row + sheet append for the
+non-media file.
+
+#### 5. Batched booking lookup — N+1 → 1 query (`src/lib/booking-lookup.ts`)
+
+```ts
+findBookingsByProductionIds(codes: string[])
+  → Map<bookingCode, Booking>
+```
+
+Replaces N sequential `findUnique` calls with one `findMany({ where:
+{ bookingCode: { in: codes } } })`. Matters when the first sync after
+`FOOTAGE_WORKER_ENABLED=1` flips discovers thousands of pre-existing
+files — DB stays responsive instead of going head-down for ~5s on
+1000 sequential lookups.
+
+#### 6. Sheet append chunking — max 1000 rows per request (`src/lib/footage-sheet.ts`)
+
+```ts
+const APPEND_CHUNK_SIZE = 1000
+for (let i = 0; i < rows.length; i += APPEND_CHUNK_SIZE) {
+  const chunk = rows.slice(i, i + APPEND_CHUNK_SIZE).map(rowToCells)
+  await sheets.spreadsheets.values.append(...)
+}
+```
+
+Prevents the Sheets API request-size limit from breaking the FIRST
+sync after enablement (when the worker might find 5000+ matched
+files at once). Each chunk is its own request; earlier chunks commit
+even if a later one fails (worker retries unwritten via the
+`FootageLog.sheetRowWritten=false` flag on the next tick).
+
+#### Known limitations (deferred — flag in CHANGELOG, not fixed)
+
+- **File moved between folders post-match**: if a file is logged with
+  Production ID A, then someone moves it into a folder with Production
+  ID B, the sheet row stays at A. The `FootageLog` upsert updates the
+  ledger's `productionId` to B but `sheetRowWritten=true` blocks the
+  re-append. Fix would be a "force-resync" admin endpoint — not built.
+- **Multiple Production IDs in one path** (e.g.
+  `AGN-…-01/something/TSS-…-02/file`): closest-wins picks `TSS-…-02`,
+  but the inner-most match might not be the operator's intent. The
+  warning loop in (3) does NOT flag this case because both folders
+  parse strictly — only typos/case-misses get logged.
+
+---
+
 ## [1.34.3] — 2026-05-27
 
 ### Fixed — Footage matcher reads Production ID from FOLDER name, not filename

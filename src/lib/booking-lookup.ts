@@ -24,19 +24,47 @@ export type ProductionIdLookup = {
   assignedEmails: string[]
 } | null
 
+const LOOKUP_SELECT = {
+  id: true,
+  bookingCode: true,
+  shootDate: true,
+  producer: true,
+  assignedEmails: true,
+  outlet: { select: { code: true, name: true } },
+  program: { select: { code: true, name: true } },
+} as const
+
 export async function findBookingByProductionId(code: string): Promise<ProductionIdLookup> {
   if (!code) return null
   const booking = await prisma.booking.findUnique({
     where: { bookingCode: code },
-    select: {
-      id: true,
-      bookingCode: true,
-      shootDate: true,
-      producer: true,
-      assignedEmails: true,
-      outlet: { select: { code: true, name: true } },
-      program: { select: { code: true, name: true } },
-    },
+    select: LOOKUP_SELECT,
   })
   return booking
+}
+
+/**
+ * Batched lookup — single DB roundtrip for N codes. Used by the sync
+ * worker so a tick with 1000 newly-detected files doesn't fire 1000
+ * sequential Prisma findUniques. Returns a Map keyed by bookingCode.
+ *
+ * Codes not found in the DB are simply absent from the returned Map —
+ * caller does `map.get(code)` and gets `undefined`, treats that as
+ * `parsed_no_booking`.
+ */
+export async function findBookingsByProductionIds(
+  codes: string[],
+): Promise<Map<string, NonNullable<ProductionIdLookup>>> {
+  const uniqueCodes = Array.from(new Set(codes.filter(Boolean)))
+  const out = new Map<string, NonNullable<ProductionIdLookup>>()
+  if (uniqueCodes.length === 0) return out
+
+  const rows = await prisma.booking.findMany({
+    where: { bookingCode: { in: uniqueCodes } },
+    select: LOOKUP_SELECT,
+  })
+  for (const row of rows) {
+    if (row.bookingCode) out.set(row.bookingCode, row)
+  }
+  return out
 }

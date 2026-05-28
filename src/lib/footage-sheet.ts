@@ -156,6 +156,13 @@ function fmtCell(value: unknown): string {
   return String(value)
 }
 
+// Max rows per single Sheets API append. Sheets accepts up to ~10MB per
+// request and ~50K cells; at ~30 cells per row this gives us comfortable
+// headroom (1000 × 30 = 30K cells). Chunking matters for the FIRST sync
+// after FOOTAGE_WORKER_ENABLED=1 flips — that tick may discover thousands
+// of pre-existing files all at once.
+const APPEND_CHUNK_SIZE = 1000
+
 /**
  * Append one or more rows to the footage log sheet. Returns the number of
  * rows actually appended (always equal to `rows.length` on success, 0 on
@@ -166,6 +173,12 @@ function fmtCell(value: unknown): string {
  * row, fill only the columns whose canonical key appears in our input.
  * Never touches row 1. Never widens the sheet beyond the user's existing
  * column count.
+ *
+ * Chunked: batches >APPEND_CHUNK_SIZE rows are split across multiple
+ * append calls. Each chunk is its own API request, so a mid-batch
+ * failure leaves earlier chunks committed (sheet stays ahead of the
+ * `FootageLog.sheetRowWritten=true` patch — that's why the worker
+ * always flips the ledger flag AFTER `appendFootageRows` returns).
  */
 export async function appendFootageRows(rows: FootageInput[]): Promise<number> {
   if (rows.length === 0) return 0
@@ -175,24 +188,29 @@ export async function appendFootageRows(rows: FootageInput[]): Promise<number> {
     throw new Error(`Footage sheet ${map.sheetId} tab "${map.tabName}" has no header row — the worker needs row 1 populated to know where to put each field.`)
   }
 
-  const values = rows.map(row => {
+  const rowToCells = (row: FootageInput): string[] => {
     const cells = new Array<string>(map.rawHeaders.length).fill('')
     for (const [canonical, colIdx] of Object.entries(map.byKey) as Array<[keyof FootageInput, number]>) {
       const v = row[canonical]
       if (v !== undefined) cells[colIdx] = fmtCell(v)
     }
     return cells
-  })
+  }
 
   const sheets = google.sheets({ version: 'v4', auth: getSheetsWriteAuth() })
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: map.sheetId,
-    range: `${map.tabName}!A2`,
-    valueInputOption: 'RAW',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: { values },
-  })
-  return rows.length
+  let written = 0
+  for (let i = 0; i < rows.length; i += APPEND_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + APPEND_CHUNK_SIZE).map(rowToCells)
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: map.sheetId,
+      range: `${map.tabName}!A2`,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: chunk },
+    })
+    written += chunk.length
+  }
+  return written
 }
 
 /** For tests / diagnostics. Forces a cache flush. */

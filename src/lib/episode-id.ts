@@ -15,11 +15,32 @@
 export const EPISODE_ID_RE = /^([A-Z]{2,4})-(\d{6})-([A-Z0-9]{1,4})-(\d{2})$/
 
 /**
- * Non-anchored format: matches a Production ID embedded inside a longer
- * string (e.g. a filename like `AGN-260423-EVT-01_Cam1_001.mp4`).
- * Used by src/lib/production-id.ts to pull the ID out of filenames.
+ * Non-anchored format with word boundaries — matches a Production ID
+ * embedded inside a longer string (e.g. folder name `[Final] AGN-260423-EVT-01 master`).
+ * Used by src/lib/production-id.ts to pull the ID out of folder names.
+ *
+ * Boundaries (added v1.34.4 — defensive):
+ *   `(?<![A-Za-z0-9])` — char before the ID must NOT be alnum, so
+ *     `XAGN-260423-EVT-01` doesn't slip through as `AGN-260423-EVT-01`.
+ *     Spaces, dashes, slashes, parens, Thai chars, start-of-string all OK.
+ *   `(?!\d)`          — char after must NOT be a digit, so
+ *     `AGN-260423-EVT-100` doesn't get truncated to `AGN-260423-EVT-10`.
+ *     Underscores, spaces, dots, dashes, end-of-string all OK.
+ *
+ * Lookbehind on the `A-Za-z0-9` class (not just `[A-Z0-9]`) so a lowercase
+ * prefix like `xAGN-…` is also rejected — the strict format is uppercase-
+ * only, and we treat near-misses as suspicious typos worth flagging.
  */
-export const EPISODE_ID_RE_LOOSE = /([A-Z]{2,4}-\d{6}-[A-Z0-9]{1,4}-\d{2})/
+export const EPISODE_ID_RE_LOOSE = /(?<![A-Za-z0-9])([A-Z]{2,4}-\d{6}-[A-Z0-9]{1,4}-\d{2})(?!\d)/
+
+/**
+ * Lowercase-detection variant. Same shape but case-insensitive on the
+ * ID body. NOT used for parsing — only by `findProductionIdInPath` to
+ * surface a warning when a folder name looks like a Production ID but
+ * was typed in the wrong case (so the user can fix the typo instead of
+ * silently watching it land in `unparsed`).
+ */
+export const EPISODE_ID_RE_CASE_INSENSITIVE = /(?<![A-Za-z0-9])([A-Za-z]{2,4}-\d{6}-[A-Za-z0-9]{1,4}-\d{2})(?!\d)/
 
 export function generateEpisodeId(
   outletCode: string,
