@@ -19,6 +19,11 @@ import { google, drive_v3 } from 'googleapis'
 import { getCalendarImpersonateSubject } from './google-calendar'
 
 const DRIVE_READ_SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+// v1.35.1 — write scope for the booking upload path. Full `drive` scope
+// because the impersonated user (narasit.k) is the Shared Drive Content
+// Manager — `drive.file` would restrict to files THIS SDK invocation
+// created, which would block listing/managing existing files later.
+const DRIVE_WRITE_SCOPES = ['https://www.googleapis.com/auth/drive']
 
 /**
  * JWT auth for Drive read. Impersonates the user configured for Calendar
@@ -47,6 +52,26 @@ export function getDriveReadAuth() {
 export function hasDriveCredentials(): boolean {
   return !!(process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
     (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY))
+}
+
+/**
+ * Same DWD model as read, but with full `drive` scope so the upload
+ * path can create folders + initiate resumable upload sessions.
+ */
+export function getDriveWriteAuth() {
+  const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+    ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+    : {
+        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }
+  const subject = getCalendarImpersonateSubject()
+  return new google.auth.JWT({
+    email: credentials.client_email,
+    key: credentials.private_key,
+    scopes: DRIVE_WRITE_SCOPES,
+    subject,
+  })
 }
 
 export interface DriveFile {
@@ -183,4 +208,185 @@ export async function listFilesRecursive(
     console.warn(`[google-drive] listFilesRecursive hit maxFiles=${maxFiles} for root=${rootFolderId} — increase via worker config if expected.`)
   }
   return out
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.35.1 — write helpers used by /api/upload/init to (a) make sure the
+// destination folder exists in the Shared Drive and (b) hand the browser
+// a resumable upload session URL it can stream bytes into directly.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Find or create a single child folder under `parentId`. Race-safe via
+ * a list-then-create pattern: two concurrent calls might both create the
+ * folder, but the second's create would succeed too and we'd just orphan
+ * one empty folder — acceptable cost. To make it strictly atomic we'd
+ * need Drive locks (it doesn't have them).
+ */
+async function ensureChildFolder(
+  drive: drive_v3.Drive,
+  parentId: string,
+  name: string,
+): Promise<string> {
+  // Escape single quotes in folder name for the query string
+  const safeName = name.replace(/'/g, "\\'")
+  const found = await drive.files.list({
+    q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}' and name = '${safeName}'`,
+    fields: 'files(id, name)',
+    pageSize: 10,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    corpora: 'allDrives',
+  })
+  const existing = found.data.files?.[0]
+  if (existing?.id) return existing.id
+
+  const created = await drive.files.create({
+    requestBody: {
+      name,
+      mimeType: FOLDER_MIME,
+      parents: [parentId],
+    },
+    fields: 'id',
+    supportsAllDrives: true,
+  })
+  if (!created.data.id) throw new Error(`Drive folder create returned no id for "${name}"`)
+  return created.data.id
+}
+
+/**
+ * Walk a path of folder names under `rootFolderId`, creating any segment
+ * that's missing. Returns the leaf folder's id. Used by /api/upload/init
+ * to ensure `<root>/<outlet>/<bookingCode>/<camera>/` exists before
+ * starting the resumable upload session.
+ *
+ *   ensureFolderPath(root, ['Advertorial', 'AGN-260423-EVT-01', 'Cam1'])
+ *     → id of the Cam1 folder (created on first call, reused after)
+ */
+export async function ensureFolderPath(
+  rootFolderId: string,
+  segments: string[],
+): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  let parent = rootFolderId
+  for (const segment of segments) {
+    parent = await ensureChildFolder(drive, parent, segment)
+  }
+  return parent
+}
+
+export interface ResumableSession {
+  /** Drive file id reserved for the upload (browser PUTs into this slot). */
+  fileId: string
+  /** Browser PUTs chunks (or one big blob) to this URL. */
+  sessionUrl: string
+}
+
+/**
+ * Initiate a resumable upload session by creating an empty file slot via
+ * `files.create` and returning its `id` plus a session URL the browser
+ * can stream bytes into. Two-step because Drive's resumable upload API
+ * doesn't natively expose the session URL through the SDK — we reserve
+ * the id with the SDK, then start a resumable session with a raw HTTP
+ * POST that returns the session URL in the `Location` header.
+ *
+ * Browser flow:
+ *   PUT {sessionUrl}
+ *     Content-Length: <size>
+ *     Content-Type: <mime>
+ *     <bytes>
+ *   → 200 OK with the final file metadata
+ *
+ * For chunked / resumable browser uploads, the browser PUTs each chunk
+ * with a Content-Range header. The session URL stays valid for ~1 week
+ * by default (Drive's contract).
+ */
+export async function createResumableUploadSession(input: {
+  parentFolderId: string
+  filename: string
+  mimeType: string
+  size: number
+}): Promise<ResumableSession> {
+  const auth = getDriveWriteAuth()
+  // Get a fresh OAuth access token to hit the raw resumable endpoint.
+  await auth.authorize()
+  const accessToken = auth.credentials.access_token
+  if (!accessToken) throw new Error('Drive write auth: no access token after authorize()')
+
+  // Reserve the file id first via the SDK (gives us a stable id to track
+  // before any bytes are uploaded — useful for FootageLog dedupe).
+  const drive = google.drive({ version: 'v3', auth })
+  const reserve = await drive.files.create({
+    requestBody: {
+      name: input.filename,
+      parents: [input.parentFolderId],
+      mimeType: input.mimeType || 'application/octet-stream',
+    },
+    fields: 'id',
+    supportsAllDrives: true,
+  })
+  const fileId = reserve.data.id
+  if (!fileId) throw new Error('Drive resumable: files.create returned no id')
+
+  // Now POST to the resumable upload endpoint, scoped to that file id,
+  // to obtain the session URL. The body is empty (we're "updating" with
+  // a resumable session, not the initial create).
+  const initRes = await fetch(
+    `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable&supportsAllDrives=true`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Upload-Content-Type': input.mimeType || 'application/octet-stream',
+        'X-Upload-Content-Length': String(input.size),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    },
+  )
+  if (!initRes.ok) {
+    const body = await initRes.text().catch(() => '')
+    throw new Error(`Drive resumable init failed: HTTP ${initRes.status} — ${body.slice(0, 300)}`)
+  }
+  const sessionUrl = initRes.headers.get('Location')
+  if (!sessionUrl) throw new Error('Drive resumable init: no Location header in response')
+
+  return { fileId, sessionUrl }
+}
+
+/**
+ * Best-effort cleanup after a failed/cancelled upload. Removes the
+ * reserved Drive file slot so an aborted session doesn't leave an
+ * empty/partial file in the Shared Drive.
+ */
+export async function deleteDriveFile(fileId: string): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  await drive.files.delete({ fileId, supportsAllDrives: true })
+}
+
+/**
+ * Read the size + name of an uploaded Drive file. Used by
+ * /api/upload/complete to confirm the upload actually finished (Drive's
+ * resumable PUT can succeed partially, leaving a file shorter than
+ * expected — checking size mirrors the Wasabi verifyUpload pattern).
+ */
+export async function getDriveFile(fileId: string): Promise<{
+  id: string; name: string; size: number | null; webViewLink: string | null
+} | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  try {
+    const res = await drive.files.get({
+      fileId,
+      fields: 'id, name, size, webViewLink',
+      supportsAllDrives: true,
+    })
+    return {
+      id: res.data.id ?? fileId,
+      name: res.data.name ?? '',
+      size: res.data.size ? Number(res.data.size) : null,
+      webViewLink: res.data.webViewLink ?? null,
+    }
+  } catch {
+    return null
+  }
 }

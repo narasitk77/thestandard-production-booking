@@ -105,6 +105,17 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
   })
   const logByFileId = new Map(existingLogs.map(l => [l.driveFileId, l]))
 
+  // v1.35.1 — skip files our /api/upload flow owns (their `Upload` row's
+  // /complete handler writes the sheet row; if we also wrote one we'd get
+  // a duplicate). Pull the set of driveFileIds that have an Upload row,
+  // regardless of status — even a FAILED one shouldn't get scanner-written
+  // (the operator can resubmit through the UI).
+  const appOwnedUploads = await prisma.upload.findMany({
+    where: { driveFileId: { in: driveFileIds } },
+    select: { driveFileId: true },
+  })
+  const appOwnedFileIds = new Set(appOwnedUploads.map(u => u.driveFileId).filter(Boolean) as string[])
+
   // 3. Classify each file
   // First pass: parse Production ID from folder path, surface look-alikes
   // (lowercase typos, near-miss formats) as warnings so the operator can
@@ -122,6 +133,12 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
     if (existing?.sheetRowWritten) {
       out.seen += 1
       continue  // fully done — skip
+    }
+    // v1.35.1 — file owned by an /api/upload row → app handles the sheet
+    // write inside /api/upload/complete. Scanner stays out of its way.
+    if (appOwnedFileIds.has(file.id)) {
+      out.seen += 1
+      continue
     }
     // Production ID lives on the FOLDER name, not the filename
     // (`episode-id.ts` policy: "ID on folder name, not individual files").

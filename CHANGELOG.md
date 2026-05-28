@@ -5,6 +5,155 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.1] — 2026-05-27
+
+### Added — Wasabi + Drive write libs + `/api/upload/{init,complete,cancel}`
+
+Backend half of the browser-direct dual-cloud upload flow. The browser
+now has 3 endpoints to drive an end-to-end upload without server bytes
+ever touching the wire. UI lands in v1.35.2.
+
+#### New deps
+
+```
+@aws-sdk/client-s3 ^3.1055.0
+@aws-sdk/s3-request-presigner ^3.1055.0
+```
+
+Both `--legacy-peer-deps` (next-auth pins nodemailer at v6 which conflicts
+with the AWS SDK's transitive resolution, same pattern as pdf-lib).
+
+#### `src/lib/outlet-folders.ts` (new)
+
+Single source of truth mapping `Outlet.code` → folder name used by both
+Drive and Wasabi. Confirmed mappings (matching the team's actual Drive
+layout):
+
+```
+AGN → Advertorial          (NOT Outlet.name "Content Agency")
+TSS → the Secret Sauce     (lowercase 'the' on purpose)
+POP → THE STANDARD POP
+NWS → News
+WLT → Wealth
+SPT → Sport
+POD → Podcast
+KND → KND
+LIF → LIFE
+```
+
+`buildStoragePath(outlet, bookingCode, camera, filename)` returns the
+segment array used by both clouds:
+`[outletFolder, bookingCode, camera, filename]`. Single function — if we
+ever change the layout it changes here only.
+
+#### `src/lib/wasabi.ts` (new)
+
+S3 client + presign helpers via `@aws-sdk/client-s3`:
+
+- `isWasabiConfigured()` — env-var sanity check; callers check before use
+- `createMultipart(key, mime)` — initiate multipart, returns `uploadId`
+- `presignParts(key, uploadId, partCount)` — N presigned PUT URLs,
+  1-hour TTL
+- `completeMultipart(key, uploadId, parts)` — finalize after browser
+  pushes all chunks
+- `abortMultipart(key, uploadId)` — release storage on cancel/fail
+- `verifyUpload(key, expectedSize)` — server-side HEAD to confirm
+  size matches (controlled by `WASABI_VERIFY_ON_COMPLETE=1`)
+- `chooseChunkSize(fileSize)` — picks a part size that keeps the part
+  count ≤ 10000 (S3 hard limit) while staying ≥ 5MB (S3 min). Rounded
+  to whole MB so progress bars look sensible.
+
+#### `src/lib/google-drive.ts` — write helpers added
+
+- `getDriveWriteAuth()` — JWT with full `drive` scope, DWD-impersonated
+  through the same Workspace user that powers Calendar (single source
+  of truth)
+- `ensureFolderPath(rootId, segments)` — walk a path of folder names,
+  create any missing segments. Race-tolerant (list-then-create with
+  exists check; concurrent calls might both create one folder, accepted
+  cost since Drive has no locks)
+- `createResumableUploadSession({ parentId, filename, mimeType, size })`
+  — reserves a file id via `files.create`, then PATCH to the resumable
+  endpoint to get a `Location` session URL. Browser PUTs bytes straight
+  to that URL.
+- `deleteDriveFile(id)` — cleanup for cancel/fail
+- `getDriveFile(id)` — read size + webViewLink for /complete verification
+
+#### Schema
+
+One column added to `Upload`:
+
+```
+wasabiMultipartId  String?  // S3 UploadId between init+complete
+```
+
+So `/complete` and `/cancel` can find the in-flight multipart without
+hacky reuse of other columns. `prisma db push --accept-data-loss` adds
+it on the next boot — pure additive, nullable, rollback-safe.
+
+#### Endpoints
+
+- **`POST /api/upload/init`** — validates booking + outlet + filename,
+  decides Wasabi-or-Drive-or-both based on `Outlet.storagePolicy` and
+  optional operator `includeWasabi`, ensures the Drive folder path
+  exists, reserves a Drive file slot + resumable session, creates the
+  Wasabi multipart upload + N presigned part URLs, and returns
+  everything the browser needs:
+
+  ```json
+  {
+    "uploadId": "cl…",
+    "bookingCode": "AGN-260423-EVT-01",
+    "outletFolder": "Advertorial",
+    "targets": {
+      "drive":  { "fileId": "…", "sessionUrl": "…" },
+      "wasabi": {
+        "uploadId": "…", "bucket": "video2026hires",
+        "key": "VIDEO2026/Advertorial/AGN-…/Cam1/001.mp4",
+        "parts": [{ "partNumber": 1, "url": "…" }, …],
+        "chunkSize": 5242880
+      }
+    }
+  }
+  ```
+
+- **`POST /api/upload/complete`** — browser sends back Drive file
+  confirmation + Wasabi part ETags. We call `CompleteMultipartUpload`,
+  verify both objects via HEAD, flip `Upload.status` to `COMPLETE`
+  (or `DRIVE_OK` / `WASABI_OK` / `FAILED` for partial), and write the
+  footage sheet row + flip `FootageLog.sheetRowWritten=true`.
+
+- **`POST /api/upload/[id]/cancel`** — best-effort abort. Calls
+  `AbortMultipartUpload` (Wasabi) + `files.delete` (Drive) + clears the
+  `FootageLog` row. Idempotent — re-calling on COMPLETE/FAILED is a 200
+  with `idempotent: true`.
+
+#### Footage scanner (`src/lib/footage-sync.ts`) — race fix
+
+The v1.34.2 scanner walks Drive and writes sheet rows. With browser
+uploads also writing sheet rows via `/api/upload/complete`, they'd
+race and produce duplicates. The scanner now skips files where any
+`Upload` row has the matching `driveFileId` — the app handles its own
+uploads end-to-end, the scanner only handles files that arrived
+outside the app (NAS transfer, direct Drive upload).
+
+#### Security note
+
+Wasabi access + secret keys go directly into Portainer stack env. Per
+deployment runbook: never paste them in chat, never commit them to
+git, never put them in `.env.portainer.example`. The example file only
+lists the variable names.
+
+#### Out of scope (next versions)
+
+- Upload UI on `/admin/[id]` — v1.35.2 (browser progress, chunk PUTs,
+  parallel uploads, cancel button)
+- Reconciler worker (ORPHANED cleanup) — v1.35.4
+- SHA-256 integrity verify both clouds — v1.35.4
+- Remove legacy `/upload` page — v1.35.5
+
+---
+
 ## [1.35.0] — 2026-05-27
 
 ### Added — Schema foundation for dual-cloud (Drive + Wasabi) booking uploads

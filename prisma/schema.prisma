@@ -324,9 +324,10 @@ model Upload {
   sha256        String?  // computed in browser before upload; verified on complete
   driveFileId   String?  @unique
   driveUrl      String?
-  wasabiBucket  String?
-  wasabiKey     String?  // e.g. "AGN-260423-EVT-01/Cam1/001.mp4"
-  wasabiEtag    String?  // final ETag from CompleteMultipartUpload
+  wasabiBucket       String?
+  wasabiKey          String?  // e.g. "VIDEO2026/Advertorial/AGN-…/Cam1/001.mp4"
+  wasabiMultipartId  String?  // S3 UploadId between init+complete (v1.35.1)
+  wasabiEtag         String?  // final ETag from CompleteMultipartUpload
   initiatedAt   DateTime @default(now())  // when /api/upload/init was called
   completedAt   DateTime?                 // when both clouds confirmed + sheet row written
   failureReason String?                   // surfaced in admin UI for FAILED/ORPHANED rows
