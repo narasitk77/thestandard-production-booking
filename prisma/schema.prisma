@@ -39,10 +39,13 @@ enum CalendarSyncStatus {
 }
 
 enum UploadStatus {
-  PENDING
-  UPLOADING
-  COMPLETE
-  FAILED
+  PENDING       // row created by /api/upload/init, awaiting browser to start
+  UPLOADING     // at least one cloud upload in progress
+  DRIVE_OK      // v1.35 — Drive done, Wasabi pending (only DUAL_WRITE outlets)
+  WASABI_OK     // v1.35 — Wasabi done, Drive pending
+  COMPLETE      // all required destinations done + sheet row appended
+  FAILED        // user cancel or confirm timeout — Upload row stays for audit
+  ORPHANED      // v1.35 — partial state stuck >24h, reconciler must inspect
 }
 
 enum UserRole {
@@ -159,15 +162,24 @@ model OTRecord {
   @@map("ot_records")
 }
 
+// v1.35.0 — per-outlet upload destination policy. The booking upload UI
+// reads this to know whether to require both Drive + Wasabi (paid client
+// work that must be archived) or just Drive (internal / cheaper).
+enum StoragePolicy {
+  DRIVE_ONLY        // Drive only — operator may opt-in to Wasabi per file
+  DUAL_WRITE        // Both clouds required, upload fails unless both succeed
+}
+
 model Outlet {
-  id       String    @id @default(cuid())
-  code     String    @unique @db.VarChar(3)
-  name     String
-  notes    String?
-  color    String?
-  sort     Int       @default(0)
-  programs Program[]
-  bookings Booking[]
+  id            String        @id @default(cuid())
+  code          String        @unique @db.VarChar(3)
+  name          String
+  notes         String?
+  color         String?
+  sort          Int           @default(0)
+  storagePolicy StoragePolicy @default(DRIVE_ONLY)
+  programs      Program[]
+  bookings      Booking[]
 
   @@map("outlets")
 }
@@ -306,9 +318,23 @@ model Upload {
   notes       String?
   status      UploadStatus @default(PENDING)
   uploadedBy  String
+
+  // v1.35.0 — dual-cloud upload metadata + integrity. All nullable so old
+  // pre-v1.35 rows (local-disk uploads) keep working unchanged.
+  sha256        String?  // computed in browser before upload; verified on complete
+  driveFileId   String?  @unique
+  driveUrl      String?
+  wasabiBucket  String?
+  wasabiKey     String?  // e.g. "AGN-260423-EVT-01/Cam1/001.mp4"
+  wasabiEtag    String?  // final ETag from CompleteMultipartUpload
+  initiatedAt   DateTime @default(now())  // when /api/upload/init was called
+  completedAt   DateTime?                 // when both clouds confirmed + sheet row written
+  failureReason String?                   // surfaced in admin UI for FAILED/ORPHANED rows
+
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
+  @@index([status])
   @@map("uploads")
 }
 

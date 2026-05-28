@@ -5,6 +5,101 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.0] — 2026-05-27
+
+### Added — Schema foundation for dual-cloud (Drive + Wasabi) booking uploads
+
+Opens the v1.35 line: replace the old local-disk `/upload` flow with
+browser-direct uploads from `/admin/[id]` that fan out to both Google
+Drive (working copy) and Wasabi S3 (archive). This release is
+schema-only — no upload UI, no Wasabi SDK code yet. v1.35.1+ ship the
+library + presign endpoints + UI.
+
+Pure additive. Rollback is safe: nullable columns + enum extensions
+only. Bump `IMAGE_TAG` back to `sha-b80e07e` (v1.34.5) and previous
+behavior returns. The new columns sit unused — no data corruption.
+
+#### Schema
+
+```prisma
+enum StoragePolicy {
+  DRIVE_ONLY   // Drive only — operator may opt-in to Wasabi per file
+  DUAL_WRITE   // Both clouds required, upload fails unless both succeed
+}
+
+model Outlet {
+  …existing
+  storagePolicy StoragePolicy @default(DRIVE_ONLY)
+}
+
+enum UploadStatus {
+  PENDING, UPLOADING,
+  DRIVE_OK,   // v1.35 — Drive done, Wasabi pending
+  WASABI_OK,  // v1.35 — Wasabi done, Drive pending
+  COMPLETE, FAILED,
+  ORPHANED    // v1.35 — partial >24h, reconciler must inspect
+}
+
+model Upload {
+  …existing
+  sha256        String?
+  driveFileId   String?  @unique
+  driveUrl      String?
+  wasabiBucket  String?
+  wasabiKey     String?  // <bookingCode>/<camera>/<filename>
+  wasabiEtag    String?
+  initiatedAt   DateTime @default(now())
+  completedAt   DateTime?
+  failureReason String?
+
+  @@index([status])
+}
+```
+
+#### Migration (`start.sh`)
+
+Two new blocks, both idempotent:
+
+1. **Pre-push** — `ALTER TYPE "UploadStatus" ADD VALUE` for `DRIVE_OK`,
+   `WASABI_OK`, `ORPHANED`. Guarded so re-runs are no-ops.
+2. **Post-push** — flip `Outlet.storagePolicy = 'DUAL_WRITE'` for the
+   three outlets that require both clouds:
+
+   ```
+   AGN  Content Agency      DUAL_WRITE
+   TSS  THE STANDARD Studio DUAL_WRITE
+   NWS  News                DUAL_WRITE
+   ```
+
+   Other outlets stay on the schema default `DRIVE_ONLY`. The `UPDATE`
+   only flips rows still on the default — once an admin changes a
+   policy via the future UI, this seed leaves their choice alone.
+
+#### New env vars (`.env.portainer.example`)
+
+| Var | Notes |
+|---|---|
+| `WASABI_ENDPOINT` | e.g. `https://s3.ap-southeast-1.wasabisys.com` |
+| `WASABI_REGION` | e.g. `ap-southeast-1` |
+| `WASABI_BUCKET` | bucket name (must be created in Wasabi console first) |
+| `WASABI_ACCESS_KEY` | IAM access key with `s3:PutObject` + `s3:AbortMultipartUpload` + `s3:ListBucket` scoped to the bucket |
+| `WASABI_SECRET_KEY` | matching secret |
+| `WASABI_VERIFY_ON_COMPLETE` | default `1`; turns on server-side HEAD check after browser upload |
+
+All unset by default — the upload flow that will read these doesn't
+exist yet in v1.35.0, so a missing config doesn't break anything.
+
+#### Out of scope (next versions)
+
+- `src/lib/wasabi.ts` (S3 client + presign helpers) — v1.35.1
+- `/api/upload/init` + `/complete` endpoints — v1.35.1
+- Browser-direct upload UI on `/admin/[id]` — v1.35.2
+- Multipart + progress + retry — v1.35.3
+- SHA-256 integrity check + reconciler worker — v1.35.4
+- Removal of legacy `/upload` page — v1.35.5
+
+---
+
 ## [1.34.5] — 2026-05-27
 
 ### Changed — `/ot/admin` defaults to "qualifying-OT-only" view

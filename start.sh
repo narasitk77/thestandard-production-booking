@@ -75,6 +75,30 @@ END $$;
 SQL
 
 # ──────────────────────────────────────────────────────────────────────────────
+# v1.35.0 — extend UploadStatus enum with the new dual-cloud states
+# (DRIVE_OK, WASABI_OK, ORPHANED) BEFORE prisma db push, so Postgres
+# doesn't recreate the type and orphan existing rows.
+# Idempotent via IF NOT EXISTS guards.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Extending UploadStatus enum (v1.35.0 dual-cloud states)..."
+psql "$DATABASE_URL" <<'SQL' || echo "UploadStatus extension skipped (type missing — fresh DB)"
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'UploadStatus') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'DRIVE_OK' AND enumtypid = '"UploadStatus"'::regtype) THEN
+      ALTER TYPE "UploadStatus" ADD VALUE 'DRIVE_OK';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'WASABI_OK' AND enumtypid = '"UploadStatus"'::regtype) THEN
+      ALTER TYPE "UploadStatus" ADD VALUE 'WASABI_OK';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'ORPHANED' AND enumtypid = '"UploadStatus"'::regtype) THEN
+      ALTER TYPE "UploadStatus" ADD VALUE 'ORPHANED';
+    END IF;
+  END IF;
+END $$;
+SQL
+
+# ──────────────────────────────────────────────────────────────────────────────
 # v1.33.0 — pre-push migration for OT signature workflow.
 #
 # Old enum: OTApprovalStatus { PENDING, APPROVED }
@@ -229,6 +253,36 @@ BEGIN
      WHERE 'MUA' = ANY("crewRequired");
     GET DIAGNOSTICS affected = ROW_COUNT;
     RAISE NOTICE 'Backfilled % booking(s): crewRequired MUA -> Virtual Production', affected;
+  END IF;
+END $$;
+SQL
+
+# ──────────────────────────────────────────────────────────────────────────────
+# v1.35.0 — seed Outlet.storagePolicy = 'DUAL_WRITE' for the outlets that
+# require both Drive + Wasabi archive (paid client / event work):
+# AGN, TSS, NWS. Other outlets stay at the schema default 'DRIVE_ONLY'.
+#
+# Guarded so this only flips rows that are still on the default — admins
+# can change a policy via the future admin UI without this seed clobbering
+# their choice on the next restart. Future outlets that should default to
+# DUAL_WRITE either get added to this list or set via that admin UI.
+# ──────────────────────────────────────────────────────────────────────────────
+echo "==> Seeding Outlet.storagePolicy for DUAL_WRITE outlets..."
+psql "$DATABASE_URL" <<'SQL' || echo "storagePolicy seed skipped (column missing — old image)"
+DO $$
+DECLARE
+  flipped INT;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'outlets' AND column_name = 'storagePolicy'
+  ) THEN
+    UPDATE outlets
+       SET "storagePolicy" = 'DUAL_WRITE'
+     WHERE code IN ('AGN', 'TSS', 'NWS')
+       AND "storagePolicy" = 'DRIVE_ONLY';
+    GET DIAGNOSTICS flipped = ROW_COUNT;
+    RAISE NOTICE 'Flipped % outlet(s) to DUAL_WRITE storage policy', flipped;
   END IF;
 END $$;
 SQL
