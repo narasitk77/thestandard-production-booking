@@ -5,6 +5,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.4] — 2026-05-28
+
+### Fixed — `/upload` strictly limits to CONFIRMED + COMPLETED everywhere
+
+Two leaks in v1.35.3 closed:
+
+#### 1. Admin's list view missed COMPLETED rows
+
+The admin path fetched `/api/bookings?status=CONFIRMED` only — the
+underlying API accepts a single status param at a time, so a single
+fetch silently dropped every COMPLETED booking from the admin's
+upload list. They had to know the URL or use `/my-bookings` to reach
+those.
+
+Fix: admin path now fires **two parallel fetches** (`status=CONFIRMED`
+and `status=COMPLETED`), dedupes by id, and sorts by `shootDate` desc.
+Crew path (`?scope=mine&limit=200`) was already correct — it fetches
+all of the crew's assignments and filters client-side, which already
+caught both statuses.
+
+#### 2. Single-booking deep-link didn't warn on bad status upfront
+
+If a user pasted `/upload?bookingId=X` where X happened to be
+REQUESTED / ASSIGNED / CANCELLED, the page used to render the full
+`UploadSection` and only show the failure when they tried to upload
+(403 BAD_STATUS from `/api/upload/init`).
+
+Fix: page now shows the booking's status badge in the header and, if
+status is anything other than CONFIRMED / COMPLETED, replaces
+UploadSection with a clear advisory:
+
+```
+Booking นี้สถานะ REQUESTED — upload ทำได้เฉพาะ CONFIRMED หรือ COMPLETED เท่านั้น
+รอ Admin approve booking ก่อน — แจ้ง Producer
+[← เลือก booking อื่น]
+```
+
+Server gate unchanged — `/api/upload/init` still 403s; this is a UX
+fix so the user sees the reason without first composing files.
+
+#### Rollback
+
+Pure UI / fetch logic change in `/upload/page.tsx`. Bump
+`IMAGE_TAG` back to `sha-8b7a2bb` (v1.35.3) to revert; the API gate
+stays correct either way.
+
+---
+
 ## [1.35.3] — 2026-05-28
 
 ### Fixed — Crew can actually reach the upload UI + assignment gate

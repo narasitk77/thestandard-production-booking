@@ -73,17 +73,30 @@ function UploadPage() {
       return
     }
     // List mode — pull bookings the user can act on. Admins use the full
-    // feed; crew uses ?scope=mine to restrict to their own assignments.
+    // feed (2 parallel fetches because the bookings API takes a single
+    // status param at a time); crew uses ?scope=mine to restrict to their
+    // own assignments.
     const isAdmin = me?.role === 'ADMIN'
-    const url = isAdmin
-      ? '/api/bookings?limit=100&status=CONFIRMED'
-      : '/api/bookings?scope=mine&limit=200'
-    fetch(url)
-      .then(r => r.json())
-      .then(d => {
-        const all: BookingRow[] = d.bookings || []
-        const eligible = all.filter(b => b.status === 'CONFIRMED' || b.status === 'COMPLETED')
-        setBookings(eligible)
+    const urls = isAdmin
+      ? [
+          '/api/bookings?limit=100&status=CONFIRMED',
+          '/api/bookings?limit=100&status=COMPLETED',
+        ]
+      : ['/api/bookings?scope=mine&limit=200']
+    Promise.all(urls.map(u => fetch(u).then(r => r.json())))
+      .then(results => {
+        const seen = new Set<string>()
+        const merged: BookingRow[] = []
+        for (const d of results) {
+          for (const b of (d.bookings || []) as BookingRow[]) {
+            if (seen.has(b.id)) continue
+            seen.add(b.id)
+            if (b.status === 'CONFIRMED' || b.status === 'COMPLETED') merged.push(b)
+          }
+        }
+        // Sort newest shoot date first so the most-relevant rows are on top
+        merged.sort((a, b) => (b.shootDate || '').localeCompare(a.shootDate || ''))
+        setBookings(merged)
       })
       .catch(e => setError(String(e?.message || e)))
       .finally(() => setLoading(false))
@@ -116,26 +129,56 @@ function UploadPage() {
       )}
 
       {/* SINGLE BOOKING MODE */}
-      {requestedBookingId && single && (
-        <>
-          <div className="gf-card p-3 text-xs text-gray-600 space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono font-medium text-gray-900">{single.bookingCode || single.id}</span>
-              <span className="bg-gray-100 px-1.5 py-0.5 rounded">{single.outlet.code}</span>
-              <span className="text-gray-500">·</span>
-              <span className="text-gray-700">{single.program.name}</span>
-              <span className="text-gray-500">·</span>
-              <span className="text-gray-700">{fmtDate(single.shootDate)} {single.callTime}</span>
+      {requestedBookingId && single && (() => {
+        // Upload is only allowed when the booking has been approved
+        // (CONFIRMED) or finished (COMPLETED). REQUESTED hasn't been
+        // approved yet; ASSIGNED is mid-flight; CANCELLED is dead.
+        // We surface this upfront instead of letting the user fill the
+        // form and then get a 403 from /api/upload/init.
+        const canStatus = single.status === 'CONFIRMED' || single.status === 'COMPLETED'
+        return (
+          <>
+            <div className="gf-card p-3 text-xs text-gray-600 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono font-medium text-gray-900">{single.bookingCode || single.id}</span>
+                <span className="bg-gray-100 px-1.5 py-0.5 rounded">{single.outlet.code}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                  single.status === 'CONFIRMED' ? 'bg-green-50 text-green-700 border border-green-200'
+                  : single.status === 'COMPLETED' ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                }`}>{single.status}</span>
+                <span className="text-gray-500">·</span>
+                <span className="text-gray-700">{single.program.name}</span>
+                <span className="text-gray-500">·</span>
+                <span className="text-gray-700">{fmtDate(single.shootDate)} {single.callTime}</span>
+              </div>
             </div>
-          </div>
-          <UploadSection booking={{
-            id: single.id,
-            bookingCode: single.bookingCode ?? null,
-            status: single.status,
-            outlet: single.outlet,
-          }} />
-        </>
-      )}
+            {canStatus ? (
+              <UploadSection booking={{
+                id: single.id,
+                bookingCode: single.bookingCode ?? null,
+                status: single.status,
+                outlet: single.outlet,
+              }} />
+            ) : (
+              <div className="gf-card p-6 text-center space-y-2 border-l-4 border-amber-400 bg-amber-50/40">
+                <div className="text-sm text-amber-900">
+                  Booking นี้สถานะ <strong>{single.status}</strong> — upload ทำได้เฉพาะ
+                  {' '}<strong>CONFIRMED</strong> หรือ <strong>COMPLETED</strong> เท่านั้น
+                </div>
+                <div className="text-xs text-gray-600">
+                  {single.status === 'REQUESTED' && 'รอ Admin approve booking ก่อน — แจ้ง Producer'}
+                  {single.status === 'ASSIGNED' && 'รอ Admin ยืนยัน assign — แจ้ง Producer'}
+                  {single.status === 'CANCELLED' && 'Booking ถูกยกเลิก — ไม่ควร upload'}
+                </div>
+                <Link href="/upload" className="inline-block text-xs text-[#673ab7] hover:underline">
+                  ← เลือก booking อื่น
+                </Link>
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       {requestedBookingId && !loading && !single && !error && (
         <div className="gf-card p-6 text-center text-sm text-gray-500">
