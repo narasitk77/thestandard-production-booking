@@ -5,6 +5,98 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.7] — 2026-05-29
+
+### Fixed — Calendar guest "silent drop" — diagnostic + readback verification
+
+User report: "calendar ไม่ยิง guest" — assigned crew aren't being added
+as event attendees. Without access to the live audit_logs to diagnose
+directly, this release ships two things: a controlled diagnostic
+endpoint to isolate the cause, and a readback verification in the
+production create/patch paths so the most common silent-failure mode
+gets caught + alerted instead of being lost.
+
+#### Most likely root cause (per Google's behavior)
+
+When the DWD-impersonated user (e.g. `narasit.k@thestandard.co`) has
+**read-only access** to the shared Production Bookings calendar
+instead of "Make changes to events", the Calendar API:
+
+- Returns `200 OK` on `events.insert` / `events.patch` with the
+  attendees echoed in the response
+- **Silently drops the attendees** when persisting
+
+The pre-v1.35.7 code trusted the 200 and assumed the attendees were
+attached. They weren't. No alert fired because the API returned
+success.
+
+#### `/api/admin/calendar-debug` (new diagnostic endpoint)
+
+```
+GET /api/admin/calendar-debug
+GET /api/admin/calendar-debug?inviteSelf=1   ← actually emails the
+                                               impersonate subject
+```
+
+Walks the full guest-attach path against a throwaway event:
+
+1. Read env: service account + impersonate subject + calendar id
+2. Authenticate (forces DWD JWT exchange via `calendars.get`)
+3. `events.insert` with `[impersonateSubject]` as the sole attendee
+4. **`events.get` to read the persisted attendees count**
+5. `events.delete` to clean up
+
+Returns a structured report with `summary` mapped to a known cause:
+
+| `summary` | Meaning + recommended fix |
+|---|---|
+| `OK — attendees attached + persisted` | Pipe is healthy. If real bookings still show empty, audit `audit_logs WHERE action LIKE 'calendar.%_failed'` |
+| `ATTENDEES_SILENTLY_DROPPED` | The silent-drop case above. Open Calendar settings → share → grant impersonated user "Make changes to events" |
+| `DWD_NOT_GRANTED` | Workspace Admin → Security → API controls → Domain-Wide Delegation → add SA client id with `https://www.googleapis.com/auth/calendar` |
+| `INSUFFICIENT_PERMISSIONS` | DWD works but user lacks calendar visibility. Share the calendar with them first |
+| `NO_IMPERSONATE_SUBJECT` | Set `GOOGLE_IMPERSONATE_SUBJECT` in Portainer stack env |
+| `NO_SERVICE_ACCOUNT` | Set `GOOGLE_SERVICE_ACCOUNT_*` in Portainer stack env |
+
+Admin-only. Side effect: creates + immediately deletes one event 24h
+in the future. With `inviteSelf=0` (default), no email is sent.
+
+#### Production fix — readback verification
+
+`createCalendarEvent` and `updateCalendarEventAttendees` now do a
+`calendar.events.get` after a successful insert/patch when there are
+attendees in the request. If the persisted count is less than what
+was sent:
+
+- Logs a warning with the specific likely cause
+- Fires `notifyCalendarAlert` (writes `AuditLog` + emails the calendar
+  alert recipient — same channel the existing failure path uses)
+- For `updateCalendarEventAttendees`: returns `false` so the assign
+  route correctly surfaces a failure to the admin UI (currently
+  shown as "⚠ guests NOT added" toast)
+
+Cost: one extra `events.get` per insert/patch with attendees (~150ms).
+Worth it — silent data loss is hard to detect after the fact.
+
+#### How to use this release
+
+1. Deploy `sha-<new>` via Portainer.
+2. As admin, browse to **`/api/admin/calendar-debug`** in your browser.
+3. Read the `summary` field at the top of the JSON.
+4. Follow the matching row in the table above.
+5. After fixing the root cause, re-run the endpoint to confirm
+   `summary: 'OK'`.
+6. Then push a new assign action on a real booking to verify the
+   readback no longer fires the alert.
+
+#### Rollback
+
+Pure additive — new endpoint + extra readback in the existing helpers.
+No schema change. Bump `IMAGE_TAG` back to `sha-d3d7592` (v1.35.6) to
+revert; the silent-drop bug returns unalerted but no other behavior
+changes.
+
+---
+
 ## [1.35.6] — 2026-05-29
 
 ### Hardened — Resilient uploads (chunked Drive + per-chunk retry + drag/drop)
