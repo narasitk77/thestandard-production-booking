@@ -1,301 +1,215 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Upload, CheckCircle2, Loader2, ArrowLeft, Film } from 'lucide-react'
+import { ArrowLeft, Loader2, Search } from 'lucide-react'
+import UploadSection from '@/app/_components/booking/UploadSection'
 
-interface Episode {
+interface BookingRow {
   id: string
-  episodeId: string
-  title: string
-}
-
-interface Booking {
-  id: string
+  bookingCode: string | null
   shootDate: string
-  outlet: { code: string; name: string }
+  callTime: string
+  status: string
+  outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
   program: { code: string; name: string }
-  episodes: Episode[]
+  assignedEmails: string[]
+  episodes: Array<{ episodeId: string; title: string }>
 }
 
-const CAMERAS = ['Cam1', 'Cam2', 'Cam3', 'Cam4', 'Sound', 'Drone', 'BTS']
+interface Me {
+  email: string
+  role: string
+  canUpload: boolean
+}
 
-function UploadContent() {
+const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+function fmtDate(d: string): string {
+  const dt = new Date(d)
+  return `${dt.getDate()} ${THAI_MONTHS[dt.getMonth()]} ${String(dt.getFullYear()).slice(2)}`
+}
+
+/**
+ * /upload — v1.35.3 rewrite.
+ *
+ * Two modes driven by the `?bookingId=X` query param:
+ *   - With bookingId  → embeds UploadSection for that booking
+ *   - Without         → shows a list of bookings the user can upload to
+ *                       (admin sees all CONFIRMED/COMPLETED; crew sees
+ *                        only the ones they're assigned to)
+ */
+function UploadPage() {
   const searchParams = useSearchParams()
-  const preselectedBookingId = searchParams.get('bookingId')
+  const requestedBookingId = searchParams.get('bookingId') || ''
 
-  const [bookings, setBookings] = useState<Booking[]>([])
-  const [selectedBookingId, setSelectedBookingId] = useState(preselectedBookingId || '')
-  const [selectedEpisodeId, setSelectedEpisodeId] = useState('')
-  const [camera, setCamera] = useState('Cam1')
-  const [uploadedBy, setUploadedBy] = useState('')
-  const [notes, setNotes] = useState('')
-  const [files, setFiles] = useState<FileList | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadedCount, setUploadedCount] = useState(0)
+  const [me, setMe] = useState<Me | null>(null)
+  const [bookings, setBookings] = useState<BookingRow[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState(false)
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
-    fetch('/api/bookings?limit=50&status=CONFIRMED')
-      .then(r => r.json())
-      .then(data => {
-        const allBookings = data.bookings || []
-        setBookings(allBookings)
-        if (preselectedBookingId && allBookings.find((b: Booking) => b.id === preselectedBookingId)) {
-          setSelectedBookingId(preselectedBookingId)
-        } else if (!preselectedBookingId) {
-          // Also fetch PENDING
-          fetch('/api/bookings?limit=50&status=PENDING')
-            .then(r => r.json())
-            .then(d => setBookings(prev => [...prev, ...(d.bookings || [])]))
-        }
-      })
-  }, [preselectedBookingId])
+    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.user) setMe({ email: d.user.email, role: d.user.role, canUpload: !!d.user.canUpload })
+    }).catch(() => {})
+  }, [])
 
-  const selectedBooking = bookings.find(b => b.id === selectedBookingId)
-
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!files || files.length === 0 || !selectedBookingId || !camera || !uploadedBy) {
-      setError('Please fill all required fields and select files.')
+  useEffect(() => {
+    if (requestedBookingId) {
+      // Single-booking mode
+      fetch(`/api/bookings/${requestedBookingId}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.error) {
+            setError(d.error)
+            setBookings([])
+          } else {
+            setBookings([d])
+          }
+        })
+        .catch(e => setError(String(e?.message || e)))
+        .finally(() => setLoading(false))
       return
     }
+    // List mode — pull bookings the user can act on. Admins use the full
+    // feed; crew uses ?scope=mine to restrict to their own assignments.
+    const isAdmin = me?.role === 'ADMIN'
+    const url = isAdmin
+      ? '/api/bookings?limit=100&status=CONFIRMED'
+      : '/api/bookings?scope=mine&limit=200'
+    fetch(url)
+      .then(r => r.json())
+      .then(d => {
+        const all: BookingRow[] = d.bookings || []
+        const eligible = all.filter(b => b.status === 'CONFIRMED' || b.status === 'COMPLETED')
+        setBookings(eligible)
+      })
+      .catch(e => setError(String(e?.message || e)))
+      .finally(() => setLoading(false))
+  }, [requestedBookingId, me?.role])
 
-    setUploading(true)
-    setError('')
-    setUploadedCount(0)
-
-    let successCount = 0
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('bookingId', selectedBookingId)
-      formData.append('camera', camera)
-      formData.append('uploadedBy', uploadedBy)
-      if (selectedEpisodeId) formData.append('episodeId', selectedEpisodeId)
-      if (notes) formData.append('notes', notes)
-
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData })
-        if (res.ok) successCount++
-        setUploadedCount(successCount)
-      } catch {
-        // continue
-      }
-    }
-
-    setUploading(false)
-    if (successCount > 0) {
-      setSuccess(true)
-      setFiles(null)
-      const input = document.getElementById('file-input') as HTMLInputElement
-      if (input) input.value = ''
-    } else {
-      setError('All uploads failed. Check server logs.')
-    }
-  }
-
-  if (success) {
-    return (
-      <div className="max-w-lg mx-auto px-4 py-20 text-center">
-        <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-brand-black mb-2">
-          {uploadedCount} file{uploadedCount !== 1 ? 's' : ''} uploaded!
-        </h2>
-        <p className="text-brand-gray-500 text-sm mb-6">
-          Footage logged to {selectedBooking?.outlet.code}-{selectedBooking?.program.code}
-          {selectedEpisodeId ? ` → ${selectedEpisodeId}` : ''}
-        </p>
-        <div className="flex gap-3 justify-center">
-          <button onClick={() => setSuccess(false)} className="btn-secondary">Upload More</button>
-          {selectedBookingId && (
-            <Link href={`/dashboard/${selectedBookingId}`} className="btn-primary">View Booking</Link>
-          )}
-        </div>
-      </div>
-    )
-  }
+  const single = requestedBookingId ? bookings[0] : null
+  const filtered = bookings.filter(b => {
+    if (!search.trim()) return true
+    const q = search.toLowerCase()
+    return (b.bookingCode || '').toLowerCase().includes(q)
+        || (b.outlet?.name || '').toLowerCase().includes(q)
+        || (b.program?.name || '').toLowerCase().includes(q)
+  })
 
   return (
-    <div className="max-w-xl mx-auto px-4 sm:px-6 py-8">
-      <Link href="/dashboard" className="inline-flex items-center gap-1 text-sm text-brand-gray-500 hover:text-brand-black mb-5">
-        <ArrowLeft className="w-4 h-4" /> Dashboard
+    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
+      <Link href="/my-bookings" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+        <ArrowLeft className="w-4 h-4" /> กลับ My Bookings
       </Link>
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-brand-black mb-1">Upload Footage</h1>
-        <p className="text-sm text-brand-gray-500">
-          ลง footage โดยผูกกับ Booking + Episode ID · เข้า Mimir/NAS อัตโนมัติ
+      <div className="gf-header p-4 sm:p-6">
+        <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Upload Footage</h1>
+        <p className="text-xs sm:text-sm text-gray-500">
+          อัปโหลด footage ตรงเข้า Drive (+ Wasabi ถ้า outlet เป็น DUAL_WRITE) — ผูกกับ Production ID อัตโนมัติ
         </p>
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">{error}</div>
+        <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400">{error}</div>
       )}
 
-      <form onSubmit={handleUpload} className="space-y-5">
-        {/* Select booking */}
-        <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-sm text-brand-gray-700 border-b border-brand-gray-100 pb-2">
-            1 · Select Booking
-          </h2>
-          <div>
-            <label className="label">Booking <span className="text-red-500">*</span></label>
-            <select
-              className="input"
-              value={selectedBookingId}
-              onChange={e => { setSelectedBookingId(e.target.value); setSelectedEpisodeId('') }}
-              required
-            >
-              <option value="">— Select Booking —</option>
-              {bookings.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.outlet.code}-{b.shootDate.slice(2, 4)}{b.shootDate.slice(5, 7)}{b.shootDate.slice(8, 10)}-{b.program.code} · {b.program.name} ({b.shootDate.slice(0, 10)})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedBooking && (
-            <div>
-              <label className="label">Episode (optional)</label>
-              <select
-                className="input"
-                value={selectedEpisodeId}
-                onChange={e => setSelectedEpisodeId(e.target.value)}
-              >
-                <option value="">— All episodes / Unassigned —</option>
-                {selectedBooking.episodes.map(ep => (
-                  <option key={ep.id} value={ep.episodeId}>
-                    {ep.episodeId} — {ep.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* Camera slot */}
-        <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-sm text-brand-gray-700 border-b border-brand-gray-100 pb-2">
-            2 · Camera / Source
-          </h2>
-          <div>
-            <label className="label">Camera Slot <span className="text-red-500">*</span></label>
-            <div className="flex flex-wrap gap-2">
-              {CAMERAS.map(cam => (
-                <button
-                  key={cam}
-                  type="button"
-                  onClick={() => setCamera(cam)}
-                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                    camera === cam
-                      ? 'bg-brand-black text-white border-brand-black'
-                      : 'bg-white text-brand-gray-600 border-brand-gray-200 hover:border-brand-gray-300'
-                  }`}
-                >
-                  {cam}
-                </button>
-              ))}
+      {/* SINGLE BOOKING MODE */}
+      {requestedBookingId && single && (
+        <>
+          <div className="gf-card p-3 text-xs text-gray-600 space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono font-medium text-gray-900">{single.bookingCode || single.id}</span>
+              <span className="bg-gray-100 px-1.5 py-0.5 rounded">{single.outlet.code}</span>
+              <span className="text-gray-500">·</span>
+              <span className="text-gray-700">{single.program.name}</span>
+              <span className="text-gray-500">·</span>
+              <span className="text-gray-700">{fmtDate(single.shootDate)} {single.callTime}</span>
             </div>
           </div>
-          <div>
-            <label className="label">Uploaded By <span className="text-red-500">*</span></label>
+          <UploadSection booking={{
+            id: single.id,
+            bookingCode: single.bookingCode ?? null,
+            status: single.status,
+            outlet: single.outlet,
+          }} />
+        </>
+      )}
+
+      {requestedBookingId && !loading && !single && !error && (
+        <div className="gf-card p-6 text-center text-sm text-gray-500">
+          ไม่พบ booking นี้ หรือคุณไม่มีสิทธิ์ upload ที่นี่
+        </div>
+      )}
+
+      {/* LIST MODE — show eligible bookings */}
+      {!requestedBookingId && (
+        <>
+          <div className="gf-card p-3 flex items-center gap-2 flex-wrap">
+            <Search className="w-4 h-4 text-gray-400 shrink-0" />
             <input
               type="text"
-              className="input"
-              placeholder="Your name"
-              value={uploadedBy}
-              onChange={e => setUploadedBy(e.target.value)}
-              required
+              placeholder="ค้นหา Production ID / Program / Outlet"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-sm flex-1 min-w-[200px]"
             />
+            <span className="text-xs text-gray-500 ml-auto">
+              {me?.role === 'ADMIN' ? 'แสดงทุก booking ที่ CONFIRMED/COMPLETED' : 'แสดงเฉพาะที่คุณถูก assign'}
+            </span>
           </div>
-          <div>
-            <label className="label">Notes</label>
-            <input
-              type="text"
-              className="input"
-              placeholder="e.g., Card 1 of 2, B-roll only..."
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-            />
-          </div>
-        </div>
 
-        {/* File select */}
-        <div className="card p-5">
-          <h2 className="font-semibold text-sm text-brand-gray-700 border-b border-brand-gray-100 pb-3 mb-4">
-            3 · Select Files
-          </h2>
-          <label
-            htmlFor="file-input"
-            className={`flex flex-col items-center justify-center w-full h-36 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
-              files && files.length > 0
-                ? 'border-brand-gold bg-brand-gold/5'
-                : 'border-brand-gray-200 hover:border-brand-gray-300 bg-brand-gray-50'
-            }`}
-          >
-            {files && files.length > 0 ? (
-              <div className="text-center">
-                <Film className="w-8 h-8 text-brand-gold mx-auto mb-2" />
-                <p className="text-sm font-medium text-brand-black">{files.length} file{files.length !== 1 ? 's' : ''} selected</p>
-                <p className="text-xs text-brand-gray-500">{Array.from(files).map(f => f.name).join(', ').slice(0, 60)}</p>
-              </div>
-            ) : (
-              <div className="text-center">
-                <Upload className="w-8 h-8 text-brand-gray-300 mx-auto mb-2" />
-                <p className="text-sm text-brand-gray-500">Click to select footage files</p>
-                <p className="text-xs text-brand-gray-400 mt-1">MP4, MOV, MXF, R3D, BRAW supported</p>
-              </div>
-            )}
-            <input
-              id="file-input"
-              type="file"
-              className="sr-only"
-              multiple
-              accept="video/*,.mxf,.r3d,.braw"
-              onChange={e => setFiles(e.target.files)}
-            />
-          </label>
-          <p className="text-xs text-brand-gray-400 mt-2">
-            กฎ: ไฟล์ข้างในเก็บ <strong>ชื่อเดิมของกล้อง</strong> — ไม่ต้อง rename (Folder-only policy)
-          </p>
-        </div>
-
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={uploading || !files || files.length === 0}
-          className="btn-primary w-full justify-center py-3"
-        >
-          {uploading ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Uploading {uploadedCount}/{files?.length ?? 0}...
-            </>
+          {loading ? (
+            <div className="gf-card p-12 text-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" /></div>
+          ) : filtered.length === 0 ? (
+            <div className="gf-card p-8 text-center text-sm text-gray-500">
+              {bookings.length === 0
+                ? me?.role === 'ADMIN'
+                  ? 'ยังไม่มี booking ที่ CONFIRMED/COMPLETED'
+                  : 'ยังไม่มี booking ที่ถูก assign — รอ producer assign ก่อน'
+                : 'ไม่ตรงกับคำค้น'}
+            </div>
           ) : (
-            <>
-              <Upload className="w-4 h-4" />
-              Upload {files ? `${files.length} file${files.length !== 1 ? 's' : ''}` : 'Files'}
-            </>
+            <div className="space-y-2">
+              {filtered.map(b => (
+                <Link key={b.id} href={`/upload?bookingId=${b.id}`}
+                  className="gf-card p-3 hover:border-[#673ab7] transition-colors block">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-medium text-gray-900">{b.bookingCode || b.id}</span>
+                    <span className="bg-gray-100 px-1.5 py-0.5 text-[11px] rounded">{b.outlet.code}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      b.status === 'CONFIRMED' ? 'bg-green-50 text-green-700 border border-green-200'
+                                               : 'bg-blue-50 text-blue-700 border border-blue-200'
+                    }`}>{b.status}</span>
+                    {b.outlet.storagePolicy === 'DUAL_WRITE' && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200" title="ขึ้นทั้ง Drive + Wasabi">
+                        DUAL
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    {b.program.name} · {fmtDate(b.shootDate)} {b.callTime}
+                  </div>
+                  {b.episodes?.length > 0 && (
+                    <div className="text-[11px] text-gray-500 mt-0.5">
+                      {b.episodes.slice(0, 3).map(e => e.episodeId).join(' · ')}{b.episodes.length > 3 ? ` +${b.episodes.length - 3}` : ''}
+                    </div>
+                  )}
+                </Link>
+              ))}
+            </div>
           )}
-        </button>
-      </form>
+        </>
+      )}
     </div>
   )
 }
 
-export default function UploadPage() {
+export default function UploadPageWrapper() {
   return (
-    <Suspense fallback={
-      <div className="flex items-center justify-center min-h-96">
-        <Loader2 className="w-8 h-8 animate-spin text-brand-gray-400" />
-      </div>
-    }>
-      <UploadContent />
+    <Suspense fallback={<div className="p-12 text-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" /></div>}>
+      <UploadPage />
     </Suspense>
   )
 }

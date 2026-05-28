@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession, getUploadAccess } from '@/lib/session'
+import { getSession, canUploadToBooking } from '@/lib/session'
 import { buildStoragePath, hasOutletFolderMapping, outletFolderName } from '@/lib/outlet-folders'
 import {
   isWasabiConfigured,
@@ -45,14 +45,10 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // v1.35.2 — defense in depth. UI hides the Upload tab for non-crew, but
-    // a hand-crafted POST would still land here without this gate.
-    if (!(await getUploadAccess(session.email))) {
-      return NextResponse.json({
-        error: 'Upload access requires video/sound team role or admin',
-        code: 'NO_UPLOAD_ACCESS',
-      }, { status: 403 })
-    }
+    // v1.35.3 — per-booking gate runs after the body is parsed (we need the
+    // booking id first). The `getUploadAccess` quick role-only check is
+    // dropped — `canUploadToBooking` below subsumes it AND adds the
+    // assignment + status checks in one place.
 
     const body = await request.json().catch(() => ({}))
     const bookingId = String(body.bookingId || '').trim()
@@ -89,6 +85,7 @@ export async function POST(request: NextRequest) {
         id: true,
         bookingCode: true,
         status: true,
+        assignedEmails: true,
         outlet: { select: { code: true, name: true, storagePolicy: true } },
       },
     })
@@ -96,15 +93,22 @@ export async function POST(request: NextRequest) {
     if (!booking.bookingCode) {
       return NextResponse.json({ error: 'Booking has no Production ID — assign one before uploading' }, { status: 400 })
     }
-    // v1.35.2 — only CONFIRMED + COMPLETED bookings can receive footage.
-    // REQUESTED isn't approved yet; CANCELLED shouldn't get new files.
-    // (Note: BookingStatus enum spells it 'COMPLETED', not 'COMPLETE' —
-    //  UploadStatus is separate and does spell its own state 'COMPLETE'.)
-    if (booking.status !== 'CONFIRMED' && booking.status !== 'COMPLETED') {
-      return NextResponse.json({
-        error: `Cannot upload to a ${booking.status} booking — upload is only allowed for CONFIRMED or COMPLETED`,
-        code: 'BAD_BOOKING_STATUS',
-      }, { status: 400 })
+    // v1.35.3 — combined gate: role + status + assignment (admin bypasses
+    // assignment). Mirrors the UI's visibility check exactly so a
+    // hand-crafted POST gets the same answer as the rendered page would.
+    const check = await canUploadToBooking(session.email, {
+      id: booking.id, status: booking.status, assignedEmails: booking.assignedEmails,
+    })
+    if (!check.ok) {
+      const code = check.reason ?? 'FORBIDDEN'
+      const errMap: Record<string, string> = {
+        NO_UPLOAD_ROLE: 'Upload requires video/sound team role or admin',
+        NOT_ASSIGNED:   'You are not assigned to this booking — only assigned crew can upload',
+        BAD_STATUS:     `Booking is ${booking.status} — uploads only allowed for CONFIRMED or COMPLETED`,
+        BOOKING_NOT_FOUND: 'Booking not found',
+        FORBIDDEN: 'Upload forbidden for this booking',
+      }
+      return NextResponse.json({ error: errMap[code], code }, { status: 403 })
     }
     if (!hasOutletFolderMapping(booking.outlet.code)) {
       return NextResponse.json({

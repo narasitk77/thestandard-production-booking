@@ -5,6 +5,98 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.3] — 2026-05-28
+
+### Fixed — Crew can actually reach the upload UI + assignment gate
+
+v1.35.2 placed the Upload section on `/admin/[id]`, but `/admin` is
+ADMIN-only via layout — so the video/sound crew the feature was built
+for couldn't actually get there. This release opens up `/upload` (was
+admin-only "under development") as the proper crew-facing entry point
+and adds the per-booking assignment check the user asked for:
+
+> "User คนนั้นจะสามารถเลือกได้แค่งานที่ตัวเองถูก assign และงานที่
+> จะอัพได้ต้อง [CONFIRMED/COMPLETED]"
+
+#### `/upload` rewrite (was the legacy admin-only stub)
+
+- **Layout gate** flipped from "ADMIN only" to "anyone with upload
+  access" (`getUploadAccess` = ADMIN or active TeamMember with role
+  in `{video, sound}`). The under-development banner is gone.
+- **Page** has two modes driven by `?bookingId=X`:
+  - With param → renders the same `UploadSection` component used on
+    `/admin/[id]`, with the booking context loaded from the URL.
+    Server enforces the per-booking gate (see below) so a non-assigned
+    user navigating directly to `/upload?bookingId=X` gets a 403.
+  - Without param → shows a searchable list of the bookings the user
+    can act on. Admins see all CONFIRMED/COMPLETED; crew sees only
+    `?scope=mine` results (their own assignments).
+
+#### `canUploadToBooking(email, bookingOrId)` — new helper in `src/lib/session.ts`
+
+Single source of truth combining all three gates:
+
+```ts
+{
+  ok: boolean,
+  reason?: 'NO_UPLOAD_ROLE' | 'NOT_ASSIGNED' | 'BAD_STATUS' | 'BOOKING_NOT_FOUND',
+  isAdmin?: boolean,
+}
+```
+
+Rules:
+- Inactive `User` → `NO_UPLOAD_ROLE`
+- Non-admin without `TeamMember` role `video`/`sound` → `NO_UPLOAD_ROLE`
+- Booking status not in `{CONFIRMED, COMPLETED}` → `BAD_STATUS`
+- **Non-admin not listed in `Booking.assignedEmails`** → `NOT_ASSIGNED`
+- ADMIN bypasses the assignment check (ops needs to upload on behalf
+  of crew, fix wrong filings, etc.)
+
+#### Server enforcement
+
+- `POST /api/upload/init` — runs `canUploadToBooking` after parsing the
+  body, returns `403` with the specific `code` so the UI can show a
+  friendly message ("you're not assigned to this booking", etc.). The
+  v1.35.2 `getUploadAccess` + `BAD_BOOKING_STATUS` checks fold into the
+  single new helper — same coverage, less duplication.
+- `GET /api/upload/list?bookingId=…` — same gate. Listing the upload
+  history of a booking you can't act on leaks who's been on a shoot,
+  so visibility ties to upload permission.
+
+#### Discovery surfaces
+
+- **Nav** — "Upload" link in More dropdown now uses `canUpload` flag
+  (was `isAdmin`). Crew see the link; users without upload access
+  don't.
+- **`/my-bookings`** — CONFIRMED + COMPLETED rows get a primary
+  "📹 Upload" button that links to `/upload?bookingId=<id>`. Only
+  rendered when `me.canUpload === true`. Crew's natural home page now
+  surfaces the action they need.
+- **`/admin`** — the v1.35.2 Upload button on booking cards is
+  unchanged (admin-only path stays as a power-user shortcut).
+
+#### What the crew sees end-to-end (v1.35.3)
+
+1. Videographer / sound op signs in → lands on `/`
+2. Goes to **My Bookings** in the nav (or **Upload** for a direct
+   booking picker)
+3. Sees their assigned bookings; CONFIRMED/COMPLETED ones have
+   "📹 Upload"
+4. Clicks → `/upload?bookingId=X` → UploadSection prefilled, no way
+   to misclick into a different booking
+5. Drops files; per-cloud progress bars run; history table refreshes
+6. Done
+
+#### Rollback
+
+Pure additive on the server (one new helper); UI changes affect
+`/upload`, `/my-bookings`, Nav. Rollback by bumping `IMAGE_TAG` back
+to `sha-7e3ed84` (v1.35.2). The `/upload` page reverts to its
+admin-only stub; `/admin/[id]#upload` still works for admins exactly
+as it did in v1.35.2.
+
+---
+
 ## [1.35.2] — 2026-05-28
 
 ### Added — Upload UI on `/admin/[id]` (crew-only, status-gated, booking-prefilled)

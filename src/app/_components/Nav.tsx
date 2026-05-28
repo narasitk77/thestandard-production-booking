@@ -11,6 +11,7 @@ interface NavProps {
   canSeeOT?: boolean
   canSeeProducer?: boolean
   canApproveOT?: boolean
+  canUpload?: boolean
 }
 
 /**
@@ -20,7 +21,7 @@ interface NavProps {
  * Pages a user touches daily live in `primary`; docs/dev utilities live
  * in `secondary` behind a divider.
  */
-export default function Nav({ session, canSeeOT = false, canSeeProducer = false, canApproveOT = false }: NavProps) {
+export default function Nav({ session, canSeeOT = false, canSeeProducer = false, canApproveOT = false, canUpload = false }: NavProps) {
   const [open, setOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const pathname = usePathname() || '/'
@@ -59,7 +60,9 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     { href: '/profile/signature', label: 'ลายเซ็น', show: !!session },
     { href: '/manual', label: 'คู่มือ', show: true },
     { href: '/changelog', label: 'อัปเดต', show: true },
-    { href: '/upload', label: 'Upload', show: !!isAdmin },
+    // v1.35.3 — Upload shown to crew (video/sound) + admin via canUpload flag.
+    // Previously admin-only because /upload was under-development.
+    { href: '/upload', label: 'Upload', show: !!canUpload },
   ].filter(i => i.show)
 
   return (

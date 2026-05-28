@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
-import { getSession, getProducerAccess, getOTApproverAccess } from '@/lib/session'
+import { getSession, getProducerAccess, getOTApproverAccess, getUploadAccess } from '@/lib/session'
 import { isTeamMember } from '@/lib/team-profiles'
 import Nav from './_components/Nav'
 
@@ -26,6 +26,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // the /ot/admin link in the nav so managers can reach the review surface
   // without being told the URL.
   const canApproveOT = await getOTApproverAccess(session?.email)
+  // v1.35.3 — Upload — ADMIN or video/sound roster role. Surfaces the
+  // /upload link in the nav so crew can find their assigned bookings to
+  // upload footage to.
+  const canUpload = await getUploadAccess(session?.email)
 
   return (
     <html lang="th">
@@ -40,6 +44,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           canSeeOT={canSeeOT}
           canSeeProducer={canSeeProducer}
           canApproveOT={canApproveOT}
+          canUpload={canUpload}
         />
         {children}
       </body>

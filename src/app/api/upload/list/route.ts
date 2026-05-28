@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession, getUploadAccess } from '@/lib/session'
+import { getSession, canUploadToBooking } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,14 +19,19 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!(await getUploadAccess(session.email))) {
-      return NextResponse.json({ error: 'Upload access required' }, { status: 403 })
-    }
 
     const { searchParams } = new URL(request.url)
     const bookingId = searchParams.get('bookingId')?.trim()
     if (!bookingId) {
       return NextResponse.json({ error: 'bookingId query parameter is required' }, { status: 400 })
+    }
+
+    // v1.35.3 — same per-booking gate as /api/upload/init. Listing the
+    // history of a booking you can't upload to leaks who's been on that
+    // shoot, so we tie list visibility to upload permission.
+    const check = await canUploadToBooking(session.email, bookingId)
+    if (!check.ok) {
+      return NextResponse.json({ error: 'Forbidden', code: check.reason }, { status: 403 })
     }
 
     const rows = await prisma.upload.findMany({

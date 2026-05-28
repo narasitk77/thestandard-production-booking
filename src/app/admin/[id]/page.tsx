@@ -720,7 +720,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       {/* v1.35.2 — Upload section. Visible only to video/sound crew (or admin)
           AND only when the booking is CONFIRMED or COMPLETED. Booking context
           is implicit via this page's URL, so the upload form is prefilled
-          and the user can't accidentally upload to the wrong booking. */}
+          and the user can't accidentally upload to the wrong booking.
+          (Since /admin is admin-only via layout.tsx, this section reaches only
+           admins in practice. Crew uses /upload?bookingId=… instead.) */}
       {meCanUpload && (booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') && (
         <div id="upload" className="gf-card p-3 border-l-4 border-[#673ab7] bg-purple-50/30">
           <div className="text-sm font-medium text-[#673ab7] mb-2 flex items-center gap-1">

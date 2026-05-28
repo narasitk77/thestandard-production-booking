@@ -66,6 +66,74 @@ export async function getUploadAccess(email: string | null | undefined): Promise
   }
 }
 
+// v1.35.3 — per-booking upload gate. Combines the general capability check
+// (`getUploadAccess`) with the booking-specific assignment rule so a
+// videographer can only push files to bookings they're actually working on.
+//
+// Admin bypass: anyone with `User.role === 'ADMIN'` skips the assignment
+// check (ops need to upload on behalf of crew, fix wrong filings, etc).
+//
+// Returns `{ ok, reason? }` so callers can either redirect/hide silently
+// or surface the specific failure (good for diagnosing "I can see this
+// booking on /my-bookings but the Upload button is missing — why?").
+export interface UploadAccessCheck {
+  ok: boolean
+  reason?: 'NO_UPLOAD_ROLE' | 'NOT_ASSIGNED' | 'BAD_STATUS' | 'BOOKING_NOT_FOUND'
+  isAdmin?: boolean
+}
+
+export async function canUploadToBooking(
+  email: string | null | undefined,
+  bookingIdOrRow:
+    | string
+    | { id: string; status: string; assignedEmails: string[] },
+): Promise<UploadAccessCheck> {
+  if (!email) return { ok: false, reason: 'NO_UPLOAD_ROLE' }
+  const lower = email.toLowerCase()
+
+  // Load user role first — admin shortcuts both the role check and the
+  // assignment check.
+  const user = await prisma.user.findUnique({
+    where: { email: lower },
+    select: { role: true, active: true },
+  })
+  if (!user || !user.active) return { ok: false, reason: 'NO_UPLOAD_ROLE' }
+  const isAdmin = user.role === 'ADMIN'
+
+  // For non-admins, confirm the upload-role check (video/sound)
+  if (!isAdmin) {
+    const member = await prisma.teamMember.findUnique({
+      where: { email: lower },
+      select: { role: true, active: true },
+    })
+    if (!member || !member.active || (member.role !== 'video' && member.role !== 'sound')) {
+      return { ok: false, reason: 'NO_UPLOAD_ROLE' }
+    }
+  }
+
+  // Load booking (caller may have already done this)
+  const booking = typeof bookingIdOrRow === 'string'
+    ? await prisma.booking.findUnique({
+        where: { id: bookingIdOrRow },
+        select: { id: true, status: true, assignedEmails: true },
+      })
+    : bookingIdOrRow
+  if (!booking) return { ok: false, reason: 'BOOKING_NOT_FOUND', isAdmin }
+
+  if (booking.status !== 'CONFIRMED' && booking.status !== 'COMPLETED') {
+    return { ok: false, reason: 'BAD_STATUS', isAdmin }
+  }
+
+  if (isAdmin) return { ok: true, isAdmin: true }
+
+  // Assignment check: case-insensitive membership in booking.assignedEmails
+  const assigned = (booking.assignedEmails || []).map(e => e.toLowerCase())
+  if (!assigned.includes(lower)) {
+    return { ok: false, reason: 'NOT_ASSIGNED', isAdmin: false }
+  }
+  return { ok: true, isAdmin: false }
+}
+
 // OT approver access (v1.33.4): the set of users who can approve/reject OT
 // records and see the cover-sheet overview at /ot/admin.
 //

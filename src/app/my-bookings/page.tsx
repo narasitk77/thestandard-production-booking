@@ -37,6 +37,13 @@ export default function MyBookingsPage() {
   const [bookings, setBookings] = useState<Booking[] | null>(null)
   const [tab, setTab] = useState<TabKey>('upcoming')
   const [search, setSearch] = useState('')
+  // v1.35.3 — whether to render Upload buttons next to CONFIRMED/COMPLETED rows
+  const [canUpload, setCanUpload] = useState(false)
+  useEffect(() => {
+    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.user?.canUpload) setCanUpload(true)
+    }).catch(() => {})
+  }, [])
 
   // Fetch once with scope=mine, then filter client-side per tab. The API
   // already handles "mine" vs "all confirmed" — for an inbox we want the
@@ -171,21 +178,22 @@ export default function MyBookingsPage() {
         </div>
       ) : (
         <ul className="ops-card divide-y divide-gray-100 overflow-hidden">
-          {filtered.map(b => <BookingRow key={b.id} b={b} />)}
+          {filtered.map(b => <BookingRow key={b.id} b={b} canUpload={canUpload} />)}
         </ul>
       )}
     </div>
   )
 }
 
-function BookingRow({ b }: { b: Booking }) {
+function BookingRow({ b, canUpload }: { b: Booking; canUpload: boolean }) {
   const d = parseISO(b.shootDate)
   const valid = !isNaN(d.getTime())
+  const showUpload = canUpload && (b.status === 'CONFIRMED' || b.status === 'COMPLETED')
   return (
-    <li>
+    <li className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
       <Link
         href={`/dashboard/${b.id}`}
-        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+        className="flex items-center gap-3 flex-1 min-w-0"
       >
         <div className="flex-shrink-0 w-14 text-center">
           <div className="text-[10px] text-gray-400 uppercase">{valid ? format(d, 'EEE') : '—'}</div>
@@ -206,6 +214,15 @@ function BookingRow({ b }: { b: Booking }) {
         </div>
         <StatusPill status={b.status} />
       </Link>
+      {showUpload && (
+        <Link
+          href={`/upload?bookingId=${b.id}`}
+          title="Upload footage — form prefilled with this booking"
+          className="ml-1 shrink-0 px-2.5 py-1.5 text-xs border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] inline-flex items-center gap-1"
+        >
+          📹 Upload
+        </Link>
+      )}
     </li>
   )
 }
