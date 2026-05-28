@@ -52,6 +52,11 @@ export default function OTAdminPage() {
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Partial<PersonSummary>>({})
+  // v1.34.5 — default to hiding people with zero qualifying-OT days, since
+  // they have nothing for the approver to act on. Toggle off to see the
+  // full roster (useful when an admin is hunting for a person who hasn't
+  // hit the threshold yet, or for general profile maintenance).
+  const [onlyQualifying, setOnlyQualifying] = useState(true)
 
   // Add user form
   const [showAdd, setShowAdd] = useState(false)
@@ -118,9 +123,20 @@ export default function OTAdminPage() {
     return { pendingRows, pendingPeople }
   }, [summary])
 
+  // v1.34.5 — what the table actually renders. When `onlyQualifying` is
+  // on (default), hide rows where the person has no qualifying-OT day this
+  // month (`totalDays === 0`). The Inbox banner intentionally still reads
+  // the FULL `summary` so the month-wide "อนุมัติทุกคนในเดือนนี้" button
+  // never silently leaves out submitted-but-not-qualifying rows.
+  const displayedSummary = useMemo(
+    () => onlyQualifying ? summary.filter(s => s.totalDays > 0) : summary,
+    [summary, onlyQualifying]
+  )
+  const hiddenByFilter = summary.length - displayedSummary.length
+
   const selectableRows = useMemo(
-    () => summary.filter(s => s.userId && (s.submittedRecords ?? s.pendingRecords) > 0),
-    [summary]
+    () => displayedSummary.filter(s => s.userId && (s.submittedRecords ?? s.pendingRecords) > 0),
+    [displayedSummary]
   )
   const allSelected = selectableRows.length > 0 && selectableRows.every(s => selected.has(s.userId!))
 
@@ -323,6 +339,13 @@ export default function OTAdminPage() {
         </div>
 
         <label className="flex items-center gap-1 text-xs text-gray-600 ml-2">
+          <input type="checkbox" checked={onlyQualifying}
+            onChange={e => setOnlyQualifying(e.target.checked)}
+            className="accent-[#673ab7]" />
+          เฉพาะที่ต้อง approve (เข้าเกณฑ์ OT)
+        </label>
+
+        <label className="flex items-center gap-1 text-xs text-gray-600 ml-2">
           <input type="checkbox" checked={includeInactive}
             onChange={e => setIncludeInactive(e.target.checked)}
             className="accent-[#673ab7]" />
@@ -369,7 +392,14 @@ export default function OTAdminPage() {
       <div className="gf-card p-4 sm:p-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-medium text-gray-700 flex items-center gap-2">
-            <Users className="w-4 h-4 text-[#673ab7]" /> Roster ({summary.length} คน)
+            <Users className="w-4 h-4 text-[#673ab7]" /> Roster (
+              {onlyQualifying
+                ? `${displayedSummary.length} คน ที่เข้าเกณฑ์ OT`
+                : `${summary.length} คน`}
+              {onlyQualifying && hiddenByFilter > 0 && (
+                <span className="text-gray-400"> · ซ่อน {hiddenByFilter}</span>
+              )}
+            )
             {!meIsAdmin && (
               <span className="ml-1 text-[10px] text-gray-400">(Manager view — read-only roster)</span>
             )}
@@ -442,7 +472,16 @@ export default function OTAdminPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {summary.map((s, i) => {
+                {displayedSummary.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="py-6 text-center text-xs text-gray-400">
+                      {onlyQualifying && summary.length > 0
+                        ? `ไม่มีคนเข้าเกณฑ์ OT ในเดือนนี้ — เอาเครื่องหมายถูก "เฉพาะที่ต้อง approve" ออกเพื่อดู roster ทั้งหมด`
+                        : 'ไม่มีรายการ'}
+                    </td>
+                  </tr>
+                )}
+                {displayedSummary.map((s, i) => {
                   const editing = editingId === s.userId
                   const isMe = meId && s.userId === meId
                   const submittedCount = s.submittedRecords ?? s.pendingRecords

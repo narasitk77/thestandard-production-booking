@@ -5,6 +5,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.34.5] — 2026-05-27
+
+### Changed — `/ot/admin` defaults to "qualifying-OT-only" view
+
+The approver landing now hides any user whose monthly summary has
+`totalDays === 0` — i.e. nobody whose recorded time hit the OT
+threshold (weekday > 9h, or any weekend / declared holiday). Cuts
+visual noise so the manager sees only people they actually need to
+act on.
+
+#### UI
+
+- New checkbox **"เฉพาะที่ต้อง approve (เข้าเกณฑ์ OT)"** in the month
+  picker row, **default ON**. Toggle off to reveal the full roster
+  (useful when an admin is hunting for a user who hasn't hit threshold
+  yet, or doing general profile maintenance).
+- Roster header reflects the filtered count: `Roster (N คน ที่เข้า
+  เกณฑ์ OT · ซ่อน M)` instead of the raw total.
+- Empty-state row inside the table when the filter hides everyone:
+  *"ไม่มีคนเข้าเกณฑ์ OT ในเดือนนี้ — เอาเครื่องหมายถูก…ออกเพื่อดู
+  roster ทั้งหมด"*.
+
+#### What stays unchanged on purpose
+
+- **Inbox banner** at the top still reads the **full** `summary` —
+  `อนุมัติทุกคนในเดือนนี้` still acts on every SUBMITTED record in the
+  month even if their owner is currently filtered out of the table.
+  The button's contract is "approve everything pending", not
+  "approve everything visible".
+- **Sticky bulk-select footer** acts on whatever's selected. If a
+  user was checked while filter was off and the filter then hid them,
+  the approve still applies — selections persist across toggle.
+- **Totals strip** (4 cards: count / Hol days / WD>9h / THB) is
+  unaffected — rows that get hidden by the filter contribute 0 to
+  every total anyway (they have no qualifying days), so the numbers
+  stay numerically identical.
+
+No schema, API, or env change. Pure client-side filter.
+
+---
+
 ## [1.34.4] — 2026-05-27
 
 ### Hardened — Defensive footage matching (accidents + out-of-rule inputs)
