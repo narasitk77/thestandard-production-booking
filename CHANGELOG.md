@@ -5,6 +5,132 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.5] — 2026-05-29
+
+### Added — Upload review queue + Mark-as-Done flow (closes the loop)
+
+After crew uploads video + sound, a booking now enters an admin review
+queue. Admin looks over the upload log, confirms the work is complete,
+and flips the booking's status from CONFIRMED → COMPLETED — which
+removes it from every active queue. Closes the production lifecycle.
+
+#### Completeness rule (`src/lib/upload-completeness.ts`)
+
+A booking enters the review queue when **all** hold:
+
+1. Status is `CONFIRMED` (already approved by Producer)
+2. At least one `Upload` row with status `COMPLETE` and a video
+   camera (Cam1–4, Drone, BTS, etc — anything other than 'Sound')
+3. At least one `Upload` row with status `COMPLETE` and camera
+   exactly `'Sound'` (case-insensitive; also accepts 'Audio'/'Mic')
+
+PENDING / UPLOADING / DRIVE_OK / WASABI_OK / FAILED / ORPHANED uploads
+don't count toward coverage — crew can't claim "video uploaded" with a
+half-finished file.
+
+#### New endpoints
+
+- **`GET /api/admin/upload-review`** — returns two arrays:
+  - `ready[]` — CONFIRMED bookings that pass the rule above (video +
+    sound both present). Each row includes `videoCount`, `soundCount`,
+    `inFlightCount`, `failedCount`, `totalBytes`, `uploaders[]`,
+    `lastUploadAt`.
+  - `inProgress[]` — CONFIRMED bookings with at least one upload but
+    missing video or sound. Visibility into "what's pending" without
+    polluting the action queue.
+
+- **`POST /api/admin/[id]/mark-upload-done`** body `{ note? }` —
+  re-checks completeness server-side (race-safe), flips
+  `BookingStatus` `CONFIRMED → COMPLETED`, writes an `AuditLog` row:
+  ```
+  action:        booking.mark_upload_done
+  fromStatus:    CONFIRMED
+  toStatus:      COMPLETED
+  changes:       { videoCount, soundCount, inFlightCount,
+                   failedCount, totalBytes, note }
+  ```
+  Idempotent on COMPLETED (returns 200 `idempotent: true` for double-
+  click safety). Returns `400 INCOMPLETE_UPLOAD` if the rule no longer
+  holds (file deleted between list + confirm — gate sticks).
+
+#### New page `/admin/upload-review`
+
+Two-section layout:
+
+```
+[Summary strip]  พร้อมยืนยัน N  ·  รอ crew อัพเพิ่ม M
+
+[พร้อมยืนยัน Done]
+  📂 AGN-260423-EVT-01 · [AGN] Key Message
+     Thu 23 Apr 26 13:00–18:00 · PD: Producer
+     ✓ Video 4  ✓ Sound 1  📦 24.7 GB  🕐 23/4 14:32
+     อัพโดย: cam.a@…, sound.b@…       [✓ Mark as Done]
+
+[รอ crew อัพเพิ่ม]
+  📂 TSS-260424-EXE-02 · [TSS] The Secret Sauce
+     ✓ Video 2  ⚪ Sound 0  ...          [ขาด Sound]
+```
+
+Click row → opens `/admin/[id]` for full detail. "Mark as Done" opens
+a confirm modal with the upload counts, an optional note field, and
+the bytes-uploaded summary.
+
+#### `/admin/[id]` — inline Mark-as-Done card
+
+Below the existing UploadSection, CONFIRMED bookings now render a
+`MarkUploadDoneCard` that pulls `/api/upload/list` to compute the
+same completeness report client-side. Shows:
+
+- Per-channel coverage chips (Video N, Sound N)
+- Total bytes
+- In-flight / failed counts when relevant
+- "✓ Mark as Done" button — disabled until both channels have ≥1
+  COMPLETE upload
+
+Confirming flips the status and reloads the booking. The card
+disappears (COMPLETED bookings don't render it).
+
+#### Nav
+
+New admin-only link **"Upload Review"** under the More dropdown,
+between "Upload" and the existing utilities. Crew don't see it.
+
+#### Edge cases handled
+
+- **Empty review queue**: shows friendly "ไม่มี booking ที่พร้อมรีวิว"
+  empty state.
+- **In-flight uploads at confirm time**: the modal shows a yellow
+  warning "ยังมี N ไฟล์ที่กำลัง upload" so admin can pause + wait if
+  they want. Doesn't block — admin's call.
+- **FAILED uploads**: shown as red counts so admin sees "5 attempts
+  but only 4 completed, the 5th was a re-take" type situations.
+- **Booking re-opens after Done**: COMPLETED bookings can still
+  receive uploads (per v1.35.3) — useful for adding late B-roll, but
+  the booking doesn't re-enter the review queue. The mark-as-done
+  is a one-way transition by design; if footage is wrong, admin
+  manually flips via SQL / future endpoint.
+
+#### What this closes
+
+This is the final piece of the v1.35 upload line. The loop is now:
+
+```
+PRODUCER books → ADMIN approves (CONFIRMED) → CREW uploads video + sound
+              → ADMIN reviews log → ADMIN confirms (COMPLETED) → out of queue
+```
+
+No more "is everything in?" Slack threads — the queue + log are the
+source of truth.
+
+#### Rollback
+
+Pure additive: new endpoints, new page, new UI card. No schema
+change. Rollback by bumping `IMAGE_TAG` back to `sha-f57da79`
+(v1.35.4). Any bookings already flipped to COMPLETED stay COMPLETED;
+they just won't have the review-queue page available.
+
+---
+
 ## [1.35.4] — 2026-05-28
 
 ### Fixed — `/upload` strictly limits to CONFIRMED + COMPLETED everywhere

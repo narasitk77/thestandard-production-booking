@@ -737,8 +737,141 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           }} />
         </div>
       )}
+
+      {/* v1.35.5 — Mark-as-Done card. Shows on CONFIRMED bookings only,
+          fetches the upload completeness report, enables the button when
+          video + sound are both COMPLETE. Out of scope for COMPLETED
+          bookings (already Done). */}
+      {booking.status === 'CONFIRMED' && (
+        <MarkUploadDoneCard bookingId={booking.id} bookingCode={booking.bookingCode || null}
+          onDone={() => fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => setBooking(d))} />
+      )}
     </div>
   )
+}
+
+function MarkUploadDoneCard({ bookingId, bookingCode, onDone }: {
+  bookingId: string
+  bookingCode: string | null
+  onDone: () => void
+}) {
+  const [report, setReport] = useState<{
+    videoCount: number; soundCount: number; inFlightCount: number; failedCount: number
+    totalBytes: number; hasVideo: boolean; hasSound: boolean; isReady: boolean
+  } | null>(null)
+  const [acting, setActing] = useState(false)
+  const [note, setNote] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      const res = await fetch(`/api/upload/list?bookingId=${bookingId}`)
+      const data = await res.json()
+      if (!res.ok) { setReport(null); return }
+      // Mirror the server's assessCompleteness logic (simplified — only counts what we need)
+      let videoCount = 0, soundCount = 0, inFlightCount = 0, failedCount = 0, totalBytes = 0
+      for (const u of (data.uploads || [])) {
+        if (u.status === 'COMPLETE') {
+          const isSound = String(u.camera || '').toLowerCase() === 'sound'
+          if (isSound) soundCount += 1; else videoCount += 1
+          if (u.fileSize) totalBytes += Number(u.fileSize)
+        } else if (u.status === 'FAILED' || u.status === 'ORPHANED') failedCount += 1
+        else inFlightCount += 1
+      }
+      setReport({
+        videoCount, soundCount, inFlightCount, failedCount, totalBytes,
+        hasVideo: videoCount > 0, hasSound: soundCount > 0,
+        isReady: videoCount > 0 && soundCount > 0,
+      })
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }, [bookingId])
+  useEffect(() => { load() }, [load])
+
+  const confirmDone = async () => {
+    setActing(true); setError('')
+    try {
+      const res = await fetch(`/api/admin/${bookingId}/mark-upload-done`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: note || null }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to mark done')
+      setConfirming(false)
+      setNote('')
+      onDone()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setActing(false)
+    }
+  }
+
+  if (!report) return null
+
+  return (
+    <div className="gf-card p-3 border-l-4 border-green-400 bg-green-50/30 space-y-2">
+      <div className="text-sm font-medium text-green-800 flex items-center gap-1">
+        ✓ Upload Review · Mark as Done
+      </div>
+      <div className="text-[11px] text-gray-700 grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className={`px-2 py-1 rounded border ${report.hasVideo ? 'bg-green-100 border-green-300 text-green-900' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+          📹 Video: {report.videoCount}
+        </div>
+        <div className={`px-2 py-1 rounded border ${report.hasSound ? 'bg-green-100 border-green-300 text-green-900' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+          🎙️ Sound: {report.soundCount}
+        </div>
+        <div className="px-2 py-1 rounded border border-gray-200">📦 {fmtBytesLocal(report.totalBytes)}</div>
+        <div className="px-2 py-1 rounded border border-gray-200">
+          {report.inFlightCount > 0 ? <span className="text-amber-700">⏳ {report.inFlightCount} in-flight</span>
+          : report.failedCount > 0 ? <span className="text-red-700">❌ {report.failedCount} failed</span>
+          : <span className="text-gray-600">— ok —</span>}
+        </div>
+      </div>
+
+      {error && <div className="text-xs text-red-600">{error}</div>}
+
+      {!report.isReady ? (
+        <div className="text-[11px] text-amber-700">
+          ขาด {!report.hasVideo ? 'Video' : ''}{!report.hasVideo && !report.hasSound ? ' + ' : ''}{!report.hasSound ? 'Sound' : ''} —
+          ปุ่ม Done จะเปิดเมื่อ crew อัพครบ
+        </div>
+      ) : !confirming ? (
+        <button onClick={() => setConfirming(true)}
+          className="text-xs px-3 py-1.5 border border-green-500 text-white bg-green-600 rounded hover:bg-green-700 inline-flex items-center gap-1">
+          ✓ Mark as Done — เปลี่ยน CONFIRMED → COMPLETED
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <textarea rows={2} maxLength={1000} value={note} onChange={e => setNote(e.target.value)}
+            placeholder="หมายเหตุ (optional) — เช่น ครบ 4 cam + sound + B-roll OK"
+            className="gf-input resize-none w-full text-xs" />
+          <div className="flex gap-2">
+            <button onClick={confirmDone} disabled={acting}
+              className="text-xs px-4 py-1.5 border border-green-500 text-white bg-green-600 rounded hover:bg-green-700 disabled:opacity-40">
+              {acting ? '…' : '✓ ยืนยัน Done'}
+            </button>
+            <button onClick={() => { setConfirming(false); setNote('') }}
+              className="text-xs px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50">
+              ยกเลิก
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function fmtBytesLocal(n: number): string {
+  if (!n || n <= 0) return '—'
+  const units = ['B','KB','MB','GB','TB']
+  let v = n, i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
 }
 
 /* ───────────────────────────────────────────────────────────────────────── */

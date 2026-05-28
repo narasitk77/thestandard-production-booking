@@ -63,6 +63,8 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     // v1.35.3 — Upload shown to crew (video/sound) + admin via canUpload flag.
     // Previously admin-only because /upload was under-development.
     { href: '/upload', label: 'Upload', show: !!canUpload },
+    // v1.35.5 — Admin-only review queue for Mark-as-Done
+    { href: '/admin/upload-review', label: 'Upload Review', show: !!isAdmin },
   ].filter(i => i.show)
 
   return (
