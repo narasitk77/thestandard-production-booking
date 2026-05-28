@@ -5,6 +5,115 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.6] — 2026-05-29
+
+### Hardened — Resilient uploads (chunked Drive + per-chunk retry + drag/drop)
+
+The v1.35.2 upload UI worked but assumed friendly network conditions —
+a single Drive PUT for the whole file, no retry on chunk failures. For
+real footage (4–50GB on apartment wifi) one disconnect would restart
+the whole upload. v1.35.6 fixes that.
+
+#### New: `src/lib/upload-client.ts`
+
+Extracted out of `UploadSection` so the chunking + retry logic is
+testable and reusable. Exposes:
+
+```ts
+uploadToDrive(sessionUrl, file, { onProgress, onRetry? })
+uploadToWasabi(file, parts, chunkSize, { onProgress, onRetry? })
+```
+
+#### Drive — chunked Content-Range PUTs
+
+Replaces the single-PUT-of-the-whole-file approach with 8MB chunks
+sent via `Content-Range: bytes <start>-<end>/<total>`. Drive returns
+**308 Resume Incomplete** between chunks and **200/201** on the last.
+
+A network drop now costs at most one 8MB chunk to retry, not the
+whole file. The session URL stays valid (~1 week per Drive's spec) so
+the retry hits the same upload slot — no duplicate file on success.
+
+#### Per-chunk retry with exponential backoff
+
+Both Drive chunks and Wasabi parts wrap their `XMLHttpRequest.PUT` in
+a retry loop:
+
+- 4 attempts max
+- Delay: 1.5s × 2^(n-1), capped at 20s, with ±400ms jitter
+- 4xx (non-408/429) responses fail fast — they're not transient
+- User-initiated cancel propagates immediately, no retry
+
+When a retry is in flight, the UI shows it:
+
+```
+Drive  [██████████░░░░░] 67%  ↻ retry 2/4
+       └── amber bar instead of purple to flag the recovery
+```
+
+The retry hint clears the moment the chunk succeeds — no false
+"stuck retrying" left over.
+
+#### `RetryStatus` surfaced through the callback
+
+```ts
+interface RetryStatus {
+  attempt: number       // 1..maxAttempts
+  maxAttempts: number
+  lastError: string | null
+  active: boolean       // false on success
+}
+```
+
+`UploadSection` stores the latest status per file × per cloud and
+renders the amber retry hint inline with the progress bar. Hovering
+the retry chip shows the last error message (e.g. "Drive chunk HTTP
+503") for diagnostic clarity.
+
+#### Drag/drop file picker
+
+Wrapped the file `<input>` in a dashed-border drop zone. Behavior:
+
+- Drag a file in → border turns purple, background lightens, label
+  changes to "⬇ ปล่อยไฟล์ที่นี่"
+- Drop → files enter the upload queue immediately (same handler as
+  the file picker)
+- Drag away without dropping → state resets
+
+The file picker click still works exactly as before, so non-mouse
+users (keyboard / touch) aren't penalized.
+
+#### Footnote in the upload pane
+
+```
+จะ upload ตรงเข้า Drive ที่ <outlet>/<bookingCode>/<camera>/
+· chunked + auto-retry (network drop ปลอดภัย)
+```
+
+So the operator knows what the system is doing when they see the
+retry chip flash during a wifi blip.
+
+#### What's still deferred (would land in v1.35.7+)
+
+- **Cross-reload resume** — File objects don't survive a page reload;
+  recovering requires the user to re-pick the file. We could
+  fingerprint by name+size+lastModified and resume the same Drive
+  session URL — but the architectural cost is bigger than the
+  benefit until we see real reload-mid-upload pain.
+- **Stall detection** — if no `xhr.upload.progress` event for 30s,
+  proactively abort + retry. The retry loop handles eventual failure
+  but doesn't notice a frozen connection until the OS times out.
+- **SHA-256 verify** — browser computes hash via Web Crypto streaming,
+  server verifies after upload, mismatch → mark FAILED.
+
+#### Rollback
+
+Pure UI + client-lib change. Bump `IMAGE_TAG` back to `sha-a76bfae`
+(v1.35.5) — uploads revert to single-PUT Drive + no retries. The
+review queue + Mark-as-Done flow stay intact.
+
+---
+
 ## [1.35.5] — 2026-05-29
 
 ### Added — Upload review queue + Mark-as-Done flow (closes the loop)

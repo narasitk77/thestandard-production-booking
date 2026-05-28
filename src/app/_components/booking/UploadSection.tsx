@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw } from 'lucide-react'
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
+import { uploadToDrive as driveUpload, uploadToWasabi as wasabiUpload, type RetryStatus } from '@/lib/upload-client'
 
 const CAMERAS = ['Cam1', 'Cam2', 'Cam3', 'Cam4', 'Sound', 'Drone', 'BTS']
 
@@ -40,6 +41,9 @@ interface InFlight {
   wasabiActive: boolean
   state: 'pending' | 'initiating' | 'uploading' | 'completing' | 'done' | 'failed' | 'cancelled'
   error: string | null
+  // v1.35.6 — surface auto-retry attempts so user sees recovery is happening
+  driveRetry: RetryStatus | null
+  wasabiRetry: RetryStatus | null
 }
 
 interface Props {
@@ -78,6 +82,8 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
   const [historyLoading, setHistoryLoading] = useState(false)
   const [queue, setQueue] = useState<InFlight[]>([])
   const [error, setError] = useState('')
+  // v1.35.6 — drag/drop visual feedback
+  const [dragOver, setDragOver] = useState(false)
 
   const policy = booking.outlet.storagePolicy ?? 'DRIVE_ONLY'
   const wasabiLocked = policy === 'DUAL_WRITE'
@@ -106,6 +112,8 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
       wasabiActive: false,
       state: 'pending',
       error: null,
+      driveRetry: null,
+      wasabiRetry: null,
     }))
     setQueue(prev => [...prev, ...items])
     // fire-and-forget — process each item sequentially (browser parallel
@@ -141,25 +149,32 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
       driveActive: !!initData.targets?.drive,
       wasabiActive: !!initData.targets?.wasabi }))
 
-    // 2. UPLOAD — parallel Drive resumable + Wasabi multipart
+    // 2. UPLOAD — parallel Drive resumable + Wasabi multipart, both with
+    //    chunked + retried PUTs (see src/lib/upload-client.ts).
     const tasks: Array<Promise<any>> = []
 
     if (initData.targets?.drive?.sessionUrl) {
-      tasks.push(uploadToDrive(
+      tasks.push(driveUpload(
         initData.targets.drive.sessionUrl,
         item.file,
-        (frac) => updateQueue(item.localId, q => ({ ...q, driveProgress: frac })),
+        {
+          onProgress: (frac) => updateQueue(item.localId, q => ({ ...q, driveProgress: frac })),
+          onRetry: (status) => updateQueue(item.localId, q => ({ ...q, driveRetry: status.active ? status : null })),
+        },
       ))
     }
 
     let wasabiParts: Array<{ n: number; etag: string }> = []
     if (initData.targets?.wasabi) {
       const w = initData.targets.wasabi
-      tasks.push(uploadToWasabi(
+      tasks.push(wasabiUpload(
         item.file,
         w.parts,
         w.chunkSize,
-        (frac) => updateQueue(item.localId, q => ({ ...q, wasabiProgress: frac })),
+        {
+          onProgress: (frac) => updateQueue(item.localId, q => ({ ...q, wasabiProgress: frac })),
+          onRetry: (status) => updateQueue(item.localId, q => ({ ...q, wasabiRetry: status.active ? status : null })),
+        },
       ).then(parts => { wasabiParts = parts }))
     }
 
@@ -236,17 +251,39 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
         </div>
 
         <div>
-          <input ref={fileInputRef} type="file" multiple
-            onChange={e => startQueue(e.target.files)}
-            className="block w-full text-sm text-gray-600
-              file:mr-3 file:py-2 file:px-4 file:rounded file:border-0
-              file:text-sm file:font-medium
-              file:bg-[#673ab7] file:text-white
-              hover:file:bg-[#5e35b1]
-              file:cursor-pointer cursor-pointer" />
+          {/* v1.35.6 — drag/drop zone wrapping the file picker. Native
+              <input type="file"> handles the click; the surrounding div
+              handles drop. */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDragEnd={() => setDragOver(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragOver(false)
+              startQueue(e.dataTransfer.files)
+            }}
+            className={`rounded border-2 border-dashed p-3 transition-colors ${
+              dragOver ? 'border-[#673ab7] bg-purple-100/60' : 'border-gray-300 bg-gray-50/30'
+            }`}
+          >
+            <input ref={fileInputRef} type="file" multiple
+              onChange={e => startQueue(e.target.files)}
+              className="block w-full text-sm text-gray-600
+                file:mr-3 file:py-2 file:px-4 file:rounded file:border-0
+                file:text-sm file:font-medium
+                file:bg-[#673ab7] file:text-white
+                hover:file:bg-[#5e35b1]
+                file:cursor-pointer cursor-pointer" />
+            <p className="text-[11px] text-gray-500 mt-2 text-center">
+              {dragOver ? '⬇ ปล่อยไฟล์ที่นี่' : 'หรือ drag ไฟล์มาวางที่นี่'}
+            </p>
+          </div>
           <p className="text-[10px] text-gray-500 mt-1">
             จะ upload ตรงเข้า Drive {wasabiLocked || includeWasabi ? '+ Wasabi' : ''} ที่
             {' '}<code className="text-gray-700">{`<outlet>/${booking.bookingCode}/${camera}/`}</code>
+            {' · '}
+            <span className="text-gray-400">chunked + auto-retry (network drop ปลอดภัย)</span>
           </p>
         </div>
       </div>
@@ -280,8 +317,8 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
               {q.error && <div className="text-red-700 text-[11px] mt-1">{q.error}</div>}
               {(q.state === 'uploading' || q.state === 'completing' || q.state === 'done') && (
                 <div className="space-y-1 mt-1.5">
-                  {q.driveActive && <ProgressBar label="Drive" frac={q.driveProgress} />}
-                  {q.wasabiActive && <ProgressBar label="Wasabi" frac={q.wasabiProgress} />}
+                  {q.driveActive && <ProgressBar label="Drive" frac={q.driveProgress} retry={q.driveRetry} />}
+                  {q.wasabiActive && <ProgressBar label="Wasabi" frac={q.wasabiProgress} retry={q.wasabiRetry} />}
                 </div>
               )}
             </div>
@@ -344,112 +381,29 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
   )
 }
 
-function ProgressBar({ label, frac }: { label: string; frac: number }) {
+function ProgressBar({ label, frac, retry }: { label: string; frac: number; retry?: RetryStatus | null }) {
   const pct = Math.min(100, Math.max(0, Math.round(frac * 100)))
+  // v1.35.6 — retry hint colors the bar amber so the user notices a
+  // recovering chunk without thinking "stalled".
+  const isRetrying = !!retry?.active
   return (
     <div className="flex items-center gap-2">
       <span className="text-[10px] text-gray-500 w-12">{label}</span>
       <div className="flex-1 h-1.5 bg-gray-200 rounded overflow-hidden">
-        <div className="h-full bg-[#673ab7] transition-all" style={{ width: `${pct}%` }} />
+        <div className={`h-full transition-all ${isRetrying ? 'bg-amber-500' : 'bg-[#673ab7]'}`} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-[10px] text-gray-500 tabular-nums w-10 text-right">{pct}%</span>
+      {isRetrying && (
+        <span className="text-[9px] text-amber-700 inline-flex items-center gap-0.5 whitespace-nowrap"
+              title={retry?.lastError || ''}>
+          <RotateCw className="w-2.5 h-2.5 animate-spin" />
+          retry {retry?.attempt}/{retry?.maxAttempts}
+        </span>
+      )}
     </div>
   )
 }
 
-/**
- * Drive resumable upload — single PUT with the whole file. For very
- * large files we'd want chunked PUTs with Content-Range, but the
- * single-PUT path is simpler and works for the common case of files
- * the browser can fit in memory.
- */
-async function uploadToDrive(sessionUrl: string, file: File, onProgress: (frac: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open('PUT', sessionUrl, true)
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total)
-    }
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress(1)
-        resolve()
-      } else {
-        reject(new Error(`Drive upload ${xhr.status}: ${xhr.responseText?.slice(0, 200)}`))
-      }
-    }
-    xhr.onerror = () => reject(new Error('Drive upload network error'))
-    xhr.onabort = () => reject(new Error('Drive upload aborted'))
-    xhr.send(file)
-  })
-}
-
-/**
- * Wasabi multipart upload — PUT each chunk to its presigned URL in parallel
- * (capped at 4 concurrent). Returns the parts list with ETags to feed back
- * into /api/upload/complete.
- */
-async function uploadToWasabi(
-  file: File,
-  parts: Array<{ partNumber: number; url: string }>,
-  chunkSize: number,
-  onProgress: (frac: number) => void,
-): Promise<Array<{ n: number; etag: string }>> {
-  const PARALLEL = 4
-  const total = file.size
-  const loaded = new Array<number>(parts.length).fill(0)
-  const out = new Array<{ n: number; etag: string }>(parts.length)
-
-  let cursor = 0
-  let active = 0
-  return new Promise((resolve, reject) => {
-    let failed = false
-    const startNext = () => {
-      if (failed) return
-      if (cursor >= parts.length && active === 0) {
-        onProgress(1)
-        resolve(out.filter(Boolean))
-        return
-      }
-      while (active < PARALLEL && cursor < parts.length) {
-        const idx = cursor++
-        const part = parts[idx]
-        const start = idx * chunkSize
-        const end = Math.min(start + chunkSize, file.size)
-        const chunk = file.slice(start, end)
-        active++
-        const xhr = new XMLHttpRequest()
-        xhr.open('PUT', part.url, true)
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            loaded[idx] = e.loaded
-            const sum = loaded.reduce((a, b) => a + b, 0)
-            onProgress(Math.min(1, sum / total))
-          }
-        }
-        xhr.onload = () => {
-          active--
-          if (xhr.status >= 200 && xhr.status < 300) {
-            const etag = (xhr.getResponseHeader('ETag') || '').replace(/"/g, '')
-            out[idx] = { n: part.partNumber, etag }
-            loaded[idx] = end - start
-            const sum = loaded.reduce((a, b) => a + b, 0)
-            onProgress(Math.min(1, sum / total))
-            startNext()
-          } else {
-            failed = true
-            reject(new Error(`Wasabi part ${part.partNumber} upload ${xhr.status}`))
-          }
-        }
-        xhr.onerror = () => {
-          active--
-          failed = true
-          reject(new Error(`Wasabi part ${part.partNumber} network error`))
-        }
-        xhr.send(chunk)
-      }
-    }
-    startNext()
-  })
-}
+// v1.35.6 — uploadToDrive + uploadToWasabi moved to src/lib/upload-client.ts.
+// That file holds the chunked + retry logic so the component focuses on
+// queue UI / rendering. See `driveUpload` / `wasabiUpload` imports at top.
