@@ -107,14 +107,38 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
 
   // v1.35.1 — skip files our /api/upload flow owns (their `Upload` row's
   // /complete handler writes the sheet row; if we also wrote one we'd get
-  // a duplicate). Pull the set of driveFileIds that have an Upload row,
-  // regardless of status — even a FAILED one shouldn't get scanner-written
-  // (the operator can resubmit through the UI).
+  // a duplicate).
+  //
+  // v1.35.8 — refined: skip ONLY when the Upload is in-flight (not
+  // COMPLETE yet) or known FAILED. If status is COMPLETE but the
+  // FootageLog still has sheetRowWritten=false, /complete's sheet append
+  // crashed and never recovered — we DO want the scanner to pick it up
+  // and write the row, otherwise the file is forever invisible in the
+  // footage log. Same logic when status is COMPLETE but no FootageLog
+  // row exists (extreme edge case — manual DB tweaking, partial state).
   const appOwnedUploads = await prisma.upload.findMany({
     where: { driveFileId: { in: driveFileIds } },
-    select: { driveFileId: true },
+    select: { driveFileId: true, status: true },
   })
-  const appOwnedFileIds = new Set(appOwnedUploads.map(u => u.driveFileId).filter(Boolean) as string[])
+  const appOwnedSkip = new Set<string>()
+  for (const u of appOwnedUploads) {
+    if (!u.driveFileId) continue
+    // Status flow: PENDING → UPLOADING → (DRIVE_OK | WASABI_OK) → COMPLETE
+    // or → FAILED / ORPHANED. We let the scanner take over only for
+    // COMPLETE rows where /complete failed to write the sheet row.
+    if (u.status !== 'COMPLETE') {
+      appOwnedSkip.add(u.driveFileId)
+      continue
+    }
+    // COMPLETE — let it through ONLY if FootageLog says sheet wasn't
+    // written. The log lookup happened earlier (logByFileId); if the
+    // log exists and is already written, skip; otherwise process.
+    const existing = logByFileId.get(u.driveFileId)
+    if (existing?.sheetRowWritten) {
+      appOwnedSkip.add(u.driveFileId)
+    }
+    // else: fall through — process this file (scanner writes sheet row)
+  }
 
   // 3. Classify each file
   // First pass: parse Production ID from folder path, surface look-alikes
@@ -135,8 +159,10 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
       continue  // fully done — skip
     }
     // v1.35.1 — file owned by an /api/upload row → app handles the sheet
-    // write inside /api/upload/complete. Scanner stays out of its way.
-    if (appOwnedFileIds.has(file.id)) {
+    // write inside /api/upload/complete. Scanner stays out of its way
+    // UNLESS the Upload is COMPLETE + the FootageLog says sheet write
+    // failed (recovery path — see appOwnedSkip computation above).
+    if (appOwnedSkip.has(file.id)) {
       out.seen += 1
       continue
     }

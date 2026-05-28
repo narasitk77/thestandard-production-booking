@@ -11,7 +11,7 @@ import {
   getWasabiKeyPrefix,
   getWasabiBucket,
 } from '@/lib/wasabi'
-import { ensureFolderPath, createResumableUploadSession } from '@/lib/google-drive'
+import { ensureFolderPath, createResumableUploadSession, deleteDriveFile } from '@/lib/google-drive'
 
 export const dynamic = 'force-dynamic'
 
@@ -215,14 +215,28 @@ export async function POST(request: NextRequest) {
           data: { wasabiMultipartId: init.uploadId },
         })
       } catch (e: any) {
-        // Drive succeeded but Wasabi failed — DUAL_WRITE policy means
-        // we must roll back Drive too. For now, mark FAILED and let the
-        // operator cancel; reconciler will clean up.
+        // v1.35.8 — Drive succeeded but Wasabi failed. DUAL_WRITE means
+        // the upload can't proceed, so roll back the Drive reservation
+        // inline (instead of leaving an orphan empty file slot for the
+        // future reconciler to find). Best-effort: if the cleanup itself
+        // fails, the FAILED row still includes both errors in
+        // failureReason so triage isn't blind.
+        const wasabiReason = e?.message || String(e)
+        let cleanupNote = ''
+        if (driveTarget?.fileId) {
+          try {
+            await deleteDriveFile(driveTarget.fileId)
+            await prisma.footageLog.delete({ where: { driveFileId: driveTarget.fileId } }).catch(() => {})
+            cleanupNote = ' · drive slot rolled back'
+          } catch (cleanupErr: any) {
+            cleanupNote = ` · drive cleanup failed: ${cleanupErr?.message || cleanupErr}`
+          }
+        }
         await prisma.upload.update({
           where: { id: upload.id },
-          data: { status: 'FAILED', failureReason: `Wasabi init: ${e?.message || String(e)}` },
+          data: { status: 'FAILED', failureReason: `Wasabi init: ${wasabiReason}${cleanupNote}` },
         })
-        return NextResponse.json({ error: `Failed to initiate Wasabi upload: ${e?.message || e}` }, { status: 502 })
+        return NextResponse.json({ error: `Failed to initiate Wasabi upload: ${wasabiReason}` }, { status: 502 })
       }
     }
 

@@ -5,6 +5,97 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.8] — 2026-05-29
+
+### Fixed — Two upload-pipeline edge cases (silent data loss + Drive orphan)
+
+Code-audit pass found two latent bugs in the v1.35.x upload pipeline.
+Both shipped invisible: the system kept working "well enough" until a
+specific failure path was hit, at which point data was lost or
+storage leaked.
+
+#### Bug A — sheet rows lost when `/api/upload/complete`'s sheet write fails
+
+**Path:** Upload reaches both clouds OK. `/complete` then appends a
+row to the footage-log sheet. If that append throws (Sheets API
+rate limit, transient 503, sheet permission revoked), the catch
+swallows the error and returns `ok: true`. The COMPLETE Upload row
+exists, the FootageLog row has `sheetRowWritten=false`, and the file
+is in both clouds — but **never appears in the user's footage log
+sheet**.
+
+The v1.34.x footage-sync scanner *would* have caught this on its
+next tick, but v1.35.1 added a "skip files owned by Upload rows"
+rule to prevent the scanner from double-writing rows for files the
+app uploaded. That rule was too aggressive — it also skipped
+recovery cases.
+
+**Fix:** scanner now classifies each Upload-owned file:
+
+- `status != COMPLETE` → skip (in-flight or known FAILED; let
+  `/complete` or `/cancel` handle it)
+- `status === COMPLETE` AND `FootageLog.sheetRowWritten === true`
+  → skip (done)
+- `status === COMPLETE` AND `FootageLog.sheetRowWritten === false`
+  → **process** (recovery — `/complete` failed to write sheet row;
+  scanner now writes it on the next 10-min tick)
+
+Files where `/complete` failed silently will start appearing in the
+footage log sheet within ~10 minutes of the next worker run after
+this deploy.
+
+#### Bug B — Drive file slot orphaned when Wasabi init fails after Drive succeeds
+
+**Path:** `/api/upload/init` for a DUAL_WRITE outlet:
+
+1. Reserves Drive file slot + opens resumable session ✓
+2. Updates Upload row with `driveFileId` ✓
+3. Pre-creates FootageLog row ✓
+4. **Wasabi `CreateMultipartUpload` throws** (bad creds, rate limit,
+   transient 5xx)
+5. Catch block marks Upload `FAILED` and returns 502 ✓
+6. **Drive empty file slot stays in the Shared Drive forever** ✗
+
+Over time this leaves visible-but-empty 0-byte files under
+`<outlet>/<bookingCode>/<camera>/` named after files that never
+uploaded — confusing to crew browsing the folder.
+
+**Fix:** the Wasabi-init failure path now calls `deleteDriveFile`
+on the reserved slot + removes the FootageLog row before returning
+the 502. Best-effort; if the cleanup itself fails, the Upload row's
+`failureReason` records both errors so triage isn't blind:
+
+```
+Wasabi init: CreateMultipartUpload failed: NoSuchBucket: …
+  · drive slot rolled back
+```
+
+or
+
+```
+Wasabi init: CreateMultipartUpload failed: …
+  · drive cleanup failed: insufficient permissions
+```
+
+#### Sanity audit (no fix needed — verified working)
+
+- `/api/upload/cancel` correctly aborts Wasabi multipart + deletes
+  Drive slot + clears FootageLog
+- `/api/upload/complete` idempotent on COMPLETE
+- `mark-upload-done` idempotent on COMPLETED
+- `canUploadToBooking` correctly bypasses assignment for admins
+- UploadSection drag/drop handler preventDefaults to avoid browser
+  opening the file in a tab
+- v1.35.7 calendar readback verify catches silent-drop without
+  changing happy-path behavior
+
+#### Rollback
+
+Pure logic refinement — no schema change. Bump `IMAGE_TAG` back to
+`sha-b765014` (v1.35.7) to revert; the two bugs return latent.
+
+---
+
 ## [1.35.7] — 2026-05-29
 
 ### Fixed — Calendar guest "silent drop" — diagnostic + readback verification
