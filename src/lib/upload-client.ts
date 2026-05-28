@@ -165,13 +165,38 @@ export async function uploadToDrive(
     })
 
     cursor = end
-    // Honor Drive's Range hint if it tells us it received less than we
-    // sent (rare but possible). The header looks like `bytes=0-<n>`.
+    // v1.35.9 — defensive Range-header parsing. Drive may reply with
+    // `Range: bytes=0-<n>` meaning "I have bytes 0 through n inclusive".
+    // The strict semantics is that n+1 == nextByteToSend.
+    //
+    // Pre-v1.35.9 just trusted the header. Two failure modes that
+    // motivated the tightening:
+    //   1. Malformed/missing header → leave cursor at `end` (we just
+    //      sent up to `end`, so that's the safe default).
+    //   2. Header claims FEWER bytes received than we sent (n+1 < end
+    //      = the value we'd have used) → REWIND cursor so the next PUT
+    //      re-covers bytes n+1..end-1. Otherwise those bytes would be
+    //      silently missing from the final file.
+    //   3. Header claims MORE bytes received than physically possible
+    //      (n+1 > end OR n+1 > total) → ignore (likely a malformed
+    //      response or upstream proxy quirk) and keep cursor at end.
     if (!isFinal && result.rangeHeader) {
       const m = result.rangeHeader.match(/bytes=0-(\d+)/)
       if (m) {
-        const drivesLast = Number(m[1])
-        if (drivesLast + 1 < cursor) cursor = drivesLast + 1
+        const drivesNextByte = Number(m[1]) + 1
+        if (Number.isFinite(drivesNextByte) && drivesNextByte > 0 && drivesNextByte <= total) {
+          if (drivesNextByte < cursor) {
+            // Drive received less than we sent — rewind so the next PUT
+            // re-covers the gap. Without this, bytes [drivesNextByte..end)
+            // would be missing from the final Drive file.
+            console.warn(`[upload-client] Drive Range header reports fewer bytes received (${drivesNextByte}) than we sent (${cursor}); rewinding cursor to avoid silent data loss`)
+            cursor = drivesNextByte
+          }
+          // drivesNextByte === cursor: nothing to do.
+          // drivesNextByte > cursor: Drive claims it received MORE bytes
+          // than we know we sent. Ignore — likely an upstream proxy or
+          // header quirk. Trusting it would mean SKIPPING bytes.
+        }
       }
     }
   }

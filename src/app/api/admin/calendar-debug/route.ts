@@ -139,7 +139,15 @@ export async function GET(request: NextRequest) {
     if (createdEventId) {
       try {
         const calendar = google.calendar({ version: 'v3', auth: getCalendarAuth() })
-        await calendar.events.delete({ calendarId: CALENDAR_ID, eventId: createdEventId, sendUpdates: 'none' })
+        // v1.35.9 — if ?inviteSelf=1 sent an invite, also send the
+        // cancellation so the impersonate subject's inbox stays clean.
+        // Otherwise they'd see the invite + later notice the event is
+        // gone with no explanation.
+        await calendar.events.delete({
+          calendarId: CALENDAR_ID,
+          eventId: createdEventId,
+          sendUpdates: inviteSelf ? 'all' : 'none',
+        })
         report.steps.push({ step: 'cleanup (delete test event)', ok: true, ms: 0 })
       } catch (e: any) {
         report.steps.push({ step: 'cleanup (delete test event)', ok: false, ms: 0, error: e?.message || String(e) })

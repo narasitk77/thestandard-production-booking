@@ -41,6 +41,30 @@ export const dynamic = 'force-dynamic'
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024 * 1024 // 100GB hard cap
 const SAFE_FILENAME_RE = /^[A-Za-z0-9._\-()[\] ฀-๿]+$/  // ASCII + Thai
 
+/**
+ * v1.35.9 — defense-in-depth filename validator beyond the regex above.
+ * The regex allows dots, parens, brackets — fine for valid filenames but
+ * not enough to rule out tricky inputs like `..(foo).mp4` or `... .mp4`
+ * which contain valid chars but still have path-like semantics.
+ *
+ * Drive ignores OS path separators (it uses ids), but the same `filename`
+ * value flows into the Wasabi key + the Drive display name + (legacy)
+ * local disk. Keeping it strictly file-basename-shaped is the right
+ * invariant.
+ */
+function isSafeFilename(filename: string): boolean {
+  if (!filename || filename.length > 255) return false
+  // No directory separators of any flavor
+  if (/[\\/]/.test(filename)) return false
+  // No leading dot ("hidden" files are out of band for footage)
+  if (filename.startsWith('.')) return false
+  // No `..` anywhere (covers `..`, `foo..mp4`, `..bar`)
+  if (filename.includes('..')) return false
+  // No trailing whitespace or dot (Windows reserves these; corrupts ext)
+  if (/[. ]$/.test(filename)) return false
+  return SAFE_FILENAME_RE.test(filename)
+}
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession()
@@ -69,9 +93,9 @@ export async function POST(request: NextRequest) {
     if (size > MAX_FILE_SIZE_BYTES) {
       return NextResponse.json({ error: `size exceeds ${MAX_FILE_SIZE_BYTES} bytes hard cap` }, { status: 400 })
     }
-    if (!SAFE_FILENAME_RE.test(filename)) {
+    if (!isSafeFilename(filename)) {
       return NextResponse.json({
-        error: 'filename has unsafe characters — allowed: ASCII alphanumeric, Thai, space, dot, dash, underscore, parens, brackets',
+        error: 'filename has unsafe characters or path-like tokens — keep it to plain ASCII/Thai alphanumeric + dot/dash/underscore/parens/brackets, no leading dot, no `..`, no trailing dot or space',
       }, { status: 400 })
     }
     if (sha256 && !/^[a-f0-9]{64}$/i.test(sha256)) {

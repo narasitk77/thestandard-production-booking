@@ -5,6 +5,106 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.9] — 2026-05-29
+
+### Security + correctness audit findings
+
+Deeper code-audit pass on the v1.35.x upload + footage + calendar
+surfaces. Four fixes:
+
+#### 🔒 (HIGH) `GET /api/upload` leaked every upload row site-wide
+
+The pre-v1.35 local-disk endpoint at `/api/upload/route.ts` had **zero
+auth**. Anyone with a session cookie (and even unauthenticated GET in
+the original code) could `GET /api/upload?bookingId=X` and dump the
+Upload table — filenames, uploaders, Drive ids, file sizes — for any
+booking. The per-booking `/api/upload/list` (which IS properly gated)
+made this look fine in code review, but the legacy endpoint sat
+underneath unattended.
+
+**Fix:** GET is admin-only; POST applies the same
+`canUploadToBooking` gate as `/api/upload/init`. POST also forces
+`uploadedBy = session.email` instead of trusting the form field, so
+a logged-in user can no longer attribute uploads to a different
+crew member.
+
+The legacy endpoint will be removed entirely in v1.35.10 once the
+deploy confirms no client still hits it (the rewritten `/upload` page
+uses `/api/upload/{init,complete}` exclusively).
+
+#### 🔒 (HIGH) Filename validation allowed path-traversal tokens
+
+The init endpoint's regex allowed `.`, `()`, `[]` etc but didn't
+explicitly reject `..`, leading dots, or trailing dots/whitespace.
+A POST with `filename: "..(harmless).mp4"` would be accepted, then
+flow into Wasabi key building + Drive display name + legacy disk
+path joins. Drive uses ids not paths so was safe; Wasabi could
+produce confusing keys; the legacy `/api/upload` (now fixed
+separately above) would write the file outside the target dir on
+Windows in extreme cases.
+
+**Fix:** New `isSafeFilename()` helper rejects:
+
+- Path separators (`/`, `\`)
+- Leading dot (hidden files)
+- `..` anywhere (parent traversal in any position)
+- Trailing dot or space (Windows reserves these)
+- Anything longer than 255 chars
+
+Plus the existing positive class (alphanum + Thai + safe punctuation).
+
+#### 🐛 (MEDIUM) Drive resumable rewind on suspicious Range header
+
+`uploadToDrive` in `src/lib/upload-client.ts` honored Drive's
+`Range: bytes=0-<n>` reply to update the cursor for the next chunk.
+The pre-v1.35.9 code naively trusted `n+1` without bounds-checking:
+
+- If `n+1 > total` (malformed reply / proxy quirk): cursor would
+  jump past the end, terminating the upload with bytes missing.
+- If `n+1 > cursor` (impossible — Drive claims to have received
+  bytes we haven't sent yet): code would skip bytes we did send.
+
+**Fix:** Three explicit cases:
+
+1. `drivesNextByte < cursor` → Drive received less than we sent;
+   rewind cursor to re-cover the gap. Logs a warning so the
+   reason for the slowdown is visible.
+2. `drivesNextByte === cursor` → expected case; no change.
+3. `drivesNextByte > cursor` or out-of-bounds → ignore the header
+   (trusting it would skip bytes).
+
+#### 🧹 (LOW) Calendar debug cleanup sends cancellation when `inviteSelf=1`
+
+If `/api/admin/calendar-debug?inviteSelf=1` sent an invite email to
+the impersonate subject, the cleanup deleted the event with
+`sendUpdates: 'none'` — meaning the user got an invite but no
+cancellation. They'd see the invite + later notice the event is
+gone with no explanation.
+
+**Fix:** Cleanup mirrors `inviteSelf` — sends the cancellation when
+an invite was sent.
+
+#### Audited and verified working (no fix needed)
+
+- `listFilesRecursive` already has a 5000-file `maxFiles` cap — not
+  unbounded as the audit suggested.
+- Footage scanner sheet-write failure tally is intentionally 0 for
+  `matched` (rows weren't actually written this tick; next tick
+  retries via the v1.35.8 recovery path).
+- `/api/upload/complete` idempotency check on COMPLETE is correct
+  for typical usage. Concurrent double-completion is a theoretical
+  race not seen in production traffic; deferred unless real reports
+  emerge.
+
+#### Rollback
+
+Pure additive/refinement — no schema change. Bump `IMAGE_TAG` back
+to `sha-fe5ba07` (v1.35.8) if the legacy `/api/upload` auth tightening
+breaks any client. All other fixes are silent (better defaults,
+unchanged happy path).
+
+---
+
 ## [1.35.8] — 2026-05-29
 
 ### Fixed — Two upload-pipeline edge cases (silent data loss + Drive orphan)
