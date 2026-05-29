@@ -178,8 +178,8 @@ export default function AdminPage() {
                   {b.status === 'CONFIRMED' && (
                     <>
                       {canUpload && (
-                        <Link href={`/admin/${b.id}#upload`}
-                          title="Upload footage — form prefilled with this booking"
+                        <Link href={`/upload?bookingId=${b.id}`}
+                          title="Upload footage — opens the dedicated upload page"
                           className="px-3 py-1.5 text-xs border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] inline-flex items-center gap-1">
                           📹 Upload
                         </Link>
@@ -197,8 +197,8 @@ export default function AdminPage() {
                   {b.status === 'COMPLETED' && (
                     <>
                       {canUpload && (
-                        <Link href={`/admin/${b.id}#upload`}
-                          title="Upload footage — form prefilled with this booking"
+                        <Link href={`/upload?bookingId=${b.id}`}
+                          title="Upload footage — opens the dedicated upload page"
                           className="px-3 py-1.5 text-xs border border-[#673ab7] text-white bg-[#673ab7] rounded hover:bg-[#5e35b1] inline-flex items-center gap-1">
                           📹 Upload
                         </Link>

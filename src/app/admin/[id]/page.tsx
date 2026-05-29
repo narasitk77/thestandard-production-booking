@@ -6,7 +6,7 @@ import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
-import UploadSection from '@/app/_components/booking/UploadSection'
+// v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string }
 interface BookingDetail {
@@ -84,17 +84,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   // UI is never blank — an admin can still assign people, just from a
   // potentially-stale list.
   const [team, setTeam] = useState<Record<RosterRole, RosterEntry[]>>(FALLBACK_TEAM)
-  // v1.35.2 — who's looking at this page? Drives the Upload tab visibility.
-  const [meCanUpload, setMeCanUpload] = useState(false)
-  const [meEmail, setMeEmail] = useState<string>('')
-  useEffect(() => {
-    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
-      if (d?.user) {
-        setMeCanUpload(!!d.user.canUpload)
-        setMeEmail(d.user.email || '')
-      }
-    }).catch(() => {})
-  }, [])
+  // v1.35.11 — meCanUpload / meEmail removed (inline UploadSection moved
+  // to /upload?bookingId=X). MarkUploadDoneCard still renders below for
+  // admins; its own internal fetch handles auth.
 
   useEffect(() => {
     fetch('/api/admin/team', { cache: 'no-store' })
@@ -723,26 +715,29 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         />
       )}
 
-      {/* v1.35.2 — Upload section. Visible only to video/sound crew (or admin)
-          AND only when the booking is CONFIRMED or COMPLETED. Booking context
-          is implicit via this page's URL, so the upload form is prefilled
-          and the user can't accidentally upload to the wrong booking.
-          (Since /admin is admin-only via layout.tsx, this section reaches only
-           admins in practice. Crew uses /upload?bookingId=… instead.) */}
-      {meCanUpload && (booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') && (
-        <div id="upload" className="gf-card p-3 border-l-4 border-[#673ab7] bg-purple-50/30">
-          <div className="text-sm font-medium text-[#673ab7] mb-2 flex items-center gap-1">
-            📹 Upload footage
-            <span className="text-[10px] text-gray-500 ml-1">— ผู้ใช้: {meEmail}</span>
-          </div>
-          <UploadSection booking={{
-            id: booking.id,
-            bookingCode: booking.bookingCode ?? null,
-            status: booking.status,
-            outlet: booking.outlet,
-          }} />
-        </div>
+      {/* v1.35.11 — quick "Upload" shortcut to the dedicated upload page,
+          shown only on CONFIRMED / COMPLETED bookings where uploads are
+          legal. Matches the booking-card button on /admin so the admin
+          flow is consistent. Clicking opens the focused upload surface
+          (no booking-detail noise). */}
+      {(booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') && (
+        <Link
+          href={`/upload?bookingId=${booking.id}`}
+          className="gf-card p-3 border-l-4 border-[#673ab7] bg-purple-50/30 hover:bg-purple-50 transition-colors flex items-center gap-2 text-sm text-[#673ab7]"
+        >
+          📹 Open the dedicated upload page →
+          <span className="text-[11px] text-gray-500 ml-auto">/upload?bookingId={booking.id}</span>
+        </Link>
       )}
+
+      {/* v1.35.11 — Upload section has moved to its own dedicated page at
+          /upload?bookingId=<id>. The booking card on /admin links there
+          via 📹 Upload. /admin/[id] stays focused on booking metadata +
+          assign + Mark-as-Done; the upload UI is its own surface so a
+          crew member opening the upload link doesn't see all the admin
+          internals (and admins get a less-noisy upload screen too).
+          The MarkUploadDoneCard below remains here because it's an
+          admin-only review action, not an upload action. */}
 
       {/* v1.35.5 — Mark-as-Done card. Shows on CONFIRMED bookings only,
           fetches the upload completeness report, enables the button when

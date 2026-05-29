@@ -5,6 +5,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.11] — 2026-05-29
+
+### Changed — Upload moves to its own dedicated page (`/upload?bookingId=…`)
+
+Per ops feedback: the inline Upload section on `/admin/[id]` mixed
+upload UI into the same screen as the admin's booking-edit controls.
+Crew opening the upload link saw the full admin internals; admins
+uploading saw a noisy screen. Splitting the surfaces fixes both.
+
+#### What moved
+
+- The inline `UploadSection` is **removed** from `/admin/[id]`. The
+  page now stays focused on booking metadata + crew assignment +
+  calendar sync + Mark-as-Done review.
+- The Upload UI is now reachable **only** at `/upload?bookingId=<id>`
+  — which already existed for crew (since v1.35.3). Admins use the
+  same page now.
+
+#### Links updated
+
+| Surface | Before | After |
+|---|---|---|
+| `/admin` booking card "📹 Upload" | `/admin/[id]#upload` (inline) | `/upload?bookingId=<id>` (dedicated page) |
+| `/admin/[id]` page | inline `UploadSection` rendered | New shortcut link card: "📹 Open the dedicated upload page →" |
+| `/my-bookings` row "📹 Upload" | `/upload?bookingId=<id>` (already this) | unchanged |
+
+#### What stays on `/admin/[id]`
+
+- All existing booking-detail editing (admin-only)
+- Calendar status / re-sync card
+- **Mark-as-Done card** — admin-only review action, not an upload
+  action. Lives where the admin reviews booking completion.
+
+#### Bonus cleanup
+
+- Removed dead `meCanUpload` / `meEmail` state + `/api/me` fetch on
+  `/admin/[id]` — they only existed to gate the now-removed inline
+  UploadSection.
+- Removed the `UploadSection` import line; no longer referenced from
+  this page.
+
+#### Behavior preserved
+
+- Crew (video/sound role) can still upload via `/upload?bookingId=<id>`
+  exactly as before
+- Admin clicks "Upload" on a card → lands directly on the upload page
+  (one fewer click vs. v1.35.10's scroll-to-anchor)
+- Defense-in-depth gates (`canUploadToBooking`, booking status check,
+  outlet folder mapping) all live on the API side and continue to
+  apply regardless of which page the request originates from
+
+#### Rollback
+
+UI-only refactor. Bump `IMAGE_TAG` back to `sha-db2dbbb` (v1.35.10)
+to revert; the inline UploadSection returns.
+
+---
+
 ## [1.35.10] — 2026-05-29
 
 ### Fixed — `/admin/[id]` crash after Re-sync / Mark-as-Done
