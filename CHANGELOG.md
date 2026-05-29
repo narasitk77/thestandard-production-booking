@@ -5,6 +5,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.13] — 2026-05-29
+
+### Fixed — Wasabi + footage env vars never reached the container (compose bug)
+
+**Root cause.** `/api/admin/upload-config` reported every `WASABI_*`,
+`DRIVE_FOOTAGE_ROOT`, and `FOOTAGE_LOG_SHEET_ID` as `MISSING` on the
+running container — even though they were pasted into the Portainer stack
+env. The pre-existing Google/SMTP/calendar vars worked fine.
+
+The bug was in `docker-compose.portainer.yml`: every feature from v1.34.x
+(footage matcher) and v1.35.x (dual-cloud upload) was shipped **without
+adding the new vars to the `app` service's `environment:` block**.
+
+In Docker Compose, Portainer's "stack environment variables" only feed
+`${VAR}` **substitution** inside the compose file — they are NOT
+auto-injected into the container. A variable the container actually reads
+must appear on an `environment:` line (e.g. `WASABI_BUCKET: ${WASABI_BUCKET:-}`).
+The Google vars were listed there from earlier work, so they reached the
+container; the 14 new vars were never wired, so they evaporated at deploy.
+
+This is why "ผมใส่ไปหมดแล้ว" was true and the diagnostic still showed
+MISSING — nothing was wrong on the Portainer side.
+
+#### Added to the `app` service `environment:` block
+
+Footage matcher (v1.34.x):
+`FOOTAGE_LOG_SHEET_ID`, `FOOTAGE_LOG_TAB`, `DRIVE_FOOTAGE_ROOT`,
+`FOOTAGE_WORKER_ENABLED`, `FOOTAGE_WORKER_INTERVAL_MS`,
+`FOOTAGE_SYNC_SECRET` (defaults to `NEXTAUTH_SECRET`).
+
+Wasabi dual-cloud upload (v1.35.x):
+`WASABI_ENDPOINT`, `WASABI_REGION`, `WASABI_BUCKET`, `WASABI_KEY_PREFIX`,
+`WASABI_ACCESS_KEY`, `WASABI_SECRET_KEY`, `WASABI_VERIFY_ON_COMPLETE`.
+
+Each uses `${VAR:-default}` so the value comes from the Portainer stack env
+at deploy time — no secret value is written into git.
+
+#### Operator action required
+
+Redeploy the stack so the new compose takes effect, then re-run
+`/api/admin/upload-config` and confirm `wasabiPing.ok = true`. The values
+already pasted into the stack env will now flow through. (No re-paste
+needed — only the compose file changed.)
+
+---
+
 ## [1.35.12] — 2026-05-29
 
 ### Changed — Actionable config errors in `/api/upload/init`

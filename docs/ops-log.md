@@ -5,6 +5,42 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-05-29 · v1.35.13 — compose never passed Wasabi/footage env vars to the container
+
+**Symptom.** `/api/admin/upload-config` on the running container reported all
+`WASABI_*`, `DRIVE_FOOTAGE_ROOT`, and `FOOTAGE_LOG_SHEET_ID` as `MISSING`,
+while `drive.hasCredentials` (the pre-existing `GOOGLE_SERVICE_ACCOUNT_*`
+vars) read fine. Operator had pasted all the new vars into the Portainer
+stack env and redeployed — diagnostic still showed MISSING.
+
+**Root cause.** `docker-compose.portainer.yml`'s `app` service `environment:`
+block listed only the pre-existing vars. The v1.34.x footage vars and v1.35.x
+Wasabi vars were never added to it. Portainer stack env vars only drive
+`${VAR}` substitution inside the compose file — they are not injected into
+the container unless an `environment:` line references them. So the operator's
+pastes were used for substitution against lines that didn't exist → dropped.
+
+**Fix.** Added all 14 missing vars to the `environment:` block, each as
+`${VAR:-default}` (values still sourced from the Portainer stack env; no
+secret committed). `FOOTAGE_SYNC_SECRET` defaults to `${NEXTAUTH_SECRET}`,
+mirroring `CALENDAR_RECONCILE_SECRET`.
+
+**Operator action.**
+1. Redeploy the stack on the new commit so the updated compose applies
+   (Pull and redeploy — image tag also advances to v1.35.13).
+2. Confirm via `https://probook.xtec9.xyz/api/admin/upload-config`:
+   `wasabiPing.ok = true`, `summary.wasabiReady = true`.
+3. The values already in the stack env carry over — no re-paste needed.
+4. To turn the footage worker on later: set `FOOTAGE_WORKER_ENABLED=1` +
+   `FOOTAGE_LOG_SHEET_ID=1KMmbPjbRnd6Deb-ct253YMmoINuLgTDnS4Id2lPA5VI`
+   (`DRIVE_FOOTAGE_ROOT=0APhGxxryY4pzUk9PVA` already defaulted in compose).
+
+**Rollback.** Revert this commit → compose drops back to the prior
+`environment:` block. Harmless; the container just loses the new vars again
+(upload returns the actionable `WASABI_NOT_CONFIGURED` error from v1.35.12).
+
+---
+
 ## 2026-05-25 · v1.33.0–v1.33.3 prepared on `feat/ot-signature` (not yet deployed)
 
 OT signature workflow built across four phases on a feature branch. Not

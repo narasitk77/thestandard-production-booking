@@ -111,6 +111,34 @@ services:
       # something other than http://127.0.0.1:3000 (e.g. if you change PORT).
       # CALENDAR_RECONCILE_URL: ${CALENDAR_RECONCILE_URL:-}
 
+      # --- Footage → sheet auto-matcher (v1.34.x) ---
+      # A supervised worker (scripts/footage-sheet-sync-worker.js) walks the
+      # Shared Drive tree under DRIVE_FOOTAGE_ROOT every FOOTAGE_WORKER_INTERVAL_MS,
+      # parses the Production ID from each path, looks up the booking, and appends
+      # a row to FOOTAGE_LOG_SHEET_ID. Stays dormant until FOOTAGE_WORKER_ENABLED=1.
+      FOOTAGE_LOG_SHEET_ID: ${FOOTAGE_LOG_SHEET_ID:-}
+      FOOTAGE_LOG_TAB: ${FOOTAGE_LOG_TAB:-}
+      DRIVE_FOOTAGE_ROOT: ${DRIVE_FOOTAGE_ROOT:-}
+      FOOTAGE_WORKER_ENABLED: ${FOOTAGE_WORKER_ENABLED:-0}
+      FOOTAGE_WORKER_INTERVAL_MS: ${FOOTAGE_WORKER_INTERVAL_MS:-600000}
+      # Secret for the internal /api/internal/footage/sync endpoint; defaults to
+      # NEXTAUTH_SECRET (same pattern as CALENDAR_RECONCILE_SECRET above).
+      FOOTAGE_SYNC_SECRET: ${FOOTAGE_SYNC_SECRET:-${NEXTAUTH_SECRET}}
+      # FOOTAGE_SYNC_URL: ${FOOTAGE_SYNC_URL:-}  # override only if app isn't on 127.0.0.1:3000
+
+      # --- Wasabi S3 archive (dual-cloud upload, v1.35.x) ---
+      # Required for outlets with storagePolicy=DUAL_WRITE (AGN, TSS, NWS). The
+      # booking upload UI presigns multipart PUT URLs from these so the browser
+      # uploads directly to Wasabi (server never touches the bytes). ACCESS/SECRET
+      # keys are injected from the Portainer stack env — never commit values here.
+      WASABI_ENDPOINT: ${WASABI_ENDPOINT:-}
+      WASABI_REGION: ${WASABI_REGION:-}
+      WASABI_BUCKET: ${WASABI_BUCKET:-}
+      WASABI_KEY_PREFIX: ${WASABI_KEY_PREFIX:-}
+      WASABI_ACCESS_KEY: ${WASABI_ACCESS_KEY:-}
+      WASABI_SECRET_KEY: ${WASABI_SECRET_KEY:-}
+      WASABI_VERIFY_ON_COMPLETE: ${WASABI_VERIFY_ON_COMPLETE:-1}
+
       # --- App ---
       UPLOAD_DIR: /app/uploads
     volumes:
