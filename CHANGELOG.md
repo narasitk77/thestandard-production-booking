@@ -5,6 +5,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.10] — 2026-05-29
+
+### Fixed — `/admin/[id]` crash after Re-sync / Mark-as-Done
+
+**Symptom (user-visible):**
+```
+TypeError: Cannot read properties of undefined (reading 'name')
+  at /admin/[id]/page-...js
+```
+
+Crashed the booking detail page right after the admin clicked any
+action that triggered a fresh fetch (Re-sync calendar, Mark Upload
+Done, etc.).
+
+**Root cause:**
+
+`/api/bookings/[id]` returns `{ booking: {...} }` (the booking is
+wrapped). The page's initial-load handler unwraps it correctly:
+
+```ts
+fetch('/api/bookings/' + id).then(r => r.json()).then(d => setBooking(d.booking))
+```
+
+But TWO callback paths used `setBooking(d)` (passing the wrapper
+object):
+
+1. `BookingConfirmedCard.onResynced` — pre-existing bug from v1.32.2
+2. `MarkUploadDoneCard.onDone` — new in v1.35.5
+
+After either action fired, `booking` state became `{ booking: {...} }`.
+Any subsequent render reading `booking.outlet.name` (UploadSection,
+MarkUploadDoneCard subhead, etc) blew up.
+
+**Fix:**
+
+1. Both callbacks now correctly unwrap: `if (d?.booking) setBooking(d.booking)`.
+2. **Defense in depth** — `UploadSection` now guards its first render
+   on `booking?.outlet?.name`. If absent, renders a clear "booking
+   outlet data missing — refresh" card instead of crashing. The
+   ErrorBoundary above would have caught the crash anyway, but the
+   friendly card keeps the rest of the page interactive.
+
+#### Impact
+
+- Re-sync calendar from `/admin/[id]` ✓ no longer crashes
+- Mark Upload as Done from `/admin/[id]` ✓ no longer crashes
+- UploadSection rendered from `/upload?bookingId=…` ✓ unaffected
+  (that route already passed unwrapped booking)
+
+#### Rollback
+
+Single-file UI fix. Bump `IMAGE_TAG` back to `sha-1ea99e8`
+(v1.35.9) — the crash returns but no other behavior changes.
+
+---
+
 ## [1.35.9] — 2026-05-29
 
 ### Security + correctness audit findings

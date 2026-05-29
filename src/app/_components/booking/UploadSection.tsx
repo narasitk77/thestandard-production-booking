@@ -213,6 +213,22 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
 
   const removeFromQueue = (localId: string) => setQueue(prev => prev.filter(q => q.localId !== localId))
 
+  // v1.35.10 — defensive guard against a malformed booking prop. If the
+  // parent passed { booking: {...} } (mistake observed in /admin/[id]'s
+  // onResynced + Mark-as-Done callbacks pre-v1.35.10) or outlet field is
+  // missing, render a clear error instead of crashing on `.outlet.name`.
+  if (!booking || !booking.outlet || typeof booking.outlet.name !== 'string') {
+    return (
+      <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400 flex items-start gap-2">
+        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+        <div>
+          Upload section can&apos;t render — booking is missing outlet data.
+          Refresh the page; if it persists, the API response is malformed.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
       {error && (

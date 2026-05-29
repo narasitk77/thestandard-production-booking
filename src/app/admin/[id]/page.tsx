@@ -711,8 +711,14 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         <BookingConfirmedCard
           booking={booking}
           onResynced={() => {
-            // After a Re-sync POST, reload booking + verification
-            fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => setBooking(d))
+            // After a Re-sync POST, reload booking + verification.
+            // v1.35.10 — fixed: API returns { booking: {...} }, not the
+            // booking directly. Previous setBooking(d) made booking ==
+            // { booking: {...} } which crashed downstream `.outlet.name`
+            // reads.
+            fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => {
+              if (d?.booking) setBooking(d.booking)
+            })
           }}
         />
       )}
@@ -744,7 +750,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           bookings (already Done). */}
       {booking.status === 'CONFIRMED' && (
         <MarkUploadDoneCard bookingId={booking.id} bookingCode={booking.bookingCode || null}
-          onDone={() => fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => setBooking(d))} />
+          onDone={() => fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => {
+            // v1.35.10 — API returns { booking: {...} }; unwrap before setState
+            if (d?.booking) setBooking(d.booking)
+          })} />
       )}
     </div>
   )
