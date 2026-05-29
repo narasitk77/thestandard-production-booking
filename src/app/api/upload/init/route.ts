@@ -145,13 +145,29 @@ export async function POST(request: NextRequest) {
     const policy = booking.outlet.storagePolicy
     const wantWasabi = policy === 'DUAL_WRITE' || operatorWantsWasabi
     if (wantWasabi && !isWasabiConfigured()) {
+      // v1.35.12 — surface which env vars are missing so the admin can
+      // see at a glance what to set in Portainer instead of going to a
+      // separate diagnostic page.
+      const missing = ([
+        ['WASABI_ENDPOINT', process.env.WASABI_ENDPOINT],
+        ['WASABI_REGION', process.env.WASABI_REGION],
+        ['WASABI_BUCKET', process.env.WASABI_BUCKET],
+        ['WASABI_ACCESS_KEY', process.env.WASABI_ACCESS_KEY],
+        ['WASABI_SECRET_KEY', process.env.WASABI_SECRET_KEY],
+      ]).filter(([, v]) => !v?.trim()).map(([k]) => k)
       return NextResponse.json({
-        error: 'Wasabi is required for this outlet but WASABI_* env vars are not set',
+        error: `Wasabi is required for outlet "${booking.outlet.code}" (storagePolicy=DUAL_WRITE) but is not configured. Admin: set the following env vars in the Portainer stack and redeploy — ${missing.join(', ')}. Diagnose at /api/admin/upload-config.`,
         code: 'WASABI_NOT_CONFIGURED',
+        missingEnvVars: missing,
+        outletPolicy: policy,
+        adminAction: 'Set WASABI_* env vars in Portainer stack → Pull and redeploy. Verify via /api/admin/upload-config (wasabiPing.ok = true).',
       }, { status: 503 })
     }
     if (!process.env.DRIVE_FOOTAGE_ROOT?.trim()) {
-      return NextResponse.json({ error: 'DRIVE_FOOTAGE_ROOT env var is not set' }, { status: 503 })
+      return NextResponse.json({
+        error: 'DRIVE_FOOTAGE_ROOT env var is not set. Admin: set it in the Portainer stack to the Shared Drive root folder id (currently expected: 0APhGxxryY4pzUk9PVA) and redeploy.',
+        code: 'DRIVE_NOT_CONFIGURED',
+      }, { status: 503 })
     }
 
     // 4. Compute paths (same shape for both clouds)

@@ -5,6 +5,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.12] — 2026-05-29
+
+### Changed — Actionable config errors in `/api/upload/init`
+
+Symptom: a real upload showed `Wasabi is required for this outlet but
+WASABI_* env vars are not set` — accurate but the admin then has to
+guess which env vars are missing and where to set them.
+
+#### `WASABI_NOT_CONFIGURED` now returns:
+
+```json
+{
+  "error": "Wasabi is required for outlet \"AGN\" (storagePolicy=DUAL_WRITE) but is not configured. Admin: set the following env vars in the Portainer stack and redeploy — WASABI_BUCKET, WASABI_ACCESS_KEY, WASABI_SECRET_KEY. Diagnose at /api/admin/upload-config.",
+  "code": "WASABI_NOT_CONFIGURED",
+  "missingEnvVars": ["WASABI_BUCKET", "WASABI_ACCESS_KEY", "WASABI_SECRET_KEY"],
+  "outletPolicy": "DUAL_WRITE",
+  "adminAction": "Set WASABI_* env vars in Portainer stack → Pull and redeploy. Verify via /api/admin/upload-config (wasabiPing.ok = true)."
+}
+```
+
+Each of the five env vars is checked individually so the message names
+exactly which ones to fill in. The `missingEnvVars` array is structured
+so future UI surfaces can render a checklist.
+
+#### `DRIVE_NOT_CONFIGURED` (new code)
+
+Same treatment for the Drive case: if `DRIVE_FOOTAGE_ROOT` isn't set
+the error now spells out the expected folder id
+(`0APhGxxryY4pzUk9PVA` for current prod) so the admin doesn't have to
+hunt for it in `.env.portainer.example`.
+
+#### Behavior preserved
+
+- HTTP status stays `503` (server-side misconfiguration, not a client
+  error — same semantics as before)
+- The UploadSection in the browser already renders the response
+  `error` field verbatim, so the new actionable message shows up
+  inside the upload queue card with no UI change needed
+
+#### Not changed
+
+- The system still refuses to upload to a DUAL_WRITE outlet with
+  Wasabi missing. No silent downgrade to Drive-only — that would
+  break the outlet's storage policy contract. Admin must either fix
+  the Wasabi config or change the outlet's `storagePolicy` in DB.
+
+#### Rollback
+
+Trivial — message change only. Bump `IMAGE_TAG` back to `sha-0a36b5b`
+(v1.35.11). Real fix is server-side env config in Portainer
+regardless of which version is deployed.
+
+---
+
 ## [1.35.11] — 2026-05-29
 
 ### Changed — Upload moves to its own dedicated page (`/upload?bookingId=…`)
