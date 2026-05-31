@@ -75,7 +75,8 @@ function UploadPage() {
             setError(d.error)
             setBookings([])
           } else {
-            setBookings([d])
+            // /api/bookings/[id] returns { booking: {...} } — unwrap it.
+            setBookings([d.booking ?? d])
           }
         })
         .catch(e => setError(String(e?.message || e)))

@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.16] — 2026-06-01
+
+### Fixed — `/upload?bookingId=` crashes: "Cannot read properties of undefined (reading 'code')" (`src/app/upload/page.tsx`)
+
+Single-booking mode fetches `/api/bookings/[id]` which returns `{ booking: { ... } }`.
+The effect did `setBookings([d])` — storing the wrapper object, not the booking.
+All subsequent accesses (`single.outlet.code`, `single.program.name`, etc.) read
+`undefined` and the page crashed.
+
+Fixed by unwrapping: `setBookings([d.booking ?? d])`. The `?? d` fallback preserves
+backward-compatibility if a future API ever flattens the response.
+
+---
+
 ## [1.35.15] — 2026-06-01
 
 ### Fixed — Admin booking detail page: wrong status badge for COMPLETED / CANCELLED bookings (`src/app/admin/[id]/page.tsx`)
