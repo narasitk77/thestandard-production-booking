@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.15] — 2026-06-01
+
+### Fixed — Admin booking detail page: wrong status badge for COMPLETED / CANCELLED bookings (`src/app/admin/[id]/page.tsx`)
+
+The status badge ternary chain in the admin booking detail page had no cases
+for `COMPLETED` or `CANCELLED` — both statuses fell through to the default
+`bg-red-100 text-red-700 [REQUESTED]` badge. Admins viewing a completed or
+cancelled booking saw a misleading red "[REQUESTED]" chip instead of the correct
+label. Fixed by adding explicit branches:
+
+- `COMPLETED` → blue badge `✓ COMPLETED`
+- `CANCELLED` → gray badge `CANCELLED`
+
+The `isConfirmed` branch (covers `CONFIRMED` + its `approved` alias) and the
+`ASSIGNED` branch are unchanged.
+
+---
+
 ## [1.35.14] — 2026-05-31
 
 ### Fixed — Three bugs found during codebase audit

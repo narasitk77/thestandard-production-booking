@@ -354,9 +354,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
             isConfirmed ? 'bg-green-100 text-green-700' :
             booking.status === 'ASSIGNED' ? 'bg-yellow-100 text-yellow-700' :
+            booking.status === 'COMPLETED' ? 'bg-blue-100 text-blue-700' :
+            booking.status === 'CANCELLED' ? 'bg-gray-100 text-gray-600' :
             'bg-red-100 text-red-700'
           }`}>
-            {isConfirmed ? '✓ CONFIRMED' : booking.status === 'ASSIGNED' ? 'ASSIGNED' : '[REQUESTED]'}
+            {isConfirmed ? '✓ CONFIRMED' :
+             booking.status === 'ASSIGNED' ? 'ASSIGNED' :
+             booking.status === 'COMPLETED' ? '✓ COMPLETED' :
+             booking.status === 'CANCELLED' ? 'CANCELLED' :
+             '[REQUESTED]'}
           </span>
         </div>
         <h1 className="text-2xl font-normal text-gray-800">
