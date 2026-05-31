@@ -5,6 +5,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.14] — 2026-05-31
+
+### Fixed — Three bugs found during codebase audit
+
+#### 1. `GET /api/upload` crashes with BigInt serialization error (`src/app/api/upload/route.ts`)
+
+`Upload.fileSize` is stored as `BigInt?` in Prisma. The admin-only legacy
+GET endpoint returned `NextResponse.json({ uploads })` directly — once any
+v1.35.x upload existed, the response threw `TypeError: Do not know how to
+serialize a BigInt` and returned a 500 to the caller. Fixed by mapping
+`fileSize` to `Number` before serialization (same pattern already used in
+`/api/upload/list`).
+
+#### 2. Admin sees empty crew view briefly on `/upload` list (race condition) (`src/app/upload/page.tsx`)
+
+The list-mode `useEffect` fired before `/api/me` resolved. With `me === null`
+the scope defaulted to `mine` (crew view) and fetched `?scope=mine`. When
+`/api/me` settled, the effect re-fired with the correct admin scope — causing
+a flash of the wrong (empty) list. Fixed by introducing a `meLoaded` boolean
+state: the me-fetch effect always calls `setMeLoaded(true)` in `.finally()`;
+the list-mode branch returns early until `meLoaded` is true. The spinner
+that was already showing from `loading: true` (initial state) covers the wait
+with no visible flicker.
+
+#### 3. `Switcher` and `Atem` missing from upload camera list (`src/app/_components/booking/UploadSection.tsx`)
+
+The footage-sync `CAMERA_TOKEN_RE` in `src/lib/footage-sync.ts` recognises
+`Switcher` and `Atem` as valid camera tokens. The upload form `CAMERAS` array
+only had `['Cam1', 'Cam2', 'Cam3', 'Cam4', 'Sound', 'Drone', 'BTS']` — so
+a crew member uploading switcher or ATEM output had to pick a wrong camera
+label, breaking the footage log's camera column. Added both tokens to align
+the UI with the parser.
+
+---
+
 ## [1.35.13] — 2026-05-29
 
 ### Fixed — Wasabi + footage env vars never reached the container (compose bug)

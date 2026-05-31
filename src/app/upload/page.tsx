@@ -44,20 +44,30 @@ function UploadPage() {
   const requestedBookingId = searchParams.get('bookingId') || ''
 
   const [me, setMe] = useState<Me | null>(null)
+  // meLoaded flips to true once /api/me settles (success OR failure).
+  // The list-mode fetch waits for this so we know the real role before
+  // picking the scope — prevents admins from briefly seeing the crew-only
+  // view (scope=mine) on the first render before /api/me resolves.
+  const [meLoaded, setMeLoaded] = useState(false)
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
-      if (d?.user) setMe({ email: d.user.email, role: d.user.role, canUpload: !!d.user.canUpload })
-    }).catch(() => {})
+    fetch('/api/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.user) setMe({ email: d.user.email, role: d.user.role, canUpload: !!d.user.canUpload })
+      })
+      .catch(() => {})
+      .finally(() => setMeLoaded(true))
   }, [])
 
   useEffect(() => {
     if (requestedBookingId) {
-      // Single-booking mode
+      // Single-booking mode — doesn't need me (no scope decision)
+      setLoading(true)
       fetch(`/api/bookings/${requestedBookingId}`)
         .then(r => r.json())
         .then(d => {
@@ -72,10 +82,12 @@ function UploadPage() {
         .finally(() => setLoading(false))
       return
     }
-    // List mode — pull bookings the user can act on. Admins use the full
-    // feed (2 parallel fetches because the bookings API takes a single
-    // status param at a time); crew uses ?scope=mine to restrict to their
-    // own assignments.
+    // List mode — wait for /api/me to settle before choosing the scope.
+    // Without this guard, the effect fires with me=null (before /api/me
+    // returns) and fetches scope=mine — admins briefly see an empty crew
+    // list before the effect re-fires with the correct admin scope.
+    if (!meLoaded) return
+    setLoading(true)
     const isAdmin = me?.role === 'ADMIN'
     const urls = isAdmin
       ? [
@@ -100,7 +112,7 @@ function UploadPage() {
       })
       .catch(e => setError(String(e?.message || e)))
       .finally(() => setLoading(false))
-  }, [requestedBookingId, me?.role])
+  }, [requestedBookingId, meLoaded, me?.role])
 
   const single = requestedBookingId ? bookings[0] : null
   const filtered = bookings.filter(b => {

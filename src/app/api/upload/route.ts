@@ -44,7 +44,11 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ uploads })
+    // Serialize BigInt fileSize — JSON.stringify cannot handle BigInt natively
+    // and throws "Do not know how to serialize a BigInt" without this.
+    return NextResponse.json({
+      uploads: uploads.map(u => ({ ...u, fileSize: u.fileSize != null ? Number(u.fileSize) : null })),
+    })
   } catch (error) {
     console.error('GET /api/upload error:', error)
     return NextResponse.json({ error: 'Failed to fetch uploads' }, { status: 500 })

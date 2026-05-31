@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Upload, X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
 import { uploadToDrive as driveUpload, uploadToWasabi as wasabiUpload, type RetryStatus } from '@/lib/upload-client'
 
-const CAMERAS = ['Cam1', 'Cam2', 'Cam3', 'Cam4', 'Sound', 'Drone', 'BTS']
+const CAMERAS = ['Cam1', 'Cam2', 'Cam3', 'Cam4', 'Sound', 'Drone', 'BTS', 'Switcher', 'Atem']
 
 interface BookingContext {
   id: string
