@@ -5,6 +5,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.19] — 2026-06-01
+
+### Fixed — Bookings tab rows patched by Production ID, not stored index (`src/lib/google-sheets.ts`, 4 route files)
+
+`updateBookingRow` previously used `booking.sheetRowIndex` (a stored integer) to locate the target row.
+Manual insert / delete / sort in the Bookings tab would silently shift rows and cause the wrong booking
+to be patched. Now `updateBookingRow` accepts a `bookingCode: string`, scans column A live, and computes
+the real row index at write-time — immune to any sheet edits. All four callers updated.
+Authored by Panu-PookenZ (PR #2).
+
+---
+
+## [1.35.18] — 2026-06-01
+
+### Added — Main Videographer propagated to Producer Dashboard Bookings tab (`src/lib/google-sheets.ts`, `src/app/api/admin/[id]/assign/route.ts`)
+
+`Booking.mainVideographerEmail` was already stored in Postgres but never written to the Bookings tab.
+Now written as column 30 ("Main Videographer") on every assign and on new-booking append.
+Downstream PMC sync (Airtable Service Job → Main Videographer) can now read the value from the sheet.
+Authored by Panu-PookenZ (PR #1).
+
+### Removed — Dead in-app Episode ID minting (`src/lib/dashboard-episodes.ts`)
+
+`generateProjectEpisodeIds()` and all its helpers (~192 lines: `pad2`, `lookupProject`, `maxSeqInPDTab`,
+`escapeRegex`, `tabRef`, `cleanDirectorName`) were removed — no live callers existed.
+Episode creation stays in the Dashboard UI where it belongs.
+Authored by Panu-PookenZ (PR #1).
+
+---
+
 ## [1.35.17] — 2026-06-01
 
 ### Changed — Permissions page redesign (`src/app/admin/permissions/page.tsx`)
