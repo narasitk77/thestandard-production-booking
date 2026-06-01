@@ -244,17 +244,33 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
   }
 }
 
-export async function updateBookingRow(rowIndex: number, fields: Partial<{
+export async function updateBookingRow(bookingCode: string, fields: Partial<{
   assignedEmails: string
   status: string
   calendarEventId: string
   approvedAt: string
   mainVideographer: string
 }>) {
-  if (!hasCredentials() || !rowIndex) return
+  if (!hasCredentials() || !bookingCode) return
   try {
     const spreadsheetId = getSheetId()
     const sheets = google.sheets({ version: 'v4', auth: getAuth() })
+
+    // Find the row by Production ID (col A) instead of trusting a stored row
+    // index — robust to manual insert/delete/sort in the Bookings tab, which
+    // would otherwise make us patch the wrong booking.
+    const colA = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${SHEET_TAB}!A2:A`,
+    })
+    const idx = (colA.data.values || []).findIndex(
+      r => String(r[0] || '').trim() === bookingCode.trim(),
+    )
+    if (idx < 0) {
+      console.error(`updateBookingRow: Production ID "${bookingCode}" not found in "${SHEET_TAB}" — skipping`)
+      return
+    }
+    const rowIndex = idx + 2 // data rows start at sheet row 2
 
     const updates: { range: string; values: string[][] }[] = []
     for (const [key, value] of Object.entries(fields)) {

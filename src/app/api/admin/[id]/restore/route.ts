@@ -41,7 +41,7 @@ export async function POST(
     })
 
     if (existing.sheetRowIndex) {
-      updateBookingRow(existing.sheetRowIndex, {
+      updateBookingRow(existing.bookingCode || '', {
         status: 'REQUESTED',
         calendarEventId: '',
         approvedAt: '',
