@@ -263,7 +263,7 @@ export async function POST(
       .map(r => ({ email: r.email, error: r.error, hint: r.hint }))
 
     if (booking.sheetRowIndex) {
-      updateBookingRow(booking.sheetRowIndex, {
+      updateBookingRow(booking.bookingCode || '', {
         assignedEmails: emailRecipients.join(', '),
         status: nextStatus,
         mainVideographer: mainVdo || '',

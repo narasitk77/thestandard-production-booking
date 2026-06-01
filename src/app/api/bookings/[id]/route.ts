@@ -173,7 +173,7 @@ export async function PATCH(
         deleteCalendarEvent(existing.calendarEventId).catch(() => {})
       }
       if (existing.sheetRowIndex) {
-        updateBookingRow(existing.sheetRowIndex, { status: 'CANCELLED' }).catch(() => {})
+        updateBookingRow(existing.bookingCode || '', { status: 'CANCELLED' }).catch(() => {})
       }
       await prisma.booking.update({
         where: { id: params.id },

@@ -99,7 +99,7 @@ export async function POST(
         }
 
         if (booking.sheetRowIndex) {
-          await updateBookingRow(booking.sheetRowIndex, {
+          await updateBookingRow(booking.bookingCode || '', {
             status: 'CONFIRMED',
             calendarEventId: calendarEventId || '',
             approvedAt: approvedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
