@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.17] — 2026-06-01
+
+### Changed — Permissions page redesign (`src/app/admin/permissions/page.tsx`)
+
+Rebuilt `/admin/permissions` with:
+- **Search** — filter by email, thaiName, employeeId, or position
+- **Sort** — by name (Thai locale), role (Admin first), or created date
+- **Show Disabled** toggle — hidden by default, checkbox to reveal disabled accounts
+- **OT Approver badge** — derived inline: shown when `role=ADMIN` or `position` contains "manager"
+- **Inline position edit** — hover pencil icon on any row → edit position in place (Enter to save, Esc to cancel)
+- **Stat chips** in header — live count of active Admins and OT Approvers
+- **Compact table** — thaiName + email + employeeId stacked in one cell; action buttons tighter
+- **Add-user form** — collapsible, auto-focuses email input
+- **Legend** at bottom explaining how Admin / OT Approver / canUpload are derived
+
+No schema or API changes — purely a UI improvement.
+
+---
+
 ## [1.35.16] — 2026-06-01
 
 ### Fixed — `/upload?bookingId=` crashes: "Cannot read properties of undefined (reading 'code')" (`src/app/upload/page.tsx`)
