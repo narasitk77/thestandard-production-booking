@@ -266,6 +266,7 @@ export async function POST(
       updateBookingRow(booking.sheetRowIndex, {
         assignedEmails: emailRecipients.join(', '),
         status: nextStatus,
+        mainVideographer: mainVdo || '',
       }).catch(e => console.error('updateBookingRow error:', e?.message || e))
     }
 

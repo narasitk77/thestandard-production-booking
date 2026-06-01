@@ -20,7 +20,7 @@ import { getProducerDashboardSheetId, getBookingsTabName } from './google-config
 const getSheetId = getProducerDashboardSheetId
 const SHEET_TAB = getBookingsTabName()
 
-// 28 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
+// 30 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
 // *Email columns keep the canonical id so Airtable can join on either.
 // PD Phone is filled only for non-Content-Agency outlets (free-text producer).
 const HEADERS = [
@@ -32,7 +32,7 @@ const HEADERS = [
   'Location', 'PD', 'PD Email', 'PD Phone', 'DIR', 'DIR Email',
   'Episode IDs', 'Crew Required', 'Category', 'Creative/Host', 'Assigned Emails',
   'Status', 'Calendar Event ID', 'Notes', 'Created By', 'Created At',
-  'Approved At', 'Updated At', 'Video Type',
+  'Approved At', 'Updated At', 'Video Type', 'Main Videographer',
 ]
 
 // 1-indexed column positions for partial updates.
@@ -42,6 +42,7 @@ const COL = {
   calendarEventId: 23,
   approvedAt: 27,
   updatedAt: 28,
+  mainVideographer: 30,
 } as const
 
 /**
@@ -173,6 +174,7 @@ export type BookingRow = {
   crewRequired: string[]
   category: string
   videoType?: string | null
+  mainVideographerEmail?: string | null
   creative: string[]
   assignedEmails?: string[]
   status: string
@@ -223,6 +225,7 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       '', // Approved At — filled in later by the approve route
       now,
       booking.videoType || '', // Video Type — appended right of Updated At
+      booking.mainVideographerEmail || '', // Main Videographer — set later at assign-time
     ]
 
     const appendRes = await sheets.spreadsheets.values.append({
@@ -246,6 +249,7 @@ export async function updateBookingRow(rowIndex: number, fields: Partial<{
   status: string
   calendarEventId: string
   approvedAt: string
+  mainVideographer: string
 }>) {
   if (!hasCredentials() || !rowIndex) return
   try {
