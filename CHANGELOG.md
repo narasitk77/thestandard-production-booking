@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.35.20] — 2026-06-02
+
+### Fixed — Upload to Google Drive + Wasabi now works (`src/lib/google-drive.ts`)
+
+Two root-cause fixes required to unblock the footage upload feature:
+
+1. **DWD scope** — Added `https://www.googleapis.com/auth/drive` to the
+   service account's Domain-wide Delegation in Google Workspace Admin.
+   Previously only `calendar` scope was authorized; Drive upload (write ops)
+   requires the full `drive` scope via the same DWD path.
+
+2. **Drive API enabled** — Enabled `drive.googleapis.com` in the GCP project
+   (`production-booking-494605`). The API had never been used in this project,
+   so all Drive SDK calls failed with "API has not been used in project… or
+   it is disabled." Enabled via GCP Console → APIs & Services → Library.
+
+After both fixes, `POST /api/upload/init` returns 200 with a Drive resumable
+session URL + Wasabi multipart presigned URLs — upload flow works end-to-end.
+
+---
+
 ## [1.35.19] — 2026-06-01
 
 ### Fixed — Bookings tab rows patched by Production ID, not stored index (`src/lib/google-sheets.ts`, 4 route files)
