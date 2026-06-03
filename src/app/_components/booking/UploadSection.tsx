@@ -297,7 +297,11 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
           </div>
           <p className="text-[10px] text-gray-500 mt-1">
             จะ upload ตรงเข้า Drive {wasabiLocked || includeWasabi ? '+ Wasabi' : ''} ที่
-            {' '}<code className="text-gray-700">{`<outlet>/${booking.bookingCode}/${camera}/`}</code>
+            {/* v1.36.1 — hint reflects the real v1.36.0 layout: footage lands in
+                the outlet's existing folder, under "<Production ID> - <ชื่องาน>",
+                then the camera. (Exact outlet folder + job name are resolved
+                server-side, shown here as placeholders.) */}
+            {' '}<code className="text-gray-700">{`[outlet]/${booking.bookingCode} - [ชื่องาน]/${camera}/`}</code>
             {' · '}
             <span className="text-gray-400">chunked + auto-retry (network drop ปลอดภัย)</span>
           </p>

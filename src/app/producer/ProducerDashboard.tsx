@@ -144,10 +144,16 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">
                     {formatDisplayDate(b.shootDate)} · {b.callTime}{b.estimatedWrap ? ` → ${b.estimatedWrap}` : ''}
-                    {' · '}
-                    {assigned
-                      ? <span className="text-green-600">assigned: {b.assignedEmails.join(', ')}</span>
-                      : <span className="text-yellow-600">⏳ รอแอดมิน assign</span>}
+                    {/* v1.36.1 — assignment hint must respect status: a CANCELLED
+                        (or COMPLETED-but-unassigned) booking is NOT "waiting for
+                        admin to assign". Only REQUESTED/ASSIGNED-stage bookings
+                        show the pending-assign nudge; terminal states let the
+                        status pill speak for itself. */}
+                    {assigned ? (
+                      <>{' · '}<span className="text-green-600">assigned: {b.assignedEmails.join(', ')}</span></>
+                    ) : b.status === 'CANCELLED' || b.status === 'COMPLETED' ? null : (
+                      <>{' · '}<span className="text-yellow-600">⏳ รอแอดมิน assign</span></>
+                    )}
                   </div>
                   <div className="text-xs text-gray-400 mt-1">
                     {b.episodes.map(e => e.episodeId).join(', ')}

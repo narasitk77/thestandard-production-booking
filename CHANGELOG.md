@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.36.1] — 2026-06-03
+
+### Fixed — two status/label bugs found during the full-feature test sweep
+
+1. **Producer Dashboard showed "⏳ รอแอดมิน assign" for CANCELLED/COMPLETED
+   bookings** (`src/app/producer/ProducerDashboard.tsx`)
+   - The inline assignment hint was a bare binary (`assigned ? … : "รอแอดมิน
+     assign"`) that ignored `booking.status`. A cancelled (or completed-but-
+     unassigned) booking therefore displayed the pre-assignment "waiting for
+     admin to assign" nudge while its status pill correctly read "Cancelled" —
+     a contradiction. Same class of bug as the v1.35.15 admin-detail fix.
+   - Now terminal states (CANCELLED, COMPLETED) suppress the pending-assign
+     nudge and let the status pill speak; only pre-assign bookings show it.
+
+2. **Upload page path hint was stale** (`src/app/_components/booking/UploadSection.tsx`)
+   - The "จะ upload ตรงเข้า…" hint still showed `<outlet>/<bookingCode>/<camera>/`,
+     not the v1.36.0 layout. Updated to
+     `[outlet]/<Production ID> - [ชื่องาน]/<camera>/` so it matches where files
+     actually land.
+
+Found via a recorded end-to-end UI test sweep on the live v1.36.0 deploy
+(auth, calendar, bookings, dashboard, new-booking wizard, admin detail,
+upload→Drive+booking-info.txt, OT, permissions, exports, health — all
+otherwise green).
+
+---
+
 ## [1.36.0] — 2026-06-02
 
 ### Changed — Upload lands in the team's existing Drive folders + drops a booking-info.txt
