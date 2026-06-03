@@ -8,39 +8,51 @@
  * This module is the single source of truth that the upload code consults
  * when computing the destination path.
  *
- * Confirmed with narasit.k on 2026-05-27:
- *   AGN → "Advertorial"          (NOT "Content Agency" which is Outlet.name)
- *   TSS → "the Secret Sauce"     (lowercase 'the' — intentional)
- *   POP → "THE STANDARD POP"     (NOT just "POP")
- *   NWS → "News"
- *   WLT → "Wealth"
- *   SPT → "Sport"
- *   POD → "Podcast"
- *   KND → "KND"
- *   LIF → "LIFE"
+ * v1.36.0 — the team's real Shared Drive "VIDEO 2026" lays its outlet
+ * folders out with an ORDERING prefix the producers re-number over time:
  *
- * If a new outlet is added later, append a line here AND rename the
- * Drive folder + Wasabi prefix to match. The inspect script
- * (`scripts/inspect-drive-outlets.ts`) will flag any mismatch.
+ *   1.NEWS · 2.POP · 3.PODCAST · 4.KND · 5.THE SECRET SAUCE ·
+ *   6.WEALTH · 7.LIFE · 8.SPORT · 9.ADVERTORIAL
+ *
+ * We must drop new footage into THOSE existing folders, not create a
+ * fresh one. So the values below are the CANONICAL suffix (no "N."
+ * prefix); the Drive layer matches an existing child folder whose name
+ * equals this suffix after the numeric prefix is stripped
+ * (`ensureChildFolderByCanonicalName` in `google-drive.ts`). Wasabi keeps
+ * using the canonical name directly (no renumbering problem there).
+ *
+ * Confirmed against the live Drive on 2026-06-02 (inspect-drive-outlets):
+ *   AGN → "ADVERTORIAL"        (folder "9.ADVERTORIAL")
+ *   TSS → "THE SECRET SAUCE"   (folder "5.THE SECRET SAUCE")
+ *   POP → "POP"                (folder "2.POP")
+ *   NWS → "NEWS"               (folder "1.NEWS")
+ *   WLT → "WEALTH"             (folder "6.WEALTH")
+ *   SPT → "SPORT"              (folder "8.SPORT")
+ *   POD → "PODCAST"            (folder "3.PODCAST")
+ *   KND → "KND"                (folder "4.KND")
+ *   LIF → "LIFE"               (folder "7.LIFE")
+ *
+ * If a new outlet is added later, append a line here. The numeric prefix
+ * in Drive is matched fuzzily, so you only need the suffix to be right.
  */
 
 const OUTLET_FOLDER_BY_CODE: Record<string, string> = {
-  AGN: 'Advertorial',
-  TSS: 'the Secret Sauce',
-  POP: 'THE STANDARD POP',
-  NWS: 'News',
-  WLT: 'Wealth',
-  SPT: 'Sport',
-  POD: 'Podcast',
+  AGN: 'ADVERTORIAL',
+  TSS: 'THE SECRET SAUCE',
+  POP: 'POP',
+  NWS: 'NEWS',
+  WLT: 'WEALTH',
+  SPT: 'SPORT',
+  POD: 'PODCAST',
   KND: 'KND',
   LIF: 'LIFE',
 }
 
 /**
- * Resolve the storage folder name for an outlet code. Falls back to the
- * raw code when the mapping is missing — better than silently using the
- * wrong folder, and the inspect script + the upload UI surface the gap
- * for triage.
+ * Resolve the canonical storage folder name for an outlet code. Falls
+ * back to the raw code when the mapping is missing — better than silently
+ * using the wrong folder, and the inspect script + the upload UI surface
+ * the gap for triage.
  */
 export function outletFolderName(outletCode: string): string {
   return OUTLET_FOLDER_BY_CODE[outletCode.toUpperCase()] ?? outletCode.toUpperCase()
@@ -56,15 +68,46 @@ export function hasOutletFolderMapping(outletCode: string): boolean {
 }
 
 /**
- * Build the per-file storage path components that BOTH Wasabi and Drive
- * use. Single source of truth — if we ever change the layout (e.g. add
- * year segment, swap order), it changes in one place.
+ * Sanitize a string for safe use as a single Drive folder / file name.
+ * Drive itself tolerates almost anything (it keys on ids, not paths), but
+ * a clean name keeps the tree readable and avoids surprises in tools that
+ * later sync these folders. Keeps Thai + alphanumerics + a few separators;
+ * collapses whitespace; strips path separators; caps the length.
+ */
+export function sanitizeNameSegment(raw: string, maxLen = 120): string {
+  const cleaned = String(raw || '')
+    .replace(/[\\/]+/g, ' ')      // no path separators
+    .replace(/[\r\n\t]+/g, ' ')   // no line breaks
+    .replace(/\s+/g, ' ')         // collapse whitespace
+    .trim()
+  if (cleaned.length <= maxLen) return cleaned
+  return cleaned.slice(0, maxLen).trim()
+}
+
+/**
+ * Human-readable Drive folder name for a booking:
+ *   "AGN-260529-STD-01 - PTTPLC ปตท."   (when a job name is known)
+ *   "AGN-260529-STD-01"                  (when it isn't)
+ *
+ * The Production ID always leads so the folder sorts + searches by the
+ * code the team uses, with the producer's job name appended for humans.
+ */
+export function buildBookingFolderName(bookingCode: string, jobName?: string | null): string {
+  const code = String(bookingCode || '').trim()
+  const job = sanitizeNameSegment(jobName || '', 100)
+  return job ? `${code} - ${job}` : code
+}
+
+/**
+ * Build the per-file Wasabi key components. Wasabi has no renumbering
+ * problem and we want keys to stay stable + ASCII-clean, so it uses the
+ * canonical outlet name and the bare bookingCode for the booking segment
+ * (NOT the human "code - job name" Drive folder).
  *
  *   buildStoragePath('AGN', 'AGN-260423-EVT-01', 'Cam1', '001.mp4')
- *     → ['Advertorial', 'AGN-260423-EVT-01', 'Cam1', '001.mp4']
+ *     → ['ADVERTORIAL', 'AGN-260423-EVT-01', 'Cam1', '001.mp4']
  *
- * Caller joins with '/' for Wasabi key, or walks the segments with
- * `ensureFolderPath` for Drive.
+ * Caller joins with '/' for the Wasabi key.
  */
 export function buildStoragePath(
   outletCode: string,

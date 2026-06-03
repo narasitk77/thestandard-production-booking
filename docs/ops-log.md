@@ -5,6 +5,41 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-02 · v1.36.0 — upload Drive path: existing folders + DWD drive scope + Drive API enable
+
+**Goal.** Make footage upload land in the team's real "VIDEO 2026" Shared
+Drive folders (not duplicates), name the booking folder by Production ID +
+job name, and drop a `booking-info.txt` per booking. Last piece for the
+upload feature to be end-to-end usable.
+
+**Three infra actions before the code change worked:**
+
+1. **DWD scope** — Added `https://www.googleapis.com/auth/drive` to the
+   `production-booking@…` service account's Domain-Wide Delegation in Google
+   Workspace Admin (Security → API controls → Domain-wide Delegation → edit
+   client `106117530552798836735`). It previously had only `…/auth/calendar`.
+   DWD matches scopes EXACTLY — `drive.readonly` was a different, unauthorized
+   string, which is why the footage worker + inspect script had failed with
+   `unauthorized_client`. Code now points read auth at the authorized `drive`
+   scope too.
+
+2. **Drive API enabled** — Enabled `drive.googleapis.com` in GCP project
+   `production-booking-494605` (number 157610285818). Had never been used
+   there, so Drive SDK calls failed with "API … is disabled."
+
+3. **Folder mapping confirmed against live Drive** — real outlet folders:
+   `1.NEWS · 2.POP · 3.PODCAST · 4.KND · 5.THE SECRET SAUCE · 6.WEALTH ·
+   7.LIFE · 8.SPORT · 9.ADVERTORIAL` (root `0APhGxxryY4pzUk9PVA`). Code matches
+   by canonical suffix (ordering-prefix tolerant, prefers numbered). A stray
+   bare `Advertorial` folder from the earlier bug was moved to Drive trash
+   (recoverable) — it held only 0-byte test placeholders.
+
+**Verification.** Local E2E against live Drive: AGN resolved to the real
+`9.ADVERTORIAL` (parent `1_uz_0Ceyp9…`), wrote a readable `booking-info.txt`
+with all episodes, cleaned up. After deploy `POST /api/upload/init` → 200.
+
+---
+
 ## 2026-05-29 · v1.35.13 — compose never passed Wasabi/footage env vars to the container
 
 **Symptom.** `/api/admin/upload-config` on the running container reported all

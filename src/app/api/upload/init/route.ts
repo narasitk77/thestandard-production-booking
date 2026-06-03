@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, canUploadToBooking } from '@/lib/session'
-import { buildStoragePath, hasOutletFolderMapping, outletFolderName } from '@/lib/outlet-folders'
+import {
+  buildStoragePath,
+  hasOutletFolderMapping,
+  outletFolderName,
+  buildBookingFolderName,
+} from '@/lib/outlet-folders'
 import {
   isWasabiConfigured,
   createMultipart,
@@ -11,7 +16,13 @@ import {
   getWasabiKeyPrefix,
   getWasabiBucket,
 } from '@/lib/wasabi'
-import { ensureFolderPath, createResumableUploadSession, deleteDriveFile } from '@/lib/google-drive'
+import {
+  ensureUploadFolderPath,
+  createResumableUploadSession,
+  deleteDriveFile,
+  upsertTextFile,
+} from '@/lib/google-drive'
+import { renderBookingInfo } from '@/lib/booking-info'
 
 export const dynamic = 'force-dynamic'
 
@@ -102,7 +113,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'sha256 must be 64 hex chars' }, { status: 400 })
     }
 
-    // 2. Load booking + outlet
+    // 2. Load booking + outlet (+ fields the booking-info.txt needs)
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
@@ -110,7 +121,30 @@ export async function POST(request: NextRequest) {
         bookingCode: true,
         status: true,
         assignedEmails: true,
+        // --- booking-info.txt context ---
+        projectName: true,
+        projectId: true,
+        category: true,
+        videoType: true,
+        shootType: true,
+        shootDate: true,
+        shootEndDate: true,
+        callTime: true,
+        estimatedWrap: true,
+        locationName: true,
+        producer: true,
+        producerEmail: true,
+        director: true,
+        directorEmail: true,
+        mainVideographerEmail: true,
+        crewRequired: true,
+        agencyRef: true,
+        notes: true,
         outlet: { select: { code: true, name: true, storagePolicy: true } },
+        episodes: {
+          orderBy: { sequence: 'asc' },
+          select: { episodeId: true, title: true, sequence: true },
+        },
       },
     })
     if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
@@ -170,10 +204,20 @@ export async function POST(request: NextRequest) {
       }, { status: 503 })
     }
 
-    // 4. Compute paths (same shape for both clouds)
+    // 4. Compute paths.
+    //   Wasabi: stable ASCII key — <prefix>/<OUTLET>/<bookingCode>/<camera>/<file>
+    //   Drive : reuse the team's existing outlet folder + a human booking
+    //           folder "<Production ID> - <job name>" (resolved in step 6).
     const segments = buildStoragePath(booking.outlet.code, booking.bookingCode, camera, filename)
-    const folderSegments = segments.slice(0, -1) // everything except the filename
     const wasabiKey = buildKey(getWasabiKeyPrefix(), segments)
+
+    // "job name" the producer set — projectName for Content Agency, else the
+    // lead episode's title, else nothing (folder is just the Production ID).
+    const jobName =
+      (booking.projectName && booking.projectName.trim()) ||
+      (booking.episodes[0]?.title && booking.episodes[0].title.trim()) ||
+      null
+    const bookingFolderName = buildBookingFolderName(booking.bookingCode, jobName)
 
     // 5. Create Upload row first (lets us reference its id below)
     const upload = await prisma.upload.create({
@@ -192,12 +236,57 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // 6. Drive — ensure folder path + reserve file slot + resumable session
+    // 6. Drive — ensure folder path + reserve file slot + resumable session.
+    //   Lands in <root>/<existing outlet folder>/<Production ID - job>/<camera>/
     let driveTarget: { fileId: string; sessionUrl: string } | null = null
     try {
-      const parentId = await ensureFolderPath(process.env.DRIVE_FOOTAGE_ROOT!.trim(), folderSegments)
+      const { bookingFolderId, cameraFolderId } = await ensureUploadFolderPath({
+        rootFolderId: process.env.DRIVE_FOOTAGE_ROOT!.trim(),
+        outletCanonicalName: outletFolderName(booking.outlet.code),
+        bookingFolderName,
+        camera,
+      })
+
+      // Drop / refresh booking-info.txt at the booking-folder level so editors
+      // who open the folder have the shoot's context. Best-effort: never let
+      // an info-file hiccup block the actual footage upload.
+      try {
+        await upsertTextFile({
+          parentFolderId: bookingFolderId,
+          name: 'booking-info.txt',
+          content: renderBookingInfo({
+            bookingCode: booking.bookingCode,
+            projectName: booking.projectName,
+            projectId: booking.projectId,
+            outletName: booking.outlet.name,
+            outletCode: booking.outlet.code,
+            category: booking.category,
+            videoType: booking.videoType,
+            shootType: booking.shootType,
+            shootDate: booking.shootDate,
+            shootEndDate: booking.shootEndDate,
+            callTime: booking.callTime,
+            estimatedWrap: booking.estimatedWrap,
+            locationName: booking.locationName,
+            producer: booking.producer,
+            producerEmail: booking.producerEmail,
+            director: booking.director,
+            directorEmail: booking.directorEmail,
+            mainVideographerEmail: booking.mainVideographerEmail,
+            assignedEmails: booking.assignedEmails,
+            crewRequired: booking.crewRequired,
+            agencyRef: booking.agencyRef,
+            notes: booking.notes,
+            episodes: booking.episodes,
+            generatedAt: new Date(),
+          }),
+        })
+      } catch (infoErr: any) {
+        console.error('booking-info.txt write failed (non-fatal):', infoErr?.message || infoErr)
+      }
+
       const driveSession = await createResumableUploadSession({
-        parentFolderId: parentId,
+        parentFolderId: cameraFolderId,
         filename,
         mimeType,
         size,

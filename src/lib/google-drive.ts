@@ -18,7 +18,15 @@
 import { google, drive_v3 } from 'googleapis'
 import { getCalendarImpersonateSubject } from './google-calendar'
 
-const DRIVE_READ_SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+// v1.36.0 — read path uses the SAME full `drive` scope as the write path.
+// Domain-Wide Delegation authorizes scopes EXACTLY, not hierarchically: the
+// Workspace Admin DWD grant for this service account lists `calendar` +
+// `drive` only. Requesting `drive.readonly` (a different string) fails with
+// `unauthorized_client`, which silently broke the footage worker + the
+// inspect script. `drive` is a superset of read, so reads work and we don't
+// need a second DWD scope. (If least-privilege read is ever wanted, add
+// `drive.readonly` to the DWD grant and revert this line.)
+const DRIVE_READ_SCOPES = ['https://www.googleapis.com/auth/drive']
 // v1.35.1 — write scope for the booking upload path. Full `drive` scope
 // because the impersonated user (narasit.k) is the Shared Drive Content
 // Manager — `drive.file` would restrict to files THIS SDK invocation
@@ -273,6 +281,150 @@ export async function ensureFolderPath(
     parent = await ensureChildFolder(drive, parent, segment)
   }
   return parent
+}
+
+/** Strip a leading ordering prefix like "9." / "10) " / "3 - " from a folder name. */
+function stripOrderingPrefix(name: string): string {
+  return name.replace(/^\s*\d+\s*[.)\-]\s*/, '').trim()
+}
+
+/**
+ * v1.36.0 — find an EXISTING child folder whose name matches `canonicalName`
+ * after its ordering prefix is stripped, so footage lands in the team's real
+ * outlet folder (e.g. "9.ADVERTORIAL") instead of a freshly-created duplicate
+ * ("ADVERTORIAL"). The producers re-number these folders over time, so we
+ * match on the suffix, case-insensitively.
+ *
+ * A folder is a CANDIDATE when its name equals `canonicalName` after the
+ * ordering prefix is stripped (this also covers bare, un-prefixed names,
+ * since stripping a no-prefix name is a no-op). Among candidates we prefer
+ * the one that carries a numeric prefix — that's the team's canonical
+ * convention ("9.ADVERTORIAL"), so a stray un-numbered duplicate
+ * ("ADVERTORIAL", e.g. created by an earlier bug) never wins. Lowest
+ * number breaks ties. If no candidate exists we create a plain
+ * `canonicalName` folder — a visible, correctable fallback rather than a
+ * silent wrong-folder write.
+ */
+async function ensureChildFolderByCanonicalName(
+  drive: drive_v3.Drive,
+  parentId: string,
+  canonicalName: string,
+): Promise<string> {
+  const want = canonicalName.trim().toLowerCase()
+  // List all child folders under the parent (the root has ~17 — cheap).
+  const children: Array<{ id: string; name: string }> = []
+  let pageToken: string | undefined = undefined
+  do {
+    const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`,
+      fields: 'nextPageToken, files(id, name)',
+      pageSize: 100,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      corpora: 'allDrives',
+    })
+    for (const f of res.data.files ?? []) {
+      if (f.id && f.name) children.push({ id: f.id, name: f.name })
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+
+  // Candidates = name matches the canonical suffix (prefix-tolerant).
+  const candidates = children.filter(
+    f => stripOrderingPrefix(f.name).toLowerCase() === want,
+  )
+  if (candidates.length > 0) {
+    // Prefer a numbered folder (team convention); lowest number first.
+    const numbered = candidates
+      .map(f => ({ f, n: parseInt(f.name.match(/^\s*(\d+)/)?.[1] ?? '', 10) }))
+      .filter(x => Number.isFinite(x.n))
+      .sort((a, b) => a.n - b.n)
+    if (numbered.length > 0) return numbered[0].f.id
+    return candidates[0].id // no numbered variant — take the bare match
+  }
+
+  // Fallback — create a plain canonical folder (surfaces the gap visibly).
+  const created = await drive.files.create({
+    requestBody: { name: canonicalName, mimeType: FOLDER_MIME, parents: [parentId] },
+    fields: 'id',
+    supportsAllDrives: true,
+  })
+  if (!created.data.id) throw new Error(`Drive folder create returned no id for "${canonicalName}"`)
+  return created.data.id
+}
+
+export interface UploadFolderTarget {
+  /** id of "<outlet>/<bookingFolder>/" — where booking-info.txt lives. */
+  bookingFolderId: string
+  /** id of "<outlet>/<bookingFolder>/<camera>/" — where the file goes. */
+  cameraFolderId: string
+}
+
+/**
+ * v1.36.0 — resolve (and create where needed) the Drive folder path for an
+ * upload, reusing the team's existing outlet folder:
+ *
+ *   <root>/<existing outlet folder>/<bookingFolder>/<camera>/
+ *
+ * - outlet segment is matched fuzzily (ordering-prefix tolerant) so we land
+ *   in "9.ADVERTORIAL" instead of making a new "ADVERTORIAL".
+ * - bookingFolder + camera are our own naming → exact ensure/create.
+ *
+ * Returns both the booking-folder id (for the info .txt) and the camera-folder
+ * id (for the file itself).
+ */
+export async function ensureUploadFolderPath(input: {
+  rootFolderId: string
+  outletCanonicalName: string
+  bookingFolderName: string
+  camera: string
+}): Promise<UploadFolderTarget> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const outletId = await ensureChildFolderByCanonicalName(drive, input.rootFolderId, input.outletCanonicalName)
+  const bookingFolderId = await ensureChildFolder(drive, outletId, input.bookingFolderName)
+  const cameraFolderId = await ensureChildFolder(drive, bookingFolderId, input.camera)
+  return { bookingFolderId, cameraFolderId }
+}
+
+/**
+ * v1.36.0 — write (or refresh) a small UTF-8 text file inside a folder.
+ * Used to drop a `booking-info.txt` next to the footage so editors who open
+ * the folder see the shoot's context without leaving Drive. Idempotent:
+ * if a file of the same name already exists in the folder we UPDATE its
+ * contents (keeps a single, current info file across re-assigns); otherwise
+ * we create it. Best-effort by contract — callers should not fail the upload
+ * if this throws.
+ */
+export async function upsertTextFile(input: {
+  parentFolderId: string
+  name: string
+  content: string
+}): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const safeName = input.name.replace(/'/g, "\\'")
+  const found = await drive.files.list({
+    q: `'${input.parentFolderId}' in parents and trashed = false and name = '${safeName}'`,
+    fields: 'files(id, name)',
+    pageSize: 5,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    corpora: 'allDrives',
+  })
+  const media = { mimeType: 'text/plain', body: input.content }
+  const existingId = found.data.files?.[0]?.id
+  if (existingId) {
+    await drive.files.update({ fileId: existingId, media, supportsAllDrives: true })
+    return existingId
+  }
+  const created = await drive.files.create({
+    requestBody: { name: input.name, mimeType: 'text/plain', parents: [input.parentFolderId] },
+    media,
+    fields: 'id',
+    supportsAllDrives: true,
+  })
+  if (!created.data.id) throw new Error(`Drive text-file create returned no id for "${input.name}"`)
+  return created.data.id
 }
 
 export interface ResumableSession {

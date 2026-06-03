@@ -5,6 +5,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.36.0] — 2026-06-02
+
+### Changed — Upload lands in the team's existing Drive folders + drops a booking-info.txt
+
+Footage now uploads into the real "VIDEO 2026" outlet folders the producers
+already maintain, instead of a fresh duplicate. Three parts:
+
+1. **Reuse existing numbered outlet folders** (`src/lib/outlet-folders.ts`,
+   `src/lib/google-drive.ts`)
+   - The Shared Drive lays outlets out with an ordering prefix the team
+     renumbers over time: `1.NEWS · 2.POP · 3.PODCAST · 4.KND ·
+     5.THE SECRET SAUCE · 6.WEALTH · 7.LIFE · 8.SPORT · 9.ADVERTORIAL`.
+   - Outlet folder mapping now stores the canonical suffix; the Drive layer
+     (`ensureChildFolderByCanonicalName`) matches an existing child folder by
+     that suffix after stripping the `N.` prefix, preferring the numbered
+     folder so a stray un-numbered duplicate never wins. No more new
+     "Advertorial" folder next to "9.ADVERTORIAL".
+
+2. **Booking folder named by Production ID + job name**
+   (`buildBookingFolderName`)
+   - `<root>/<outlet>/AGN-260529-STD-01 - PTTPLC ปตท./<camera>/<file>` —
+     the producer's project/episode title is appended so editors recognise
+     the folder. Wasabi keys stay the stable bare-`bookingCode` form.
+
+3. **`booking-info.txt` written into each booking folder**
+   (`src/lib/booking-info.ts`)
+   - A readable summary (Production ID, project, schedule, crew, **all
+     episodes**, notes) is upserted at the booking-folder level so anyone
+     opening the folder — editor, archivist — has the shoot's context
+     without the app. Refreshed on each upload; best-effort (never blocks
+     the footage upload).
+
+### Fixed — Drive read auth used an unauthorized DWD scope (`src/lib/google-drive.ts`)
+
+`getDriveReadAuth()` requested `drive.readonly`, but the service account's
+Domain-Wide Delegation grant only authorizes `calendar` + `drive` (DWD
+matches scopes exactly, not hierarchically), so every read failed with
+`unauthorized_client` — silently breaking the footage worker + the inspect
+script. Read now uses the authorized full `drive` scope (a superset of read).
+
+---
+
 ## [1.35.20] — 2026-06-02
 
 ### Fixed — Upload to Google Drive + Wasabi now works (`src/lib/google-drive.ts`)
