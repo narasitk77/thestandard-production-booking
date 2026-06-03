@@ -5,6 +5,52 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-03 · Wasabi browser upload broken — bucket had no CORS
+
+**Symptom.** Drive upload worked end-to-end, but files never appeared in
+Wasabi — no object, no "folder". The user's real upload
+(`AGN-260604-STD-01/Cam1/S__8429575.jpg`) was sitting as an INCOMPLETE
+multipart with zero parts.
+
+**Root cause.** The `video2026hires` Wasabi bucket had **no CORS
+configuration** (`GetBucketCors` → `NoSuchCORSConfiguration`). The booking
+app uploads browser-direct to Wasabi via presigned multipart `UploadPart`
+PUTs; a cross-origin browser PUT requires the bucket to (a) allow the app
+origin + PUT method and (b) expose the `ETag` response header so the client
+can collect part ETags for `CompleteMultipartUpload`. Without CORS the
+browser blocks the PUT outright → multipart never completes → no object.
+Drive was unaffected (Google's resumable endpoint sends its own CORS); the
+server-side `wasabiPing` passed because server-to-server S3 calls ignore CORS.
+
+**Investigation note — Mimir shares the bucket.** Mimir's media-ingest
+config (`ingest_media-video2026hires`) reads `video2026hires` as a SOURCE
+bucket using the same Wasabi account. This is **server-side** ingest
+(Mimir's backend scans with the access/secret key), which does **not** use
+CORS — so adding browser CORS for the booking app cannot affect Mimir's
+scan. Mimir's own bucket is `tsdmimir2026` (separate). Account has 3 buckets:
+`tsdmimir2026`, `tsdphotographer`, `video2026hires`.
+
+**Fix (applied via S3 API, `PutBucketCors` on `video2026hires` only).**
+Previous CORS was empty, so nothing was overwritten:
+```json
+[{ "AllowedMethods": ["PUT","GET","HEAD"],
+   "AllowedOrigins": ["https://probook.xtec9.xyz"],
+   "AllowedHeaders": ["*"], "ExposeHeaders": ["ETag"], "MaxAgeSeconds": 3600 }]
+```
+
+**Verification.** A real cross-origin browser PUT from `probook.xtec9.xyz`
+to a presigned Wasabi part URL → **HTTP 200 + readable ETag**
+(`video2026hires.s3.ap-southeast-1.wasabisys.com`). Before the fix this PUT
+was CORS-blocked. Cleaned up 5 stale booking-app incomplete multiparts
+(the user's failed upload + 4 test artifacts); left 13 other-tool
+multiparts (AVATR/UNCOVER/rclone) untouched.
+
+**Follow-up idea (not applied — bucket change, needs operator OK).** A
+bucket Lifecycle rule to auto-abort incomplete multipart uploads after N
+days would prevent orphan accumulation from any failed upload.
+
+---
+
 ## 2026-06-02 · v1.36.0 — upload Drive path: existing folders + DWD drive scope + Drive API enable
 
 **Goal.** Make footage upload land in the team's real "VIDEO 2026" Shared
