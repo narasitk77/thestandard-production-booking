@@ -560,6 +560,7 @@ export default function DashboardPage() {
         onSearch={setSheetSearch}
         onFilter={setSheetFilter}
         onLoad={() => { if (!sheetProjects && !sheetLoading) fetchSheetMonitor(false) }}
+        onRefresh={() => fetchSheetMonitor(false)}
         onSync={handleSheetSync}
       />
     </div>
@@ -568,9 +569,11 @@ export default function DashboardPage() {
 
 /* ---------- Sheet Monitor ---------- */
 
+const POLL_INTERVAL_MS = 2 * 60 * 1000 // 2 minutes
+
 function SheetMonitor({
   projects, loading, error, ts, syncing, syncMsg,
-  search, filter, onSearch, onFilter, onLoad, onSync,
+  search, filter, onSearch, onFilter, onLoad, onRefresh, onSync,
 }: {
   projects: ProjectMonitorRow[] | null
   loading: boolean
@@ -583,10 +586,15 @@ function SheetMonitor({
   onSearch: (v: string) => void
   onFilter: (v: 'all' | 'active' | 'unbooked') => void
   onLoad: () => void
+  onRefresh: () => void
   onSync: () => void
 }) {
-  // Lazy-load on first render of this section
-  useEffect(() => { onLoad() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Initial load + auto-poll every 2 minutes (quiet, no cache bust)
+  useEffect(() => {
+    onLoad()
+    const id = setInterval(onRefresh, POLL_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     if (!projects) return []
