@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
-import { getSession, canUploadToBooking, requireAdmin } from '@/lib/session'
+import { getSession, canUploadToBooking, requireConsole } from '@/lib/session'
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads')
 
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   // (pre-v1.35.9 bug, found in audit). Admin-only now. The per-booking
   // /api/upload/list endpoint covers the legitimate use-case with the
   // assignment-aware gate.
-  if (!(await requireAdmin())) {
+  if (!(await requireConsole())) {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   }
   try {

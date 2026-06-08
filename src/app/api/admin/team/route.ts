@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { ROLE_ORDER } from '@/lib/team-roster'
 
 export const dynamic = 'force-dynamic'
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
  * /admin/[id]'s assign sections.
  */
 export async function GET() {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   const members = await prisma.teamMember.findMany({
     orderBy: [{ sort: 'asc' }, { name: 'asc' }],
@@ -40,7 +40,7 @@ export async function GET() {
  * Email is unique; duplicate POST returns 409.
  */
 export async function POST(request: NextRequest) {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   try {
     const body = await request.json()

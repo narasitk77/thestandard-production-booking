@@ -50,6 +50,9 @@ enum UploadStatus {
 
 enum UserRole {
   USER
+  COORDINATOR
+  MANAGER
+  SUPPORT
   ADMIN
 }
 
@@ -270,6 +273,11 @@ model Episode {
   episodeId   String
   sequence    Int
   title       String
+  // Per-episode business classification (non-CA bookings let the producer tag
+  // each episode Original Content vs Advertorial). Reuses the booking-level
+  // Category enum; only ORIGINAL_CONTENT / ADVERTORIAL are used here. Null for
+  // legacy rows and Content Agency episodes (which carry it at booking level).
+  contentType Category?
   booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   bookingId   String
   program     Program  @relation(fields: [programId], references: [id])

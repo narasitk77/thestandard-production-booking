@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { ROLE_ORDER } from '@/lib/team-roster'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +16,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   try {
     const body = await request.json()
@@ -62,7 +62,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   try {
     const member = await prisma.teamMember.update({

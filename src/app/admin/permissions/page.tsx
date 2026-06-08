@@ -3,9 +3,13 @@
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import {
-  ArrowLeft, Loader2, Shield, ShieldOff, UserPlus,
+  ArrowLeft, Loader2, UserPlus, Lock,
   Search, Pencil, Check, X, Mail,
 } from 'lucide-react'
+import {
+  ROLES, ROLE_RANK, ROLE_LABEL, canEditUser, assignableRoles,
+  canApproveOTByRole, type Role,
+} from '@/lib/roles'
 
 interface User {
   id: string
@@ -14,12 +18,20 @@ interface User {
   thaiName: string | null
   employeeId: string | null
   position: string | null
-  role: 'USER' | 'ADMIN'
+  role: Role
   active: boolean
   createdAt: string
 }
 
 type SortKey = 'name' | 'role' | 'createdAt'
+
+const ROLE_BADGE: Record<Role, string> = {
+  ADMIN: 'bg-purple-100 text-purple-700',
+  SUPPORT: 'bg-blue-100 text-blue-700',
+  MANAGER: 'bg-indigo-100 text-indigo-700',
+  COORDINATOR: 'bg-teal-100 text-teal-700',
+  USER: 'bg-gray-100 text-gray-500',
+}
 
 export default function PermissionsPage() {
   const [users, setUsers] = useState<User[]>([])
@@ -29,10 +41,14 @@ export default function PermissionsPage() {
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [showDisabled, setShowDisabled] = useState(false)
 
+  // Current actor (drives which controls are enabled — see role matrix).
+  const [myRole, setMyRole] = useState<Role>('USER')
+  const [myEmail, setMyEmail] = useState('')
+
   // Add-user form
   const [adding, setAdding] = useState(false)
   const [newEmail, setNewEmail] = useState('')
-  const [newRole, setNewRole] = useState<'USER' | 'ADMIN'>('USER')
+  const [newRole, setNewRole] = useState<Role>('USER')
   const [saving, setSaving] = useState(false)
 
   // Inline position edit
@@ -49,7 +65,17 @@ export default function PermissionsPage() {
   }
 
   useEffect(() => { load() }, [])
+  useEffect(() => {
+    fetch('/api/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.user) { setMyRole(d.user.role as Role); setMyEmail((d.user.email || '').toLowerCase()) } })
+      .catch(() => {})
+  }, [])
   useEffect(() => { if (editId) posInputRef.current?.focus() }, [editId])
+
+  // ── actor capability helpers (mirror server matrix in src/lib/roles.ts) ──
+  const myAssignable = assignableRoles(myRole)
+  const canAdd = myRole === 'ADMIN' || myRole === 'MANAGER'
 
   const updateUser = async (id: string, patch: Record<string, unknown>) => {
     setError('')
@@ -86,7 +112,7 @@ export default function PermissionsPage() {
 
   // ── derived helpers ───────────────────────────────────────
   const canApproveOT = (u: User) =>
-    u.role === 'ADMIN' || (u.position || '').toLowerCase().includes('manager')
+    canApproveOTByRole(u.role) || (u.position || '').toLowerCase().includes('manager')
 
   const displayName = (u: User) =>
     u.thaiName || u.name || u.email.split('@')[0]
@@ -105,7 +131,7 @@ export default function PermissionsPage() {
     })
     .sort((a, b) => {
       if (sortKey === 'role') {
-        if (a.role !== b.role) return a.role === 'ADMIN' ? -1 : 1
+        if (a.role !== b.role) return ROLE_RANK[a.role] - ROLE_RANK[b.role]
       }
       if (sortKey === 'createdAt') {
         return b.createdAt.localeCompare(a.createdAt)
@@ -140,12 +166,14 @@ export default function PermissionsPage() {
               {otCount} OT Approver
             </span>
             <TestEmailButton />
-            <button
-              onClick={() => { setAdding(a => !a); setError('') }}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors"
-            >
-              <UserPlus className="w-3.5 h-3.5" /> เพิ่มผู้ใช้
-            </button>
+            {canAdd && (
+              <button
+                onClick={() => { setAdding(a => !a); setError('') }}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors"
+              >
+                <UserPlus className="w-3.5 h-3.5" /> เพิ่มผู้ใช้
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -171,10 +199,11 @@ export default function PermissionsPage() {
               onKeyDown={e => e.key === 'Enter' && addUser()}
               autoFocus
             />
-            <select className="gf-input w-28 shrink-0" value={newRole}
-              onChange={e => setNewRole(e.target.value as 'USER' | 'ADMIN')}>
-              <option value="USER">User</option>
-              <option value="ADMIN">Admin</option>
+            <select className="gf-input w-36 shrink-0" value={newRole}
+              onChange={e => setNewRole(e.target.value as Role)}>
+              {ROLES.filter(r => myAssignable.includes(r)).map(r => (
+                <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+              ))}
             </select>
             <button onClick={addUser} disabled={!newEmail || saving}
               className="px-4 py-1.5 text-sm bg-[#673ab7] text-white rounded disabled:opacity-40 flex items-center gap-1.5 whitespace-nowrap">
@@ -248,6 +277,11 @@ export default function PermissionsPage() {
                   const isEditing    = editId === u.id
                   const isOTApprover = canApproveOT(u)
                   const dName        = displayName(u)
+                  const isSelf       = u.email.toLowerCase() === myEmail
+                  // May the current actor edit this user's role / active / profile?
+                  const mayEdit      = canEditUser(myRole, u.role) && !isSelf
+                  // Roles the actor may switch this user to (always include current).
+                  const roleChoices  = ROLES.filter(r => r === u.role || myAssignable.includes(r))
 
                   return (
                     <tr key={u.id}
@@ -264,12 +298,8 @@ export default function PermissionsPage() {
 
                       {/* System role */}
                       <td className="px-3 py-3">
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
-                          u.role === 'ADMIN'
-                            ? 'bg-purple-100 text-purple-700'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}>
-                          {u.role}
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${ROLE_BADGE[u.role]}`}>
+                          {ROLE_LABEL[u.role]}
                         </span>
                       </td>
 
@@ -307,12 +337,14 @@ export default function PermissionsPage() {
                             <span className="text-xs text-gray-500">
                               {u.position || <span className="text-gray-300">—</span>}
                             </span>
-                            <button
-                              onClick={() => { setEditId(u.id); setEditPos(u.position || '') }}
-                              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 p-0.5 text-gray-400 hover:text-[#673ab7] rounded transition-all"
-                              title="แก้ไข Position">
-                              <Pencil className="w-2.5 h-2.5" />
-                            </button>
+                            {mayEdit && (
+                              <button
+                                onClick={() => { setEditId(u.id); setEditPos(u.position || '') }}
+                                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 p-0.5 text-gray-400 hover:text-[#673ab7] rounded transition-all"
+                                title="แก้ไข Position">
+                                <Pencil className="w-2.5 h-2.5" />
+                              </button>
+                            )}
                             {isOTApprover && (
                               <span className="ml-0.5 text-[10px] px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded whitespace-nowrap">
                                 OT Approver
@@ -335,25 +367,35 @@ export default function PermissionsPage() {
 
                       {/* Actions */}
                       <td className="px-4 py-3 text-right">
-                        <div className="inline-flex gap-1.5">
-                          <button
-                            onClick={() => updateUser(u.id, { role: u.role === 'ADMIN' ? 'USER' : 'ADMIN' })}
-                            title={u.role === 'ADMIN' ? 'Demote to User' : 'Make Admin'}
-                            className="text-[11px] px-2 py-1 border border-gray-200 rounded hover:bg-gray-50 inline-flex items-center gap-1 text-gray-600 transition-colors">
-                            {u.role === 'ADMIN'
-                              ? <><ShieldOff className="w-3 h-3" /> Demote</>
-                              : <><Shield className="w-3 h-3" /> Admin</>}
-                          </button>
-                          <button
-                            onClick={() => updateUser(u.id, { active: !u.active })}
-                            className={`text-[11px] px-2 py-1 border rounded transition-colors ${
-                              u.active
-                                ? 'border-red-200 text-red-600 hover:bg-red-50'
-                                : 'border-green-200 text-green-600 hover:bg-green-50'
-                            }`}>
-                            {u.active ? 'Disable' : 'Enable'}
-                          </button>
-                        </div>
+                        {mayEdit ? (
+                          <div className="inline-flex items-center gap-1.5">
+                            {/* Role picker — only roles the actor may assign (+ current) */}
+                            <select
+                              value={u.role}
+                              onChange={e => updateUser(u.id, { role: e.target.value })}
+                              title="เปลี่ยน Role"
+                              className="text-[11px] px-1.5 py-1 border border-gray-200 rounded text-gray-700 bg-white outline-none focus:border-[#673ab7]">
+                              {roleChoices.map(r => (
+                                <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => updateUser(u.id, { active: !u.active })}
+                              className={`text-[11px] px-2 py-1 border rounded transition-colors ${
+                                u.active
+                                  ? 'border-red-200 text-red-600 hover:bg-red-50'
+                                  : 'border-green-200 text-green-600 hover:bg-green-50'
+                              }`}>
+                              {u.active ? 'Disable' : 'Enable'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] text-gray-300"
+                            title={isSelf ? 'แก้ไขตัวเองไม่ได้ (กัน lockout)' : `role ${myRole} แก้ ${ROLE_LABEL[u.role]} ไม่ได้`}>
+                            <Lock className="w-3 h-3" /> {isSelf ? 'คุณ' : 'ล็อก'}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -366,8 +408,11 @@ export default function PermissionsPage() {
 
       {/* Legend */}
       <div className="text-[11px] text-gray-400 px-1 space-y-0.5">
-        <div>• <strong>Admin</strong> — เข้าถึง Admin Console ได้ทั้งหมด · bypass ทุก gate</div>
-        <div>• <strong>OT Approver</strong> — มาจาก role=ADMIN หรือ position ที่มีคำว่า "manager" · ดู/อนุมัติ OT ทุกคน</div>
+        <div>• <strong>Admin</strong> — สิทธิ์เต็ม · จัดการได้ทุก role · approve OT</div>
+        <div>• <strong>Support</strong> — เข้า console ได้ · <em>ไม่</em> approve OT · จัดการ role ใครไม่ได้ (read-only) · Manager/Coordinator แก้ Support ไม่ได้</div>
+        <div>• <strong>Manager</strong> — เข้า console เต็ม · approve OT · จัดการได้แค่ Coordinator + User (ตั้งได้สูงสุด Coordinator)</div>
+        <div>• <strong>Coordinator</strong> — เข้า console เต็ม · <em>ไม่</em> approve OT · แก้ได้แค่ User (เลื่อนขั้น/เพิ่มคนไม่ได้)</div>
+        <div>• <strong>OT Approver</strong> — Admin หรือ Manager (หรือ position มีคำว่า "manager")</div>
         <div>• <strong>canUpload</strong> — ควบคุมที่ Admin → Team (role = video / sound) · Admin bypass อัตโนมัติ</div>
       </div>
     </div>

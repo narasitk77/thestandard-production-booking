@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import {
   getCalendarAuth,
   getCalendarImpersonateSubject,
@@ -37,7 +37,7 @@ const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID ||
  * if emails are being delivered" follow-up. Default off.
  */
 export async function GET(request: NextRequest) {
-  if (!(await requireAdmin())) {
+  if (!(await requireConsole())) {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   }
   const { searchParams } = new URL(request.url)

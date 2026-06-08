@@ -66,6 +66,7 @@ type BookingForReconcile = {
   crewRequired: string[]
   agencyRef?: string | null
   notes?: string | null
+  adminNotes?: string | null
   calendarEventId?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -93,6 +94,7 @@ async function createVerifiedCalendarEvent(booking: {
   crewRequired: string[]
   agencyRef?: string | null
   notes?: string | null
+  adminNotes?: string | null
 }): Promise<{ eventId: string; htmlLink: string | null }> {
   // v1.29.3 — createCalendarEvent now throws specific errors instead of
   // returning null silently. We still defend against an unexpected null
@@ -162,6 +164,7 @@ async function processBooking(
         crewRequired: booking.crewRequired,
         agencyRef: booking.agencyRef,
         notes: booking.notes,
+        adminNotes: booking.adminNotes,
       })
       await prisma.booking.update({
         where: { id: booking.id },
@@ -213,6 +216,7 @@ async function processBooking(
         crewRequired: booking.crewRequired,
         agencyRef: booking.agencyRef,
         notes: booking.notes,
+        adminNotes: booking.adminNotes,
       })
       await prisma.booking.update({
         where: { id: booking.id },

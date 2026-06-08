@@ -8,7 +8,7 @@
  * Defaults: from = 90 days ago, to = now.
  */
 import { NextRequest } from 'next/server'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { iterateAuditLogs, RETENTION_DAYS } from '@/lib/audit-retention'
 import { streamCSV, csvFilename } from '@/lib/csv'
 
@@ -25,7 +25,7 @@ const COLUMNS = [
 ]
 
 export async function GET(request: NextRequest) {
-  if (!(await requireAdmin())) {
+  if (!(await requireConsole())) {
     return new Response(JSON.stringify({ error: 'Admin only' }), {
       status: 403,
       headers: { 'Content-Type': 'application/json' },

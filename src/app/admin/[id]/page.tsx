@@ -26,6 +26,13 @@ interface BookingDetail {
 
 interface Freelancer { id: string; name: string; contract: string; email: string }
 
+// Team distribution / group inboxes — quick-select alongside individual crew so
+// an admin can notify a whole team at once (e.g. the shared video / sound desk).
+const TEAM_GROUP_EMAILS: { name: string; email: string }[] = [
+  { name: 'Video Team (กลุ่ม)', email: 'video@thestandard.co' },
+  { name: 'Sound Team (กลุ่ม)', email: 'Sound@thestandard.co' },
+]
+
 // v1.31 — roster now lives in the DB (table `team_members`, managed at
 // /admin/team). We fetch it via /api/admin/team on mount; the hardcoded
 // INITIAL_TEAM_ROSTER from src/lib/team-roster.ts is kept ONLY as a
@@ -573,6 +580,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               <span className="ml-auto text-xs bg-[#673ab7] text-white px-2 py-0.5 rounded-full">{totalAssigned} assigned</span>
             )}
           </div>
+
+          {/* Team distribution emails (shared inboxes) */}
+          <TeamSection label="Team Email (กลุ่ม)" members={TEAM_GROUP_EMAILS} checked={assignEmails} onToggle={toggleEmail} />
 
           {/* Video Team */}
           <TeamSection label="Producer / Coordinator" members={team.producer} checked={assignEmails} onToggle={toggleEmail} />

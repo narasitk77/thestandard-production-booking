@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { createCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 
@@ -11,7 +11,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await requireAdmin()
+    const session = await requireConsole()
     if (!session) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
@@ -71,6 +71,7 @@ export async function POST(
           crewRequired: booking.crewRequired,
           agencyRef: booking.agencyRef,
           notes: booking.notes,
+          adminNotes: booking.adminNotes,
         }, {
           requireAttendees: booking.assignedEmails.length > 0,
         })

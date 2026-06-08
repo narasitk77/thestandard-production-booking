@@ -4,12 +4,13 @@ import { sendAssignmentEmail, buildEmailErrorHint } from '@/lib/email'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { updateBookingRow } from '@/lib/google-sheets'
 import {
+  buildEventDescription,
   createCalendarEvent,
   getCalendarImpersonateSubject,
   getCalendarEventLink,
   updateCalendarEventAttendees,
 } from '@/lib/google-calendar'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { format } from 'date-fns'
 import { getToken } from 'next-auth/jwt'
@@ -29,7 +30,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await requireAdmin()
+    const session = await requireConsole()
     if (!session) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
@@ -96,6 +97,10 @@ export async function POST(
         const ok = await updateCalendarEventAttendees(booking.calendarEventId, emailRecipients, {
           bookingId: booking.id,
           bookingCode: booking.bookingCode,
+          // Refresh the event details too — admin notes / freelance contacts
+          // may have changed on this re-assign, so keep the event in sync with
+          // the email (not just the guest list).
+          description: buildEventDescription(booking, emailRecipients),
         })
         if (ok) {
           calendarSync = { ok: true, eventId: booking.calendarEventId, action: 'patched' }
@@ -167,6 +172,8 @@ export async function POST(
           crewRequired: booking.crewRequired,
           agencyRef: booking.agencyRef,
           notes: booking.notes,
+          // Carry admin notes + freelance contacts onto the new event.
+          adminNotes: booking.adminNotes,
         }, {
           requireAttendees: emailRecipients.length > 0,
         })

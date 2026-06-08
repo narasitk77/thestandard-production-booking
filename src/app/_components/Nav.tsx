@@ -5,9 +5,10 @@ import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { Menu, X, Plus, ChevronDown } from 'lucide-react'
 import { signOut } from 'next-auth/react'
+import { hasConsoleAccess } from '@/lib/roles'
 
 interface NavProps {
-  session: { email: string; role: 'USER' | 'ADMIN' } | null
+  session: { email: string; role: string } | null
   canSeeOT?: boolean
   canSeeProducer?: boolean
   canApproveOT?: boolean
@@ -25,7 +26,8 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
   const [open, setOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const pathname = usePathname() || '/'
-  const isAdmin = session?.role === 'ADMIN'
+  // Console access = every staff tier (Admin / Support / Manager / Coordinator).
+  const isConsole = hasConsoleAccess(session?.role)
   const close = () => { setOpen(false); setMoreOpen(false) }
 
   const isActive = (href: string) =>
@@ -48,8 +50,8 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     { href: '/calendar', label: 'Calendar', show: true },
     { href: '/my-bookings', label: 'My Bookings', show: !!session },
     { href: '/producer', label: 'Producer', show: !!canSeeProducer },
-    { href: '/dashboard', label: 'Dashboard', show: !!isAdmin },
-    { href: '/admin', label: 'Admin', show: !!isAdmin, tone: 'danger' as const },
+    { href: '/dashboard', label: 'Dashboard', show: isConsole },
+    { href: '/admin', label: 'Admin', show: isConsole, tone: 'danger' as const },
   ] as Item[]).filter(i => i.show)
 
   const secondary: Item[] = [
@@ -64,7 +66,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     // Previously admin-only because /upload was under-development.
     { href: '/upload', label: 'Upload', show: !!canUpload },
     // v1.35.5 — Admin-only review queue for Mark-as-Done
-    { href: '/admin/upload-review', label: 'Upload Review', show: !!isAdmin },
+    { href: '/admin/upload-review', label: 'Upload Review', show: isConsole },
   ].filter(i => i.show)
 
   return (

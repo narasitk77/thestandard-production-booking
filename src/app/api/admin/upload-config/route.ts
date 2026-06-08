@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { isWasabiConfigured, getWasabiBucket, getWasabiKeyPrefix } from '@/lib/wasabi'
 import { hasDriveCredentials } from '@/lib/google-drive'
 import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3'
@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic'
  * Run in browser: https://probook.xtec9.xyz/api/admin/upload-config
  */
 export async function GET() {
-  if (!(await requireAdmin())) {
+  if (!(await requireConsole())) {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   }
 

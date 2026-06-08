@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
       episodeType,
       notes,
       episodeTitles,
+      episodes,
       selectedEpisodeIds,
     } = body
 
@@ -126,6 +127,10 @@ export async function POST(request: NextRequest) {
     // Content Agency books a "Production" by SELECTING existing episodes; other
     // outlets enter titles and the app generates local Episode IDs.
     const isAgency = outletCode === 'AGN'
+    // Normalized non-CA episode list: each episode carries its own program +
+    // content type (v1.37). Populated/validated in the non-CA branch below.
+    type EpisodeInput = { programCode: string; title: string; contentType: 'ORIGINAL_CONTENT' | 'ADVERTORIAL' }
+    let episodeInputs: EpisodeInput[] = []
     if (isAgency) {
       if (!Array.isArray(selectedEpisodeIds) || selectedEpisodeIds.length === 0) {
         return NextResponse.json({ error: 'At least one episode must be selected' }, { status: 400 })
@@ -137,11 +142,34 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Project ID required for Content Agency' }, { status: 400 })
       }
     } else {
-      if (!episodeTitles || episodeTitles.length === 0) {
-        return NextResponse.json({ error: 'At least one episode title required' }, { status: 400 })
+      // Prefer the structured `episodes` payload; fall back to the legacy flat
+      // `episodeTitles` array (older clients) mapped onto the booking-level
+      // program + category so nothing breaks mid-deploy.
+      episodeInputs = Array.isArray(episodes) && episodes.length > 0
+        ? (episodes as any[]).map(e => ({
+            programCode: String(e?.programCode || programCode),
+            title: String(e?.title ?? '').trim(),
+            contentType: e?.contentType === 'ADVERTORIAL' ? 'ADVERTORIAL' : 'ORIGINAL_CONTENT',
+          }))
+        : (Array.isArray(episodeTitles) ? episodeTitles : []).map((t: any) => ({
+            programCode,
+            title: String(t ?? '').trim(),
+            contentType: category === 'ADVERTORIAL' ? 'ADVERTORIAL' : 'ORIGINAL_CONTENT',
+          }))
+      if (episodeInputs.length === 0) {
+        return NextResponse.json({ error: 'At least one episode required' }, { status: 400 })
       }
-      if (episodeTitles.length > 20) {
+      if (episodeInputs.length > 20) {
         return NextResponse.json({ error: 'Maximum 20 episodes per booking' }, { status: 400 })
+      }
+      for (let i = 0; i < episodeInputs.length; i++) {
+        const ep = episodeInputs[i]
+        if (!ep.title) {
+          return NextResponse.json({ error: `Episode ${i + 1} title required` }, { status: 400 })
+        }
+        if (!getProgram(outletCode, ep.programCode)) {
+          return NextResponse.json({ error: `Unknown program: ${ep.programCode} in ${outletCode}` }, { status: 400 })
+        }
       }
     }
 
@@ -172,7 +200,7 @@ export async function POST(request: NextRequest) {
     //   episodes — we do NOT generate new Episode IDs.
     //   Other outlets: legacy — generate local [OUT]-[YYMMDD]-[PROG]-[NN] IDs
     //   from the entered titles; bookingCode = first episode.
-    type EpRecord = { episodeId: string; sequence: number; title: string; programId: string }
+    type EpRecord = { episodeId: string; sequence: number; title: string; programId: string; contentType?: 'ORIGINAL_CONTENT' | 'ADVERTORIAL' }
     let episodeRecords: EpRecord[]
     let bookingCode: string
 
@@ -212,19 +240,43 @@ export async function POST(request: NextRequest) {
         programId: programDb.id,
       }))
     } else {
+      // Production ID keeps the legacy shape: [OUT]-[YYMMDD]-[EpisodeType]-[NN],
+      // sequenced per outlet+date+Episode-Type from the step-1 program (L/S/A/T).
+      // The per-episode program + Original/AD pick is stored as DATA only
+      // (Episode.programId + Episode.contentType) — it does NOT change the ID.
       const prefix = `${outletCode}-${formatShootDateForId(parsedDate)}-${programCode}-`
-      const last = await prisma.episode.findFirst({
+      const lastEp = await prisma.episode.findFirst({
         where: { episodeId: { startsWith: prefix } },
-        orderBy: { sequence: 'desc' },
-        select: { sequence: true },
+        orderBy: { episodeId: 'desc' },
+        select: { episodeId: true },
       })
-      const startSeq = (last?.sequence ?? 0) + 1
-      episodeRecords = (episodeTitles as string[]).map((title, idx) => ({
-        episodeId: generateEpisodeId(outletCode, parsedDate, programCode, startSeq + idx),
-        sequence: startSeq + idx,
-        title,
-        programId: programDb.id,
-      }))
+      const lastNum = lastEp?.episodeId.match(/-(\d{2})$/)?.[1]
+      const startSeq = (lastNum ? parseInt(lastNum, 10) : 0) + 1
+
+      // Upsert each distinct per-episode program once and cache its DB id.
+      const programIdByCode = new Map<string, string>([[programCode, programDb.id]])
+      episodeRecords = []
+      for (let idx = 0; idx < episodeInputs.length; idx++) {
+        const ep = episodeInputs[idx]
+        let epProgramId = programIdByCode.get(ep.programCode)
+        if (!epProgramId) {
+          const epProgram = getProgram(outletCode, ep.programCode)!
+          const epProgramDb = await prisma.program.upsert({
+            where: { code_outletId: { code: ep.programCode, outletId: outletDb.id } },
+            update: {},
+            create: { code: epProgram.code, name: epProgram.name, category: epProgram.category, outletId: outletDb.id },
+          })
+          epProgramId = epProgramDb.id
+          programIdByCode.set(ep.programCode, epProgramId)
+        }
+        episodeRecords.push({
+          episodeId: generateEpisodeId(outletCode, parsedDate, programCode, startSeq + idx),
+          sequence: startSeq + idx,
+          title: ep.title,
+          programId: epProgramId,
+          contentType: ep.contentType,
+        })
+      }
       bookingCode = episodeRecords[0].episodeId
     }
 

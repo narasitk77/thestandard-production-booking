@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT } from '@/lib/ot-sync'
 
@@ -14,7 +14,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    if (!(await requireAdmin())) {
+    if (!(await requireConsole())) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
 

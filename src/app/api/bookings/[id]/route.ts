@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession, requireAdmin } from '@/lib/session'
+import { getSession, requireConsole } from '@/lib/session'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
@@ -52,7 +52,7 @@ export async function PATCH(
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!(await requireAdmin())) {
+    if (!(await requireConsole())) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
     const body = await request.json()

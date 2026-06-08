@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { buildEmailErrorHint, getEmailConfigSummary, sendEmail } from '@/lib/email'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { getToken } from 'next-auth/jwt'
@@ -13,7 +13,7 @@ import { getToken } from 'next-auth/jwt'
  * Returns actionable hints so the admin knows exactly what to fix.
  */
 export async function POST(request: NextRequest) {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
 
   const body = await request.json().catch(() => ({}))

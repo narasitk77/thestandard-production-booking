@@ -21,6 +21,10 @@ import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } fro
 
 type ProjectOption = { projectId: string; projectName: string; producer?: string }
 type Person = { email: string; nickname: string }
+// One row in the non-CA episode list: each episode picks its own program (show)
+// and is tagged Original Content or Advertorial (AD).
+type EpContentType = 'ORIGINAL_CONTENT' | 'ADVERTORIAL'
+type EpRow = { programCode: string; title: string; contentType: EpContentType }
 type ProjectEpisode = {
   episodeId: string
   type: string
@@ -184,7 +188,7 @@ export default function BookingWizard() {
   const [peopleLoading, setPeopleLoading] = useState(true)
   const [notes, setNotes] = useState('')
   const [epCount, setEpCount] = useState(1)
-  const [epTitles, setEpTitles] = useState<string[]>([''])
+  const [epRows, setEpRows] = useState<EpRow[]>([{ programCode: '', title: '', contentType: 'ORIGINAL_CONTENT' }])
 
   // ---- wizard state ----
   const [step, setStep] = useState<StepKey>(1)
@@ -237,6 +241,9 @@ export default function BookingWizard() {
   const selectedOutlet = OUTLETS.find(o => o.code === outletCode)
   const programs = (selectedOutlet?.programs ?? []).filter(p => p.code.length === 1)
   const selectedProgram = programs.find(p => p.code === programCode)
+  // Real show programs (3-char codes) for the per-episode program picker —
+  // excludes the L/S/A/T Episode-Type aliases used by the step-1 picker.
+  const epPrograms = (selectedOutlet?.programs ?? []).filter(p => p.code.length > 1)
   const isContentAgency = outletCode === 'AGN'
 
   const selectedProject = projectOptions.find(p => p.projectId === projectId)
@@ -265,6 +272,7 @@ export default function BookingWizard() {
     if (programCode) cleared.push('Episode Type')
     if (projectId) cleared.push('Project ID')
     if (selectedEpisodeIds.length > 0) cleared.push(`${selectedEpisodeIds.length} Episode pick(s)`)
+    if (!willBeContentAgency && epRows.some(r => r.programCode)) cleared.push('Episode program(s)')
     if (wasContentAgency && producerEmail) cleared.push('Producer (CA)')
     if (wasContentAgency && directorEmail) cleared.push('Director')
     if (!wasContentAgency && (producerName || producerPhone || producerEmailText)) cleared.push('Producer contact')
@@ -278,6 +286,9 @@ export default function BookingWizard() {
     setProducerEmailText('')
     setProjectId('')
     setSelectedEpisodeIds([])
+    // Program options are outlet-specific, so the per-episode picks are no
+    // longer valid — keep the titles/types but clear the program selection.
+    setEpRows(prev => prev.map(r => ({ ...r, programCode: '' })))
 
     if (cleared.length > 0) {
       const flow = willBeContentAgency ? 'Content Agency' : 'standard'
@@ -295,12 +306,15 @@ export default function BookingWizard() {
 
   const handleEpCountChange = (n: number) => {
     setEpCount(n)
-    setEpTitles(prev => {
+    setEpRows(prev => {
       const next = [...prev]
-      while (next.length < n) next.push('')
+      while (next.length < n) next.push({ programCode: '', title: '', contentType: 'ORIGINAL_CONTENT' })
       return next.slice(0, n)
     })
   }
+
+  const updateEpRow = (idx: number, patch: Partial<EpRow>) =>
+    setEpRows(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
 
   const toggleCrew = (c: string) =>
     setCrew(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
@@ -342,9 +356,12 @@ export default function BookingWizard() {
         if (!producerName.trim()) errs.producerName = 'กรุณากรอกชื่อ Producer'
         if (!producerPhone.trim()) errs.producerPhone = 'กรุณากรอกเบอร์โทร Producer'
         if (!producerEmailText.trim()) errs.producerEmailText = 'กรุณากรอกอีเมล Producer'
-        const blank: number[] = []
-        epTitles.forEach((t, i) => { if (!t.trim()) blank.push(i + 1) })
-        if (blank.length > 0) errs.epTitles = `กรุณากรอกชื่อ Episode ${blank.join(', ')}`
+        const missing: string[] = []
+        epRows.forEach((r, i) => {
+          if (!r.programCode) missing.push(`โปรแกรม EP${i + 1}`)
+          if (!r.title.trim()) missing.push(`ชื่อ EP${i + 1}`)
+        })
+        if (missing.length > 0) errs.epRows = `กรุณากรอก: ${missing.join(', ')}`
       }
     }
     return errs
@@ -370,7 +387,7 @@ export default function BookingWizard() {
     shootDate, shootEndDate, callTime, estimatedWrap,
     locationId, locationCustom, needsCustomText,
     isContentAgency, producerEmail, directorEmail, projectId, selectedEpisodeIds,
-    producerName, producerPhone, producerEmailText, epTitles, projectSelectable,
+    producerName, producerPhone, producerEmailText, epRows, projectSelectable,
   ])
 
   /* ---- navigation ---- */
@@ -446,7 +463,11 @@ export default function BookingWizard() {
           projectName: isContentAgency ? (selectedProject?.projectName || null) : null,
           episodeType: (isContentAgency && projectId && programCode.length === 1) ? programCode : null,
           notes: notes || null,
-          episodeTitles: epTitles.map(t => t.trim()),
+          episodes: epRows.map(r => ({
+            programCode: r.programCode,
+            title: r.title.trim(),
+            contentType: r.contentType,
+          })),
           selectedEpisodeIds,
         }),
       })
@@ -500,8 +521,11 @@ export default function BookingWizard() {
       ? selectedEpisodeIds.length > 0
           ? `${selectedEpisodeIds.length} ตอน · ${selectedEpisodeIds.join(', ')}`
           : ''
-      : (epTitles.filter(t => t.trim()).length > 0
-          ? `${epTitles.filter(t => t.trim()).length} ตอน · ${epTitles.filter(t => t.trim()).join(', ')}`
+      : (epRows.filter(r => r.title.trim()).length > 0
+          ? `${epRows.filter(r => r.title.trim()).length} ตอน · ${epRows
+              .filter(r => r.title.trim())
+              .map(r => `${r.programCode || '?'} · ${r.title.trim()}${r.contentType === 'ADVERTORIAL' ? ' (AD)' : ''}`)
+              .join(', ')}`
           : ''),
     subject: creative,
     productCode: agencyRef,
@@ -968,7 +992,8 @@ export default function BookingWizard() {
                   </div>
                 )}
 
-                {/* Episodes — non-CA */}
+                {/* Episodes — non-CA. Each episode picks its own program (show)
+                    and is tagged Original Content vs Advertorial (AD). */}
                 {!isContentAgency && (
                   <div>
                     <Label htmlFor="epCount" required>Number of Episodes</Label>
@@ -982,25 +1007,58 @@ export default function BookingWizard() {
                         <option key={n} value={n}>{n}</option>
                       ))}
                     </select>
-                    <div className="space-y-2">
-                      {epTitles.map((title, idx) => (
-                        <input
-                          key={idx}
-                          type="text"
-                          className={`ops-input ${fieldErrors.epTitles ? 'ops-input-invalid' : ''}`}
-                          placeholder={`Episode ${idx + 1} title`}
-                          value={title}
-                          onChange={e => {
-                            const next = [...epTitles]
-                            next[idx] = e.target.value
-                            setEpTitles(next)
-                          }}
-                          aria-invalid={!!fieldErrors.epTitles}
-                          aria-label={`Episode ${idx + 1} title`}
-                        />
+                    <div className="space-y-3">
+                      {epRows.map((row, idx) => (
+                        <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full bg-brand-primary/10 text-xs font-semibold text-brand-primary">
+                              {idx + 1}
+                            </span>
+                            <select
+                              className={`ops-input flex-1 ${fieldErrors.epRows && !row.programCode ? 'ops-input-invalid' : ''}`}
+                              value={row.programCode}
+                              disabled={!outletCode}
+                              onChange={e => updateEpRow(idx, { programCode: e.target.value })}
+                              aria-label={`Episode ${idx + 1} program`}
+                            >
+                              <option value="">{outletCode ? '— เลือกโปรแกรม —' : '— เลือก Outlet ก่อน —'}</option>
+                              {epPrograms.map(p => (
+                                <option key={p.code} value={p.code}>{p.code} · {p.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <input
+                            type="text"
+                            className={`ops-input ${fieldErrors.epRows && !row.title.trim() ? 'ops-input-invalid' : ''}`}
+                            placeholder={`Episode ${idx + 1} title`}
+                            value={row.title}
+                            onChange={e => updateEpRow(idx, { title: e.target.value })}
+                            aria-label={`Episode ${idx + 1} title`}
+                          />
+                          <div className="flex gap-2">
+                            {([['ORIGINAL_CONTENT', 'Original Content'], ['ADVERTORIAL', 'AD']] as const).map(([val, lbl]) => (
+                              <button
+                                key={val}
+                                type="button"
+                                onClick={() => updateEpRow(idx, { contentType: val })}
+                                aria-pressed={row.contentType === val}
+                                className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+                                  row.contentType === val
+                                    ? val === 'ADVERTORIAL'
+                                      ? 'border-amber-400 bg-amber-50 text-amber-800'
+                                      : 'border-brand-primary bg-brand-primary/10 text-brand-primary'
+                                    : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                                }`}
+                              >
+                                {lbl}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
-                    <FieldError message={fieldErrors.epTitles} />
+                    <FieldHelp>เลือกโปรแกรม + ระบุว่าแต่ละ EP เป็น Original Content หรือ AD</FieldHelp>
+                    <FieldError message={fieldErrors.epRows} />
                   </div>
                 )}
 

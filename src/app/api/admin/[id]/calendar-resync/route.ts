@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { reconcileSingleBooking } from '@/lib/calendar-reconcile'
 
 export const dynamic = 'force-dynamic'
@@ -46,7 +46,7 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   }
@@ -65,7 +65,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   }

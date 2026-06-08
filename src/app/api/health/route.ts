@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { google } from 'googleapis'
 import {
   getProducerDashboardSheetId,
@@ -46,7 +46,7 @@ async function timed(fn: () => Promise<string | void>): Promise<CheckResult> {
 }
 
 export async function GET(_req: NextRequest) {
-  const session = await requireAdmin()
+  const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
 
   // --- Config snapshot ---------------------------------------------------

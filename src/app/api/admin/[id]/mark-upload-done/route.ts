@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { assessCompleteness } from '@/lib/upload-completeness'
 import { logAudit } from '@/lib/audit'
 
@@ -29,7 +29,7 @@ export async function POST(
   { params }: { params: { id: string } },
 ) {
   try {
-    const session = await requireAdmin()
+    const session = await requireConsole()
     if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
 
     const body = await request.json().catch(() => ({}))

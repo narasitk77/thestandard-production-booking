@@ -5,6 +5,174 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.39.0] — 2026-06-08
+
+### Added — Sheet Data Monitor on Admin Dashboard
+
+**Section 4 "Sheet Data Monitor"** added to `/dashboard`:
+
+- **`GET /api/projects/monitor`** — new API that reads the Producer Dashboard Sheet
+  (`All Projects` + `_EPs` tabs) in real-time and joins with DB booking counts. Returns
+  every project (including Published), episode-status counts per project, and non-cancelled
+  booking count from DB per `projectId`.
+
+- **Sheet monitor table** — shows all projects with:
+  - Episode status breakdown: Pre-prod / Production (amber highlight) / Post-prod / Published
+  - Booking count linked to filtered `/dashboard` view
+  - Status badge: Active (in Production) / Bookable / Finished / No EPs
+  - Rows highlighted amber when project has episodes in Production phase
+
+- **"Sync Booking List" button** — calls `/api/projects/monitor?refresh=1` which also
+  invalidates the server-side 5-minute project cache (`invalidateProjectsCache()`), so the
+  `/new` booking form Project dropdown shows the freshest Sheet data on the next load —
+  no need to wait up to 5 minutes.
+
+- **Filter tabs**: All · Active (Prod) · Unbooked — plus free-text search across Project ID,
+  name, client, producer, director.
+
+- **Stats row**: total / bookable / in-production / unbooked counts at a glance.
+
+- **"Synced X min ago"** timestamp shows cache freshness.
+
+Lazy-loads on first scroll (projects data fetched only when the section mounts).
+`tsc --noEmit` and `next build` both clean.
+
+---
+
+## [1.38.0] — 2026-06-04
+
+### Added — Role tiers (Admin / Support / Manager / Coordinator / User) + team group emails
+
+**1. Team distribution emails on the assign page** (`src/app/admin/[id]/page.tsx`)
+   - A new "Team Email (กลุ่ม)" quick-select row at the top of ASSIGN TEAM with
+     `video@thestandard.co` and `Sound@thestandard.co`, so an admin can notify a
+     whole desk in one tick (they flow through the same assign → calendar guest +
+     email path as individual crew).
+
+**2. Five-tier role model** (`src/lib/roles.ts` — new, `prisma/schema.prisma`)
+   - `UserRole` enum gains `COORDINATOR`, `MANAGER`, `SUPPORT` (additive — applied
+     by `start.sh` → `prisma db push` on deploy; existing USER/ADMIN rows
+     untouched). Hierarchy (rank 0 = most authority):
+     `ADMIN(0) > SUPPORT(1) > MANAGER(2) > COORDINATOR(3) > USER(4)`.
+   - Capability helpers centralised in `roles.ts`: `hasConsoleAccess`,
+     `canApproveOTByRole`, `canEditUser`, `assignableRoles`, `canAddUser`.
+
+**3. "Permission เต็ม" = full admin console for every staff tier**
+   (`src/lib/session.ts`, 15 API routes, `src/app/_components/Nav.tsx`)
+   - New `requireConsole()` gate (ADMIN / SUPPORT / MANAGER / COORDINATOR; plain
+     USER excluded). The operational admin routes (booking edit, approve, assign,
+     restore, calendar re-sync, team CRUD, upload-review, upload-config,
+     calendar-debug, test-email, health, audit export, mark-upload-done, upload)
+     switched `requireAdmin` → `requireConsole`. Destructive endpoints
+     (`audit/purge`, `audit/purge-warning`) stay ADMIN-only.
+   - Nav shows Dashboard / Admin / Upload Review to all console tiers.
+
+**4. Permission-management matrix** (`src/app/api/admin/users/route.ts`,
+   `src/app/admin/permissions/page.tsx`)
+   - Who can change whose role / active / profile:
+     - **Admin** → anyone (any role).
+     - **Manager** → Coordinator + User; may assign up to Coordinator. Cannot
+       touch Admin / Support / fellow Managers.
+     - **Coordinator** → User only; cannot promote or add new users.
+     - **Support** → no role management (read-only); and Support users are
+       protected — only Admin can edit them.
+   - Enforced server-side (PATCH/POST/DELETE check the actor's role against the
+     target's current role + the role being assigned, and close the upsert
+     privilege-escalation hole) AND reflected in the UI (role `<select>` shows
+     only assignable roles, edit controls lock for out-of-scope targets, the
+     "เพิ่มผู้ใช้" button hides for roles that can't add). Self-demote/disable
+     guard kept.
+
+**5. OT approval restricted to Manager + Admin** (`src/lib/session.ts`,
+   `src/app/api/me/route.ts` flag, permissions page badge)
+   - `getOTApproverAccess` now grants the MANAGER role directly (plus the legacy
+     position-contains-"manager" path). Coordinator and Support cannot approve OT
+     — it is the Manager's duty, per spec.
+
+Verified: `tsc --noEmit` and `next lint` both clean.
+
+---
+
+## [1.37.1] — 2026-06-04
+
+### Changed — Admin notes + freelance contacts now land on the Calendar event too
+
+Previously the admin's notes (which also carry the freelance roster the admin
+adds on `/admin/[id]`) only reached the **assignment email** — the Google
+Calendar event never showed them. Now they appear on both.
+
+1. **Shared description builder** (`src/lib/google-calendar.ts`)
+   - Extracted `buildEventDescription(booking, assignedEmails)` and added an
+     `Admin notes / Freelance:` line sourced from `booking.adminNotes`. The
+     admin detail page appends `Freelancers: name · contract · email` into
+     `adminNotes` before saving, so freelance contacts now surface on the event.
+   - `createCalendarEvent` gained an `adminNotes` field and builds its
+     description via the shared helper.
+
+2. **Re-assign keeps the event in sync** (`updateCalendarEventAttendees`,
+   `src/app/api/admin/[id]/assign/route.ts`)
+   - The attendee PATCH now also refreshes the event `description` (via
+     `buildEventDescription`) so editing admin notes / freelancers and clicking
+     Assign updates the event details, not just the guest list. The auto-create
+     branch passes `adminNotes` through as well.
+
+3. **Approve + reconciler carry it through**
+   (`src/app/api/admin/[id]/approve/route.ts`, `src/lib/calendar-reconcile.ts`)
+   - Both `createCalendarEvent` call sites now pass `adminNotes`, so the event
+     created on approve — and any event the 10-min reconciler recreates — keeps
+     the admin notes / freelance contacts instead of dropping them.
+
+The assignment email already rendered `หมายเหตุจาก Admin:` (`src/lib/email.ts`),
+so no email change was needed — this closes the gap on the calendar side.
+
+Verified: `tsc --noEmit` and `next lint` both clean.
+
+---
+
+## [1.37.0] — 2026-06-04
+
+### Added — Per-episode Program picker + Original/AD tag (non-CA bookings)
+
+The People & Crew step (step 4) of the booking wizard now lets non-Content-
+Agency producers pick, **for each episode**, which **program (show)** it belongs
+to and whether it is **Original Content** or **Advertorial (AD)**.
+
+1. **Per-episode program dropdown** (`src/app/_components/booking/BookingWizard.tsx`)
+   - Each episode row gained a program `<select>` listing the real show
+     programs of the selected outlet (the 3-char codes from `src/lib/data.ts`,
+     e.g. `MNW · Morning Wealth`). The L/S/A/T Episode-Type aliases are filtered
+     out (`code.length > 1`); the step-1 "Episode Type" picker is unchanged.
+   - The plain `epTitles: string[]` state became
+     `epRows: { programCode, title, contentType }[]`. Outlet change clears each
+     row's program (options are outlet-specific) but keeps titles/types.
+
+2. **Original / AD toggle per episode**
+   - A two-button segmented control on each row. Defaults to Original Content.
+     The step-1 booking-level **Category** field is intentionally kept as-is
+     (booking-level default); the per-episode tag is additive.
+
+3. **Stored as data only — Production ID is unchanged**
+   (`src/app/api/bookings/route.ts`)
+   - The per-episode program + Original/AD pick is recorded purely as data
+     (so a booking carries "what does this queue shoot"): each episode's chosen
+     program is upserted and linked as `Episode.programId`, and the tag is saved
+     as `Episode.contentType`. The Production ID keeps its legacy shape
+     `[OUT]-[YYMMDD]-[EpisodeType]-[NN]` from the step-1 Episode Type (L/S/A/T),
+     sequenced per outlet+date+type exactly as before — it does NOT change.
+   - New payload field `episodes: [{ programCode, title, contentType }]`. The
+     legacy flat `episodeTitles` array is still accepted as a fallback (mapped
+     onto the booking-level program + category) so nothing breaks mid-deploy.
+
+4. **Schema** (`prisma/schema.prisma`)
+   - `Episode.contentType Category?` — nullable, reuses the existing `Category`
+     enum (only `ORIGINAL_CONTENT` / `ADVERTORIAL` used). Additive column;
+     applied automatically by `start.sh` → `prisma db push` on deploy, so no
+     manual migration is needed. Null for legacy rows and CA episodes.
+
+Verified: `tsc --noEmit` and `next lint` both clean.
+
+---
+
 ## [1.36.1] — 2026-06-03
 
 ### Fixed — two status/label bugs found during the full-feature test sweep

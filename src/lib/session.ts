@@ -1,6 +1,7 @@
 import { getServerSession } from 'next-auth'
 import { authOptions } from './auth'
 import { prisma } from './db'
+import { hasConsoleAccess, type Role } from './roles'
 
 export async function getSession() {
   const s = await getServerSession(authOptions)
@@ -8,7 +9,7 @@ export async function getSession() {
   return {
     email: s.user.email.toLowerCase(),
     name: s.user.name ?? null,
-    role: ((s.user as any).role || 'USER') as 'USER' | 'ADMIN',
+    role: ((s.user as any).role || 'USER') as Role,
     id: (s.user as any).id as string | undefined,
   }
 }
@@ -16,6 +17,17 @@ export async function getSession() {
 export async function requireAdmin() {
   const s = await getSession()
   if (!s || s.role !== 'ADMIN') return null
+  return s
+}
+
+// Console gate (v1.38): full admin console is open to every staff tier
+// (ADMIN / SUPPORT / MANAGER / COORDINATOR) — only a plain USER is excluded.
+// Use this for operational console routes (review / approve / assign / team /
+// dashboard). Truly destructive or role-management endpoints keep requireAdmin
+// or their own finer-grained role matrix.
+export async function requireConsole() {
+  const s = await getSession()
+  if (!s || !hasConsoleAccess(s.role)) return null
   return s
 }
 
@@ -155,7 +167,10 @@ export async function getOTApproverAccess(email: string | null | undefined): Pro
       select: { role: true, position: true, active: true },
     })
     if (!u || !u.active) return false
-    if (u.role === 'ADMIN') return true
+    // v1.38 — OT approval is an Admin/Manager duty. The MANAGER role grants it
+    // directly; the legacy position-contains-"manager" path stays for users who
+    // were tagged by position before the role tier existed.
+    if (u.role === 'ADMIN' || u.role === 'MANAGER') return true
     return (u.position || '').toLowerCase().includes('manager')
   } catch {
     return false

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { requireConsole } from '@/lib/session'
 import { assessCompleteness } from '@/lib/upload-completeness'
 
 export const dynamic = 'force-dynamic'
@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic'
  * reviewed while still fresh.
  */
 export async function GET() {
-  if (!(await requireAdmin())) {
+  if (!(await requireConsole())) {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   }
 
