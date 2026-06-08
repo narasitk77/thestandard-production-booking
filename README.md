@@ -2,8 +2,8 @@
 
 > ระบบ Booking การผลิต | Episode ID auto-generation | Calendar Packet for Coordinator | Auto calendar guest sync
 
-**Live**: https://probook.xtec9.xyz (Portainer, primary) · legacy: https://production-booking-app.onrender.com (Render, sunsetting 2026-05-27)
-**Version**: 1.32.2 · **Phase**: 2 (live calendar sync + observability)
+**Live**: https://probook.xtec9.xyz (Portainer, primary)
+**Version**: 1.39.0 · **Phase**: 2 (live calendar sync + observability)
 
 ---
 
@@ -22,13 +22,15 @@ Producer กรอก Booking ครั้งเดียว → Coordinator app
 | Calendar Packet | Auto-generated, copy-paste ready for coordinator |
 | **Calendar event auto-create** | On Approve → Google Calendar event with crew as guests (DWD impersonate) |
 | **Calendar guest auto-reconciler** | Background worker every 10 min patches drift between assigned crew and calendar attendees |
-| **Calendar sync visibility** (v1.32.2) | Per-booking `calendarSyncStatus` (PENDING / OK / FAILED) shown live in admin UI · dry-run guest verification on detail page |
+| **Calendar sync visibility** | Per-booking `calendarSyncStatus` (PENDING / OK / FAILED) shown live in admin UI · dry-run guest verification on detail page |
+| **Calendar notes on event** (v1.37.1) | Admin notes + freelance contacts written to Google Calendar event description on assign/re-assign |
 | **Health dashboard** (v1.30+) | `/admin/health` — runtime config + 4 live checks (DB, Calendar DWD, Sheets read, Sheets write) |
 | Admin Console | Inbox-style tabs (REQUESTED / Confirmed / Completed / Cancelled), bulk approve, per-booking re-sync |
 | Team Roster | DB-backed crew CRUD at `/admin/team` (v1.31) |
-| Permissions | USER ↔ ADMIN role mgmt via `/admin/permissions` |
-| Dashboard | Charts + workload + CSV export |
-| Upload platform | Log footage by Production ID + camera slot |
+| **Role tiers** (v1.38) | 5-tier model: ADMIN / SUPPORT / MANAGER / COORDINATOR / USER · permission matrix: who can edit whom · OT approval restricted to Manager + Admin |
+| **Sheet Data Monitor** (v1.39) | Section 4 in `/dashboard` — live project list from Sheet with episode-status breakdown + "Sync Booking List" to force-refresh project cache |
+| Dashboard | Charts + team workload + CSV export + Sheet Data Monitor |
+| Upload platform | Log footage by Production ID + camera slot · Wasabi S3 storage |
 
 ## ID Layers
 
@@ -63,13 +65,13 @@ OUT    YYMMDD    PROG    Sequence
 | `/calendar` | Month view + agenda drawer |
 | `/my-bookings` | Inbox-style 6 tabs for the signed-in user |
 | `/producer` | Per-producer dashboard (gated by `_Users` PD sheet) |
-| `/dashboard` | Charts + workload + CSV export |
+| `/dashboard` | Charts + team workload + CSV export + **Sheet Data Monitor** (Section 4) |
 | `/admin` | Admin Console — review, assign crew, approve |
 | `/admin/[id]` | Booking detail — edit, approve, assign, re-sync calendar |
 | `/admin/team` | Crew roster CRUD |
 | `/admin/health` | Runtime config + live health checks |
-| `/admin/permissions` | USER ↔ ADMIN role mgmt |
-| `/upload` | Footage upload — log files by Production ID + camera |
+| `/admin/permissions` | Role management (ADMIN/SUPPORT/MANAGER/COORDINATOR/USER) |
+| `/upload` | Footage upload — log files by Production ID + camera (Wasabi S3) |
 
 ## Local Development
 
@@ -159,10 +161,13 @@ Phase 2 (current) — ✅ shipped
 - ✅ Live Google Calendar create on approve
 - ✅ Auto-reconciler for guest drift (every 10 min)
 - ✅ Per-booking sync status visibility (`CalendarSyncStatus`)
+- ✅ Admin notes + freelance contacts on Calendar event (v1.37.1)
 - ✅ Health dashboard + live config inspection
 - ✅ TEAM roster as DB CRUD
 - ✅ Booking detail guest verification (dry-run)
 - ✅ Impersonate fallback warning + runbook
+- ✅ Five-tier role model + permission matrix (v1.38)
+- ✅ Sheet Data Monitor — live project/episode status + Sync button (v1.39)
 
 Phase 3 (next)
 - [ ] Proper Prisma migrations (replace `prisma db push --accept-data-loss`)
