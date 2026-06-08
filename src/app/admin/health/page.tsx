@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, Loader2, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Loader2, CheckCircle2, AlertTriangle, AlertCircle, Trash2 } from 'lucide-react'
 
 /* =============================================================================
    /admin/health — diagnostic dashboard
@@ -214,6 +214,143 @@ export default function HealthPage() {
           </Section>
         </>
       )}
+
+      {/* Danger Zone */}
+      <DangerZone />
+    </div>
+  )
+}
+
+/* ---------- Danger Zone ---------- */
+
+type PurgeCounts = { bookings: number; episodes: number; auditLogs: number; uploads: number; footageLogs: number }
+
+function DangerZone() {
+  const [counts, setCounts] = useState<PurgeCounts | null>(null)
+  const [loadingCounts, setLoadingCounts] = useState(false)
+  const [confirm, setConfirm] = useState('')
+  const [purging, setPurging] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  function loadCounts() {
+    setLoadingCounts(true)
+    fetch('/api/admin/purge-bookings')
+      .then(r => r.json())
+      .then(d => setCounts(d))
+      .finally(() => setLoadingCounts(false))
+  }
+
+  async function handlePurge() {
+    if (confirm !== 'DELETE ALL') return
+    setPurging(true)
+    setResult(null)
+    try {
+      const res = await fetch('/api/admin/purge-bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      })
+      const d = await res.json()
+      if (d.ok) {
+        setResult({ ok: true, msg: `ลบแล้ว: ${d.deleted.bookingCount} bookings · ${d.deleted.episodeCount} episodes · ${d.deleted.auditCount} audit logs · ${d.deleted.uploadCount} uploads · ${d.deleted.footageCount} footage logs` })
+        setCounts(null)
+        setConfirm('')
+      } else {
+        setResult({ ok: false, msg: d.error || 'Unknown error' })
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: String(e) })
+    } finally {
+      setPurging(false)
+    }
+  }
+
+  const ready = confirm === 'DELETE ALL'
+
+  return (
+    <div className="mt-6 border border-red-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-2 bg-red-50 border-b border-red-200 flex items-center gap-2">
+        <Trash2 className="w-4 h-4 text-red-600" />
+        <span className="text-sm font-semibold text-red-800">Danger Zone</span>
+      </div>
+
+      <div className="px-4 py-4 bg-white">
+        <div className="text-sm font-medium text-gray-800 mb-1">Purge all bookings</div>
+        <p className="text-xs text-gray-500 mb-4">
+          ลบ Booking + Episode + Audit Log + Upload + Footage Log ทั้งหมดออกจาก DB ถาวร · ใช้สำหรับล้างข้อมูลทดสอบก่อนใช้งานจริง
+        </p>
+
+        {/* Step 1 — Export CSV first */}
+        <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600">
+          <span className="font-mono bg-gray-200 text-gray-700 w-5 h-5 rounded-full flex items-center justify-center text-[10px] flex-shrink-0">1</span>
+          <span>Export CSV ก่อนเป็น backup —</span>
+          <Link href="/dashboard" className="text-brand-primary hover:underline font-medium">
+            ไปหน้า Dashboard → Export Bookings
+          </Link>
+        </div>
+
+        {/* Step 2 — Load counts */}
+        <div className="flex items-start gap-3 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600">
+          <span className="font-mono bg-gray-200 text-gray-700 w-5 h-5 rounded-full flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">2</span>
+          <div className="flex-1">
+            <div className="mb-2">ตรวจสอบจำนวน records ที่จะถูกลบ</div>
+            {counts ? (
+              <div className="flex flex-wrap gap-3 text-gray-700">
+                <span><strong>{counts.bookings}</strong> bookings</span>
+                <span><strong>{counts.episodes}</strong> episodes</span>
+                <span><strong>{counts.auditLogs}</strong> audit logs</span>
+                <span><strong>{counts.uploads}</strong> uploads</span>
+                <span><strong>{counts.footageLogs}</strong> footage logs</span>
+              </div>
+            ) : (
+              <button onClick={loadCounts} disabled={loadingCounts}
+                className="ops-btn-secondary ops-btn-sm">
+                {loadingCounts ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                Load counts
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Step 3 — Type to confirm */}
+        <div className="flex items-start gap-3 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600">
+          <span className="font-mono bg-gray-200 text-gray-700 w-5 h-5 rounded-full flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">3</span>
+          <div className="flex-1">
+            <div className="mb-2">พิมพ์ <code className="bg-red-100 text-red-700 px-1 rounded">DELETE ALL</code> เพื่อยืนยัน</div>
+            <input
+              type="text"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              placeholder="DELETE ALL"
+              className="ops-input text-xs w-48 font-mono"
+            />
+          </div>
+        </div>
+
+        {/* Result message */}
+        {result && (
+          <div className={`mb-3 px-3 py-2 rounded-lg text-xs flex items-start gap-2 ${result.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+            {result.ok
+              ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              : <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />}
+            {result.msg}
+          </div>
+        )}
+
+        {/* Purge button */}
+        <button
+          onClick={handlePurge}
+          disabled={!ready || purging}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            ready && !purging
+              ? 'bg-red-600 text-white hover:bg-red-700'
+              : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+          }`}
+        >
+          {purging ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          {purging ? 'กำลังลบ…' : 'Purge All Bookings'}
+        </button>
+      </div>
     </div>
   )
 }

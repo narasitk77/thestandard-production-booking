@@ -3,7 +3,7 @@
 > ระบบ Booking การผลิต | Episode ID auto-generation | Calendar Packet for Coordinator | Auto calendar guest sync
 
 **Live**: https://probook.xtec9.xyz (Portainer, primary)
-**Version**: 1.39.0 · **Phase**: 2 (live calendar sync + observability)
+**Version**: 1.40.0 · **Phase**: 2 (live calendar sync + observability)
 
 ---
 
@@ -69,7 +69,7 @@ OUT    YYMMDD    PROG    Sequence
 | `/admin` | Admin Console — review, assign crew, approve |
 | `/admin/[id]` | Booking detail — edit, approve, assign, re-sync calendar |
 | `/admin/team` | Crew roster CRUD |
-| `/admin/health` | Runtime config + live health checks |
+| `/admin/health` | Runtime config + live health checks + **Danger Zone (purge all bookings)** |
 | `/admin/permissions` | Role management (ADMIN/SUPPORT/MANAGER/COORDINATOR/USER) |
 | `/upload` | Footage upload — log files by Production ID + camera (Wasabi S3) |
 

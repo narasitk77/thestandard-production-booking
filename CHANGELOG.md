@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.40.0] — 2026-06-08
+
+### Added — Danger Zone: Purge all bookings
+
+**`GET /api/admin/purge-bookings`** — returns record counts (bookings, episodes,
+audit logs, uploads, footage logs) before purge. ADMIN only.
+
+**`POST /api/admin/purge-bookings`** — body `{ confirm: true }` — deletes ALL
+bookings and related records in a Prisma transaction. Delete order: `audit_logs`
+→ `footage_log` → `bookings` (cascades `episodes` + `uploads`). Writes one
+post-purge audit entry with the deleted counts. ADMIN only.
+
+**Danger Zone card** at the bottom of `/admin/health`:
+- 3-step flow: (1) link to Dashboard → Export CSV backup, (2) Load counts to
+  see what will be deleted, (3) type `DELETE ALL` to unlock the purge button.
+- Red button only activates once confirmation text matches exactly.
+- Success/error message shown inline after purge.
+
+---
+
 ## [1.39.0] — 2026-06-08
 
 ### Added — Sheet Data Monitor on Admin Dashboard
