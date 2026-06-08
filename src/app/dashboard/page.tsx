@@ -623,6 +623,13 @@ function SheetMonitor({
   }, [projects])
 
   const syncAgo = ts ? Math.round((Date.now() - ts.getTime()) / 60000) : null
+  const syncLabel = ts
+    ? ts.toLocaleString('th-TH', {
+        timeZone: 'Asia/Bangkok',
+        day: 'numeric', month: 'short', year: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      })
+    : null
 
   return (
     <div className="ops-card overflow-hidden mt-3 mb-6">
@@ -665,8 +672,11 @@ function SheetMonitor({
             </span>
           )}
           {ts && !syncMsg && (
-            <span className="text-xs text-gray-400">
-              synced {syncAgo === 0 ? 'just now' : `${syncAgo}m ago`}
+            <span className="text-xs text-gray-400" title={`ดึงข้อมูลล่าสุด: ${syncLabel}`}>
+              อัปเดต {syncLabel}
+              {syncAgo !== null && syncAgo > 0 && (
+                <span className="ml-1 opacity-60">({syncAgo}m ago)</span>
+              )}
             </span>
           )}
           <button
