@@ -5,6 +5,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.41.0] — 2026-06-09
+
+Batch of ops feedback after the team started using the booking flow in production.
+
+### Added — Equipment counts on the calendar (🎥 / 🎙)
+
+- New optional **camera count** + **mic count** fields on the booking form
+  (People & Crew step). Stored as `Booking.cameraCount` / `Booking.micCount`
+  (nullable Int).
+- Surfaced on the **Google Calendar event title** (e.g. `… · 🎥 2 · 🎙 1`) and
+  in the event description, so crew see gear needs at a glance.
+
+### Added — Van request for off-site shoots (🚐)
+
+- New **"ต้องการรถตู้"** toggle on the booking form (Location step). Stored as
+  `Booking.needsVan` (Boolean, default false).
+- When set, the calendar event title is prefixed with 🚐 on **both** the in-web
+  Production Calendar and Google Calendar.
+
+### Added — Shoot descriptor in the Google Calendar title
+
+- The event title now includes the **Video Type** so it says what kind of item
+  the shoot is (previously only `[OUTLET] Program — Episode`). Title shape:
+  `🚐 [OUT] Program — Episode · Interview · 🎥 2 · 🎙 1`.
+- Centralized in a shared `buildEventTitle()` so create + update paths agree.
+
+### Fixed — Calendar event not updated when editing time / episode title
+
+- Editing a booking's **call time / estimated wrap** or an **episode title**
+  updated the DB but left the Google Calendar event showing the old title and
+  time. `PATCH /api/bookings/[id]` now patches the event's summary, start/end,
+  location and description via the new `updateCalendarEventDetails()` (attendees
+  untouched). The 10-min reconciler remains the safety net for the guest list.
+
+### Fixed — Freelancer names piling up on the calendar
+
+- Adding a freelancer then saving any other change re-appended a "Freelancers:"
+  block to `adminNotes` every time (the form list was never cleared and the old
+  block never stripped), so names duplicated on the Google Calendar description.
+- Freelancers are now a **structured** `Booking.freelancers` (Json) list. The
+  assign route stores them structurally and the calendar description is **rebuilt**
+  from that list every save (never appended) — re-saving is idempotent. Legacy
+  bookings have their old text block parsed into the structured list on first edit
+  (`src/lib/freelancers.ts`).
+
+### Changed — Estimated Wrap is now required
+
+- Previously optional; when blank the calendar fell back to "call time + 4h",
+  which mis-stated the team's time/workload calc. The booking form now requires
+  a real wrap time.
+
+### Schema
+
+- `Booking`: added `cameraCount Int?`, `micCount Int?`, `needsVan Boolean
+  @default(false)`, `freelancers Json?`. All additive — applied via the existing
+  `prisma db push` on container start; no manual migration.
+
+---
+
 ## [1.40.0] — 2026-06-08
 
 ### Added — Danger Zone: Purge all bookings

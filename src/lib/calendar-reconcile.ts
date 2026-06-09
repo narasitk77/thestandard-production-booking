@@ -60,8 +60,13 @@ type BookingForReconcile = {
   callTime: string
   estimatedWrap?: string | null
   shootType: string
+  videoType?: string | null
   locationName?: string | null
   producer: string
+  cameraCount?: number | null
+  micCount?: number | null
+  needsVan?: boolean | null
+  freelancers?: unknown
   assignedEmails: string[]
   crewRequired: string[]
   agencyRef?: string | null
@@ -85,8 +90,13 @@ async function createVerifiedCalendarEvent(booking: {
   callTime: string
   estimatedWrap?: string | null
   shootType: string
+  videoType?: string | null
   locationName?: string | null
   producer: string
+  cameraCount?: number | null
+  micCount?: number | null
+  needsVan?: boolean | null
+  freelancers?: unknown
   assignedEmails: string[]
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -155,8 +165,13 @@ async function processBooking(
         callTime: booking.callTime,
         estimatedWrap: booking.estimatedWrap,
         shootType: booking.shootType,
+        videoType: booking.videoType,
         locationName: booking.locationName,
         producer: booking.producer,
+        cameraCount: booking.cameraCount,
+        micCount: booking.micCount,
+        needsVan: booking.needsVan,
+        freelancers: booking.freelancers,
         assignedEmails,
         outlet: booking.outlet,
         program: booking.program,
@@ -207,8 +222,13 @@ async function processBooking(
         callTime: booking.callTime,
         estimatedWrap: booking.estimatedWrap,
         shootType: booking.shootType,
+        videoType: booking.videoType,
         locationName: booking.locationName,
         producer: booking.producer,
+        cameraCount: booking.cameraCount,
+        micCount: booking.micCount,
+        needsVan: booking.needsVan,
+        freelancers: booking.freelancers,
         assignedEmails,
         outlet: booking.outlet,
         program: booking.program,

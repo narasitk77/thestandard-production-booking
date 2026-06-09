@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, requireConsole } from '@/lib/session'
-import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
@@ -67,12 +67,16 @@ export async function PATCH(
       locationName,
       crewRequired,
       shootType,
+      videoType,
       category,
       producer,
       creative,
       agencyRef,
       adminNotes,
       assignedEmails,
+      cameraCount,
+      micCount,
+      needsVan,
       episodeTitles, // Array<{ id: string, title: string }> — only updates titles, NOT episodeId
     } = body
 
@@ -122,12 +126,16 @@ export async function PATCH(
           ...(locationName !== undefined && { locationName: locationName || null }),
           ...(crewRequired && Array.isArray(crewRequired) && { crewRequired }),
           ...(shootType && { shootType }),
+          ...(videoType !== undefined && { videoType: videoType || null }),
           ...(category && { category }),
           ...(producer && { producer }),
           ...(creative && Array.isArray(creative) && { creative }),
           ...(agencyRef !== undefined && { agencyRef: agencyRef || null }),
           ...(adminNotes !== undefined && { adminNotes: adminNotes || null }),
           ...(assignedEmails && Array.isArray(assignedEmails) && { assignedEmails }),
+          ...(cameraCount !== undefined && { cameraCount: cameraCount === null || cameraCount === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0) }),
+          ...(micCount !== undefined && { micCount: micCount === null || micCount === '' ? null : Math.max(0, parseInt(micCount, 10) || 0) }),
+          ...(typeof needsVan === 'boolean' && { needsVan }),
         },
         include: {
           outlet: true,
@@ -180,8 +188,20 @@ export async function PATCH(
         data: { calendarEventId: null },
       })
       clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
-    } else if (
-      // Re-sync OT if scheduling fields changed and booking is active
+    } else if (booking.calendarEventId) {
+      // v1.41.0 — edits to a synced booking (time, episode titles, location,
+      // video type, equipment, van) must flow to the Google Calendar event.
+      // Previously the DB updated but the event kept its old title/time. Patch
+      // the event's core details (NOT attendees) so the calendar stays in sync.
+      // Fire-and-forget: the booking is already saved; a calendar blip must not
+      // fail the edit, and the 10-min reconciler is a safety net for guests.
+      updateCalendarEventDetails(booking.calendarEventId, booking).catch(e =>
+        console.error('updateCalendarEventDetails error:', e?.message || e),
+      )
+    }
+
+    // Re-sync OT if scheduling fields changed and booking is active
+    if (
       booking.status !== 'CANCELLED' && (
         callTime !== undefined ||
         estimatedWrap !== undefined ||

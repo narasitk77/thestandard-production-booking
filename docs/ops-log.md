@@ -5,6 +5,27 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-09 · v1.41.0 — booking ops feedback (schema additions)
+
+**What deployed.** Batch of ops feedback (see CHANGELOG 1.41.0): required
+Estimated Wrap, camera/mic counts + 🎥/🎙 on calendar, 🚐 van flag on calendar
+(web + Google), Google Calendar title now patched on time/episode edits, and a
+fix for freelancer names duplicating on the calendar (now structured).
+
+**Schema change — applied automatically, no manual step.** Added four columns to
+`bookings`: `cameraCount Int?`, `micCount Int?`, `needsVan Boolean default false`,
+`freelancers Json?`. All additive/nullable, so the container's existing
+`prisma db push --accept-data-loss` on start applies them cleanly (no data loss,
+no manual migration). Verify after deploy: `/admin/health` should be green and a
+new booking should round-trip the van/equipment fields onto its calendar event.
+
+**Calendar email noise.** `updateCalendarEventDetails` uses `sendUpdates: 'all'`,
+so editing a synced booking (time/title/location) re-notifies its guests. This is
+intentional — crew must hear about call-time changes — but expect an invite-update
+email whenever an admin edits a CONFIRMED booking.
+
+---
+
 ## 2026-06-03 · Wasabi browser upload broken — bucket had no CORS
 
 **Symptom.** Drive upload worked end-to-end, but files never appeared in

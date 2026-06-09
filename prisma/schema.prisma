@@ -228,6 +228,18 @@ model Booking {
   creative         String[]
   crewRequired     String[]
   videographerCount     Int     @default(1)  // how many videographers requested at booking time
+  // v1.41.0 — equipment counts surfaced on the calendar event (🎥 / 🎙).
+  // Nullable: legacy bookings have none; 0/null both render as "not specified".
+  cameraCount      Int?
+  micCount         Int?
+  // v1.41.0 — off-site shoots that need a company van. When true the calendar
+  // event title (web + Google) is prefixed with 🚐 so it's obvious at a glance.
+  needsVan         Boolean       @default(false)
+  // v1.41.0 — structured freelance crew (name · contract · email). Replaces the
+  // old "append into adminNotes text" approach that duplicated names on every
+  // re-save (the calendar description is rebuilt from this list, never appended).
+  // Shape: [{ name: string, contract?: string, email?: string }]
+  freelancers      Json?
   assignedEmails   String[]
   mainVideographerEmail String?              // designated lead camera, picked at assign-time
   agencyRef        String?

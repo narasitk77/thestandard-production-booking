@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { sendAssignmentEmail, buildEmailErrorHint } from '@/lib/email'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
@@ -12,6 +13,7 @@ import {
 } from '@/lib/google-calendar'
 import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
+import { normalizeFreelancers, freelancerEmails } from '@/lib/freelancers'
 import { format } from 'date-fns'
 import { getToken } from 'next-auth/jwt'
 
@@ -37,8 +39,14 @@ export async function POST(
     const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
     const senderAccessToken = await getValidGoogleAccessToken(authToken)
     const accessTokenError = (authToken as any)?.accessTokenError as string | undefined
-    const { assignedEmails, adminNotes, mainVideographerEmail } = await request.json()
-    const emailRecipients = cleanEmailList(assignedEmails)
+    const { assignedEmails, adminNotes, mainVideographerEmail, freelancers } = await request.json()
+    // v1.41.0 — freelancers arrive as a structured list (not appended text), so
+    // re-saving can't duplicate names. Their emails join the staff emails as
+    // calendar guests / mail recipients; names without an email still ride along
+    // on the event description.
+    const staffEmails = cleanEmailList(assignedEmails)
+    const freelancerList = normalizeFreelancers(freelancers)
+    const emailRecipients = Array.from(new Set([...staffEmails, ...freelancerEmails(freelancerList)]))
     // Only persist a main videographer if they're actually in the assigned list.
     const mainVdo = typeof mainVideographerEmail === 'string' && mainVideographerEmail.trim() && emailRecipients.includes(mainVideographerEmail.trim())
       ? mainVideographerEmail.trim()
@@ -56,6 +64,7 @@ export async function POST(
         assignedEmails: emailRecipients,
         mainVideographerEmail: mainVdo,
         adminNotes: adminNotes || null,
+        freelancers: freelancerList as unknown as Prisma.InputJsonValue,
         status: nextStatus,
       },
       include: {
@@ -161,8 +170,13 @@ export async function POST(
           callTime: booking.callTime,
           estimatedWrap: booking.estimatedWrap,
           shootType: booking.shootType,
+          videoType: booking.videoType,
           locationName: booking.locationName,
           producer: booking.producer,
+          cameraCount: booking.cameraCount,
+          micCount: booking.micCount,
+          needsVan: booking.needsVan,
+          freelancers: booking.freelancers,
           // Bake the just-assigned crew into the new event so it has guests
           // from the moment it's created.
           assignedEmails: emailRecipients,

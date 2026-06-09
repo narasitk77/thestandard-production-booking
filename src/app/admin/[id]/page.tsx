@@ -6,6 +6,7 @@ import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
+import { normalizeFreelancers, splitLegacyFreelancers } from '@/lib/freelancers'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string }
@@ -13,7 +14,9 @@ interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]; videographerCount?: number
+  cameraCount?: number | null; micCount?: number | null; needsVan?: boolean
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
+  freelancers?: unknown
   outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -118,6 +121,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     producer: '',
     creative: '',
     crewRequired: '',
+    cameraCount: '',
+    micCount: '',
+    needsVan: false,
     agencyRef: '',
     notes: '',
     episodeTitles: [] as { id: string; episodeId: string; title: string }[],
@@ -133,6 +139,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       producer: b.producer || '',
       creative: (b.creative || []).join(', '),
       crewRequired: (b.crewRequired || []).join(', '),
+      cameraCount: b.cameraCount === null || b.cameraCount === undefined ? '' : String(b.cameraCount),
+      micCount: b.micCount === null || b.micCount === undefined ? '' : String(b.micCount),
+      needsVan: !!b.needsVan,
       agencyRef: b.agencyRef || '',
       notes: b.notes || '',
       episodeTitles: b.episodes.map(e => ({ id: e.id, episodeId: e.episodeId, title: e.title })),
@@ -148,9 +157,27 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           return
         }
         setBooking(d.booking)
-        setAssignEmails(d.booking.assignedEmails || [])
         setMainVideographer(d.booking.mainVideographerEmail || '')
-        setAdminNotes(d.booking.adminNotes || '')
+        // v1.41.0 — freelancers are now a structured list, not appended text.
+        // Prefer the structured field; for older bookings, parse the legacy
+        // "Freelancers:" block out of adminNotes and strip it from the textarea
+        // so it can't be double-counted on the next save.
+        const structured = normalizeFreelancers(d.booking.freelancers)
+        if (structured.length > 0) {
+          setFreelancers(structured.map(f => ({ id: crypto.randomUUID(), name: f.name, contract: f.contract || '', email: f.email || '' })))
+          setAdminNotes(d.booking.adminNotes || '')
+        } else {
+          const split = splitLegacyFreelancers(d.booking.adminNotes)
+          setFreelancers(split.freelancers.map(f => ({ id: crypto.randomUUID(), name: f.name, contract: f.contract || '', email: f.email || '' })))
+          setAdminNotes(split.notes)
+        }
+        // Keep freelancer emails out of the staff "assigned" list so each crew
+        // member shows in exactly one place (the assign route re-merges them).
+        const flEmails = new Set(
+          (structured.length > 0 ? structured : splitLegacyFreelancers(d.booking.adminNotes).freelancers)
+            .map(f => f.email).filter(Boolean),
+        )
+        setAssignEmails((d.booking.assignedEmails || []).filter((e: string) => !flEmails.has(e)))
         hydrateEditForm(d.booking)
       })
       .catch(e => setError(e?.message || 'Failed to load booking'))
@@ -192,20 +219,17 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     setError('')
     setSaving(true)
     try {
-      // Combine staff emails + freelancer emails
+      // v1.41.0 — send STAFF emails + structured freelancers separately. The
+      // assign route merges freelancer emails into the guest list server-side
+      // and rebuilds the calendar description from the structured list — so
+      // re-saving never duplicates names (the old append-into-adminNotes bug).
+      const freelancerPayload = freelancers
+        .map(f => ({ name: f.name.trim(), contract: f.contract.trim(), email: f.email.trim() }))
+        .filter(f => f.name)
       const allEmails = [
         ...assignEmails,
-        ...freelancers.filter(f => f.email).map(f => f.email),
+        ...freelancerPayload.map(f => f.email).filter(Boolean),
       ]
-
-      // Append freelancer info to adminNotes
-      let notes = adminNotes
-      if (freelancers.length > 0) {
-        const fl = freelancers.map(f =>
-          `• ${f.name}${f.contract ? ` (Contract: ${f.contract})` : ''}${f.email ? ` <${f.email}>` : ''}`
-        ).join('\n')
-        notes = notes ? `${notes}\n\nFreelancers:\n${fl}` : `Freelancers:\n${fl}`
-      }
 
       // Only keep the picked main videographer if they're still in the assigned list
       const mainVdo = mainVideographer && allEmails.includes(mainVideographer) ? mainVideographer : null
@@ -213,8 +237,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          assignedEmails: allEmails,
-          adminNotes: notes,
+          assignedEmails: assignEmails,
+          adminNotes,
+          freelancers: freelancerPayload,
           mainVideographerEmail: mainVdo,
         }),
       })
@@ -226,8 +251,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         assignedEmails: data.booking.assignedEmails,
         mainVideographerEmail: data.booking.mainVideographerEmail,
         adminNotes: data.booking.adminNotes,
+        freelancers: data.booking.freelancers,
       } : data.booking)
-      setAssignEmails(data.booking.assignedEmails || [])
+      // Re-derive the staff list (response assignedEmails includes freelancer
+      // emails — keep them out of the staff checkboxes, they live in the cards).
+      const savedFlEmails = new Set(freelancerPayload.map(f => f.email).filter(Boolean))
+      setAssignEmails((data.booking.assignedEmails || []).filter((e: string) => !savedFlEmails.has(e)))
       setMainVideographer(data.booking.mainVideographerEmail || '')
       setAdminNotes(data.booking.adminNotes || '')
 
@@ -301,6 +330,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         producer: editForm.producer,
         creative: editForm.creative ? editForm.creative.split(',').map(s => s.trim()).filter(Boolean) : [],
         crewRequired: editForm.crewRequired ? editForm.crewRequired.split(',').map(s => s.trim()).filter(Boolean) : [],
+        cameraCount: editForm.cameraCount.trim() === '' ? null : Math.max(0, parseInt(editForm.cameraCount, 10) || 0),
+        micCount: editForm.micCount.trim() === '' ? null : Math.max(0, parseInt(editForm.micCount, 10) || 0),
+        needsVan: editForm.needsVan,
         agencyRef: editForm.agencyRef || null,
         notes: editForm.notes || null,
         episodeTitles: editForm.episodeTitles.map(e => ({ id: e.id, title: e.title })),
@@ -553,6 +585,30 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               <label className="text-xs text-gray-500 mb-1 block">Crew Requested (คั่นด้วย ,)</label>
               <input className="gf-input" value={editForm.crewRequired}
                 onChange={e => setEditForm({ ...editForm, crewRequired: e.target.value })} />
+            </div>
+
+            {/* v1.41.0 — equipment + van; flow to the calendar event on save */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">🎥 จำนวนกล้อง</label>
+                <input type="number" min={0} max={50} inputMode="numeric" className="gf-input tabular-nums"
+                  value={editForm.cameraCount}
+                  onChange={e => setEditForm({ ...editForm, cameraCount: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">🎙 จำนวนไมค์</label>
+                <input type="number" min={0} max={50} inputMode="numeric" className="gf-input tabular-nums"
+                  value={editForm.micCount}
+                  onChange={e => setEditForm({ ...editForm, micCount: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">การเดินทาง</label>
+                <label className="flex items-center gap-2 h-[38px] px-2 cursor-pointer">
+                  <input type="checkbox" checked={editForm.needsVan} className="accent-[#673ab7]"
+                    onChange={e => setEditForm({ ...editForm, needsVan: e.target.checked })} />
+                  <span className="text-sm text-gray-700">🚐 ต้องการรถตู้</span>
+                </label>
+              </div>
             </div>
 
             <div>

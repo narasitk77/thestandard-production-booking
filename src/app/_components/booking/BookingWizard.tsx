@@ -176,6 +176,9 @@ export default function BookingWizard() {
   const [creative, setCreative] = useState('')
   const [crew, setCrew] = useState<string[]>([])
   const [videographerCount, setVideographerCount] = useState(1)
+  const [cameraCount, setCameraCount] = useState('')
+  const [micCount, setMicCount] = useState('')
+  const [needsVan, setNeedsVan] = useState(false)
   const [agencyRef, setAgencyRef] = useState('')
   const [projectId, setProjectId] = useState('')
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
@@ -340,7 +343,12 @@ export default function BookingWizard() {
         errs.shootEndDate = 'Shoot End Date ต้องไม่อยู่ก่อน Shoot Date'
       }
       if (!callTime) errs.callTime = 'กรุณาเลือก Call Time'
-      if (callTime && estimatedWrap && shootDate && shootEndDate && shootDate === shootEndDate && estimatedWrap <= callTime) {
+      // v1.41.0 — Estimated Wrap is now REQUIRED. When it was optional the
+      // calendar fell back to "call time + 4h", which mis-stated the team's
+      // workload/time calc (ops feedback). Force a real wrap time.
+      if (!estimatedWrap) {
+        errs.estimatedWrap = 'กรุณาเลือก Estimated Wrap'
+      } else if (callTime && shootDate && shootEndDate && shootDate === shootEndDate && estimatedWrap <= callTime) {
         errs.estimatedWrap = 'Estimated Wrap ต้องอยู่หลัง Call Time (เมื่อถ่ายวันเดียว)'
       }
     } else if (s === 3) {
@@ -458,6 +466,9 @@ export default function BookingWizard() {
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           videographerCount: crew.includes('Videographer') ? videographerCount : 1,
+          cameraCount: cameraCount.trim() === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
+          micCount: micCount.trim() === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
+          needsVan,
           agencyRef: agencyRef || null,
           projectId: isContentAgency ? (projectId || null) : null,
           projectName: isContentAgency ? (selectedProject?.projectName || null) : null,
@@ -532,6 +543,11 @@ export default function BookingWizard() {
     crew: crew.length > 0
       ? crew.map(c => c === 'Videographer' && videographerCount > 1 ? `${c} ×${videographerCount}` : c).join(', ')
       : '',
+    equipment: [
+      cameraCount.trim() && Number(cameraCount) > 0 ? `🎥 ${parseInt(cameraCount, 10)}` : '',
+      micCount.trim() && Number(micCount) > 0 ? `🎙 ${parseInt(micCount, 10)}` : '',
+    ].filter(Boolean).join(' · '),
+    van: needsVan ? '🚐 ต้องการรถตู้' : '',
     notes,
   }
 
@@ -700,7 +716,7 @@ export default function BookingWizard() {
                   <FieldError message={fieldErrors.callTime} />
                 </div>
                 <div>
-                  <Label htmlFor="estimatedWrap">Estimated Wrap</Label>
+                  <Label htmlFor="estimatedWrap" required>Estimated Wrap</Label>
                   <input
                     id="estimatedWrap"
                     type="time"
@@ -709,7 +725,7 @@ export default function BookingWizard() {
                     onChange={e => setEstimatedWrap(e.target.value)}
                     aria-invalid={!!fieldErrors.estimatedWrap}
                   />
-                  <FieldHelp>ไม่บังคับ — ใช้คำนวณ workload ของทีม</FieldHelp>
+                  <FieldHelp>เวลาที่คาดว่าจะถ่ายเสร็จ — ใช้คำนวณเวลางาน/workload ของทีม</FieldHelp>
                   <FieldError message={fieldErrors.estimatedWrap} />
                 </div>
               </div>
@@ -739,6 +755,22 @@ export default function BookingWizard() {
                     ))}
                   </div>
                   <FieldHelp>ประเภทการผลิต — ไม่ใช่ห้อง/สถานที่ ใส่ตรงข้างล่าง</FieldHelp>
+                </div>
+
+                {/* v1.41.0 — van request for off-site shoots. Adds 🚐 to the
+                    calendar event title (web + Google) so logistics see it. */}
+                <div>
+                  <Label>การเดินทาง</Label>
+                  <label className={`ops-choice ${needsVan ? 'ops-choice-selected' : ''} cursor-pointer`}>
+                    <input
+                      type="checkbox"
+                      checked={needsVan}
+                      onChange={e => setNeedsVan(e.target.checked)}
+                      className="accent-brand-primary mt-0.5"
+                    />
+                    <span className="text-sm text-gray-700">🚐 ต้องการรถตู้ (งานออกนอกสถานที่)</span>
+                  </label>
+                  <FieldHelp>ถ้าเลือก ชื่องานบนปฏิทินจะขึ้น 🚐 นำหน้า</FieldHelp>
                 </div>
 
                 <div>
@@ -1129,6 +1161,43 @@ export default function BookingWizard() {
                   <FieldHelp>เลือก crew ทุกตำแหน่งที่ต้องใช้ · ระบุจำนวน Videographer ถ้าต้องมากกว่า 1</FieldHelp>
                 </div>
 
+                {/* v1.41.0 — equipment counts (🎥 / 🎙). Surfaced on the
+                    calendar event title so crew see gear needs at a glance. */}
+                <div>
+                  <Label>อุปกรณ์ (Equipment)</Label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="cameraCount">🎥 จำนวนกล้อง</Label>
+                      <input
+                        id="cameraCount"
+                        type="number"
+                        min={0}
+                        max={50}
+                        inputMode="numeric"
+                        className="ops-input tabular-nums"
+                        placeholder="เช่น 2"
+                        value={cameraCount}
+                        onChange={e => setCameraCount(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="micCount">🎙 จำนวนไมค์</Label>
+                      <input
+                        id="micCount"
+                        type="number"
+                        min={0}
+                        max={50}
+                        inputMode="numeric"
+                        className="ops-input tabular-nums"
+                        placeholder="เช่น 1"
+                        value={micCount}
+                        onChange={e => setMicCount(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <FieldHelp>ระบุจำนวนกล้องและไมค์ที่ต้องใช้ — จะแสดงบน Google Calendar (เว้นว่างได้)</FieldHelp>
+                </div>
+
                 {/* Notes */}
                 <div>
                   <Label htmlFor="notes">Notes for coordinator</Label>
@@ -1163,6 +1232,7 @@ export default function BookingWizard() {
                 <ReviewBlock title="Location" onEdit={() => jumpTo(3)}>
                   <ReviewRow label="Shoot Type" value={summary.shootType} />
                   <ReviewRow label="Location / Room" value={summary.location} />
+                  <ReviewRow label="รถตู้" value={summary.van} />
                 </ReviewBlock>
                 <ReviewBlock title="People & Crew" onEdit={() => jumpTo(4)}>
                   <ReviewRow label="Producer" value={summary.producer} />
@@ -1172,6 +1242,7 @@ export default function BookingWizard() {
                   <ReviewRow label="แขก / Subject" value={summary.subject} />
                   <ReviewRow label="Product Code" value={summary.productCode} />
                   <ReviewRow label="Crew" value={summary.crew} />
+                  <ReviewRow label="Equipment" value={summary.equipment} />
                   <ReviewRow label="Notes" value={summary.notes} />
                 </ReviewBlock>
               </div>

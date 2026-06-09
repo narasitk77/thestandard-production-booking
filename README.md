@@ -3,7 +3,7 @@
 > ระบบ Booking การผลิต | Episode ID auto-generation | Calendar Packet for Coordinator | Auto calendar guest sync
 
 **Live**: https://probook.xtec9.xyz (Portainer, primary)
-**Version**: 1.40.0 · **Phase**: 2 (live calendar sync + observability)
+**Version**: 1.41.0 · **Phase**: 2 (live calendar sync + observability)
 
 ---
 
