@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireOTApprover } from '@/lib/session'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
-import { summarizeDay, formatTHB, RATE_WEEKDAY_OT_THB, RATE_WEEKEND_OR_HOLIDAY_THB, WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
+import { summarizeDay, formatTHB, dateOffsetDays, RATE_WEEKDAY_OT_THB, RATE_WEEKEND_OR_HOLIDAY_THB, WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
 
 const THAI_MONTHS = [
   'มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
@@ -43,9 +43,11 @@ export async function GET(request: NextRequest) {
       records.forEach((r, i) => {
         const u = userMap.get(r.userEmail.toLowerCase())
         const dateStr = r.date.toISOString().slice(0, 10)
+        const nightOffset = dateOffsetDays(dateStr, r.endDate ? r.endDate.toISOString() : null)
         const summary = summarizeDay(dateStr, [{
           startTime: r.startTime || '',
           endTime: r.endTime || '',
+          endOffsetDays: nightOffset,
           jobTask: r.jobTask,
           justification: r.justification,
         }])
@@ -56,7 +58,7 @@ export async function GET(request: NextRequest) {
           u?.position || '',
           dateStr,
           r.startTime || (r.type === 'HOLIDAY' ? '00:00' : ''),
-          r.endTime || '',
+          `${r.endTime || ''}${nightOffset > 0 ? ` (+${nightOffset}d ${r.endDate ? r.endDate.toISOString().slice(0, 10) : ''})` : ''}`,
           r.jobTask || r.description || '',
           r.justification || '',
           summary.dayLabel,
@@ -92,6 +94,7 @@ export async function GET(request: NextRequest) {
         const sum = summarizeDay(dateStr, recs.map(r => ({
           startTime: r.startTime || '',
           endTime: r.endTime || '',
+          endOffsetDays: dateOffsetDays(dateStr, r.endDate ? r.endDate.toISOString() : null),
           jobTask: r.jobTask,
           justification: r.justification,
         })))

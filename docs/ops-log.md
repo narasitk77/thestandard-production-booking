@@ -5,6 +5,20 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-09 · v1.42.0 — overnight OT (schema addition)
+
+**What deployed.** OT can now span midnight (CHANGELOG 1.42.0): a "วันที่เลิก"
+field on the OT form, calc/validation that span the day boundary, auto-OT from
+overnight shoots, and 🌙+N markers across the OT page / review / CSV / PDF.
+
+**Schema change — applied automatically.** Added one column to `ot_records`:
+`endDate DateTime? @db.Date` (nullable). The container's existing
+`prisma db push --accept-data-loss` on start applies it cleanly — no manual
+migration, no data touched. Verify after deploy: a new OT entry with วันที่เลิก =
+next day should save (no "end must be after start" error) and show 🌙+1.
+
+---
+
 ## 2026-06-09 · v1.41.0 — booking ops feedback (schema additions)
 
 **What deployed.** Batch of ops feedback (see CHANGELOG 1.41.0): required

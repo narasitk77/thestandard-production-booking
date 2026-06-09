@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireOTApprover } from '@/lib/session'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
-import { summarizeDay } from '@/lib/ot-calc'
+import { summarizeDay, dateOffsetDays } from '@/lib/ot-calc'
 
 interface PersonSummary {
   userId: string | null
@@ -79,6 +79,7 @@ export async function GET(request: NextRequest) {
         g.recs.map(r => ({
           startTime: r.startTime || '',
           endTime: r.endTime || '',
+          endOffsetDays: dateOffsetDays(g.date, r.endDate ? r.endDate.toISOString() : null),
           jobTask: r.jobTask,
           justification: r.justification,
         }))

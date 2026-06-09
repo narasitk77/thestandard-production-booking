@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.42.0] — 2026-06-09
+
+### Added — Overnight OT (shifts that cross midnight)
+
+Crew sometimes work past midnight; OT could only be logged within a single day,
+so an overnight shift either got rejected ("end must be after start") or, for the
+calc, was silently dropped.
+
+- **OT entry form** now has a **"วันที่เลิก (ถ้าทำข้ามวัน)"** date field next to
+  the start/end times. Leave it blank for a same-day shift; set it to the next day
+  when the shift runs past midnight. A live hint shows `🌙 ข้ามวัน (+N วัน)` and
+  warns when the end time is earlier than the start without an end date set.
+- **Calc** (`summarizeDay`) interprets the end time as
+  `endOffsetDays × 24h + endTime`, so the span/worked-hours and OT amount are
+  correct across the day boundary. The shift still belongs to its **START date**
+  for weekday/weekend/holiday classification and rate.
+- **Validation** (POST + PATCH `/api/ot`): the shift duration must be > 0 and
+  ≤ 24h; overnight is allowed only when the end date is the next day.
+- **Auto-OT from bookings** (`syncBookingOT`): when a booking's wrap time is at or
+  before its call time (overnight shoot), the generated OT record's end date is set
+  to the next day.
+- Overnight shifts are flagged with a `🌙+N` marker on the OT page, the manager
+  review page, the CSV export, and the PDF cover sheet.
+
+### Schema
+
+- `OTRecord`: added `endDate DateTime? @db.Date` (null = ends same day as `date`).
+  Additive — applied via the existing `prisma db push` on container start.
+
+---
+
 ## [1.41.0] — 2026-06-09
 
 Batch of ops feedback after the team started using the booking flow in production.

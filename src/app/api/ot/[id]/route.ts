@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { isMonthEditable } from '@/lib/ot-cleanup'
-import { parseTimeToMinutes } from '@/lib/ot-calc'
+import { parseTimeToMinutes, dateOffsetDays } from '@/lib/ot-calc'
 
 export async function PATCH(
   request: NextRequest,
@@ -38,16 +38,35 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { date, startTime, endTime, jobTask, justification } = body
+    const { date, endDate, startTime, endTime, jobTask, justification } = body
 
-    if (startTime !== undefined && endTime !== undefined) {
-      const sMin = parseTimeToMinutes(startTime)
-      const eMin = parseTimeToMinutes(endTime)
+    // v1.42.0 — validate against the EFFECTIVE values (new where provided, else
+    // existing) so an overnight shift's duration is checked across the day
+    // boundary even when only one field changes.
+    const effStartTime = startTime !== undefined ? startTime : existing.startTime
+    const effEndTime = endTime !== undefined ? endTime : existing.endTime
+    const effDateISO = (date !== undefined ? String(date) : existing.date.toISOString()).slice(0, 10)
+    const endDateProvided = endDate !== undefined
+    const effEndDateISO = endDateProvided
+      ? (endDate ? String(endDate).slice(0, 10) : null)
+      : (existing.endDate ? existing.endDate.toISOString().slice(0, 10) : null)
+
+    if (effStartTime && effEndTime) {
+      const sMin = parseTimeToMinutes(effStartTime)
+      const eMin = parseTimeToMinutes(effEndTime)
       if (sMin === null || eMin === null) {
         return NextResponse.json({ error: 'Invalid time format' }, { status: 400 })
       }
-      if (eMin <= sMin) {
-        return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 })
+      const offsetDays = dateOffsetDays(effDateISO, effEndDateISO)
+      const durationMin = offsetDays * 1440 + eMin - sMin
+      if (durationMin <= 0) {
+        return NextResponse.json(
+          { error: 'End must be after start — set the end date to the next day if the shift runs past midnight' },
+          { status: 400 },
+        )
+      }
+      if (durationMin > 1440) {
+        return NextResponse.json({ error: 'OT shift cannot exceed 24 hours — check the start/end dates' }, { status: 400 })
       }
     }
 
@@ -58,6 +77,7 @@ export async function PATCH(
       where: { id: params.id },
       data: {
         ...(date && { date: new Date(date), month: date.slice(0, 7) }),
+        ...(endDateProvided && { endDate: endDate ? new Date(endDate) : null }),
         ...(startTime !== undefined && { startTime }),
         ...(endTime !== undefined && { endTime }),
         ...(jobTask !== undefined && { jobTask: jobTask?.trim() || null }),

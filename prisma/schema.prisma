@@ -123,12 +123,17 @@ enum OTApprovalStatus {
 model OTRecord {
   id              String   @id @default(cuid())
   userEmail       String
-  month           String   // YYYY-MM, derived from date
-  date            DateTime @db.Date
+  month           String   // YYYY-MM, derived from date (the START date)
+  date            DateTime @db.Date        // shift START date
 
   // Task-level fields (new model — required for new entries)
   startTime       String?  @db.VarChar(5)  // HH:MM
   endTime         String?  @db.VarChar(5)  // HH:MM
+  // v1.42.0 — overnight OT. When a shift runs past midnight the user sets the
+  // END date here; null means it ends the same day as `date`. The OT calc adds
+  // (endDate − date) × 24h so the duration is correct across the day boundary.
+  // The shift still belongs to its START date for day-type / rate purposes.
+  endDate         DateTime? @db.Date
   jobTask         String?  // description of work performed
   justification   String?  // why OT/standby was necessary
 

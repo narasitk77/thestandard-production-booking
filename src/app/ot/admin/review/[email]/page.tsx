@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Loader2, CheckCircle2, XCircle, AlertTriangle, Lock, Send, Download } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
-import { summarizeDay, formatTHB, type DaySummary } from '@/lib/ot-calc'
+import { summarizeDay, formatTHB, dateOffsetDays, type DaySummary } from '@/lib/ot-calc'
 
 type ApprovalStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
 
@@ -14,6 +14,7 @@ interface OTRecord {
   userEmail: string
   month: string
   date: string
+  endDate: string | null
   startTime: string | null
   endTime: string | null
   jobTask: string | null
@@ -86,6 +87,7 @@ export default function OTReviewPage() {
         const summary = summarizeDay(date, list.map(r => ({
           startTime: r.startTime || '',
           endTime: r.endTime || '',
+          endOffsetDays: dateOffsetDays(r.date, r.endDate),
           jobTask: r.jobTask,
           justification: r.justification,
         })))
@@ -323,6 +325,9 @@ function DayReviewCard({ date, records, summary, acting, onApprove, onReject }: 
             <div key={r.id} className="py-2 flex items-start gap-3 flex-wrap">
               <div className="text-xs text-gray-500 font-mono flex-shrink-0 w-24">
                 {r.startTime || '—'} → {r.endTime || '—'}
+                {dateOffsetDays(r.date, r.endDate) > 0 && (
+                  <span className="ml-1 text-purple-600" title={`เลิกงานวันที่ ${r.endDate?.slice(0, 10)}`}>🌙+{dateOffsetDays(r.date, r.endDate)}</span>
+                )}
               </div>
               <div className="flex-1 min-w-[200px]">
                 <div className="text-sm text-gray-800">{r.jobTask || '—'}</div>

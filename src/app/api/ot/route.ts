@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, getOTApproverAccess } from '@/lib/session'
 import { cleanupOTRecords, currentMonthYYYYMM, isMonthEditable } from '@/lib/ot-cleanup'
-import { parseTimeToMinutes } from '@/lib/ot-calc'
+import { parseTimeToMinutes, dateOffsetDays } from '@/lib/ot-calc'
 
 function deriveMonth(dateStr: string): string {
   return dateStr.slice(0, 7)
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await request.json()
-    const { date, startTime, endTime, jobTask, justification } = body
+    const { date, endDate, startTime, endTime, jobTask, justification } = body
 
     if (!date) return NextResponse.json({ error: 'Date is required' }, { status: 400 })
     if (!startTime || !endTime) {
@@ -65,8 +65,18 @@ export async function POST(request: NextRequest) {
     if (sMin === null || eMin === null) {
       return NextResponse.json({ error: 'Invalid time format (use HH:MM)' }, { status: 400 })
     }
-    if (eMin <= sMin) {
-      return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 })
+    // v1.42.0 — overnight OT. The shift may end the next day; validate the total
+    // duration across the day boundary instead of forcing endTime > startTime.
+    const offsetDays = dateOffsetDays(date, endDate)
+    const durationMin = offsetDays * 1440 + eMin - sMin
+    if (durationMin <= 0) {
+      return NextResponse.json(
+        { error: 'End must be after start — if the shift runs past midnight, set the end date to the next day' },
+        { status: 400 },
+      )
+    }
+    if (durationMin > 1440) {
+      return NextResponse.json({ error: 'OT shift cannot exceed 24 hours — check the start/end dates' }, { status: 400 })
     }
     if (!jobTask || !jobTask.trim()) {
       return NextResponse.json({ error: 'Job task description is required' }, { status: 400 })
@@ -85,6 +95,8 @@ export async function POST(request: NextRequest) {
         userEmail: session.email,
         month,
         date: new Date(date),
+        // Only persist endDate when it actually spans to a later day.
+        endDate: offsetDays > 0 ? new Date(endDate) : null,
         startTime,
         endTime,
         jobTask: jobTask.trim(),

@@ -2,7 +2,7 @@ import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
-import { summarizeDay, formatTHB } from '@/lib/ot-calc'
+import { summarizeDay, formatTHB, dateOffsetDays } from '@/lib/ot-calc'
 
 /**
  * Generates the OT cover-sheet PDF — one A4 page per person, with the
@@ -25,7 +25,8 @@ const RED = rgb(0.75, 0.20, 0.20)             // rejected highlight
 
 export interface OTPdfRecord {
   id: string
-  date: string                  // ISO YYYY-MM-DD
+  date: string                  // ISO YYYY-MM-DD (shift START date)
+  endDate: string | null        // ISO YYYY-MM-DD when the shift ends next day; null = same day
   startTime: string | null
   endTime: string | null
   jobTask: string | null
@@ -194,6 +195,7 @@ async function renderPersonPage(
     const summary = summarizeDay(d, recs.map(r => ({
       startTime: r.startTime || '',
       endTime: r.endTime || '',
+      endOffsetDays: dateOffsetDays(d, r.endDate),
       jobTask: r.jobTask,
       justification: r.justification,
     })))
@@ -229,7 +231,8 @@ async function renderPersonPage(
 
       const dateStr = isFirstRow ? fmtDateTh(d) : ''
       const dayStr = isFirstRow ? summary.dayLabel : ''
-      const timeStr = `${r.startTime || '—'}–${r.endTime || '—'}`
+      const nightOffset = dateOffsetDays(d, r.endDate)
+      const timeStr = `${r.startTime || '—'}–${r.endTime || '—'}${nightOffset > 0 ? ` +${nightOffset}` : ''}`
       const taskStr = truncate(r.jobTask || '', regular, 8.5, cols.task.w - 4)
       const statusStr = r.approvalStatus
       const statusColor =

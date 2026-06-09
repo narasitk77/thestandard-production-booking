@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Calendar, Clock, Plus, Trash2, Loader2, Lock, Info, AlertTriangle, Send, CheckCircle2, XCircle, FileSignature, Download } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
-import { summarizeDay, formatTHB, WEEKDAY_THRESHOLD_HOURS, type DaySummary } from '@/lib/ot-calc'
+import { summarizeDay, formatTHB, WEEKDAY_THRESHOLD_HOURS, parseTimeToMinutes, dateOffsetDays, type DaySummary } from '@/lib/ot-calc'
 import { isThaiHoliday, getHolidayName } from '@/lib/thai-holidays'
 
 type ApprovalStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
@@ -14,6 +14,7 @@ interface OTRecord {
   userEmail: string
   month: string
   date: string
+  endDate: string | null
   startTime: string | null
   endTime: string | null
   jobTask: string | null
@@ -63,6 +64,7 @@ export default function OTPage() {
 
   // form
   const [date, setDate] = useState(todayISO())
+  const [endDate, setEndDate] = useState('')   // '' = same day as `date`
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [jobTask, setJobTask] = useState('')
@@ -108,6 +110,7 @@ export default function OTPage() {
         const tasks = list.map(r => ({
           startTime: r.startTime || '',
           endTime: r.endTime || '',
+          endOffsetDays: dateOffsetDays(r.date, r.endDate),
           jobTask: r.jobTask,
           justification: r.justification,
         }))
@@ -190,6 +193,28 @@ export default function OTPage() {
       setError('Start time and end time are required.')
       return
     }
+    // Overnight-aware duration check (mirrors the server) so the user gets an
+    // immediate, friendly error before the round-trip.
+    const effEndDate = endDate || date
+    if (effEndDate < date) {
+      setError('วันสิ้นสุดต้องไม่อยู่ก่อนวันเริ่ม')
+      return
+    }
+    const sMin = parseTimeToMinutes(startTime)
+    const eMin = parseTimeToMinutes(endTime)
+    if (sMin === null || eMin === null) {
+      setError('รูปแบบเวลาไม่ถูกต้อง (HH:MM)')
+      return
+    }
+    const durationMin = dateOffsetDays(date, effEndDate) * 1440 + eMin - sMin
+    if (durationMin <= 0) {
+      setError('เวลาเลิกต้องหลังเวลาเริ่ม — ถ้าทำข้ามวัน (เลยเที่ยงคืน) ให้เลือกวันสิ้นสุดเป็นวันถัดไป')
+      return
+    }
+    if (durationMin > 1440) {
+      setError('OT ต่อรายการต้องไม่เกิน 24 ชม. — ตรวจสอบวันเริ่ม/วันสิ้นสุด')
+      return
+    }
     if (!jobTask.trim()) {
       setError('Job task is required.')
       return
@@ -203,12 +228,13 @@ export default function OTPage() {
       const res = await fetch('/api/ot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, startTime, endTime, jobTask, justification }),
+        // Send endDate only when it actually spans to a later day.
+        body: JSON.stringify({ date, endDate: effEndDate > date ? effEndDate : null, startTime, endTime, jobTask, justification }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setRecords(prev => [...prev, data.record])
-      setStartTime(''); setEndTime(''); setJobTask(''); setJustification('')
+      setStartTime(''); setEndTime(''); setEndDate(''); setJobTask(''); setJustification('')
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -371,9 +397,14 @@ export default function OTPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">วันที่ *</label>
+              <label className="text-xs text-gray-500 mb-1 block">วันที่เริ่ม *</label>
               <input type="date" className="gf-input" value={date}
-                onChange={e => setDate(e.target.value)}
+                onChange={e => {
+                  const v = e.target.value
+                  setDate(v)
+                  // keep end date from falling before the new start date
+                  if (endDate && endDate < v) setEndDate('')
+                }}
                 min={`${month}-01`} max={`${month}-31`} required />
               {(() => {
                 const info = dateInfo(date)
@@ -391,6 +422,32 @@ export default function OTPage() {
               <label className="text-xs text-gray-500 mb-1 block">สิ้นสุด *</label>
               <input type="time" className="gf-input" value={endTime}
                 onChange={e => setEndTime(e.target.value)} required />
+            </div>
+          </div>
+
+          {/* v1.42.0 — overnight OT: let the user set the END date when the shift
+              runs past midnight. Default (empty) = ends the same day. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-1">
+              <label className="text-xs text-gray-500 mb-1 block">วันที่เลิก (ถ้าทำข้ามวัน)</label>
+              <input type="date" className="gf-input" value={endDate || date}
+                onChange={e => setEndDate(e.target.value === date ? '' : e.target.value)}
+                min={date} required={false} />
+            </div>
+            <div className="sm:col-span-2 flex items-end">
+              {(() => {
+                const eff = endDate || date
+                const offset = dateOffsetDays(date, eff)
+                const sMin = parseTimeToMinutes(startTime)
+                const eMin = parseTimeToMinutes(endTime)
+                if (offset > 0) {
+                  return <p className="text-[11px] text-purple-700 bg-purple-50 border border-purple-200 rounded px-2 py-1">🌙 ข้ามวัน (+{offset} วัน) — เลิกงาน {endTime || '—'} ของวันถัดไป</p>
+                }
+                if (sMin !== null && eMin !== null && eMin <= sMin) {
+                  return <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">⚠️ เวลาเลิกเช้ากว่าเวลาเริ่ม — ถ้าทำเลยเที่ยงคืน ให้เลือก “วันที่เลิก” เป็นวันถัดไป</p>
+                }
+                return <p className="text-[10px] text-gray-400">เว้นว่าง = เลิกงานวันเดียวกับวันเริ่ม</p>
+              })()}
             </div>
           </div>
 
@@ -514,6 +571,9 @@ function DayCard({ date, records, summary, editable, onDelete }: {
             <div key={r.id} className={`py-2 flex items-start gap-3 flex-wrap ${r.approvalStatus === 'REJECTED' ? 'bg-red-50/40 -mx-2 px-2 rounded' : ''}`}>
               <div className="text-xs text-gray-500 font-mono flex-shrink-0 w-24">
                 {r.startTime || '—'} → {r.endTime || '—'}
+                {dateOffsetDays(r.date, r.endDate) > 0 && (
+                  <span className="ml-1 text-purple-600" title={`เลิกงานวันที่ ${r.endDate?.slice(0, 10)}`}>🌙+{dateOffsetDays(r.date, r.endDate)}</span>
+                )}
               </div>
               <div className="flex-1 min-w-[150px]">
                 <div className="text-sm text-gray-800">{r.jobTask || r.description || '—'}</div>

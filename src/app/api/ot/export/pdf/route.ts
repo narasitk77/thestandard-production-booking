@@ -74,6 +74,7 @@ export async function GET(request: NextRequest) {
       byUser.get(key)!.push({
         id: r.id,
         date: r.date.toISOString().slice(0, 10),
+        endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
         startTime: r.startTime,
         endTime: r.endTime,
         jobTask: r.jobTask,

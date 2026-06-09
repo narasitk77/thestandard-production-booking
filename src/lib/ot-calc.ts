@@ -33,8 +33,25 @@ export function parseTimeToMinutes(t: string | null | undefined): number | null 
 export interface OTTaskInput {
   startTime: string  // HH:MM
   endTime: string    // HH:MM
+  // v1.42.0 — how many days after the START date the shift ends. 0 = same day,
+  // 1 = ends the next day (crossed midnight). The end time is interpreted as
+  // (endOffsetDays × 24h + endTime), so an overnight shift is no longer dropped.
+  endOffsetDays?: number
   jobTask?: string | null
   justification?: string | null
+}
+
+// Whole-day difference between two ISO date strings (YYYY-MM-DD or longer).
+// Never negative; an end on/before the start returns 0. Used to turn a record's
+// `endDate` into the `endOffsetDays` the day summary needs.
+export function dateOffsetDays(startISO: string, endISO?: string | null): number {
+  if (!endISO) return 0
+  const s = startISO.slice(0, 10)
+  const e = endISO.slice(0, 10)
+  if (e <= s) return 0
+  const ms = Date.parse(`${e}T00:00:00Z`) - Date.parse(`${s}T00:00:00Z`)
+  if (Number.isNaN(ms)) return 0
+  return Math.max(0, Math.round(ms / 86_400_000))
 }
 
 export interface DaySummary {
@@ -64,11 +81,16 @@ export function summarizeDay(date: Date | string, tasks: OTTaskInput[]): DaySumm
   const dayType = getDayType(date)
   const holidayName = getHolidayName(date)
   const valid = tasks
-    .map(t => ({
-      ...t,
-      startMin: parseTimeToMinutes(t.startTime),
-      endMin: parseTimeToMinutes(t.endTime),
-    }))
+    .map(t => {
+      const startMin = parseTimeToMinutes(t.startTime)
+      const endRaw = parseTimeToMinutes(t.endTime)
+      // Absolute end minutes from the START date's midnight, so an overnight
+      // shift (endRaw <= startMin but endOffsetDays >= 1) stays valid and its
+      // duration spans the day boundary correctly.
+      const offset = Math.max(0, Math.round(t.endOffsetDays ?? 0))
+      const endMin = endRaw === null ? null : endRaw + offset * 1440
+      return { ...t, startMin, endMin }
+    })
     .filter(t => t.startMin !== null && t.endMin !== null && t.endMin! > t.startMin!) as Array<OTTaskInput & { startMin: number; endMin: number }>
 
   if (valid.length === 0) {

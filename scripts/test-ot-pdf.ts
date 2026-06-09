@@ -17,6 +17,7 @@ const person: OTPdfPerson = {
     {
       id: '1',
       date: '2026-05-03',
+      endDate: null,
       startTime: '09:00', endTime: '18:00',
       jobTask: 'ถ่ายทำ Key Message EP.5 — Studio 1',
       justification: 'งานวันอาทิตย์ตามตารางออกอากาศ',
@@ -31,6 +32,7 @@ const person: OTPdfPerson = {
     {
       id: '2',
       date: '2026-05-15',
+      endDate: null,
       startTime: '08:00', endTime: '20:30',
       jobTask: 'Live event ยืดเวลา — Standby + ถ่ายทำ',
       justification: 'Live event เกินเวลา 2 ชั่วโมง',
@@ -43,6 +45,7 @@ const person: OTPdfPerson = {
     {
       id: '3',
       date: '2026-05-22',
+      endDate: null,
       startTime: '14:00', endTime: '16:00',
       jobTask: 'Standby กองถ่าย Event',
       justification: 'รอลูกค้ามาถ่าย',
