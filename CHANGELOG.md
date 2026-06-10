@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.43.1] — 2026-06-10
+
+### Fixed — Sheet Monitor: unknown episode statuses no longer vanish from counts
+
+Post-deploy verification of v1.43.0 on production found the booking rule
+exact (PP-26-025 → 16, PP-26-024 → 6 with the Published one excluded,
+PP-26-003 → 0) but the Sheet Monitor counted 96 of 97 episodes:
+a blank/unrecognized status fell into none of the five buckets, so
+PP-26-011 showed "No EPs" despite having a bookable episode.
+
+- New `bucketEpisodeStatus()` (unit-tested, 18 tests total): every status
+  maps to exactly one bucket — unknowns land in a new **other** count, so
+  Monitor totals always equal the real episode count and can never
+  disagree with the booking rule again. Gray "N other" chip in the EP
+  status bar; "Active" filter includes it.
+
+---
+
 ## [1.43.0] — 2026-06-10
 
 ### Hardened — the booking rule ("only Published is excluded") is now tested, monitored, and rate-limit-proof

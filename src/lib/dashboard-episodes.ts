@@ -110,6 +110,26 @@ export function isPublishedStatus(status: string | null | undefined): boolean {
 }
 
 /**
+ * Bucket an episode status for display/stats (Sheet Monitor). Every
+ * status falls into exactly ONE bucket — unknown/blank statuses land in
+ * "other" so an episode can never be invisible in counts while still
+ * being bookable (only "published" blocks booking; see isPublishedStatus).
+ * Pure — exported for tests.
+ */
+export type EpStatusBucket =
+  | 'pending' | 'preProduction' | 'production' | 'postProduction' | 'published' | 'other'
+
+export function bucketEpisodeStatus(status: string | null | undefined): EpStatusBucket {
+  const s = String(status ?? '').trim().toLowerCase()
+  if (s.includes('pre')) return 'preProduction'
+  if (s === 'production') return 'production'
+  if (s.includes('post')) return 'postProduction'
+  if (s === 'published') return 'published'
+  if (s === 'pending') return 'pending'
+  return 'other'
+}
+
+/**
  * Which tabs hold episode rows: every per-producer "PD <name>" tab plus
  * the legacy "_EPs" tab (kept as fallback while it still has rows the PD
  * tabs may not). Pure — exported for tests.

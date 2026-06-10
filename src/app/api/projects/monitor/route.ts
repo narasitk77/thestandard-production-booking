@@ -3,7 +3,7 @@ import { google } from 'googleapis'
 import { getProducerDashboardSheetId } from '@/lib/google-config'
 import { getSession } from '@/lib/session'
 import { invalidateProjectsCache } from '@/lib/projects'
-import { fetchAllEpisodeRows, invalidateEpisodeRowsCache } from '@/lib/dashboard-episodes'
+import { fetchAllEpisodeRows, invalidateEpisodeRowsCache, bucketEpisodeStatus } from '@/lib/dashboard-episodes'
 import { prisma } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -31,6 +31,8 @@ export type EpCounts = {
   production: number
   postProduction: number
   published: number
+  // Unknown/blank statuses — still bookable, must never vanish from counts
+  other: number
 }
 
 export type ProjectMonitorRow = {
@@ -83,22 +85,17 @@ export async function GET(request: NextRequest) {
 
     const projectRows = projectsRes.data.values || []
 
-    // Episode counts per project
+    // Episode counts per project — every episode lands in exactly one
+    // bucket (bucketEpisodeStatus), so counts always sum to the real total.
     const epCounts = new Map<string, EpCounts>()
     for (const e of episodes) {
       const m = e.episodeId.match(EPISODE_ID_RE)
       if (!m) continue
       const pid = m[1]
-      const status = e.status.trim().toLowerCase()
       if (!epCounts.has(pid)) {
-        epCounts.set(pid, { pending: 0, preProduction: 0, production: 0, postProduction: 0, published: 0 })
+        epCounts.set(pid, { pending: 0, preProduction: 0, production: 0, postProduction: 0, published: 0, other: 0 })
       }
-      const c = epCounts.get(pid)!
-      if (status.includes('pre')) c.preProduction++
-      else if (status === 'production') c.production++
-      else if (status.includes('post')) c.postProduction++
-      else if (status === 'published') c.published++
-      else if (status === 'pending') c.pending++
+      epCounts.get(pid)![bucketEpisodeStatus(e.status)]++
     }
 
     // Build project list (all — including Published)
@@ -110,8 +107,8 @@ export async function GET(request: NextRequest) {
       if (!PROJECT_ID_RE.test(projectId)) continue
       allProjectIds.push(projectId)
 
-      const counts = epCounts.get(projectId) ?? { pending: 0, preProduction: 0, production: 0, postProduction: 0, published: 0 }
-      const totalEps = counts.pending + counts.preProduction + counts.production + counts.postProduction + counts.published
+      const counts = epCounts.get(projectId) ?? { pending: 0, preProduction: 0, production: 0, postProduction: 0, published: 0, other: 0 }
+      const totalEps = counts.pending + counts.preProduction + counts.production + counts.postProduction + counts.published + counts.other
       const allPublished = totalEps > 0 && counts.published === totalEps
 
       projectMap.set(projectId, {

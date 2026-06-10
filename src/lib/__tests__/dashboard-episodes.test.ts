@@ -16,6 +16,7 @@ import {
   parseEpisodeTabs,
   bookableEpisodesFor,
   isPublishedStatus,
+  bucketEpisodeStatus,
 } from '../dashboard-episodes'
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,35 @@ test('every non-Published status stays bookable', () => {
   ]) {
     assert.equal(isPublishedStatus(s as string), false, `status ${JSON.stringify(s)} must be bookable`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// bucketEpisodeStatus — Sheet Monitor stats: every status lands in ONE bucket
+// ---------------------------------------------------------------------------
+
+test('bucketEpisodeStatus: known statuses map to their buckets', () => {
+  assert.equal(bucketEpisodeStatus('Pre-production'), 'preProduction')
+  assert.equal(bucketEpisodeStatus('Production'), 'production')
+  assert.equal(bucketEpisodeStatus('Post-production'), 'postProduction')
+  assert.equal(bucketEpisodeStatus('Published'), 'published')
+  assert.equal(bucketEpisodeStatus('Pending'), 'pending')
+})
+
+test('bucketEpisodeStatus: unknown/blank statuses land in "other", never vanish', () => {
+  assert.equal(bucketEpisodeStatus(''), 'other')
+  assert.equal(bucketEpisodeStatus('   '), 'other')
+  assert.equal(bucketEpisodeStatus('On Hold'), 'other')
+  assert.equal(bucketEpisodeStatus(null), 'other')
+  assert.equal(bucketEpisodeStatus(undefined), 'other')
+})
+
+test('bucketEpisodeStatus agrees with the booking rule: only the published bucket is unbookable', () => {
+  for (const s of ['Pending', 'Pre-production', 'Production', 'Post-production', '', 'อะไรก็ได้']) {
+    assert.notEqual(bucketEpisodeStatus(s), 'published')
+    assert.equal(isPublishedStatus(s), false)
+  }
+  assert.equal(bucketEpisodeStatus(' PUBLISHED '), 'published')
+  assert.equal(isPublishedStatus(' PUBLISHED '), true)
 })
 
 // ---------------------------------------------------------------------------
