@@ -5,6 +5,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.49.0] — 2026-06-10
+
+### Added — MCP server: สั่งงานระบบจองด้วย AI ได้แล้ว
+
+`POST /api/mcp` speaks the Model Context Protocol over Streamable HTTP,
+so anyone on the team can connect an AI client (claude.ai custom
+connector, Claude Code, Claude Desktop, any MCP client) and operate the
+booking system in plain language. Setup + examples: **docs/mcp.md**.
+
+- **7 tools**: `list_bookings`, `get_booking`,
+  `list_outlets_and_programs`, `list_projects`, `list_project_episodes`
+  (read) · `create_booking`, `cancel_booking` (write).
+- **Same logic as the web form** — booking creation was extracted to
+  `src/lib/create-booking.ts` (1:1 move) and is now shared by
+  POST /api/bookings and the MCP tool: identical validation, ID minting
+  (NWS-KYM-…), audit trail, and Bookings-tab sync. MCP-created bookings
+  enter as REQUESTED and still need admin approval.
+- **Auth**: `Authorization: Bearer MCP_API_KEY` (constant-time compare);
+  endpoint is OFF (503) until the env is set. Actions are audit-logged
+  as `MCP_ACTOR_EMAIL` with an optional `requestedBy` passthrough.
+  Admin powers (approve/assign/hard-delete/purge) are NOT exposed.
+- **Protocol core** is dependency-free
+  (initialize/ping/tools-list/tools-call/notifications, JSON responses —
+  no SDK, no SSE) and covered by 11 unit tests; `/api/health` config now
+  reports `mcp.enabled`. 52 tests total.
+
+### New env (Portainer)
+
+- `MCP_API_KEY` — generate with `openssl rand -hex 32`; unset = MCP off.
+- `MCP_ACTOR_EMAIL` — audit identity for MCP actions (default `mcp@probook`).
+
+---
+
 ## [1.48.0] — 2026-06-10
 
 ### Fixed — outlet bookings now show the real show name (per-EP program)

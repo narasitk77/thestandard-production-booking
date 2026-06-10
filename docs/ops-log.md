@@ -5,6 +5,26 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-10 · v1.49.0 — MCP endpoint (new env vars: MCP_API_KEY / MCP_ACTOR_EMAIL)
+
+**What.** `/api/mcp` lets external AI clients (claude.ai connectors,
+Claude Code, Claude Desktop) query the schedule and create/cancel
+booking requests. Full setup guide: docs/mcp.md.
+
+**Enable (one-time):** add to the Portainer stack env and redeploy —
+- `MCP_API_KEY=` `openssl rand -hex 32` output. **Leave unset to keep
+  MCP disabled** (endpoint answers 503; this is the safe default).
+- `MCP_ACTOR_EMAIL=mcp@thestandard.co` (audit identity; optional).
+
+**Security posture:** single shared bearer key, staff-level access only
+(create/cancel + reads); approve/assign/hard-delete/purge are not
+exposed as tools. All writes audit-logged. Rotate by changing the env
+and redeploying; share the key only with people allowed to book.
+
+**No schema change.** Deploy = pull `latest` and redeploy the stack.
+
+---
+
 ## 2026-06-10 · Test-data purge — deleted all 23 pre-June bookings (v1.44.0 deployed)
 
 **What was done.** Production cleaned to June-only data per narasit.k's

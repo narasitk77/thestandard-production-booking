@@ -86,6 +86,11 @@ export async function GET(_req: NextRequest) {
       smtpUserSet: !!process.env.SMTP_USER?.trim(),
       smtpPassSet: !!process.env.SMTP_PASS?.trim(),
     },
+    // v1.49.0 — MCP endpoint for external AI clients (docs/mcp.md)
+    mcp: {
+      enabled: !!process.env.MCP_API_KEY?.trim(),
+      actorEmail: process.env.MCP_ACTOR_EMAIL?.trim() || 'mcp@probook (default)',
+    },
   }
 
   // --- Live checks -------------------------------------------------------
