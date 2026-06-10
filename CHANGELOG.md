@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.44.0] — 2026-06-10
+
+### Added — per-booking hard delete (admin API)
+
+`POST /api/admin/[id]/delete` (ADMIN only) hard-deletes one booking and
+everything attached to it: episodes + uploads (FK cascade), audit-log /
+footage-log / auto-generated OT rows (explicit cleanup — no cascade on
+those tables), and the Google Calendar event (best-effort). Writes an
+`admin.delete_booking` audit entry with the booking's code/status as the
+trail. Unlike `DELETE /api/bookings/[id]` (soft-cancel) and
+`/api/admin/purge-bookings` (nukes everything), this enables selective
+cleanup — e.g. purging pre-June test bookings while keeping real ones.
+API-only; no UI button yet.
+
+---
+
 ## [1.43.1] — 2026-06-10
 
 ### Fixed — Sheet Monitor: unknown episode statuses no longer vanish from counts
