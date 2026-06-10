@@ -3,7 +3,7 @@ import { google } from 'googleapis'
 import { getProducerDashboardSheetId } from '@/lib/google-config'
 import { getSession } from '@/lib/session'
 import { invalidateProjectsCache } from '@/lib/projects'
-import { fetchAllEpisodeRows } from '@/lib/dashboard-episodes'
+import { fetchAllEpisodeRows, invalidateEpisodeRowsCache } from '@/lib/dashboard-episodes'
 import { prisma } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -64,7 +64,10 @@ export async function GET(request: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
-  if (searchParams.get('refresh') === '1') invalidateProjectsCache()
+  if (searchParams.get('refresh') === '1') {
+    invalidateProjectsCache()
+    invalidateEpisodeRowsCache()
+  }
 
   try {
     const sheetId = getProducerDashboardSheetId()

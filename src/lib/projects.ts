@@ -1,6 +1,6 @@
 import { google } from 'googleapis'
 import { getProducerDashboardSheetId } from './google-config'
-import { fetchAllEpisodeRows } from './dashboard-episodes'
+import { fetchAllEpisodeRows, isPublishedStatus } from './dashboard-episodes'
 
 /**
  * Project ID layer — Producer Dashboard integration
@@ -71,7 +71,7 @@ async function fetchFullyPublishedProjectIds(
     const m = e.episodeId.match(EPISODE_ID_RE)
     if (!m) continue
     const projectId = m[1]
-    const isPublished = e.status.trim().toLowerCase() === 'published'
+    const isPublished = isPublishedStatus(e.status)
     const t = tally.get(projectId) || { total: 0, published: 0 }
     t.total += 1
     if (isPublished) t.published += 1

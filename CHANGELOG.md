@@ -5,6 +5,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.43.0] — 2026-06-10
+
+### Hardened — the booking rule ("only Published is excluded") is now tested, monitored, and rate-limit-proof
+
+Goal: episode booking eligibility must stay correct without repeated
+firefighting when the Dashboard sheet evolves.
+
+- **Single source of truth**: `isPublishedStatus()` — an episode stops
+  being bookable ONLY when its status is exactly "Published"
+  (case/whitespace-insensitive). Pending / Pre-production / Production /
+  Post-production / blank / any future status stays bookable. Booking
+  form and dropdown filter both use it.
+- **Unit tests** (`npm test`, 15 tests): pin the rule, both real tab
+  layouts (PD + legacy _EPs), header reshuffles, tab discovery (new
+  "PD <ชื่อ>" tabs picked up automatically), dedupe precedence,
+  junk-row filtering. `npm run build` now runs them first, so BOTH the
+  CI build and the Docker image build fail if the rule regresses (the
+  push token can't edit workflow files, so the gate lives in the build
+  script instead).
+- **Health canary**: `/api/health` + `/admin/health` gained
+  **episodeTabsRead** — runs the exact booking-form read path and fails
+  loudly (with tab names in the error) if a future restructure empties
+  it, instead of users discovering "ไม่มี episode ที่ถ่ายได้".
+  `fetchAllEpisodeRows` now throws when no episode tab exists at all.
+- **30s episode-rows cache** (+ invalidated by Sheet Monitor "Sync"):
+  one dashboard refresh + form open burst could trip Google's
+  60-reads/min/user quota (observed 429 while load-testing). Also makes
+  the episode picker snappier.
+- **E2E verifier** (`npx tsx scripts/verify-booking-rule.ts`): compares
+  the app's bookable list against an independent parse of the live
+  sheet for every project, smoke-tests the full `listProjectEpisodes`
+  path, and checks the dropdown rule. Run after any Dashboard
+  restructure. Today's run: 97 episodes / 32 projects / 33 dropdown
+  checks — all green.
+
+---
+
 ## [1.42.2] — 2026-06-10
 
 ### Fixed — new episodes invisible to booking: read the "PD <name>" tabs (real root cause)

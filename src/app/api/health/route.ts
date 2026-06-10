@@ -11,6 +11,7 @@ import {
 } from '@/lib/google-config'
 import { getCalendarImpersonateSubject, getCalendarAuth } from '@/lib/google-calendar'
 import { getSheetsWriteAuth, getSheetsReadAuth } from '@/lib/google-sheets'
+import { fetchAllEpisodeRows, isPublishedStatus } from '@/lib/dashboard-episodes'
 
 export const dynamic = 'force-dynamic'
 
@@ -99,7 +100,7 @@ export async function GET(_req: NextRequest) {
   //   1. Calendar       — full scope, DWD impersonate (matches google-calendar.ts)
   //   2. Sheets WRITE   — full scope, service-account direct (matches google-sheets.ts)
   //   3. Sheets READ    — readonly scope, service-account direct (matches projects/people/dashboard-episodes)
-  const [db, calendarCheck, sheetsWrite, sheetsRead] = await Promise.all([
+  const [db, calendarCheck, sheetsWrite, sheetsRead, episodeTabs] = await Promise.all([
     timed(async () => {
       const n = await prisma.booking.count()
       return `${n} bookings`
@@ -137,9 +138,23 @@ export async function GET(_req: NextRequest) {
       })
       return res.data.properties?.title || '(no title)'
     }),
+    timed(async () => {
+      // v1.43.0 — episode visibility canary. Runs the EXACT read path the
+      // booking form uses (PD tabs + legacy _EPs). Catches the June 2026
+      // failure mode — Dashboard restructures that silently empty the
+      // bookable-episode list — before users hit "ไม่มี episode ที่ถ่ายได้".
+      // Zero episode rows across every tab = integration break, not data.
+      const sheets = google.sheets({ version: 'v4', auth: getSheetsReadAuth() })
+      const episodes = await fetchAllEpisodeRows(sheets, getProducerDashboardSheetId())
+      if (episodes.length === 0) {
+        throw new Error('0 episode rows parsed from PD/_EPs tabs — column layout or tab naming probably changed')
+      }
+      const bookable = episodes.filter(e => !isPublishedStatus(e.status)).length
+      return `${episodes.length} episodes (${bookable} bookable, ${episodes.length - bookable} published)`
+    }),
   ])
 
-  const allOk = db.ok && calendarCheck.ok && sheetsWrite.ok && sheetsRead.ok
+  const allOk = db.ok && calendarCheck.ok && sheetsWrite.ok && sheetsRead.ok && episodeTabs.ok
   return NextResponse.json(
     {
       ok: allOk,
@@ -152,6 +167,7 @@ export async function GET(_req: NextRequest) {
         googleCalendarDwd: calendarCheck,
         producerDashboardSheetWrite: sheetsWrite,
         producerDashboardSheetRead: sheetsRead,
+        episodeTabsRead: episodeTabs,
       },
     },
     { status: allOk ? 200 : 503 },

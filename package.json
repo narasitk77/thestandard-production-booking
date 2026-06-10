@@ -1,12 +1,13 @@
 {
   "name": "thestandard-production-booking",
-  "version": "1.42.2",
+  "version": "1.43.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "npm test && prisma generate && next build",
     "start": "prisma db push --accept-data-loss && next start",
     "lint": "next lint",
+    "test": "tsx --test src/**/__tests__/*.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate deploy",

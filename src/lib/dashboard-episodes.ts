@@ -97,45 +97,40 @@ export function resolveEpsColumns(header: unknown[] | undefined): EpsColumns {
 
 const EPISODE_ID_RE = /^PP-\d{2}-\d{3}-[A-Z]\d{2,}$/
 
-type SheetsClient = ReturnType<typeof google.sheets>
+/**
+ * THE booking rule, in one place: an episode stops being bookable ONLY
+ * when its status is "Published" (case-insensitive, surrounding
+ * whitespace ignored). Any other value — Pending, Pre-production,
+ * Production, Post-production, blank, or a status invented next month —
+ * keeps the episode bookable. Don't add exclusions here without a
+ * product decision.
+ */
+export function isPublishedStatus(status: string | null | undefined): boolean {
+  return String(status ?? '').trim().toLowerCase() === 'published'
+}
 
 /**
- * Read EVERY episode row from the Producer Dashboard (v1.42.2).
- *
- * Episodes are authored on the per-producer "PD <name>" tabs. The sheet's
- * own PD→"_EPs" sync automation stopped copying new rows in May 2026
- * (see "_Update Log": rows logged as "skipped"), so "_EPs" only holds
- * legacy episodes — which made every new project look like it had no
- * bookable episodes. Read the PD tabs as the source of truth and keep
- * "_EPs" as a legacy fallback; on duplicate Episode IDs the PD row wins
- * (fresher status). Each tab's columns are resolved from its own header
- * row, so the two different layouts (PD: Episode ID col C / Status col H;
- * _EPs: Episode ID col N / Status col E) both work.
+ * Which tabs hold episode rows: every per-producer "PD <name>" tab plus
+ * the legacy "_EPs" tab (kept as fallback while it still has rows the PD
+ * tabs may not). Pure — exported for tests.
  */
-export async function fetchAllEpisodeRows(
-  sheets: SheetsClient,
-  spreadsheetId: string,
-): Promise<ProjectEpisode[]> {
-  const meta = await sheets.spreadsheets.get({
-    spreadsheetId,
-    fields: 'sheets.properties.title',
-  })
-  const titles = (meta.data.sheets || [])
-    .map(s => s.properties?.title || '')
-    .filter(Boolean)
+export function selectEpisodeTabs(titles: string[]): string[] {
   const tabs = titles.filter(t => /^PD\s/.test(t))
   const epsTab = process.env.PRODUCER_DASHBOARD_EPS_TAB || '_EPs'
   if (titles.includes(epsTab)) tabs.push(epsTab)
-  if (tabs.length === 0) return []
+  return tabs
+}
 
-  const res = await sheets.spreadsheets.values.batchGet({
-    spreadsheetId,
-    ranges: tabs.map(t => `'${t.replace(/'/g, "''")}'!A1:R`),
-  })
-
+/**
+ * Parse episode rows out of raw tab values (one string[][] per tab, in
+ * tab order — earlier tabs win on duplicate Episode IDs). Each tab's
+ * columns are resolved from its own header row, so differently-laid-out
+ * tabs can be mixed. Rows whose Episode ID doesn't match PP-YY-NNN-XNN
+ * are ignored (filters header/banner/junk rows). Pure — exported for tests.
+ */
+export function parseEpisodeTabs(tabValues: string[][][]): ProjectEpisode[] {
   const byId = new Map<string, ProjectEpisode>()
-  for (const vr of res.data.valueRanges || []) {
-    const values = (vr.values as string[][]) || []
+  for (const values of tabValues) {
     const cols = resolveEpsColumns(values[0])
     for (const row of values.slice(1)) {
       const episodeId = String(row[cols.episodeId] || '').trim()
@@ -154,6 +149,79 @@ export async function fetchAllEpisodeRows(
   return Array.from(byId.values())
 }
 
+/**
+ * A project's still-bookable episodes: belongs to the project and is not
+ * Published. Pure — exported for tests.
+ */
+export function bookableEpisodesFor(episodes: ProjectEpisode[], projectId: string): ProjectEpisode[] {
+  const prefix = `${projectId}-`
+  return episodes.filter(e => e.episodeId.startsWith(prefix) && !isPublishedStatus(e.status))
+}
+
+type SheetsClient = ReturnType<typeof google.sheets>
+
+// Short-lived all-rows cache (keyed by sheet id). The booking form, the
+// project-dropdown filter, and the Sheet Monitor all read the same tabs;
+// without this, one dashboard refresh + form open costs ~6 Sheets read
+// requests and a burst can trip the 60-reads/min/user quota (observed
+// 2026-06-10 while load-testing the booking rule). 30s of staleness is
+// fine — episode statuses change on human timescales.
+const ROWS_CACHE_TTL_MS = 30_000
+let rowsCache: { ts: number; sheetId: string; rows: ProjectEpisode[] } | null = null
+
+export function invalidateEpisodeRowsCache() {
+  rowsCache = null
+}
+
+/**
+ * Read EVERY episode row from the Producer Dashboard (v1.42.2).
+ *
+ * Episodes are authored on the per-producer "PD <name>" tabs. The sheet's
+ * own PD→"_EPs" sync automation stopped copying new rows in May 2026
+ * (see "_Update Log": rows logged as "skipped"), so "_EPs" only holds
+ * legacy episodes — which made every new project look like it had no
+ * bookable episodes. Read the PD tabs as the source of truth and keep
+ * "_EPs" as a legacy fallback; on duplicate Episode IDs the PD row wins
+ * (fresher status). Each tab's columns are resolved from its own header
+ * row, so the two different layouts (PD: Episode ID col C / Status col H;
+ * _EPs: Episode ID col N / Status col E) both work.
+ */
+export async function fetchAllEpisodeRows(
+  sheets: SheetsClient,
+  spreadsheetId: string,
+): Promise<ProjectEpisode[]> {
+  if (rowsCache && rowsCache.sheetId === spreadsheetId && Date.now() - rowsCache.ts < ROWS_CACHE_TTL_MS) {
+    return rowsCache.rows
+  }
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties.title',
+  })
+  const titles = (meta.data.sheets || [])
+    .map(s => s.properties?.title || '')
+    .filter(Boolean)
+  const tabs = selectEpisodeTabs(titles)
+  if (tabs.length === 0) {
+    // The Dashboard restructure removed/renamed every episode tab — that's
+    // an integration break, not "no episodes". Throw so callers degrade
+    // loudly instead of quietly offering nothing to book.
+    throw new Error(
+      `no episode tabs found (expected "PD <name>" tabs or "_EPs") — sheet tabs: ${titles.join(', ')}`,
+    )
+  }
+
+  const res = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId,
+    ranges: tabs.map(t => `'${t.replace(/'/g, "''")}'!A1:R`),
+  })
+
+  const rows = parseEpisodeTabs(
+    (res.data.valueRanges || []).map(vr => (vr.values as string[][]) || []),
+  )
+  rowsCache = { ts: Date.now(), sheetId: spreadsheetId, rows }
+  return rows
+}
+
 export type ListEpisodesResult =
   | { ok: true; episodes: ProjectEpisode[] }
   | { ok: false; error: string }
@@ -170,11 +238,7 @@ export async function listProjectEpisodes(projectId: string): Promise<ListEpisod
     const spreadsheetId = getSheetId()
     const sheets = google.sheets({ version: 'v4', auth: getAuth() })
     const all = await fetchAllEpisodeRows(sheets, spreadsheetId)
-    const prefix = `${pid}-`
-    const episodes = all.filter(e =>
-      e.episodeId.startsWith(prefix) && e.status.toLowerCase() !== 'published',
-    )
-    return { ok: true, episodes }
+    return { ok: true, episodes: bookableEpisodesFor(all, pid) }
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || String(e) }
   }

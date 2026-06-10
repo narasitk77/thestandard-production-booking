@@ -53,6 +53,8 @@ type HealthResponse = {
     googleCalendarDwd: CheckResult
     producerDashboardSheetWrite: CheckResult
     producerDashboardSheetRead: CheckResult
+    // v1.43.0 — booking-form episode read path (PD tabs + legacy _EPs)
+    episodeTabsRead: CheckResult
   }
 }
 
@@ -163,6 +165,10 @@ export default function HealthPage() {
             <CheckRow
               name="Producer Dashboard sheet — reads (readonly scope · service-account direct)"
               result={data.checks.producerDashboardSheetRead}
+            />
+            <CheckRow
+              name="Episode tabs — booking-form read path (PD tabs + legacy _EPs)"
+              result={data.checks.episodeTabsRead}
             />
           </Section>
 
