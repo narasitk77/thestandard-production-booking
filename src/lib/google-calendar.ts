@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { logAudit } from './audit'
 import { isEmailConfigured, sendEmail } from './email'
 import { normalizeFreelancers, formatFreelancerLines, type Freelancer } from './freelancers'
+import { bookingShowName } from './display'
 
 // v1.41.0 — prefix added to the calendar event title when a booking needs a
 // company van (off-site shoots). Surfaced on both the web calendar and Google
@@ -212,10 +213,11 @@ function formatEquipment(cameraCount?: number | null, micCount?: number | null):
  * (ops feedback, June 2026).
  *
  * Shape: `🚐 [OUT] Show — Episode · Video Type · 🎥 2 · 🎙 1`
- *   - "Show" = the booking's projectName when present (Content Agency books
- *     a project — the event must lead with the actual show, e.g.
- *     "KEY MESSAGES x DMHT", not the generic "Long Form (project)" program
- *     label — ops feedback, June 2026), else the program name.
+ *   - "Show" resolves via the shared bookingShowName rule (display.ts):
+ *     projectName (Content Agency, e.g. "KEY MESSAGES x DMHT") → the
+ *     episodes' per-EP program name (outlet bookings, e.g. "Key Message")
+ *     → the booking-level program name. Same rule as every in-app surface,
+ *     so the event title agrees with the calendar/list pages.
  *   - The episode segment is dropped when it would just repeat the show name
  *     (CA episodes whose EP. label is "-" snapshot the project name as title).
  *   - 🚐 prefix only when the booking needs a van (off-site).
@@ -230,10 +232,10 @@ export function buildEventTitle(booking: {
   projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
-  episodes: Array<{ episodeId: string; title: string }>
+  episodes: Array<{ episodeId: string; title: string; program?: { name: string } | null }>
 }): string {
   const epCount = booking.episodes.length
-  const showName = booking.projectName?.trim() || booking.program.name
+  const showName = bookingShowName(booking)
   const firstEpTitle = booking.episodes[0]?.title?.trim()
   const core = epCount === 1
     ? (firstEpTitle && firstEpTitle !== showName

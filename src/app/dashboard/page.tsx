@@ -10,7 +10,7 @@ import { Download, Search, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide
 import StatusPill from '@/app/_components/StatusPill'
 import type { ProjectMonitorRow } from '@/app/api/projects/monitor/route'
 
-interface Episode { episodeId: string; title: string }
+interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string; shootDate: string; callTime: string; estimatedWrap?: string; status: string
   shootType: string; producer: string; category: string

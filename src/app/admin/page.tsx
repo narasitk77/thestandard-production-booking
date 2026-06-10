@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 
-interface Episode { episodeId: string; title: string }
+interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string; shootDate: string; callTime: string; status: string
   producer: string; assignedEmails: string[]

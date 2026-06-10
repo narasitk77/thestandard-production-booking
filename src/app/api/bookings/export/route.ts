@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 
   const bookings = await prisma.booking.findMany({
     where,
-    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' } } },
+    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } } },
     orderBy: [{ shootDate: 'desc' }, { createdAt: 'desc' }],
     take: 2000,
   })

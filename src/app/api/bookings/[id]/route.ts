@@ -20,7 +20,7 @@ export async function GET(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' } },
+        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
         uploads: { orderBy: { createdAt: 'desc' } },
       },
     })
@@ -140,7 +140,7 @@ export async function PATCH(
         include: {
           outlet: true,
           program: true,
-          episodes: { orderBy: { sequence: 'asc' } },
+          episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
         },
       })
     })

@@ -4,7 +4,7 @@ import { bookingShowName } from '@/lib/display'
 import { useEffect, useState, useCallback } from 'react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 
-interface Episode { episodeId: string; title: string }
+interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string
   bookingCode: string | null

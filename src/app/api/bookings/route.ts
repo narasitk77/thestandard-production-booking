@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
         include: {
           outlet: true,
           program: true,
-          episodes: { orderBy: { sequence: 'asc' } },
+          episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
         },
         orderBy: [{ shootDate: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * limit,
@@ -343,7 +343,7 @@ export async function POST(request: NextRequest) {
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' } },
+        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
       },
     })
 

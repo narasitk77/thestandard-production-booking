@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.48.0] — 2026-06-10
+
+### Fixed — outlet bookings now show the real show name (per-EP program)
+
+v1.47.0 covered Content Agency (projectName) but outlet bookings still
+displayed the Episode-Type bucket ("Long-form · รายการ · ซีรีส์ ·
+สัมภาษณ์ยาว") because the actual show — Key Message, End Game, … — lives
+on each EPISODE's program (v1.37 per-EP dropdown), not on the booking.
+
+- `bookingShowName` resolution is now: projectName → distinct per-EP
+  program names (joined " / " for mixed bookings, "+N" beyond 2) →
+  booking-level program name. EP programs that just echo the bucket are
+  skipped.
+- Every booking fetch now includes the episode's program
+  (`episodes.include.program` — list, detail, approve, assign, restore,
+  export, reconcile, OT sync), so the in-app pages AND the Google
+  Calendar title (`[NWS] Key Message — <ตอน>`) all see it.
+- 6 new unit tests (41 total).
+
+---
+
 ## [1.47.0] — 2026-06-10
 
 ### Changed — show name on every calendar surface

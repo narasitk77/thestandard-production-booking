@@ -19,7 +19,7 @@ export async function syncBookingOT(bookingId: string): Promise<{ created: numbe
 
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' } } },
+    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } } },
   })
   if (!booking) return { created: 0 }
   if (booking.status === 'CANCELLED') return { created: 0 }

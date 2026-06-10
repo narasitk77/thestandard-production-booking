@@ -10,7 +10,7 @@ import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRo
 import { normalizeFreelancers, splitLegacyFreelancers } from '@/lib/freelancers'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
-interface Episode { id: string; episodeId: string; title: string }
+interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string

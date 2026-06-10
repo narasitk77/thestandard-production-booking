@@ -11,6 +11,7 @@ interface Episode {
   episodeId: string
   sequence: number
   title: string
+  program?: { code?: string; name: string } | null
 }
 
 interface UploadRecord {

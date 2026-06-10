@@ -428,7 +428,7 @@ export async function reconcileCalendarGuests(options: {
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' } },
+      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
     },
     orderBy: [{ shootDate: 'asc' }, { updatedAt: 'desc' }],
     take: limit,
@@ -461,7 +461,7 @@ export async function reconcileSingleBooking(
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' } },
+      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
     },
   })
   if (!booking) return null

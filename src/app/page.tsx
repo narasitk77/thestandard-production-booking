@@ -7,7 +7,7 @@ import { format, isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'da
 import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle } from 'lucide-react'
 import StatusPill from './_components/StatusPill'
 
-interface Episode { episodeId: string; title: string }
+interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string
   shootDate: string

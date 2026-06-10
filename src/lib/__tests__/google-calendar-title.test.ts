@@ -66,6 +66,21 @@ test('Outlet booking (no project): program name leads, unchanged from before', (
   assert.equal(title, '[NWS] End Game — ศก.โลกครึ่งปีหลัง')
 })
 
+test('Outlet booking with the Episode-Type bucket as program: per-EP program leads instead', () => {
+  const title = buildEventTitle({
+    ...base,
+    projectName: null,
+    outlet: { code: 'NWS', name: 'News' },
+    program: { code: 'L', name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว' },
+    episodes: [{
+      episodeId: 'NWS-KYM-260616-L-01',
+      title: 'ศก.โลกครึ่งปีหลัง',
+      program: { name: 'Key Message' },
+    }],
+  })
+  assert.equal(title, '[NWS] Key Message — ศก.โลกครึ่งปีหลัง')
+})
+
 test('descriptor segments and van prefix still wrap the new core', () => {
   const title = buildEventTitle({
     ...base,

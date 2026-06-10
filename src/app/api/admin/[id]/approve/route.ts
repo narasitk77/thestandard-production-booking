@@ -20,7 +20,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' } },
+        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
       },
     })
 
@@ -45,7 +45,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' } },
+        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
       },
     })
 

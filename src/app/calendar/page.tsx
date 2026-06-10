@@ -10,7 +10,7 @@ import {
 } from 'date-fns'
 import StatusPill, { statusDotClass } from '@/app/_components/StatusPill'
 
-interface Episode { episodeId: string; title: string }
+interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string
   shootDate: string

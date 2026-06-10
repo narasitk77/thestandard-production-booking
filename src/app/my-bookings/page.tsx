@@ -7,7 +7,7 @@ import { Loader2, Plus, Search, Inbox } from 'lucide-react'
 import { format, parseISO, startOfToday, isAfter, isToday } from 'date-fns'
 import StatusPill from '@/app/_components/StatusPill'
 
-interface Episode { episodeId: string; title: string }
+interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string
   shootDate: string
