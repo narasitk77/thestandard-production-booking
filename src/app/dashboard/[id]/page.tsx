@@ -1,6 +1,7 @@
 'use client'
 
 import { bookingShowName } from '@/lib/display'
+import { hasConsoleAccess } from '@/lib/roles'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
@@ -56,6 +57,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const [updating, setUpdating] = useState(false)
 
   const [error, setError] = useState('')
+  // v1.50.2 — the page is reachable by anyone on the booking (the API scopes
+  // reads); status actions stay console-only, so hide them for plain users.
+  const [isStaff, setIsStaff] = useState(false)
 
   useEffect(() => {
     fetch(`/api/bookings/${id}`)
@@ -69,7 +73,14 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       })
       .catch(e => setError(e?.message || 'Failed to load booking'))
       .finally(() => setLoading(false))
+    fetch('/api/me')
+      .then(r => r.json())
+      .then(d => setIsStaff(hasConsoleAccess(d?.user?.role)))
+      .catch(() => {})
   }, [id])
+
+  const backHref = isStaff ? '/dashboard' : '/my-bookings'
+  const backLabel = isStaff ? 'Dashboard' : 'My Bookings'
 
   const handleStatusChange = async (newStatus: string) => {
     if (!booking) return
@@ -81,6 +92,10 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         body: JSON.stringify({ status: newStatus }),
       })
       const data = await res.json()
+      if (!res.ok || !data?.booking) {
+        setError(data?.error || 'Failed to update status')
+        return
+      }
       setBooking(prev => prev ? { ...prev, status: data.booking.status } : prev)
     } finally {
       setUpdating(false)
@@ -99,7 +114,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <p className="text-gray-500">{error || 'Booking not found.'}</p>
-        <Link href="/dashboard" className="gf-link mt-4 inline-block">Back to Dashboard</Link>
+        <Link href={backHref} className="gf-link mt-4 inline-block">Back to {backLabel}</Link>
       </div>
     )
   }
@@ -147,9 +162,11 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-3">
-      <Link href="/dashboard" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
-        <ArrowLeft className="w-4 h-4" /> Dashboard
+      <Link href={backHref} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
+        <ArrowLeft className="w-4 h-4" /> {backLabel}
       </Link>
+
+      {error && <p className="text-xs text-red-600">{error}</p>}
 
       {/* Header */}
       <div className="gf-header p-6">
@@ -175,20 +192,22 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             </p>
           </div>
 
-          <div className="flex gap-2 flex-shrink-0">
-            {booking.status !== 'CANCELLED' && booking.status !== 'COMPLETED' && (
-              <button onClick={() => handleStatusChange('CANCELLED')} disabled={updating}
-                className="px-3 py-1.5 text-xs border border-gray-300 rounded text-red-600 hover:border-red-300 hover:bg-red-50 flex items-center gap-1">
-                <XCircle className="w-3.5 h-3.5" /> Cancel
-              </button>
-            )}
-            {booking.status === 'CONFIRMED' && (
-              <button onClick={() => handleStatusChange('COMPLETED')} disabled={updating}
-                className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50">
-                Mark Complete
-              </button>
-            )}
-          </div>
+          {isStaff && (
+            <div className="flex gap-2 flex-shrink-0">
+              {booking.status !== 'CANCELLED' && booking.status !== 'COMPLETED' && (
+                <button onClick={() => handleStatusChange('CANCELLED')} disabled={updating}
+                  className="px-3 py-1.5 text-xs border border-gray-300 rounded text-red-600 hover:border-red-300 hover:bg-red-50 flex items-center gap-1">
+                  <XCircle className="w-3.5 h-3.5" /> Cancel
+                </button>
+              )}
+              {booking.status === 'CONFIRMED' && (
+                <button onClick={() => handleStatusChange('COMPLETED')} disabled={updating}
+                  className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50">
+                  Mark Complete
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">

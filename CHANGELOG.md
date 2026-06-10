@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.50.2] — 2026-06-11
+
+### Fixed — USER เปิดดู booking ของตัวเองจาก My Bookings ได้แล้ว
+
+ทุกแถวใน `/my-bookings` ลิงก์ไป `/dashboard/[id]` แต่ layout ของ
+dashboard เป็น console-gate → USER ธรรมดากดดูรายละเอียด booking
+ของตัวเองแล้วเจอกำแพง "Staff only" มาตลอด (ตั้งแต่ v1.28 ที่ทำ inbox)
+
+- **ย้าย console gate เข้า route group `(console)`** — คุมเฉพาะหน้า
+  list `/dashboard` · หน้า detail `/dashboard/[id]` เหลือแค่ต้อง login
+  โดยฝั่ง API คุม scope ต่อ booking ให้แล้ว (`canViewBooking`,
+  v1.50.1 — คนนอก booking ได้ 403 "Forbidden")
+- **ปุ่ม Cancel / Mark Complete แสดงเฉพาะ staff** (เช็ค role จาก
+  `/api/me`) — เดิมกดแล้วจะ 403 เงียบ ๆ · back link ชี้
+  `/my-bookings` สำหรับ USER, `/dashboard` สำหรับ staff
+- จัดการ PATCH ที่ fail: แสดง error แทนการ set status เป็น undefined
+
 ## [1.50.1] — 2026-06-11
 
 ### Security — กัน CSV formula injection ในไฟล์ export ทุกตัว
