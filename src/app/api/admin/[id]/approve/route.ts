@@ -68,6 +68,7 @@ export async function POST(
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           needsVan: booking.needsVan,
+          projectName: booking.projectName,
           freelancers: booking.freelancers,
           assignedEmails: booking.assignedEmails,
           outlet: booking.outlet,

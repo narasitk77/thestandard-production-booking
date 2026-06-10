@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.45.0] — 2026-06-10
+
+### Changed — calendar event title leads with the show name
+
+Ops feedback: Content Agency events were titled with the generic program
+label (`[AGN] Long Form (project) — …`), so the calendar didn't say WHAT
+show was shooting.
+
+- `buildEventTitle` now leads with the booking's **projectName** when
+  present — `[AGN] KEY MESSAGES x DMHT — Pre EP.1 - BKK` — falling back
+  to the program name for outlet bookings (unchanged behavior there).
+- When the first EP's title would just repeat the show name (CA episodes
+  whose EP. label is "-"), the EP segment is dropped instead of reading
+  `X — X`.
+- `projectName` added to the createCalendarEvent /
+  updateCalendarEventDetails contracts and passed from the approve /
+  assign routes (reconcile + PATCH paths already pass the full booking).
+- 6 new unit tests pin the title shape (24 total).
+
+Existing events keep their old title until the booking is edited or
+Re-synced from /admin/[id] (the details patch rebuilds the title).
+
+---
+
 ## [1.44.0] — 2026-06-10
 
 ### Added — per-booking hard delete (admin API)

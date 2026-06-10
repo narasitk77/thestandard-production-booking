@@ -211,7 +211,13 @@ function formatEquipment(cameraCount?: number | null, micCount?: number | null):
  * where editing the shoot time / episode title left the old title on the event
  * (ops feedback, June 2026).
  *
- * Shape: `🚐 [OUT] Program — Episode · Video Type · 🎥 2 · 🎙 1`
+ * Shape: `🚐 [OUT] Show — Episode · Video Type · 🎥 2 · 🎙 1`
+ *   - "Show" = the booking's projectName when present (Content Agency books
+ *     a project — the event must lead with the actual show, e.g.
+ *     "KEY MESSAGES x DMHT", not the generic "Long Form (project)" program
+ *     label — ops feedback, June 2026), else the program name.
+ *   - The episode segment is dropped when it would just repeat the show name
+ *     (CA episodes whose EP. label is "-" snapshot the project name as title).
  *   - 🚐 prefix only when the booking needs a van (off-site).
  *   - Video Type / equipment segments appear only when present.
  */
@@ -221,14 +227,19 @@ export function buildEventTitle(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Array<{ episodeId: string; title: string }>
 }): string {
   const epCount = booking.episodes.length
+  const showName = booking.projectName?.trim() || booking.program.name
+  const firstEpTitle = booking.episodes[0]?.title?.trim()
   const core = epCount === 1
-    ? `[${booking.outlet.code}] ${booking.program.name} — ${booking.episodes[0].title}`
-    : `[${booking.outlet.code}] ${booking.program.name} — ${epCount} EPs`
+    ? (firstEpTitle && firstEpTitle !== showName
+        ? `[${booking.outlet.code}] ${showName} — ${firstEpTitle}`
+        : `[${booking.outlet.code}] ${showName}`)
+    : `[${booking.outlet.code}] ${showName} — ${epCount} EPs`
 
   // Trailing descriptors so the event says what KIND of shoot it is at a glance
   // (ops feedback: the title didn't say what the item was). Video Type first
@@ -306,6 +317,7 @@ export async function createCalendarEvent(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  projectName?: string | null
   freelancers?: unknown
   assignedEmails?: string[]
   outlet: { code: string; name: string }
@@ -568,6 +580,7 @@ export async function updateCalendarEventDetails(
     cameraCount?: number | null
     micCount?: number | null
     needsVan?: boolean | null
+    projectName?: string | null
     freelancers?: unknown
     assignedEmails?: string[]
     outlet: { code: string; name: string }
