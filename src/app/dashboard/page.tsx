@@ -1,5 +1,6 @@
 'use client'
 
+import { bookingShowName } from '@/lib/display'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { formatDisplayDate } from '@/lib/utils'
@@ -14,6 +15,7 @@ interface Booking {
   id: string; shootDate: string; callTime: string; estimatedWrap?: string; status: string
   shootType: string; producer: string; category: string
   assignedEmails: string[]
+  projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -242,7 +244,7 @@ export default function DashboardPage() {
       if (statusFilter && b.status !== statusFilter) return false
       if (outletFilter && b.outlet.code !== outletFilter) return false
       if (search) {
-        const hay = [b.outlet.name, b.program.name, b.producer, ...b.episodes.map(e => e.episodeId + ' ' + e.title)]
+        const hay = [b.outlet.name, b.program.name, b.projectName || '', b.producer, ...b.episodes.map(e => e.episodeId + ' ' + e.title)]
           .join(' ').toLowerCase()
         if (!hay.includes(search.toLowerCase())) return false
       }
@@ -520,7 +522,7 @@ export default function DashboardPage() {
                     </td>
                     <td>
                       <div className="text-gray-800">{b.outlet.name}</div>
-                      <div className="text-xs text-gray-500">{b.program.name}</div>
+                      <div className="text-xs text-gray-500">{bookingShowName(b)}</div>
                     </td>
                     <td>
                       <div className="flex flex-wrap gap-1">

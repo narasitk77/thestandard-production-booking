@@ -1,5 +1,6 @@
 'use client'
 
+import { bookingShowName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Loader2, X, MapPin, User, Tag } from 'lucide-react'
@@ -20,10 +21,15 @@ interface Booking {
   locationName?: string
   producer: string
   needsVan?: boolean
+  projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
 }
+
+// The show the crew is shooting — shared rule (src/lib/display.ts), same
+// as the Google Calendar event title (v1.45.0).
+const showName = bookingShowName
 
 type ViewMode = 'month' | 'agenda'
 
@@ -259,7 +265,7 @@ function MonthGrid({
                       <span className="text-gray-400 flex-shrink-0">·</span>
                       <span className="font-medium flex-shrink-0 text-gray-600">{b.outlet.code}</span>
                       <span className="text-gray-400 flex-shrink-0">·</span>
-                      <span className="truncate flex-1 text-gray-600">{b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}{b.program.name}</span>
+                      <span className="truncate flex-1 text-gray-600">{b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}{showName(b)}</span>
                     </div>
                   ))}
                   {dayBookings.length > 3 && (
@@ -337,7 +343,7 @@ function BookingRow({ b, onOpen }: { b: Booking; onOpen: () => void }) {
           <div className="text-sm text-gray-900 font-medium truncate">
             <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
             {b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}
-            {b.program.name}
+            {showName(b)}
           </div>
           <div className="text-xs text-gray-500 truncate">
             {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}
@@ -385,7 +391,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking | null | undefin
               <StatusPill status={b.status} />
               <span className="text-xs text-gray-500 tabular-nums">{b.callTime}{b.estimatedWrap && ` → ${b.estimatedWrap}`}</span>
             </div>
-            <div className="text-sm font-semibold text-gray-900 truncate">{b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}{b.outlet.name} · {b.program.name}</div>
+            <div className="text-sm font-semibold text-gray-900 truncate">{b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}{b.outlet.name} · {showName(b)}</div>
           </div>
           <button onClick={onClose} className="p-1.5 -mr-1 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100" aria-label="Close">
             <X className="w-4 h-4" />

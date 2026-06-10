@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.47.0] — 2026-06-10
+
+### Changed — show name on every calendar surface
+
+Ops feedback: "ชื่อรายการแสดงบน calendar ทุก platform". v1.45.0 fixed the
+Google Calendar event title; this release applies the same rule to every
+in-app surface that labels a booking.
+
+- New shared helper `bookingShowName` (src/lib/display.ts): project name
+  when present (Content Agency — e.g. "KEY MESSAGES x DMHT"), program
+  name otherwise. One rule, every platform.
+- Applied to: **/calendar** (month chips, agenda rows, detail modal),
+  **Overview** upcoming list, **My Bookings**, **Producer** dashboard,
+  **Admin** booking list, admin + dashboard booking detail headers, and
+  the Admin Dashboard "All Bookings" table.
+- Search boxes on My Bookings and the Admin Dashboard now match the
+  project name too.
+- 3 new unit tests (36 total).
+
+---
+
 ## [1.46.0] — 2026-06-10
 
 ### Changed — Booking/Episode ID carries the program code

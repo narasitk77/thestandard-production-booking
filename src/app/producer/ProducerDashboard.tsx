@@ -1,5 +1,6 @@
 'use client'
 
+import { bookingShowName } from '@/lib/display'
 import { useEffect, useState, useCallback } from 'react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 
@@ -139,7 +140,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
                     </span>
                   </div>
                   <div className="text-sm text-gray-600 mt-1">
-                    {b.outlet.name} · {b.program.name}
+                    {b.outlet.name} · {bookingShowName(b)}
                     {b.projectId ? ` · ${b.projectId}` : ''}
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">

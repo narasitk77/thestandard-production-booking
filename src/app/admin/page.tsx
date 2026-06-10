@@ -1,5 +1,6 @@
 'use client'
 
+import { bookingShowName } from '@/lib/display'
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
@@ -9,6 +10,7 @@ interface Episode { episodeId: string; title: string }
 interface Booking {
   id: string; shootDate: string; callTime: string; status: string
   producer: string; assignedEmails: string[]
+  projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -133,7 +135,7 @@ export default function AdminPage() {
                     </span>
                   </div>
                   <div className="font-medium text-gray-800 text-sm sm:text-base">
-                    {b.outlet.name} · {b.program.name}
+                    {b.outlet.name} · {bookingShowName(b)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producer}

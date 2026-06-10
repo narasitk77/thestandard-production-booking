@@ -1,5 +1,6 @@
 'use client'
 
+import { bookingShowName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, Plus, Search, Inbox } from 'lucide-react'
@@ -17,6 +18,7 @@ interface Booking {
   shootType: string
   locationName?: string
   producer: string
+  projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -97,7 +99,7 @@ export default function MyBookingsPage() {
       const q = search.trim().toLowerCase()
       list = list.filter(x => {
         const hay = [
-          x.outlet.name, x.outlet.code, x.program.name,
+          x.outlet.name, x.outlet.code, x.program.name, x.projectName || '',
           x.producer, x.locationName || '',
           ...x.episodes.map(e => `${e.episodeId} ${e.title}`),
         ].join(' ').toLowerCase()
@@ -203,7 +205,7 @@ function BookingRow({ b, canUpload }: { b: Booking; canUpload: boolean }) {
         <div className="flex-1 min-w-0">
           <div className="text-sm text-gray-900 font-medium truncate">
             <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
-            {b.program.name}
+            {bookingShowName(b)}
           </div>
           <div className="text-xs text-gray-500 truncate mt-0.5">
             {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}
