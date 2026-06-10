@@ -5,6 +5,31 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-10 · Test-data purge — deleted all 23 pre-June bookings (v1.44.0 deployed)
+
+**What was done.** Production cleaned to June-only data per narasit.k's
+request: hard-deleted every booking with `shootDate < 2026-06-01` — 23
+rows, mostly the May test spam (AGN-2605xx, PP-26-006 Yamaha test runs,
+mid-May NWS/WLT/KND trials, incl. `TSS-260528-TSL-01`). Each delete went
+through the new `POST /api/admin/[id]/delete` (v1.44.0): cascades
+episodes + uploads, cleans audit/footage/auto-OT rows, removes the
+Google Calendar event best-effort, and writes an `admin.delete_booking`
+audit entry (the only trace left, by design).
+
+**Kept (7 bookings, all June):** AGN-260604-STD-01, WLT-260604-L-01,
+NWS-260608-L-01/-02 (cancelled), AGN-260610-EVT-01 (cancelled),
+PP-26-026-S01 (requested), AGN-260615-LOC-01 (confirmed).
+
+**Verified after purge:** `GET /api/bookings?limit=100` returns exactly
+those 7; zero pre-June rows. The Producer Dashboard "Bookings" tab
+already held only June rows (the May test rows didn't survive the sheet
+restructure), so no sheet cleanup was needed.
+
+**Deploys today (one stack redeploy each):** v1.42.1 → v1.43.0 →
+v1.44.0 (`sha-31f5bc6`, includes v1.43.1's Monitor "other" bucket).
+
+---
+
 ## 2026-06-10 · v1.42.1→.2 — "ไม่มี episode ที่ถ่ายได้" incident: Dashboard PD→_EPs sync is dead
 
 **Symptom.** Content Agency booking form showed no bookable episodes for any
