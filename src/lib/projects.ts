@@ -1,5 +1,6 @@
 import { google } from 'googleapis'
 import { getProducerDashboardSheetId } from './google-config'
+import { resolveEpsColumns } from './dashboard-episodes'
 
 /**
  * Project ID layer — Producer Dashboard integration
@@ -13,9 +14,8 @@ import { getProducerDashboardSheetId } from './google-config'
  *   A Project ID   B Project Name   C Client       D Brief     E Brief Date
  *   F Producer     G Director       H Video Type   I Progress  J Note
  *
- * "_EPs" columns used here:
- *   E  Status      (idx 4)  — Pre-production | Production | Post-production | Published
- *   N  Episode ID  (idx 13) — PP-YY-NNN-{type}NN
+ * "_EPs" columns used here: Status + Episode ID, resolved from the header
+ * row via resolveEpsColumns (the Dashboard team reshuffles that tab).
  *
  * A project drops off the booking dropdown once EVERY one of its episodes is
  * "Published" (work finished). Projects with no episodes yet stay bookable.
@@ -68,16 +68,17 @@ async function fetchFullyPublishedProjectIds(
 ): Promise<Set<string>> {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${epsTab}!A2:N`,
+    range: `${epsTab}!A1:R`,
   })
   const values = res.data.values || []
+  const cols = resolveEpsColumns(values[0])
   const tally = new Map<string, { total: number; published: number }>()
-  for (const r of values) {
-    const episodeId = (r[13] || '').toString().trim()
+  for (const r of values.slice(1)) {
+    const episodeId = (r[cols.episodeId] || '').toString().trim()
     const m = episodeId.match(EPISODE_ID_RE)
     if (!m) continue
     const projectId = m[1]
-    const isPublished = (r[4] || '').toString().trim().toLowerCase() === 'published'
+    const isPublished = (r[cols.status] || '').toString().trim().toLowerCase() === 'published'
     const t = tally.get(projectId) || { total: 0, published: 0 }
     t.total += 1
     if (isPublished) t.published += 1

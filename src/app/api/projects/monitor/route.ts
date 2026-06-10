@@ -3,6 +3,7 @@ import { google } from 'googleapis'
 import { getProducerDashboardSheetId } from '@/lib/google-config'
 import { getSession } from '@/lib/session'
 import { invalidateProjectsCache } from '@/lib/projects'
+import { resolveEpsColumns } from '@/lib/dashboard-episodes'
 import { prisma } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -73,20 +74,22 @@ export async function GET(request: NextRequest) {
 
     const [projectsRes, epsRes] = await Promise.all([
       sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: `${projectsTab}!A2:J` }),
-      sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: `${epsTab}!A2:N` }),
+      sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: `${epsTab}!A1:R` }),
     ])
 
     const projectRows = projectsRes.data.values || []
-    const epRows = epsRes.data.values || []
+    const epValues = epsRes.data.values || []
+    const epCols = resolveEpsColumns(epValues[0])
+    const epRows = epValues.slice(1)
 
     // Episode counts per project
     const epCounts = new Map<string, EpCounts>()
     for (const r of epRows) {
-      const episodeId = (r[13] || '').toString().trim()
+      const episodeId = (r[epCols.episodeId] || '').toString().trim()
       const m = episodeId.match(EPISODE_ID_RE)
       if (!m) continue
       const pid = m[1]
-      const status = (r[4] || '').toString().trim().toLowerCase()
+      const status = (r[epCols.status] || '').toString().trim().toLowerCase()
       if (!epCounts.has(pid)) {
         epCounts.set(pid, { preProduction: 0, production: 0, postProduction: 0, published: 0 })
       }

@@ -48,13 +48,59 @@ export type ProjectEpisode = {
   projectName: string
 }
 
+/**
+ * "_EPs" column resolution (v1.42.1)
+ * ----------------------------------
+ * The Dashboard team reshuffles the "_EPs" tab occasionally — Episode ID
+ * moved col N→C and Status col E→H, which silently emptied the booking
+ * episode list (every Pre-production episode "disappeared"). Resolve the
+ * columns we need from the HEADER row by name instead of hardcoding
+ * positions; fall back to the current known layout when a header is
+ * missing or renamed.
+ */
+export type EpsColumns = {
+  episodeId: number
+  status: number
+  ep: number
+  productCode: number
+  projectName: number
+}
+
+// Current layout: A ProjectID · B Episode Type · C Episode ID · D Project
+// Name · E Director · F Product Code · G EP. · H Status · I… extras
+const EPS_FALLBACK_COLUMNS: EpsColumns = {
+  episodeId: 2,   // C
+  status: 7,      // H
+  ep: 6,          // G
+  productCode: 5, // F
+  projectName: 3, // D
+}
+
+const EPS_HEADERS: Record<keyof EpsColumns, RegExp> = {
+  episodeId: /^episode\s*id$/i,
+  status: /^status$/i,
+  ep: /^ep\.?$/i,
+  productCode: /^product\s*code$/i,
+  projectName: /^project\s*name$/i,
+}
+
+export function resolveEpsColumns(header: unknown[] | undefined): EpsColumns {
+  const cols = { ...EPS_FALLBACK_COLUMNS }
+  if (!header) return cols
+  for (const key of Object.keys(EPS_HEADERS) as (keyof EpsColumns)[]) {
+    const idx = header.findIndex(h => EPS_HEADERS[key].test(String(h ?? '').trim()))
+    if (idx >= 0) cols[key] = idx
+  }
+  return cols
+}
+
 export type ListEpisodesResult =
   | { ok: true; episodes: ProjectEpisode[] }
   | { ok: false; error: string }
 
 // List a project's episodes from the "_EPs" master tab, EXCLUDING ones already
-// Published (those can't be booked for a new shoot). Columns in _EPs:
-//   B ProjectName · C Product Code · D EP. · E Status · … · N Episode ID
+// Published (those can't be booked for a new shoot). Columns are resolved
+// from the header row — see resolveEpsColumns above.
 export async function listProjectEpisodes(projectId: string): Promise<ListEpisodesResult> {
   const pid = String(projectId || '').trim()
   if (!/^PP-\d{2}-\d{3}$/.test(pid)) return { ok: false, error: `bad projectId: ${pid}` }
@@ -65,24 +111,25 @@ export async function listProjectEpisodes(projectId: string): Promise<ListEpisod
     const sheets = google.sheets({ version: 'v4', auth: getAuth() })
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: '_EPs!A2:N',
+      range: '_EPs!A1:R',
     })
-    const rows: string[][] = res.data.values || []
+    const values: string[][] = res.data.values || []
+    const cols = resolveEpsColumns(values[0])
     const prefix = `${pid}-`
     const episodes: ProjectEpisode[] = []
-    for (const row of rows) {
-      const episodeId = String(row[13] || '').trim() // col N
+    for (const row of values.slice(1)) {
+      const episodeId = String(row[cols.episodeId] || '').trim()
       if (!episodeId.startsWith(prefix)) continue
-      const status = String(row[4] || '').trim()     // col E
+      const status = String(row[cols.status] || '').trim()
       if (status.toLowerCase() === 'published') continue
       const typeMatch = episodeId.slice(prefix.length).match(/^([A-Za-z]+)/)
       episodes.push({
         episodeId,
         type: typeMatch ? typeMatch[1].toUpperCase() : '',
         status,
-        ep: String(row[3] || '').trim(),            // col D
-        productCode: String(row[2] || '').trim(),    // col C
-        projectName: String(row[1] || '').trim(),    // col B
+        ep: String(row[cols.ep] || '').trim(),
+        productCode: String(row[cols.productCode] || '').trim(),
+        projectName: String(row[cols.projectName] || '').trim(),
       })
     }
     return { ok: true, episodes }

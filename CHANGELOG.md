@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.42.1] — 2026-06-10
+
+### Fixed — booking episode list empty after "_EPs" tab restructure
+
+The Producer Dashboard team reshuffled the "_EPs" tab columns (Episode ID
+moved col N→C, Status col E→H). The app still read the old positions, so the
+Content Agency booking form showed "ไม่มี episode ที่ถ่ายได้" for every
+project even though its episodes were Pre-production/Pending.
+
+- `listProjectEpisodes`, `fetchFullyPublishedProjectIds`, and
+  `/api/projects/monitor` now resolve the "_EPs" columns **from the header
+  row by name** (`Episode ID`, `Status`, `EP.`, `Product Code`,
+  `Project Name`) via a shared `resolveEpsColumns` helper, falling back to
+  the current known layout. The next column reshuffle won't silently empty
+  the booking list.
+- Booking eligibility is unchanged: an episode is bookable as long as its
+  Status is not `Published`; a project drops off the dropdown only when ALL
+  its episodes are Published.
+
+---
+
 ## [1.42.0] — 2026-06-09
 
 ### Added — Overnight OT (shifts that cross midnight)
