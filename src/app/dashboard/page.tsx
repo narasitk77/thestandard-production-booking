@@ -600,7 +600,7 @@ function SheetMonitor({
     if (!projects) return []
     return projects.filter(p => {
       if (filter === 'active') {
-        const hasActive = p.epCounts.production > 0 || p.epCounts.preProduction > 0 || p.epCounts.postProduction > 0
+        const hasActive = p.epCounts.production > 0 || p.epCounts.preProduction > 0 || p.epCounts.postProduction > 0 || p.epCounts.pending > 0
         if (!hasActive) return false
       }
       if (filter === 'unbooked' && p.bookingCount > 0) return false
@@ -798,6 +798,11 @@ function EpStatusBar({ counts, total }: { counts: ProjectMonitorRow['epCounts'];
   }
   return (
     <div className="flex items-center gap-1 flex-wrap">
+      {counts.pending > 0 && (
+        <span className="text-[11px] bg-rose-50 text-rose-400 px-1.5 py-0.5 rounded tabular-nums">
+          {counts.pending} pending
+        </span>
+      )}
       {counts.preProduction > 0 && (
         <span className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded tabular-nums">
           {counts.preProduction} pre

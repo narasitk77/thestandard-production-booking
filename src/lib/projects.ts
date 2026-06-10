@@ -1,6 +1,6 @@
 import { google } from 'googleapis'
 import { getProducerDashboardSheetId } from './google-config'
-import { resolveEpsColumns } from './dashboard-episodes'
+import { fetchAllEpisodeRows } from './dashboard-episodes'
 
 /**
  * Project ID layer — Producer Dashboard integration
@@ -14,8 +14,8 @@ import { resolveEpsColumns } from './dashboard-episodes'
  *   A Project ID   B Project Name   C Client       D Brief     E Brief Date
  *   F Producer     G Director       H Video Type   I Progress  J Note
  *
- * "_EPs" columns used here: Status + Episode ID, resolved from the header
- * row via resolveEpsColumns (the Dashboard team reshuffles that tab).
+ * Episode rows (Status + Episode ID) come from fetchAllEpisodeRows —
+ * the per-producer "PD <name>" tabs plus the legacy "_EPs" tab.
  *
  * A project drops off the booking dropdown once EVERY one of its episodes is
  * "Published" (work finished). Projects with no episodes yet stay bookable.
@@ -23,7 +23,6 @@ import { resolveEpsColumns } from './dashboard-episodes'
 
 // Sheet id moved to src/lib/google-config.ts (v1.30 consolidation).
 const DEFAULT_PROJECTS_TAB = 'All Projects'
-const DEFAULT_EPS_TAB = '_EPs'
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
 const PROJECT_ID_RE = /^PP-\d{2}-\d{3}$/
@@ -57,28 +56,22 @@ function getDashboardAuth() {
 }
 
 /**
- * Read "_EPs" and return the set of Project IDs whose episodes are ALL
- * "Published" — finished projects to hide from the booking dropdown.
- * A project with no episodes is never in this set (still bookable).
+ * Read every episode row (PD tabs + legacy "_EPs") and return the set of
+ * Project IDs whose episodes are ALL "Published" — finished projects to
+ * hide from the booking dropdown. A project with no episodes is never in
+ * this set (still bookable).
  */
 async function fetchFullyPublishedProjectIds(
   sheets: ReturnType<typeof google.sheets>,
   sheetId: string,
-  epsTab: string,
 ): Promise<Set<string>> {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${epsTab}!A1:R`,
-  })
-  const values = res.data.values || []
-  const cols = resolveEpsColumns(values[0])
+  const episodes = await fetchAllEpisodeRows(sheets, sheetId)
   const tally = new Map<string, { total: number; published: number }>()
-  for (const r of values.slice(1)) {
-    const episodeId = (r[cols.episodeId] || '').toString().trim()
-    const m = episodeId.match(EPISODE_ID_RE)
+  for (const e of episodes) {
+    const m = e.episodeId.match(EPISODE_ID_RE)
     if (!m) continue
     const projectId = m[1]
-    const isPublished = (r[cols.status] || '').toString().trim().toLowerCase() === 'published'
+    const isPublished = e.status.trim().toLowerCase() === 'published'
     const t = tally.get(projectId) || { total: 0, published: 0 }
     t.total += 1
     if (isPublished) t.published += 1
@@ -98,7 +91,6 @@ export async function listProjects(opts: { force?: boolean } = {}): Promise<Proj
 
   const sheetId = getProducerDashboardSheetId()
   const projectsTab = process.env.PRODUCER_DASHBOARD_TAB || DEFAULT_PROJECTS_TAB
-  const epsTab = process.env.PRODUCER_DASHBOARD_EPS_TAB || DEFAULT_EPS_TAB
 
   try {
     const auth = getDashboardAuth()
@@ -111,13 +103,13 @@ export async function listProjects(opts: { force?: boolean } = {}): Promise<Proj
     })
     const values = res.data.values || []
 
-    // 2) which projects are finished — hide them. If "_EPs" is unreachable,
-    //    degrade gracefully and show every project.
+    // 2) which projects are finished — hide them. If the episode tabs are
+    //    unreachable, degrade gracefully and show every project.
     let publishedProjectIds = new Set<string>()
     try {
-      publishedProjectIds = await fetchFullyPublishedProjectIds(sheets, sheetId, epsTab)
+      publishedProjectIds = await fetchFullyPublishedProjectIds(sheets, sheetId)
     } catch (e) {
-      console.error('listProjects: "_EPs" read failed — not filtering published:', e)
+      console.error('listProjects: episode tabs read failed — not filtering published:', e)
     }
 
     const rows: ProjectOption[] = []

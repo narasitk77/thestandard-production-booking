@@ -5,6 +5,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.42.2] — 2026-06-10
+
+### Fixed — new episodes invisible to booking: read the "PD <name>" tabs (real root cause)
+
+v1.42.1's diagnosis was incomplete. The "_EPs" tab never changed layout —
+what actually happened is the Dashboard's May 2026 restructure moved
+episode authoring to per-producer **"PD <name>" tabs** (new column
+layout), and the sheet's own PD→"_EPs" sync automation stopped copying
+new rows ("_Update Log" shows them as `skipped`; "_EPs Backup
+20260511-1202" marks the migration date). "_EPs" still holds only ~13
+legacy episodes, so every project created after mid-May looked like it
+had no bookable episodes — booking form AND Sheet Monitor.
+
+- New shared reader `fetchAllEpisodeRows` (dashboard-episodes.ts):
+  discovers all `PD *` tabs at runtime, reads them + legacy "_EPs" in one
+  `values.batchGet`, resolves each tab's columns from its own header row
+  (PD: Episode ID col C / Status col H · _EPs: col N / col E), validates
+  IDs against `PP-YY-NNN-XNN`, dedupes by Episode ID (PD wins — fresher
+  status).
+- `listProjectEpisodes` (booking form), `fetchFullyPublishedProjectIds`
+  (project dropdown filter), and `/api/projects/monitor` (Sheet Monitor)
+  all use it now.
+- Sheet Monitor: added a **pending** count to `EpCounts` — `Pending`
+  episodes previously fell into no bucket, so a project with only Pending
+  episodes showed "No episodes / No EPs" even though it was bookable.
+  New chip in the EP status bar; "Active" filter includes pending.
+
+Verified against the live Dashboard sheet: PP-26-025 now lists all 16
+non-Published episodes (Pre-production / Production / Pending);
+PP-26-019 lists its Post-production episode.
+
+---
+
 ## [1.42.1] — 2026-06-10
 
 ### Fixed — booking episode list empty after "_EPs" tab restructure

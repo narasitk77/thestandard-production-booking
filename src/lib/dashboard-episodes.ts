@@ -3,8 +3,9 @@
  * ---------------------------------------------------------------------
  * Content Agency bookings SELECT existing episodes of a project (the
  * episodes are created upstream by the Producer/Director in the Dashboard
- * UI, not by this app). This module reads the "_EPs" master tab so the
- * booking wizard can offer the project's still-bookable episodes.
+ * UI, not by this app). This module reads the per-producer "PD <name>"
+ * tabs (source of truth) plus the legacy "_EPs" tab so the booking
+ * wizard can offer the project's still-bookable episodes.
  *
  * NOTE (v1.35.17): the in-app Episode ID *minting* path
  * (`generateProjectEpisodeIds` + its PD/Dir-tab writers) was removed — it
@@ -94,13 +95,72 @@ export function resolveEpsColumns(header: unknown[] | undefined): EpsColumns {
   return cols
 }
 
+const EPISODE_ID_RE = /^PP-\d{2}-\d{3}-[A-Z]\d{2,}$/
+
+type SheetsClient = ReturnType<typeof google.sheets>
+
+/**
+ * Read EVERY episode row from the Producer Dashboard (v1.42.2).
+ *
+ * Episodes are authored on the per-producer "PD <name>" tabs. The sheet's
+ * own PD→"_EPs" sync automation stopped copying new rows in May 2026
+ * (see "_Update Log": rows logged as "skipped"), so "_EPs" only holds
+ * legacy episodes — which made every new project look like it had no
+ * bookable episodes. Read the PD tabs as the source of truth and keep
+ * "_EPs" as a legacy fallback; on duplicate Episode IDs the PD row wins
+ * (fresher status). Each tab's columns are resolved from its own header
+ * row, so the two different layouts (PD: Episode ID col C / Status col H;
+ * _EPs: Episode ID col N / Status col E) both work.
+ */
+export async function fetchAllEpisodeRows(
+  sheets: SheetsClient,
+  spreadsheetId: string,
+): Promise<ProjectEpisode[]> {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties.title',
+  })
+  const titles = (meta.data.sheets || [])
+    .map(s => s.properties?.title || '')
+    .filter(Boolean)
+  const tabs = titles.filter(t => /^PD\s/.test(t))
+  const epsTab = process.env.PRODUCER_DASHBOARD_EPS_TAB || '_EPs'
+  if (titles.includes(epsTab)) tabs.push(epsTab)
+  if (tabs.length === 0) return []
+
+  const res = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId,
+    ranges: tabs.map(t => `'${t.replace(/'/g, "''")}'!A1:R`),
+  })
+
+  const byId = new Map<string, ProjectEpisode>()
+  for (const vr of res.data.valueRanges || []) {
+    const values = (vr.values as string[][]) || []
+    const cols = resolveEpsColumns(values[0])
+    for (const row of values.slice(1)) {
+      const episodeId = String(row[cols.episodeId] || '').trim()
+      if (!EPISODE_ID_RE.test(episodeId) || byId.has(episodeId)) continue
+      const typeMatch = episodeId.match(/-([A-Za-z]+)\d+$/)
+      byId.set(episodeId, {
+        episodeId,
+        type: typeMatch ? typeMatch[1].toUpperCase() : '',
+        status: String(row[cols.status] || '').trim(),
+        ep: String(row[cols.ep] || '').trim(),
+        productCode: String(row[cols.productCode] || '').trim(),
+        projectName: String(row[cols.projectName] || '').trim(),
+      })
+    }
+  }
+  return Array.from(byId.values())
+}
+
 export type ListEpisodesResult =
   | { ok: true; episodes: ProjectEpisode[] }
   | { ok: false; error: string }
 
-// List a project's episodes from the "_EPs" master tab, EXCLUDING ones already
-// Published (those can't be booked for a new shoot). Columns are resolved
-// from the header row — see resolveEpsColumns above.
+// List a project's episodes from the Producer Dashboard (PD tabs + legacy
+// "_EPs" — see fetchAllEpisodeRows), EXCLUDING ones already Published
+// (those can't be booked for a new shoot).
 export async function listProjectEpisodes(projectId: string): Promise<ListEpisodesResult> {
   const pid = String(projectId || '').trim()
   if (!/^PP-\d{2}-\d{3}$/.test(pid)) return { ok: false, error: `bad projectId: ${pid}` }
@@ -109,29 +169,11 @@ export async function listProjectEpisodes(projectId: string): Promise<ListEpisod
   try {
     const spreadsheetId = getSheetId()
     const sheets = google.sheets({ version: 'v4', auth: getAuth() })
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: '_EPs!A1:R',
-    })
-    const values: string[][] = res.data.values || []
-    const cols = resolveEpsColumns(values[0])
+    const all = await fetchAllEpisodeRows(sheets, spreadsheetId)
     const prefix = `${pid}-`
-    const episodes: ProjectEpisode[] = []
-    for (const row of values.slice(1)) {
-      const episodeId = String(row[cols.episodeId] || '').trim()
-      if (!episodeId.startsWith(prefix)) continue
-      const status = String(row[cols.status] || '').trim()
-      if (status.toLowerCase() === 'published') continue
-      const typeMatch = episodeId.slice(prefix.length).match(/^([A-Za-z]+)/)
-      episodes.push({
-        episodeId,
-        type: typeMatch ? typeMatch[1].toUpperCase() : '',
-        status,
-        ep: String(row[cols.ep] || '').trim(),
-        productCode: String(row[cols.productCode] || '').trim(),
-        projectName: String(row[cols.projectName] || '').trim(),
-      })
-    }
+    const episodes = all.filter(e =>
+      e.episodeId.startsWith(prefix) && e.status.toLowerCase() !== 'published',
+    )
     return { ok: true, episodes }
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || String(e) }
