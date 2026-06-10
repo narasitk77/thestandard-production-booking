@@ -5,6 +5,36 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-10 · v1.42.1→.2 — "ไม่มี episode ที่ถ่ายได้" incident: Dashboard PD→_EPs sync is dead
+
+**Symptom.** Content Agency booking form showed no bookable episodes for any
+recent project (e.g. PP-26-025 with 16 non-Published episodes); Sheet Monitor
+showed "No EPs" for everything created after mid-May.
+
+**Root cause (sheet side, NOT this app).** The Dashboard's May 2026
+restructure moved episode authoring to per-producer **"PD <name>" tabs** with
+a new column layout. The sheet's own Apps Script that synced PD rows into
+"_EPs" stopped copying new rows — "_Update Log" records them as `skipped`,
+and "_EPs Backup 20260511-1202" marks the migration date. "_EPs" is frozen at
+~13 legacy episodes (PP-26-013…020). The app read only "_EPs", so new
+episodes were invisible.
+
+**Fix (app side, v1.42.2).** `fetchAllEpisodeRows` discovers `PD *` tabs at
+runtime and reads them + legacy "_EPs" in one batchGet, resolving each tab's
+columns from its header row. Booking form, project dropdown filter, and
+Sheet Monitor all use it. (v1.42.1, same day, was an incomplete diagnosis —
+header-based column resolution; kept, it's what makes the two layouts work.)
+
+**No schema / env / infra change.** Deploy = pull `sha-ff2ef75` (or `latest`)
+and redeploy the stack.
+
+**Follow-up for the Dashboard owner (chonlathorn.j):** the PD→_EPs sync
+script can be fixed or retired; the app no longer depends on it. If a new
+producer tab is added it must keep the `PD <name>` naming pattern to be
+picked up.
+
+---
+
 ## 2026-06-09 · v1.42.0 — overnight OT (schema addition)
 
 **What deployed.** OT can now span midnight (CHANGELOG 1.42.0): a "วันที่เลิก"
