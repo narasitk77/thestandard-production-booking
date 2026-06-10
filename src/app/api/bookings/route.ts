@@ -243,21 +243,17 @@ export async function POST(request: NextRequest) {
         programId: programDb.id,
       }))
     } else {
-      // Production ID keeps the legacy shape: [OUT]-[YYMMDD]-[EpisodeType]-[NN],
-      // sequenced per outlet+date+Episode-Type from the step-1 program (L/S/A/T).
-      // The per-episode program + Original/AD pick is stored as DATA only
-      // (Episode.programId + Episode.contentType) — it does NOT change the ID.
-      const prefix = `${outletCode}-${formatShootDateForId(parsedDate)}-${programCode}-`
-      const lastEp = await prisma.episode.findFirst({
-        where: { episodeId: { startsWith: prefix } },
-        orderBy: { episodeId: 'desc' },
-        select: { episodeId: true },
-      })
-      const lastNum = lastEp?.episodeId.match(/-(\d{2})$/)?.[1]
-      const startSeq = (lastNum ? parseInt(lastNum, 10) : 0) + 1
+      // Episode ID carries the per-episode program code (v1.46.0 — ops
+      // feedback: "รหัสรายการให้อยู่ใน Booking ID เช่น NWS-KYM-…"):
+      //   [OUT]-[PROG]-[YYMMDD]-[EpisodeType]-[NN]  e.g. NWS-KYM-260616-L-01
+      // sequenced per outlet+program+date+Episode-Type, so each show gets
+      // its own numbering stream. Episodes in one booking may carry
+      // different programs — each draws from its own stream.
+      const dateStr = formatShootDateForId(parsedDate)
 
       // Upsert each distinct per-episode program once and cache its DB id.
       const programIdByCode = new Map<string, string>([[programCode, programDb.id]])
+      const nextSeqByProgram = new Map<string, number>()
       episodeRecords = []
       for (let idx = 0; idx < episodeInputs.length; idx++) {
         const ep = episodeInputs[idx]
@@ -272,9 +268,33 @@ export async function POST(request: NextRequest) {
           epProgramId = epProgramDb.id
           programIdByCode.set(ep.programCode, epProgramId)
         }
+
+        // Program segment only when it's a real show code (2–4 alnum chars,
+        // the strict-format constraint) and not just the Episode Type echoed
+        // back by a legacy client — those keep the legacy ID shape.
+        const epProgCode = ep.programCode.trim().toUpperCase()
+        const progForId = /^[A-Z0-9]{2,4}$/.test(epProgCode) && epProgCode !== programCode
+          ? epProgCode
+          : null
+        const streamKey = progForId ?? ''
+        let nextSeq = nextSeqByProgram.get(streamKey)
+        if (nextSeq === undefined) {
+          const prefix = progForId
+            ? `${outletCode}-${progForId}-${dateStr}-${programCode}-`
+            : `${outletCode}-${dateStr}-${programCode}-`
+          const lastEp = await prisma.episode.findFirst({
+            where: { episodeId: { startsWith: prefix } },
+            orderBy: { episodeId: 'desc' },
+            select: { episodeId: true },
+          })
+          const lastNum = lastEp?.episodeId.match(/-(\d{2})$/)?.[1]
+          nextSeq = (lastNum ? parseInt(lastNum, 10) : 0) + 1
+        }
+        nextSeqByProgram.set(streamKey, nextSeq + 1)
+
         episodeRecords.push({
-          episodeId: generateEpisodeId(outletCode, parsedDate, programCode, startSeq + idx),
-          sequence: startSeq + idx,
+          episodeId: generateEpisodeId(outletCode, parsedDate, programCode, nextSeq, progForId),
+          sequence: nextSeq,
           title: ep.title,
           programId: epProgramId,
           contentType: ep.contentType,

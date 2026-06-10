@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.46.0] — 2026-06-10
+
+### Changed — Booking/Episode ID carries the program code
+
+Ops feedback: "รหัสรายการให้อยู่ใน Booking ID ด้วย เช่น NWS-KYM-…".
+
+- New outlet-booking IDs are
+  **`[OUT]-[PROG]-[YYMMDD]-[EpisodeType]-[NN]`** — e.g.
+  `NWS-KYM-260616-L-01` for a Key Message long-form — using each
+  episode's own program from the dropdown. Sequences run per
+  outlet+program+date+type, so each show numbers its own stream.
+- Legacy IDs (`NWS-260608-L-01`, `AGN-260423-EVT-01`) stay valid
+  everywhere: the strict/loose/case-insensitive regexes accept both
+  shapes, and the footage folder parser (`parseProductionId`) extracts
+  both. Existing bookings/folders are untouched.
+- Content Agency productions keep their shape
+  (`AGN-YYMMDD-STD/LOC/EVT-NN`) — a production isn't a single show.
+- Legacy clients that echo the Episode Type as the program (or any code
+  that doesn't fit 2–4 alnum chars) fall back to the legacy ID shape
+  instead of emitting a malformed one.
+- 9 new unit tests on generate/parse/extract (33 total, still gating
+  every build).
+
+---
+
 ## [1.45.0] — 2026-06-10
 
 ### Changed — calendar event title leads with the show name
