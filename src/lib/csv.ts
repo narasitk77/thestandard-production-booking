@@ -1,8 +1,11 @@
 /**
- * Minimal CSV helpers used by the audit-log export endpoint.
+ * Minimal CSV helpers shared by the export endpoints (audit log, bookings, OT).
  *
  * - Prepends a UTF-8 BOM so Excel opens Thai-language values without mojibake.
  * - Escapes quotes, newlines, and embedded commas per RFC 4180.
+ * - Neutralizes spreadsheet formula injection: Excel/Sheets execute cells
+ *   starting with `=` `+` `-` `@` (or tab/CR) even when the cell is quoted,
+ *   so those get a leading apostrophe (OWASP CSV-injection mitigation).
  * - `streamCSV` produces a ReadableStream so the export route can hand it
  *   straight to a NextResponse without buffering the full result set.
  */
@@ -17,8 +20,12 @@ export function escapeCSVCell(value: unknown): string {
       : typeof value === 'object'
         ? JSON.stringify(value)
         : String(value)
-  const needsQuoting = /[",\n\r]/.test(raw)
-  const escaped = raw.replace(/"/g, '""')
+  // Actual numbers can't carry a formula payload — skip the apostrophe so
+  // negative amounts stay sortable as numbers in Excel.
+  const neutralized =
+    typeof value !== 'number' && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw
+  const needsQuoting = /[",\n\r]/.test(neutralized)
+  const escaped = neutralized.replace(/"/g, '""')
   return needsQuoting ? `"${escaped}"` : escaped
 }
 

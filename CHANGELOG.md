@@ -5,6 +5,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.50.1] — 2026-06-11
+
+### Security — กัน CSV formula injection ในไฟล์ export ทุกตัว
+
+ค่าที่ user กรอกเอง (producer, ชื่อ project, episode ID ฯลฯ) ถ้าขึ้นต้นด้วย
+`=` `+` `-` `@` (หรือ tab/CR) Excel จะ execute เป็นสูตรตอนเปิดไฟล์ CSV —
+แม้ cell จะถูก quote แล้วก็ตาม และตั้งแต่ v1.50.0 export ทั้ง corpus
+เปิดให้ทุก console tier สูตรที่ฝังมาจึงไปโผล่ใน Excel ของ staff ได้
+
+- **`escapeCSVCell` (`src/lib/csv.ts`)** — เติม apostrophe (`'`) นำหน้า
+  cell ที่ match `/^[=+\-@\t\r]/` ตาม OWASP CSV-injection mitigation
+  (ค่าที่เป็น number จริงไม่โดนเติม — ตัวเลขติดลบยัง sort ได้ใน Excel)
+  ครอบคลุม bookings export (`/api/bookings/export`) และ audit log
+  ที่ใช้ helper นี้อยู่แล้ว
+- **OT export (`/api/ot/export`)** — เปลี่ยน `csvCell` local
+  (quote-wrap อย่างเดียว ซึ่งกันสูตรไม่ได้) มาใช้ `escapeCSVCell`
+  ตัวเดียวกัน ทั้ง detail sheet และ cover sheet
+- เพิ่ม unit test `src/lib/__tests__/csv.test.ts` (RFC 4180 escaping +
+  formula neutralization)
+
+### Security — `GET /api/bookings/[id]` ไม่เปิดให้ทุกคนที่ login แล้ว
+
+เดิม user ที่ login คนไหนก็เปิดดูรายละเอียด booking ของใครก็ได้ถ้ารู้ id —
+รวม `adminNotes`, รายชื่อ crew ที่ assign และประวัติ upload ทั้งหมด
+(มี wasabi key / multipart id ภายในติดมาด้วย)
+
+- **Read scope ใหม่** (`src/lib/booking-access.ts` → `canViewBooking`):
+  ดูได้เฉพาะ console tier หรือคนบน booking นั้น — ผู้ขอ
+  (`createdByEmail`) / producer (`producerEmail`) / crew ที่ถูก assign
+  (`assignedEmails`) เทียบ email แบบ case-insensitive · นอกนั้น 403
+  (ทุกหน้าเดิมยังทำงานปกติ: success page = ผู้ขอ, upload page = crew,
+  /admin /dashboard = console)
+- **ตัด storage internals ออกจาก payload** — `uploads` ใช้ select list
+  (เลิกส่ง `wasabiKey` / `wasabiMultipartId` / `wasabiEtag` / `sha256`)
+  และแถม `episode.episodeId` ที่ dashboard detail ประกาศ type รอไว้
+  แต่ไม่เคยได้ข้อมูลจริง
+- เพิ่ม unit test `src/lib/__tests__/booking-access.test.ts` · **68 tests total**
+
+### Fixed — OT approver นอก roster เข้าหน้า OT ได้ครบทาง
+
+- `/ot` parent layout + เมนู OT ใน nav เคยเช็คแค่ ADMIN + roster ทีม
+  Production (hardcode 31 คน) — MANAGER ที่เป็น OT approver แต่ไม่อยู่ใน
+  roster จะผ่าน gate `/ot/admin` (แก้ใน v1.50.0) แต่โดน parent บล็อก →
+  เพิ่ม `getOTApproverAccess()` เข้าเงื่อนไขทั้งสองจุด
+  (ยังไม่มี user จริงที่โดน — กันไว้ให้ model ตรงกันทุกชั้น)
+
 ## [1.50.0] — 2026-06-10
 
 ### Fixed — Coordinator (และทุก staff tier) เข้า Admin Console ได้จริงแล้ว

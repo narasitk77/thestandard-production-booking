@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, requireConsole } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
+import { canViewBooking } from '@/lib/booking-access'
 import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
@@ -22,12 +23,43 @@ export async function GET(
         outlet: true,
         program: true,
         episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
-        uploads: { orderBy: { createdAt: 'desc' } },
+        // v1.50.1 — select list: keep the fields the detail pages render, drop
+        // storage internals (wasabi keys/multipart ids, sha256) from the wire.
+        uploads: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            episodeId: true,
+            camera: true,
+            fileName: true,
+            fileSize: true,
+            mimeType: true,
+            notes: true,
+            status: true,
+            uploadedBy: true,
+            driveFileId: true,
+            driveUrl: true,
+            initiatedAt: true,
+            completedAt: true,
+            failureReason: true,
+            createdAt: true,
+            updatedAt: true,
+            episode: { select: { episodeId: true } },
+          },
+        },
       },
     })
 
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+
+    // v1.50.1 — detail reads are scoped (src/lib/booking-access.ts): console
+    // staff, or someone on the booking (requester / producer / assigned crew).
+    // Previously any logged-in user could read any booking by id, incl.
+    // adminNotes and the full upload history.
+    if (!canViewBooking(session, booking)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // Serialize BigInt fileSize to string (JSON can't handle BigInt)

@@ -1,15 +1,20 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { getSession } from '@/lib/session'
+import { getSession, getOTApproverAccess } from '@/lib/session'
 import { isTeamMember } from '@/lib/team-profiles'
 
-// Gate the whole /ot section (incl. /ot/admin) to the Production team + admins.
-// Blocks direct-URL access for anyone outside the team — not just the nav menu.
+// Gate the whole /ot section (incl. /ot/admin) to the Production team + admins
+// + OT approvers (v1.50.1 — /ot/admin lives under this layout, so an approver
+// outside the hardcoded roster would otherwise pass the /ot/admin gate but be
+// blocked here). Blocks direct-URL access for anyone else — not just the menu.
 export default async function OTLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
   if (!session) redirect('/login?next=/ot')
 
-  const allowed = session.role === 'ADMIN' || isTeamMember(session.email)
+  const allowed =
+    session.role === 'ADMIN' ||
+    isTeamMember(session.email) ||
+    (await getOTApproverAccess(session.email))
   if (!allowed) {
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center">

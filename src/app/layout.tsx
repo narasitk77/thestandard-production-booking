@@ -18,14 +18,16 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
 
-  // OT module is for the Production team — admins also see it (to manage).
-  const canSeeOT = !!session && (session.role === 'ADMIN' || isTeamMember(session.email))
+  // OT Approver — ADMIN/MANAGER or anyone with "manager" in their position.
+  // Surfaces the /ot/admin link in the nav so managers can reach the review
+  // surface without being told the URL.
+  const canApproveOT = await getOTApproverAccess(session?.email)
+  // OT module is for the Production team — admins also see it (to manage),
+  // and OT approvers must see it too (v1.50.1: /ot/admin lives under /ot,
+  // so an approver outside the hardcoded roster needs the menu + section).
+  const canSeeOT = !!session && (session.role === 'ADMIN' || isTeamMember(session.email) || canApproveOT)
   // Producer Dashboard — admins + users with a Producer/Co-Producer position.
   const canSeeProducer = await getProducerAccess(session?.email)
-  // OT Approver — ADMIN or anyone with "manager" in their position. Surfaces
-  // the /ot/admin link in the nav so managers can reach the review surface
-  // without being told the URL.
-  const canApproveOT = await getOTApproverAccess(session?.email)
   // v1.35.3 — Upload — ADMIN or video/sound roster role. Surfaces the
   // /upload link in the nav so crew can find their assigned bookings to
   // upload footage to.

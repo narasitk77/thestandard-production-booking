@@ -3,15 +3,15 @@ import { prisma } from '@/lib/db'
 import { requireOTApprover } from '@/lib/session'
 import { currentMonthYYYYMM } from '@/lib/ot-cleanup'
 import { summarizeDay, formatTHB, dateOffsetDays, RATE_WEEKDAY_OT_THB, RATE_WEEKEND_OR_HOLIDAY_THB, WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
+import { escapeCSVCell } from '@/lib/csv'
 
 const THAI_MONTHS = [
   'มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
   'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม',
 ]
 
-function csvCell(v: string | number) {
-  return `"${String(v).replace(/"/g, '""')}"`
-}
+// Shared helper handles RFC 4180 escaping + formula-injection neutralization.
+const csvCell = (v: string | number) => escapeCSVCell(v)
 
 export async function GET(request: NextRequest) {
   try {
