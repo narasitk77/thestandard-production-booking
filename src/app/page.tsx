@@ -33,43 +33,50 @@ type Bucket = { key: string; label: string; bookings: Booking[] }
  */
 export default function HomeOverview() {
   const [allBookings, setAllBookings] = useState<Booking[] | null>(null)
+  const [myBookings, setMyBookings] = useState<Booking[] | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
     // Pull a generous slice — the API caps at 500. Enough to populate
-    // "today / this week / my upcoming / attention" without paging.
+    // "today / this week / attention" without paging.
     fetch('/api/bookings?limit=200')
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(d => setAllBookings(d.bookings || []))
       .catch(e => setError(String(e)))
+    // v1.50 — console tiers now get the full corpus from the default scope,
+    // so "My upcoming" asks for scope=mine explicitly (created-by or assigned)
+    // instead of relying on the implicit plain-USER filter.
+    fetch('/api/bookings?limit=200&scope=mine')
+      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+      .then(d => setMyBookings(d.bookings || []))
+      .catch(() => setMyBookings([]))
   }, [])
 
-  const loading = allBookings === null
+  const loading = allBookings === null || myBookings === null
 
-  // Buckets — purely client-side splits of the same fetch.
+  // Buckets — purely client-side splits of the two fetches.
   const { today, thisWeek, mine, attention } = useMemo(() => {
     const today0 = startOfToday()
-    const bs = allBookings || []
-    const upcoming = bs.filter(b => {
+    const isUpcoming = (b: Booking) => {
       const d = parseISO(b.shootDate)
       return !isNaN(d.getTime()) && (isToday(d) || isAfter(d, today0))
-    })
+    }
+    const bs = allBookings || []
+    const upcoming = bs.filter(isUpcoming)
     return {
       today: upcoming.filter(b => isToday(parseISO(b.shootDate))),
       thisWeek: upcoming.filter(b => {
         const d = parseISO(b.shootDate)
         return !isToday(d) && isThisWeek(d, { weekStartsOn: 1 })
       }),
-      // "Mine" is implicit: the GET filter without scope already returns the
-      // user's own bookings + confirmed-everywhere (see /api/bookings).
-      // For the overview "My upcoming" panel, just show their non-cancelled
-      // upcoming items, capped at 6.
-      mine: upcoming.filter(b => b.status !== 'CANCELLED').slice(0, 6),
+      // "My upcoming" — the user's own non-cancelled upcoming items, capped
+      // at 6, from the scope=mine fetch.
+      mine: (myBookings || []).filter(isUpcoming).filter(b => b.status !== 'CANCELLED').slice(0, 6),
       // "Attention" — REQUESTED bookings (waiting for coordinator action).
       // For an operator-style view this is the single most useful filter.
       attention: bs.filter(b => b.status === 'REQUESTED').slice(0, 6),
     }
-  }, [allBookings])
+  }, [allBookings, myBookings])
 
   const counts = useMemo(() => ({
     today: today.length,

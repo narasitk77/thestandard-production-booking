@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { hasConsoleAccess } from '@/lib/roles'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { createBookingFromPayload } from '@/lib/create-booking'
 
@@ -23,11 +24,12 @@ export async function GET(request: NextRequest) {
     const scope = searchParams.get('scope') // 'mine' | 'all' | 'producer'
 
     // scope=producer → only shoots where this user is the Producer (their own
-    // email — safe, no leak). Otherwise non-admins are restricted to their own
-    // bookings + confirmed bookings; admins (no scope) see everything.
+    // email — safe, no leak). Otherwise plain USERs are restricted to their own
+    // bookings + confirmed bookings; console tiers (no scope) see everything —
+    // the /admin queue and dashboard need the full set (v1.50, was ADMIN-only).
     const userFilter = scope === 'producer'
       ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
-      : session.role === 'ADMIN' && scope !== 'mine'
+      : hasConsoleAccess(session.role) && scope !== 'mine'
         ? {}
         : {
             OR: [

@@ -62,6 +62,9 @@ export default function HealthPage() {
   const [data, setData] = useState<HealthResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>('')
+  // v1.50 — the page itself is console-wide, but the purge API stays
+  // requireAdmin, so only ADMIN gets the Danger Zone UI.
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const fetch_ = async () => {
     setLoading(true)
@@ -78,7 +81,13 @@ export default function HealthPage() {
     }
   }
 
-  useEffect(() => { fetch_() }, [])
+  useEffect(() => {
+    fetch_()
+    fetch('/api/me', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setIsAdmin(d?.user?.role === 'ADMIN'))
+      .catch(() => {})
+  }, [])
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
@@ -221,8 +230,8 @@ export default function HealthPage() {
         </>
       )}
 
-      {/* Danger Zone */}
-      <DangerZone />
+      {/* Danger Zone — purge API is ADMIN-only, hide it for other tiers */}
+      {isAdmin && <DangerZone />}
     </div>
   )
 }

@@ -2,12 +2,14 @@
  * GET /api/bookings/export?scope=producer
  *
  * CSV of the caller's bookings for reports. scope=producer → shoots where the
- * user is the Producer (producerEmail). Admins (no scope) export everything.
+ * user is the Producer (producerEmail). Console tiers (no scope) export
+ * everything — same visibility as the /admin queue (v1.50, was ADMIN-only).
  * UTF-8 with BOM so Excel opens Thai cleanly.
  */
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { hasConsoleAccess } from '@/lib/roles'
 import { buildCSVHeader, rowToCSV, csvFilename } from '@/lib/csv'
 
 const COLUMNS = [
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest) {
   const where =
     scope === 'producer'
       ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
-      : session.role === 'ADMIN'
+      : hasConsoleAccess(session.role)
         ? {}
         : { OR: [{ createdByEmail: session.email }, { assignedEmails: { has: session.email } }] }
 

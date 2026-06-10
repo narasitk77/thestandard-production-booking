@@ -6,6 +6,10 @@ import { hasConsoleAccess, type Role } from './roles'
 export async function getSession() {
   const s = await getServerSession(authOptions)
   if (!s?.user?.email) return null
+  // v1.50 — deactivating a user revokes access immediately, not at token
+  // expiry. The jwt callback re-reads User.active from the DB per request;
+  // only an explicit false blocks (emails without a User row stay usable).
+  if ((s.user as any).active === false) return null
   return {
     email: s.user.email.toLowerCase(),
     name: s.user.name ?? null,
@@ -156,9 +160,8 @@ export async function canUploadToBooking(
 // The position-based path matches the existing `getProducerAccess` pattern.
 // It picks up chonlathorn.j ("Video Production Manager") and any other
 // future manager without needing a code change — the admin sets their
-// position and the gate flips automatically. Approver scope is narrow on
-// purpose: they can act on OT and see the OT overview, but the booking
-// `/admin` console + dashboard + user roster CRUD stay ADMIN-only.
+// position and the gate flips automatically. This gate covers OT approval
+// only; the booking console + dashboard are tier-based via requireConsole.
 export async function getOTApproverAccess(email: string | null | undefined): Promise<boolean> {
   if (!email) return false
   try {

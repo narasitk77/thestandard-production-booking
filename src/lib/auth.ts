@@ -126,6 +126,9 @@ export const authOptions: AuthOptions = {
       if (session.user) {
         ;(session.user as any).role = (token as any).role || 'USER'
         ;(session.user as any).id = (token as any).userId
+        // v1.50 — surface active so getSession can revoke deactivated users
+        // mid-token (signIn only blocks them at login; the JWT lives 7 days).
+        ;(session.user as any).active = (token as any).active
         ;(session.user as any).accessTokenError = (token as any).accessTokenError
       }
       return session

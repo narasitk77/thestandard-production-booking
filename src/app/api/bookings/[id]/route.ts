@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, requireConsole } from '@/lib/session'
+import { hasConsoleAccess } from '@/lib/roles'
 import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
@@ -230,10 +231,17 @@ export async function DELETE(
     // for the audit log so retrospective reads can see what we cancelled.
     const before = await prisma.booking.findUnique({
       where: { id: params.id },
-      select: { id: true, status: true, bookingCode: true },
+      select: { id: true, status: true, bookingCode: true, createdByEmail: true },
     })
     if (!before) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+
+    // v1.50 — cancel is for the requester or console staff. Previously any
+    // logged-in user could cancel any booking.
+    const isOwner = (before.createdByEmail || '').toLowerCase() === session.email
+    if (!isOwner && !hasConsoleAccess(session.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     await prisma.booking.update({

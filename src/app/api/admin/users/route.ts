@@ -3,13 +3,40 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess, canEditUser, assignableRoles, canAddUser, isRole } from '@/lib/roles'
 
+// v1.50 — never ship signaturePng to the client: it's the base64 e-signature
+// used to sign OT records, and no caller of these routes renders it.
+const USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  thaiName: true,
+  employeeId: true,
+  position: true,
+  role: true,
+  active: true,
+  signatureUpdatedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const
+
+// v1.50 — a position containing "manager" mints an OT approver via the legacy
+// getOTApproverAccess path, so handing it out is a promotion act: only actors
+// who hold OT-approval authority themselves (Admin/Manager) may set it.
+function canSetPosition(actorRole: string | null | undefined, position: unknown): boolean {
+  if (typeof position !== 'string' || !/manager/i.test(position)) return true
+  return actorRole === 'ADMIN' || actorRole === 'MANAGER'
+}
+
 // Viewing the roster: any console tier (Admin / Support / Manager / Coordinator).
 export async function GET() {
   const me = await getSession()
   if (!me || !hasConsoleAccess(me.role)) {
     return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   }
-  const users = await prisma.user.findMany({ orderBy: [{ employeeId: 'asc' }, { createdAt: 'asc' }] })
+  const users = await prisma.user.findMany({
+    orderBy: [{ employeeId: 'asc' }, { createdAt: 'asc' }],
+    select: USER_SELECT,
+  })
   return NextResponse.json({ users })
 }
 
@@ -46,6 +73,10 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  if (position !== undefined && !canSetPosition(me.role, position)) {
+    return NextResponse.json({ error: `Your role (${me.role}) cannot grant a manager position` }, { status: 403 })
+  }
+
   const user = await prisma.user.update({
     where: { id },
     data: {
@@ -55,6 +86,7 @@ export async function PATCH(request: NextRequest) {
       ...(employeeId !== undefined && { employeeId: employeeId?.trim() || null }),
       ...(position !== undefined && { position: position?.trim() || null }),
     },
+    select: USER_SELECT,
   })
   return NextResponse.json({ user })
 }
@@ -88,6 +120,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Your role (${me.role}) cannot add a ${newRole} user` }, { status: 403 })
   }
 
+  if (position !== undefined && !canSetPosition(me.role, position)) {
+    return NextResponse.json({ error: `Your role (${me.role}) cannot grant a manager position` }, { status: 403 })
+  }
+
   const user = await prisma.user.upsert({
     where: { email: email.toLowerCase() },
     update: {
@@ -104,6 +140,7 @@ export async function POST(request: NextRequest) {
       employeeId: employeeId?.trim() || null,
       position: position?.trim() || null,
     },
+    select: USER_SELECT,
   })
   return NextResponse.json({ user })
 }
@@ -128,6 +165,6 @@ export async function DELETE(request: NextRequest) {
   }
 
   // Soft-delete by deactivating (preserves OT history)
-  const user = await prisma.user.update({ where: { id }, data: { active: false } })
+  const user = await prisma.user.update({ where: { id }, data: { active: false }, select: USER_SELECT })
   return NextResponse.json({ user, soft: true })
 }

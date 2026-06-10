@@ -5,6 +5,69 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.50.0] — 2026-06-10
+
+### Fixed — Coordinator (และทุก staff tier) เข้า Admin Console ได้จริงแล้ว
+
+v1.38 ตั้ง role model ไว้ว่า console เปิดให้ทุก staff tier
+(ADMIN / SUPPORT / MANAGER / COORDINATOR) แต่ commit นั้นแก้เฉพาะ lib +
+API routes — **layout ของหน้าเพจยังเช็ค ADMIN-only ค้างจาก v1.4**
+ทำให้ Coordinator เห็นลิงก์ใน nav แต่กดแล้วเจอ "Admin only"
+รอบนี้แก้ gate ทุกชั้นให้ตรง model เดียวกัน:
+
+- **`/admin/*` + `/dashboard`** (`admin/layout.tsx`,
+  `dashboard/layout.tsx`) — เปลี่ยน `role !== 'ADMIN'` →
+  `hasConsoleAccess()` ทุก staff tier เข้าจัดการคิวได้:
+  approve / assign / restore / แก้สถานะ / calendar re-sync
+  (API พวกนี้เป็น `requireConsole` อยู่แล้วตั้งแต่ v1.38)
+- **คิวเต็มตา** — `GET /api/bookings` และ `GET /api/bookings/export`
+  เคย scope "เห็นทั้งหมด" ให้เฉพาะ ADMIN ทำให้ tier อื่นเห็นคิว
+  REQUESTED ไม่ครบแบบเงียบ ๆ → เปลี่ยนเป็น `hasConsoleAccess()`
+  (USER ธรรมดาเหมือนเดิมทั้งคู่: list เห็นของตัวเอง + CONFIRMED,
+  export ได้เฉพาะของตัวเอง/ที่ถูก assign)
+- **Upload-review panel บน `/admin/[id]`** — `GET /api/upload/list`
+  เคย 403 สำหรับ staff ที่ไม่ใช่ crew video/sound ทำให้การ์ด
+  Mark-Upload-Done หายทั้งใบ → console tier อ่านได้แล้ว
+  (route เขียนไฟล์ทั้งหมดยังเป็น crew/ADMIN เท่านั้น)
+- **`/ot/admin`** — gate หน้าเพจเช็ค ADMIN-only ขัดกับ API
+  (`requireOTApprover`) ทำให้ Manager ที่อนุมัติ OT ได้โดนบล็อก
+  ที่หน้าเพจ → เปลี่ยนมาใช้ `getOTApproverAccess()` ตัวเดียวกับ API
+  (Coordinator ยังเข้าไม่ได้ตามเดิม — OT เป็นอำนาจ Admin/Manager)
+- **หน้า Home: panel "My upcoming" เป็นของฉันจริง ๆ แล้ว** — เดิมพึ่ง
+  filter implicit ของ USER ธรรมดา พอเปิด scope ให้ staff tier
+  panel นี้จะกลายเป็นงานทั้งบริษัท → fetch `scope=mine` แยกชัดเจน
+  (Today / This week / Attention ของ staff เห็นทั้งคิวตามเดิม
+  ซึ่งตรงกับงาน operator — Attention คือคิว REQUESTED ทั้งหมด)
+
+### Security
+
+- **`DELETE /api/bookings/[id]` (soft-cancel)** เคยเช็คแค่ login —
+  USER คนไหนก็ cancel booking ของใครก็ได้ → ต้องเป็นเจ้าของ booking
+  (`createdByEmail`) หรือ console tier เท่านั้น
+- **`/api/admin/users` เลิกส่ง `signaturePng`** — เดิม GET/PATCH/POST
+  คืน User ทุก field รวม e-signature base64 ของทุกคน (เอาไปปลอม
+  ลายเซ็น OT ได้) ทั้งที่ไม่มีหน้าไหนใช้ → ใส่ select list ทุก response
+- **ตั้ง position ที่มีคำว่า "manager" ได้เฉพาะ ADMIN/MANAGER** —
+  เดิม COORDINATOR แก้ position ของ USER เป็น "Manager" ได้ ซึ่งจะ
+  มอบสิทธิ์ OT approver ให้คนนั้นทันทีผ่าน legacy path
+  (`getOTApproverAccess` เช็ค position) — ปิด escalation ตรงนี้แล้ว
+- **ปิด user แล้วหลุดทันที** — เดิม `active=false` เช็คแค่ตอน login
+  ส่วน JWT ที่ออกไปแล้วใช้ต่อได้อีกถึง 7 วัน → `getSession()` เช็ค
+  active ทุก request แล้ว (jwt callback อ่านจาก DB สดอยู่แล้ว)
+- **Danger Zone (purge) บน `/admin/health`** ซ่อนสำหรับ non-ADMIN
+  (API เป็น `requireAdmin` อยู่แล้ว — เก็บ UI ให้ตรงสิทธิ์)
+- ของ destructive ทั้งหมดยัง ADMIN-only ตามเดิม: hard-delete,
+  purge-bookings, audit purge · OT approve ยัง ADMIN/MANAGER
+
+### Tests
+
+- เพิ่ม `src/lib/__tests__/roles.test.ts` — truth table ของ
+  `hasConsoleAccess` / `canApproveOTByRole` / `canManageRoles` /
+  `canEditUser` / `assignableRoles` / `canAddUser`
+  (เดิม role gates ไม่มี coverage เลย) · **58 tests total**
+
+---
+
 ## [1.49.0] — 2026-06-10
 
 ### Added — MCP server: สั่งงานระบบจองด้วย AI ได้แล้ว

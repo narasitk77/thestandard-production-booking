@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, canUploadToBooking } from '@/lib/session'
+import { hasConsoleAccess } from '@/lib/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,9 +30,14 @@ export async function GET(request: NextRequest) {
     // v1.35.3 — same per-booking gate as /api/upload/init. Listing the
     // history of a booking you can't upload to leaks who's been on that
     // shoot, so we tie list visibility to upload permission.
-    const check = await canUploadToBooking(session.email, bookingId)
-    if (!check.ok) {
-      return NextResponse.json({ error: 'Forbidden', code: check.reason }, { status: 403 })
+    // v1.50 — console tiers read freely: the upload-review panel on
+    // /admin/[id] needs this list, and its Mark-Done POST is already
+    // requireConsole. Write routes keep the crew-only gate.
+    if (!hasConsoleAccess(session.role)) {
+      const check = await canUploadToBooking(session.email, bookingId)
+      if (!check.ok) {
+        return NextResponse.json({ error: 'Forbidden', code: check.reason }, { status: 403 })
+      }
     }
 
     const rows = await prisma.upload.findMany({
