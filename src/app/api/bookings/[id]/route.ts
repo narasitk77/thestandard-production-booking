@@ -54,6 +54,12 @@ export async function GET(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 
+    // v1.51 — soft-deleted bookings are invisible except to ADMIN (who needs
+    // the detail to inspect/restore from the Deleted tab).
+    if (booking.deletedAt && session.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+
     // v1.50.1 — detail reads are scoped (src/lib/booking-access.ts): console
     // staff, or someone on the booking (requester / producer / assigned crew).
     // Previously any logged-in user could read any booking by id, incl.
@@ -118,6 +124,11 @@ export async function PATCH(
       include: { episodes: true },
     })
     if (!existing) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+
+    // v1.51 — a soft-deleted booking is frozen: restore it first (undelete)
+    if (existing.deletedAt) {
+      return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
+    }
 
     // Reject illegal status transitions (e.g. COMPLETED → REQUESTED) before
     // touching the DB. Returns 400 with the rule it violated.
@@ -263,9 +274,12 @@ export async function DELETE(
     // for the audit log so retrospective reads can see what we cancelled.
     const before = await prisma.booking.findUnique({
       where: { id: params.id },
-      select: { id: true, status: true, bookingCode: true, createdByEmail: true },
+      select: { id: true, status: true, bookingCode: true, createdByEmail: true, deletedAt: true },
     })
     if (!before) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+    if (before.deletedAt) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 

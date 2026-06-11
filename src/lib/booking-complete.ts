@@ -31,7 +31,7 @@ export async function autoCompleteBookings(): Promise<number> {
   // Fetch all CONFIRMED bookings — we'll classify them in JS so we can
   // use shootEndDate when present, shootDate otherwise
   const confirmed = await prisma.booking.findMany({
-    where: { status: 'CONFIRMED' },
+    where: { status: 'CONFIRMED', deletedAt: null },
     select: { id: true, shootDate: true, shootEndDate: true, estimatedWrap: true },
   })
 

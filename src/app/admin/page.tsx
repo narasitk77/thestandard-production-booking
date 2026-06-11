@@ -44,15 +44,23 @@ export default function AdminPage() {
   const [filter, setFilter] = useState('REQUESTED')
   // v1.35.2 — only show the "Upload" shortcut on cards to crew that can use it.
   const [canUpload, setCanUpload] = useState(false)
+  // v1.51 — soft delete (hide test queues) is an ADMIN power; the Deleted tab
+  // and the trash buttons only render for ADMIN.
+  const [isAdmin, setIsAdmin] = useState(false)
   useEffect(() => {
     fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.user?.canUpload) setCanUpload(true)
+      if (d?.user?.role === 'ADMIN') setIsAdmin(true)
     }).catch(() => {})
   }, [])
 
+  const showingDeleted = filter === 'DELETED'
+
   const fetch_ = useCallback(async () => {
     setLoading(true)
-    const params = new URLSearchParams({ limit: '50', ...(filter && { status: filter }) })
+    const params = filter === 'DELETED'
+      ? new URLSearchParams({ limit: '50', deleted: '1' })
+      : new URLSearchParams({ limit: '50', ...(filter && { status: filter }) })
     const res = await fetch(`/api/bookings?${params}`)
     const data = await res.json()
     setBookings(data.bookings || [])
@@ -112,6 +120,19 @@ export default function AdminPage() {
         >
           All
         </button>
+        {isAdmin && (
+          <button
+            onClick={() => setFilter('DELETED')}
+            title="คิวที่ถูกลบ (ซ่อนจากเว็บ แต่ยังอยู่ในฐานข้อมูล) — กู้คืนหรือลบถาวรได้จากที่นี่"
+            className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ml-auto ${
+              showingDeleted
+                ? 'border-gray-700 text-gray-800 font-medium'
+                : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            🗑 Deleted
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -127,6 +148,11 @@ export default function AdminPage() {
               <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
                 <div className="flex-1 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    {showingDeleted && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-800 text-white">
+                        DELETED
+                      </span>
+                    )}
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || STATUS_BADGE.REQUESTED}`}>
                       {b.status === 'REQUESTED' ? '[REQUESTED]' : statusLabel(b.status)}
                     </span>
@@ -154,7 +180,7 @@ export default function AdminPage() {
                       v1.29.2 — surfaces the actual Google Calendar state so
                       "approved but no event" is visible at a glance instead
                       of being hidden behind a button click on /admin/[id]. */}
-                  {(b.status === 'CONFIRMED' || b.status === 'COMPLETED') && (
+                  {!showingDeleted && (b.status === 'CONFIRMED' || b.status === 'COMPLETED') && (
                     <CalendarStatus
                       bookingId={b.id}
                       calendarEventId={b.calendarEventId}
@@ -166,8 +192,14 @@ export default function AdminPage() {
                   )}
                 </div>
 
-                <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto justify-end">
-                  {b.status === 'REQUESTED' && (
+                <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto justify-end flex-wrap">
+                  {showingDeleted && (
+                    <>
+                      <UndeleteButton bookingId={b.id} onDone={fetch_} />
+                      <HardDeleteButton bookingId={b.id} onDone={fetch_} />
+                    </>
+                  )}
+                  {!showingDeleted && b.status === 'REQUESTED' && (
                     <>
                       <Link href={`/admin/${b.id}`}
                         className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
@@ -177,7 +209,7 @@ export default function AdminPage() {
                       <CancelButton bookingId={b.id} onDone={fetch_} />
                     </>
                   )}
-                  {b.status === 'CONFIRMED' && (
+                  {!showingDeleted && b.status === 'CONFIRMED' && (
                     <>
                       {canUpload && (
                         <Link href={`/upload?bookingId=${b.id}`}
@@ -196,7 +228,7 @@ export default function AdminPage() {
                       </span>
                     </>
                   )}
-                  {b.status === 'COMPLETED' && (
+                  {!showingDeleted && b.status === 'COMPLETED' && (
                     <>
                       {canUpload && (
                         <Link href={`/upload?bookingId=${b.id}`}
@@ -214,8 +246,11 @@ export default function AdminPage() {
                       </span>
                     </>
                   )}
-                  {b.status === 'CANCELLED' && (
+                  {!showingDeleted && b.status === 'CANCELLED' && (
                     <RestoreButton bookingId={b.id} onDone={fetch_} />
+                  )}
+                  {!showingDeleted && isAdmin && (
+                    <SoftDeleteButton bookingId={b.id} onDone={fetch_} />
                   )}
                 </div>
               </div>
@@ -413,6 +448,88 @@ function relativeTime(iso: string): string {
   const day = Math.floor(hr / 24)
   if (day < 7) return `${day}d ago`
   return new Date(iso).toISOString().slice(0, 10)
+}
+
+/**
+ * v1.51 — soft delete (ADMIN only). Hides the booking from every web surface
+ * but keeps the row in the DB; restorable from the Deleted tab. The matching
+ * calendar event is removed server-side.
+ */
+function SoftDeleteButton({ bookingId, onDone }: { bookingId: string; onDone: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const handle = async () => {
+    if (!confirm('ลบ booking นี้ออกจากหน้าเว็บ?\n\nข้อมูลยังเก็บอยู่ในฐานข้อมูล — กู้คืนได้จากแท็บ 🗑 Deleted\n(event ใน Google Calendar จะถูกลบออก)')) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/${bookingId}/soft-delete`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      onDone()
+    } catch (e: any) {
+      alert('Delete failed: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <button onClick={handle} disabled={loading} title="ลบออกจากเว็บ (เก็บข้อมูลไว้ กู้คืนได้)"
+      className="px-3 py-1.5 text-xs border border-gray-300 text-gray-500 rounded hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50">
+      {loading ? '…' : '🗑 DELETE'}
+    </button>
+  )
+}
+
+/** v1.51 — bring a soft-deleted booking back onto the web surfaces. */
+function UndeleteButton({ bookingId, onDone }: { bookingId: string; onDone: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const handle = async () => {
+    if (!confirm('กู้คืน booking นี้กลับมาแสดงบนเว็บ?\n(ถ้าเป็นงาน CONFIRMED ให้กด Re-sync calendar อีกครั้งเพื่อสร้าง event ใหม่)')) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/${bookingId}/undelete`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      onDone()
+    } catch (e: any) {
+      alert('Restore failed: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <button onClick={handle} disabled={loading}
+      className="px-3 py-1.5 text-xs border border-yellow-400 text-yellow-700 bg-yellow-50 rounded hover:bg-yellow-500 hover:text-white transition-colors disabled:opacity-50">
+      {loading ? '…' : '↺ RESTORE'}
+    </button>
+  )
+}
+
+/**
+ * v1.51 — hard delete from the Deleted tab (existing v1.44 endpoint, first UI
+ * surface for it). Permanent: cascades episodes/uploads and cleans audit/OT.
+ */
+function HardDeleteButton({ bookingId, onDone }: { bookingId: string; onDone: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const handle = async () => {
+    if (!confirm('⚠️ ลบถาวร?\n\nbooking, episodes, uploads และ audit log ของใบนี้จะหายทั้งหมด — กู้คืนไม่ได้')) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/${bookingId}/delete`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      onDone()
+    } catch (e: any) {
+      alert('Delete failed: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <button onClick={handle} disabled={loading}
+      className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors disabled:opacity-50">
+      {loading ? '…' : 'ลบถาวร'}
+    </button>
+  )
 }
 
 function RestoreButton({ bookingId, onDone }: { bookingId: string; onDone: () => void }) {

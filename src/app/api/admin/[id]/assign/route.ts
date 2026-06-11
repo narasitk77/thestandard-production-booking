@@ -54,6 +54,11 @@ export async function POST(
 
     const existing = await prisma.booking.findUnique({ where: { id: params.id } })
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    // v1.51 — assigning a soft-deleted booking would re-create the calendar
+    // event + OT rows the delete just removed; restore it first.
+    if (existing.deletedAt) {
+      return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
+    }
 
     // Status logic: don't downgrade CONFIRMED bookings during re-assign.
     const nextStatus = existing.status === 'CONFIRMED' ? 'CONFIRMED' : 'ASSIGNED'

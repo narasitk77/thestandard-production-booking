@@ -34,6 +34,11 @@ const LOOKUP_SELECT = {
   program: { select: { code: true, name: true } },
 } as const
 
+// NOTE (v1.51): these lookups intentionally do NOT filter `deletedAt` — the
+// footage sync worker matches Drive files by Production ID, and a file shot
+// for a soft-deleted (hidden) booking should still attribute correctly
+// instead of degrading to parsed_no_booking. Soft delete hides web surfaces
+// only; ID slots and footage attribution stay live.
 export async function findBookingByProductionId(code: string): Promise<ProductionIdLookup> {
   if (!code) return null
   const booking = await prisma.booking.findUnique({

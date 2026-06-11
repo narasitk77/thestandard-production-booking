@@ -35,6 +35,8 @@ export async function POST(
       include: { outlet: true, program: true },
     })
     if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    // v1.51 — no messages on soft-deleted bookings
+    if (booking.deletedAt) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
 
     // Only the shoot's Producer (or an admin) may message about it.
     // Case-insensitive — stored producerEmail casing may differ from the session.

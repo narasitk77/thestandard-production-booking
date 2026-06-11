@@ -50,7 +50,8 @@ async function findBookingByCode(code: string) {
   const c = String(code || '').trim()
   if (!c) throw new McpToolError('code is required')
   const booking = await prisma.booking.findFirst({
-    where: { OR: [{ bookingCode: c }, { id: c }] },
+    // v1.51 — soft-deleted bookings are invisible to MCP clients too
+    where: { OR: [{ bookingCode: c }, { id: c }], deletedAt: null },
     include: bookingInclude,
   })
   if (!booking) throw new McpToolError(`Booking not found: ${c}`)
@@ -173,7 +174,8 @@ export function buildMcpRegistry(): McpRegistry {
     handlers: {
       async list_bookings(args) {
         const limit = Math.min(Math.max(1, Number(args.limit) || 50), 200)
-        const where: any = {}
+        // v1.51 — soft-deleted bookings are hidden from MCP listings
+        const where: any = { deletedAt: null }
         if (args.status) where.status = String(args.status)
         if (args.outlet) where.outlet = { code: String(args.outlet).toUpperCase() }
         if (args.from || args.to) {

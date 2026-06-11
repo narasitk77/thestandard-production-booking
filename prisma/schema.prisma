@@ -271,6 +271,11 @@ model Booking {
   calendarLastSyncedAt  DateTime?
   sheetRowIndex    Int?
   approvedAt       DateTime?
+  // v1.51.0 — soft delete for test/junk queues: row stays in the DB (episode
+  // IDs keep their sequence slots, audit history survives) but every web
+  // surface filters `deletedAt: null`. ADMIN-only; restorable from the
+  // Deleted tab on /admin. Hard delete (admin/[id]/delete) remains separate.
+  deletedAt        DateTime?
   outlet           Outlet        @relation(fields: [outletId], references: [id])
   outletId         String
   program          Program       @relation(fields: [programId], references: [id])

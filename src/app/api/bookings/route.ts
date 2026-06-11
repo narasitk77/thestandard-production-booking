@@ -22,6 +22,9 @@ export async function GET(request: NextRequest) {
     const outlet = searchParams.get('outlet')
     const date = searchParams.get('date')
     const scope = searchParams.get('scope') // 'mine' | 'all' | 'producer'
+    // v1.51 — deleted=1 (ADMIN only) lists soft-deleted bookings for the
+    // Deleted tab on /admin; every other request filters them out.
+    const showDeleted = searchParams.get('deleted') === '1' && session.role === 'ADMIN'
 
     // scope=producer → only shoots where this user is the Producer (their own
     // email — safe, no leak). Otherwise plain USERs are restricted to their own
@@ -41,6 +44,7 @@ export async function GET(request: NextRequest) {
 
     const where = {
       ...userFilter,
+      deletedAt: showDeleted ? { not: null } : null,
       ...(status && { status: status as any }),
       ...(outlet && { outlet: { code: outlet } }),
       ...(date && { shootDate: new Date(date) }),

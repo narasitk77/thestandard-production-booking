@@ -42,12 +42,14 @@ export async function GET(request: NextRequest) {
   }
 
   const scope = new URL(request.url).searchParams.get('scope')
-  const where =
+  const scopeFilter =
     scope === 'producer'
       ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
       : hasConsoleAccess(session.role)
         ? {}
         : { OR: [{ createdByEmail: session.email }, { assignedEmails: { has: session.email } }] }
+  // v1.51 — soft-deleted bookings never export
+  const where = { deletedAt: null, ...scopeFilter }
 
   const bookings = await prisma.booking.findMany({
     where,

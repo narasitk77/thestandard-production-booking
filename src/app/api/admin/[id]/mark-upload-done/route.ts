@@ -42,6 +42,10 @@ export async function POST(
       },
     })
     if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    // v1.51 — soft-deleted bookings are frozen; undelete first
+    if (booking.deletedAt) {
+      return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
+    }
 
     if (booking.status === 'COMPLETED') {
       return NextResponse.json({

@@ -23,6 +23,9 @@ export async function syncBookingOT(bookingId: string): Promise<{ created: numbe
   })
   if (!booking) return { created: 0 }
   if (booking.status === 'CANCELLED') return { created: 0 }
+  // v1.51 — never generate OT rows for soft-deleted bookings, whatever the
+  // caller (defense-in-depth: assign/restore call this after their own guards)
+  if (booking.deletedAt) return { created: 0 }
 
   const emails = (booking.assignedEmails || []).filter(Boolean)
   if (emails.length === 0) return { created: 0 }

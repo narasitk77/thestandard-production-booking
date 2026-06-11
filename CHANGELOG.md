@@ -5,6 +5,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.51.0] — 2026-06-11
+
+### Added — ปุ่มลบคิว (soft delete): ซ่อนจากเว็บ แต่ข้อมูลยังอยู่ในฐานข้อมูล
+
+สำหรับเก็บกวาดคิวทดสอบ — ลบแล้วหายจากทุกหน้าเว็บ แต่แถวยังอยู่ใน DB
+(Episode ID ไม่โดน reuse, ประวัติ audit ไม่หาย) ต่างจากลบถาวร (v1.44)
+ที่ล้างทุกอย่างทิ้ง
+
+- **ปุ่ม 🗑 DELETE บนการ์ดทุกใบใน `/admin`** (ADMIN เท่านั้น) —
+  กดแล้ว booking หายจาก: admin queue, dashboard, calendar, home,
+  my-bookings, producer dashboard, upload, CSV export และ MCP ·
+  event ใน Google Calendar ถูกลบ + auto-OT rows ถูกเคลียร์
+  (เหมือนตอน cancel)
+- **แท็บ 🗑 Deleted ใน `/admin`** (ADMIN เท่านั้น) — ดูคิวที่ลบไป
+  พร้อมปุ่ม **↺ RESTORE** (กู้คืนกลับมาแสดง — งาน CONFIRMED กด
+  Re-sync calendar ต่อเพื่อสร้าง event ใหม่) และ **ลบถาวร**
+  (endpoint v1.44 เดิม ได้ UI ครั้งแรก — ลบจริงทั้ง episodes/uploads/audit)
+- **Schema:** คอลัมน์ใหม่ `bookings.deletedAt` (nullable) — apply อัตโนมัติ
+  ผ่าน `prisma db push` ตอน start container ไม่ต้อง migrate มือ
+- **คิวที่ลบถูก "แช่แข็ง" ทุกทาง** (ผ่าน adversarial review ก่อน ship):
+  PATCH / approve / assign / restore / mark-upload-done / cancel →
+  409 ต้อง restore ก่อน (กันเคส assign ที่จะสร้าง calendar event
+  กลับมาใหม่) · upload ไฟล์เข้าใบที่ลบไม่ได้ (`canUploadToBooking`) ·
+  หน้า upload-review กับตัวนับใน Sheet Monitor ไม่นับใบที่ลบ ·
+  history/producer-message มองไม่เห็นใบที่ลบ · ดู detail ได้เฉพาะ
+  ADMIN (มีแบนเนอร์ 🗑 บอกสถานะ) · reconciler / auto-complete /
+  OT sync ข้ามคิวที่ลบทั้งหมด
+- หมายเหตุ: แถวใน Google Sheet (Bookings tab) ไม่ถูกแตะ —
+  soft delete มีผลเฉพาะหน้าเว็บ/ปฏิทินตามที่ตั้งใจ
+
 ## [1.50.2] — 2026-06-11
 
 ### Fixed — USER เปิดดู booking ของตัวเองจาก My Bookings ได้แล้ว

@@ -21,9 +21,14 @@ export async function GET(
 
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
-      select: { id: true, bookingCode: true },
+      select: { id: true, bookingCode: true, deletedAt: true },
     })
     if (!booking) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+    // v1.51 — soft-deleted bookings are invisible except to ADMIN; same rule
+    // as the detail GET, so history can't confirm a hidden booking exists.
+    if (booking.deletedAt && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 

@@ -28,7 +28,7 @@ export async function GET() {
   // Pull all CONFIRMED bookings + their uploads. For a typical week's
   // backlog this is a few dozen rows; we don't bother paginating yet.
   const bookings = await prisma.booking.findMany({
-    where: { status: 'CONFIRMED' },
+    where: { status: 'CONFIRMED', deletedAt: null },
     orderBy: { shootDate: 'desc' },
     select: {
       id: true,

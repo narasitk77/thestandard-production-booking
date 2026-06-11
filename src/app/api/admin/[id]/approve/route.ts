@@ -27,6 +27,10 @@ export async function POST(
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
+    // v1.51 — soft-deleted bookings can't be approved; restore first
+    if (booking.deletedAt) {
+      return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
+    }
 
     const approvedAt = new Date()
 

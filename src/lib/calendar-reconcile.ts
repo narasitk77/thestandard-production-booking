@@ -414,6 +414,8 @@ export async function reconcileCalendarGuests(options: {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
   const bookings = await prisma.booking.findMany({
     where: {
+      // v1.51 — never manage calendar events for soft-deleted bookings
+      deletedAt: null,
       OR: [
         {
           status: 'CONFIRMED',
@@ -465,6 +467,17 @@ export async function reconcileSingleBooking(
     },
   })
   if (!booking) return null
+  if (booking.deletedAt) {
+    // v1.51 — soft-deleted bookings never get calendar events
+    return {
+      bookingId: booking.id,
+      bookingCode: booking.bookingCode,
+      eventId: null,
+      action: 'skipped',
+      assignedEmails: cleanEmails(booking.assignedEmails),
+      error: 'booking is deleted',
+    }
+  }
   if (booking.status !== 'CONFIRMED') {
     // Don't create calendar events for bookings that aren't approved.
     // Same invariant the bulk reconciler enforces via its WHERE clause.

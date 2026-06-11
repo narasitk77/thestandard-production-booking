@@ -121,6 +121,7 @@ export async function POST(request: NextRequest) {
         bookingCode: true,
         status: true,
         assignedEmails: true,
+        deletedAt: true, // v1.51 — canUploadToBooking rejects deleted bookings
         // --- booking-info.txt context ---
         projectName: true,
         projectId: true,

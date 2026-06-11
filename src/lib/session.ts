@@ -102,7 +102,7 @@ export async function canUploadToBooking(
   email: string | null | undefined,
   bookingIdOrRow:
     | string
-    | { id: string; status: string; assignedEmails: string[] },
+    | { id: string; status: string; assignedEmails: string[]; deletedAt?: Date | null },
 ): Promise<UploadAccessCheck> {
   if (!email) return { ok: false, reason: 'NO_UPLOAD_ROLE' }
   const lower = email.toLowerCase()
@@ -131,10 +131,12 @@ export async function canUploadToBooking(
   const booking = typeof bookingIdOrRow === 'string'
     ? await prisma.booking.findUnique({
         where: { id: bookingIdOrRow },
-        select: { id: true, status: true, assignedEmails: true },
+        select: { id: true, status: true, assignedEmails: true, deletedAt: true },
       })
     : bookingIdOrRow
   if (!booking) return { ok: false, reason: 'BOOKING_NOT_FOUND', isAdmin }
+  // v1.51 — soft-deleted bookings accept no uploads and hide their history
+  if (booking.deletedAt) return { ok: false, reason: 'BOOKING_NOT_FOUND', isAdmin }
 
   if (booking.status !== 'CONFIRMED' && booking.status !== 'COMPLETED') {
     return { ok: false, reason: 'BAD_STATUS', isAdmin }

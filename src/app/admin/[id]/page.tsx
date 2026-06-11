@@ -21,6 +21,7 @@ interface BookingDetail {
   outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
   program: { code: string; name: string }
   episodes: Episode[]
+  deletedAt?: string | null // v1.51 — soft-deleted (visible to ADMIN only)
   calendarEventId?: string
   // v1.32.2 — calendar sync visibility fields (see Booking model in schema.prisma).
   calendarSyncStatus?: 'PENDING' | 'OK' | 'FAILED' | null
@@ -387,6 +388,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
         <ArrowLeft className="w-4 h-4" /> Admin Console
       </Link>
+
+      {/* v1.51 — soft-deleted: only ADMIN can open this page; actions 409 server-side */}
+      {booking.deletedAt && (
+        <div className="bg-gray-800 text-white rounded-lg px-4 py-3 text-sm flex items-center gap-2 flex-wrap">
+          <span className="font-medium">🗑 Booking นี้ถูกลบแล้ว</span>
+          <span className="text-gray-300">— ซ่อนจากทุกหน้าเว็บ ปุ่มแก้ไข/approve ใช้ไม่ได้จนกว่าจะกู้คืน
+            (แท็บ 🗑 Deleted ใน Admin Console)</span>
+        </div>
+      )}
 
       {/* Header */}
       <div className="gf-header p-6">

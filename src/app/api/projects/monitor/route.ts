@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
     if (allProjectIds.length > 0) {
       const rows = await prisma.booking.groupBy({
         by: ['projectId'],
-        where: { projectId: { in: allProjectIds }, status: { not: 'CANCELLED' } },
+        where: { projectId: { in: allProjectIds }, status: { not: 'CANCELLED' }, deletedAt: null },
         _count: { id: true },
       })
       for (const row of rows) {

@@ -5,6 +5,24 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-11 · v1.51.0 — Booking soft delete (schema: `bookings.deleted_at`)
+
+**Schema change.** New nullable column `deletedAt` on `bookings` — applied
+automatically by `prisma db push` in `start.sh` on the next stack update
+(additive, no data migration, existing rows stay NULL = visible).
+
+**What.** ADMIN-only soft delete for test/junk queues: 🗑 DELETE on the
+/admin cards hides the booking from every web surface (and MCP) while the
+row stays in the DB. New 🗑 Deleted tab on /admin lists hidden bookings
+with ↺ RESTORE (undelete) and ลบถาวร (the existing v1.44 hard-delete
+endpoint, now with its first UI). Soft delete removes the Google Calendar
+event and auto-OT rows, same as a cancel.
+
+**Deploy.** Normal flow — point the stack at the new `sha-<commit>` tag and
+Update; no new env vars.
+
+---
+
 ## 2026-06-10 · v1.49.0 — MCP endpoint (new env vars: MCP_API_KEY / MCP_ACTOR_EMAIL)
 
 **What.** `/api/mcp` lets external AI clients (claude.ai connectors,
