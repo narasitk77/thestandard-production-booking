@@ -4,7 +4,7 @@ import { bookingShowName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { format, isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
-import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle } from 'lucide-react'
+import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react'
 import StatusPill from './_components/StatusPill'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -100,6 +100,9 @@ export default function HomeOverview() {
         </Link>
       </div>
 
+      {/* กติกาการจองคิว — สื่อสารกับทุกฝ่ายก่อนกดจอง (v1.52) */}
+      <BookingRulesNotice />
+
       {/* KPI row */}
       <div className="grid grid-cols-3 gap-3 mb-4">
         <KpiCard label="Today" value={counts.today} icon={<CalendarIcon className="w-4 h-4 text-gray-400" />} href="/calendar" />
@@ -170,6 +173,109 @@ export default function HomeOverview() {
 }
 
 /* ---------- Panels & rows ---------- */
+
+/**
+ * v1.52 — กติกาการจองคิวจากทีมโปรดักชัน (พี่ตุ้ย / Production Coordinator).
+ * Pinned to the home page for every user. Collapsible — the state sticks in
+ * localStorage so daily users keep a dense dashboard while new users see the
+ * full guide on first visit.
+ */
+const RULES_COLLAPSED_KEY = 'probook.rules.collapsed.v1'
+
+function BookingRulesNotice() {
+  const [open, setOpen] = useState(true)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(RULES_COLLAPSED_KEY) === '1') setOpen(false)
+    } catch {}
+  }, [])
+  const toggle = () => {
+    setOpen(o => {
+      try { localStorage.setItem(RULES_COLLAPSED_KEY, o ? '1' : '0') } catch {}
+      return !o
+    })
+  }
+
+  return (
+    <div className="ops-card mb-4 overflow-hidden border-amber-200 bg-amber-50/50">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-sm font-semibold text-gray-800">
+          🚨 คู่มือการใช้งาน Production Booking โปรดอ่านก่อนจองคิว!
+        </span>
+        <ChevronDown className={`w-4 h-4 text-gray-500 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="px-3 sm:px-4 pb-4 text-sm text-gray-700 space-y-3 border-t border-amber-200/60 pt-3">
+          <p>
+            เว็บไซต์นี้ถูกจัดทำขึ้นเพื่อให้ทุกคนที่เกี่ยวข้องกับการทำงานวิดีโอ
+            สามารถประเมินการใช้ทรัพยากรได้สะดวกและแม่นยำขึ้น
+            รวมถึงทีมโปรดักชันเองก็สามารถจัดสรรทรัพยากรได้มีประสิทธิภาพยิ่งขึ้น
+            โดยมีรายละเอียดที่อยากให้ทุกคนรับทราบก่อนกดจองคิวถ่ายทำกันสักนิด ดังนี้ครับ
+          </p>
+
+          <div>
+            <div className="font-semibold text-gray-800 mb-1">✨ ทรัพยากรหลักที่เรามีให้บริการ</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5 text-[13px]">
+              <div>📷 Camera: Sony FX6 จำนวน 3 ตัว · Sony FX3 จำนวน 3 ตัว</div>
+              <div>🎥 Videographer: 8 คน</div>
+              <div>🎙 Sound Engineer: 4 คน</div>
+              <div>🎛 Switcher: 1 คน</div>
+              <div>📸 Photographer: 1 คน</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="font-semibold text-gray-800 mb-1">⚡️ ก่อนจองคิวต้องรู้</div>
+            <ul className="space-y-2 list-none">
+              <li>
+                <span className="font-medium text-gray-800">First Come, First Served:</span>{' '}
+                การจัดสรรทรัพยากรอุปกรณ์และทีมงานจะเป็นไปตามลำดับการแจ้งขอคิว ดังนั้น
+                ก่อนจองคิวทุกครั้งอยากให้ลองเช็กในตารางด้านบนสักนิด
+                ว่าในช่วงเวลาเดียวกันนั้นมีคิวถ่ายทำอื่นๆ จองไว้แล้วมากน้อยแค่ไหน
+                ถ้าเกินทรัพยากรที่เรามีให้บริการ
+                แปลว่าจะมีค่าใช้จ่ายเพิ่มเติมเพื่อจ้างฟรีแลนซ์และเช่าอุปกรณ์นะครับ
+              </li>
+              <li>
+                <span className="font-medium text-gray-800">เราดีล คุณจ่าย:</span>{' '}
+                ในกรณีจำเป็นต้องจ้างฟรีแลนซ์และเช่าอุปกรณ์จริงๆ เรายินดีช่วยจัดหาให้ได้ครับ
+                แต่ค่าใช้จ่ายส่วนนี้จะถูกคิดเป็นต้นทุนการผลิตวิดีโอของคุณนะ
+              </li>
+              <li>
+                <span className="font-medium text-gray-800">กองทัพต้องเดินด้วยท้อง:</span>{' '}
+                งานเช้างานค่ำเราไม่เกี่ยง แต่เพื่อการทำงานอย่างมีพลัง
+                ทีมงานจำเป็นต้องขอช่วงเบรกอย่างเหมาะสมครับ
+                จึงอยากขอความร่วมมือทุกคนหลีกเลี่ยงการจองคิวทับช่วงพักกลางวัน
+                โดยคิวถ่ายทำในช่วงบ่าย ขอให้เริ่มเซ็ตอัพตอน 13.00 น. เป็นต้นไป
+              </li>
+            </ul>
+          </div>
+
+          <p className="text-[13px]">
+            📌 หมายเหตุ: ทุกคนสามารถตรวจสอบและอัพเดตข้อมูลการเซ็ตอัพโปรดักชันของทุกรายการได้จาก{' '}
+            <a
+              href="https://shorturl.at/dso1S"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-primary underline hover:no-underline font-medium"
+            >
+              Production Setting Handbook
+            </a>
+          </p>
+
+          <p className="text-[13px] text-gray-600">
+            ขอบคุณสำหรับทุกความร่วมมือครับ — หากมีข้อสงสัยใดๆ
+            สามารถติดต่อสอบถามได้ที่ พี่ตุ้ย Production Coordinator ได้เลยครับ :)
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function KpiCard({ label, value, accent, icon, href }: {
   label: string
