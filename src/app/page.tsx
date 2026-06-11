@@ -255,18 +255,6 @@ function BookingRulesNotice() {
             </ul>
           </div>
 
-          <p className="text-[13px]">
-            📌 หมายเหตุ: ทุกคนสามารถตรวจสอบและอัพเดตข้อมูลการเซ็ตอัพโปรดักชันของทุกรายการได้จาก{' '}
-            <a
-              href="https://shorturl.at/dso1S"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand-primary underline hover:no-underline font-medium"
-            >
-              Production Setting Handbook
-            </a>
-          </p>
-
           <p className="text-[13px] text-gray-600">
             ขอบคุณสำหรับทุกความร่วมมือครับ — หากมีข้อสงสัยใดๆ
             สามารถติดต่อสอบถามได้ที่ พี่ตุ้ย Production Coordinator ได้เลยครับ :)
