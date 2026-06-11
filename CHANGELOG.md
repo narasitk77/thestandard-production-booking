@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.53.0] — 2026-06-11
+
+### Added — Switcher + Photographer ในตัวเลือก Crew Required
+
+- ฟอร์มจอง (`/new` step People & Crew) เพิ่มตัวเลือก **Photographer**
+  และ **Switcher** ใน Crew Required — สอดคล้องกับหน้า Assign ที่มี
+  section ทั้งสองตำแหน่ง (พร้อมรายชื่อใน roster) อยู่แล้ว
+  แต่ producer ไม่เคยขอได้จากฟอร์ม
+- ลำดับตัวเลือกเรียงตาม section ของหน้า Assign: Videographer · Sound ·
+  Photographer · Switcher · DIT · Lighting · Virtual Production ·
+  Art Director
+- ค่าใหม่ไหลไปทุก surface เดิมอัตโนมัติ (ปฏิทิน Google/เว็บ, อีเมล crew,
+  Bookings sheet, CSV export) — `crewRequired` เป็น list แสดงผลตรง ๆ
+
 ## [1.52.1] — 2026-06-11
 
 ### Changed

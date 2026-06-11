@@ -218,7 +218,10 @@ export const PRODUCERS = [
   'ต้น', 'โบ', 'เจน', 'แอม', 'พลอย', 'ฝ้าย', 'มิ้น', 'ออ', 'บี', 'ปิ๊ก',
 ]
 
-export const CREW_OPTIONS = ['Videographer', 'Sound', 'DIT', 'Lighting', 'Virtual Production', 'Art Director']
+// v1.53 — ordered to mirror the assign sections on /admin/[id]
+// (ROLE_ORDER in src/lib/team-roster.ts): Photographer + Switcher have
+// roster sections, so the form should let producers request them.
+export const CREW_OPTIONS = ['Videographer', 'Sound', 'Photographer', 'Switcher', 'DIT', 'Lighting', 'Virtual Production', 'Art Director']
 
 export const CATEGORY_OPTIONS = [
   { value: 'ORIGINAL_CONTENT', label: 'Original Content' },
