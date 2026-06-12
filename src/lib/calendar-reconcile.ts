@@ -420,8 +420,18 @@ export async function reconcileCalendarGuests(options: {
         {
           status: 'CONFIRMED',
           assignedEmails: { isEmpty: false },
+          // v1.54.1 — skip rows whose approve background-create is still in
+          // flight (fresh PENDING) so the reconciler can't double-create the
+          // event in the seconds between approve commit and eventId save.
+          NOT: {
+            calendarSyncStatus: 'PENDING',
+            calendarLastSyncedAt: { gte: fiveMinutesAgo },
+          },
         },
         {
+          // v1.54.1 — status filter added: a booking cancelled while stuck
+          // PENDING must not get a brand-new event minted for it.
+          status: 'CONFIRMED',
           calendarSyncStatus: 'PENDING',
           calendarLastSyncedAt: { lt: fiveMinutesAgo },
         },

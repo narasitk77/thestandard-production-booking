@@ -1,7 +1,7 @@
 'use client'
 
 import { bookingShowName } from '@/lib/display'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
@@ -56,16 +56,28 @@ export default function AdminPage() {
 
   const showingDeleted = filter === 'DELETED'
 
+  // v1.54.1 — limit raised 50→200 (parity with the other list surfaces; at 50
+  // the desc sort silently dropped the most imminent rows), the fetch is
+  // race-guarded so a slow earlier tab can't overwrite a faster later one,
+  // and loading always clears even when the request fails.
+  const fetchSeq = useRef(0)
   const fetch_ = useCallback(async () => {
+    const seq = ++fetchSeq.current
     setLoading(true)
-    const params = filter === 'DELETED'
-      ? new URLSearchParams({ limit: '50', deleted: '1' })
-      : new URLSearchParams({ limit: '50', ...(filter && { status: filter }) })
-    const res = await fetch(`/api/bookings?${params}`)
-    const data = await res.json()
-    setBookings(data.bookings || [])
-    setTotal(data.total || 0)
-    setLoading(false)
+    try {
+      const params = filter === 'DELETED'
+        ? new URLSearchParams({ limit: '200', deleted: '1' })
+        : new URLSearchParams({ limit: '200', ...(filter && { status: filter }) })
+      const res = await fetch(`/api/bookings?${params}`)
+      const data = await res.json()
+      if (seq !== fetchSeq.current) return // stale response — a newer tab fetch won
+      setBookings(data.bookings || [])
+      setTotal(data.total || 0)
+    } catch {
+      if (seq === fetchSeq.current) setBookings([])
+    } finally {
+      if (seq === fetchSeq.current) setLoading(false)
+    }
   }, [filter])
 
   useEffect(() => { fetch_() }, [fetch_])
@@ -142,6 +154,12 @@ export default function AdminPage() {
           No {filter || ''} bookings.
         </div>
       ) : (
+        <>
+        {total > bookings.length && (
+          <p className="text-xs text-gray-400 mb-2">
+            แสดง {bookings.length} จาก {total} รายการ (เรียงตามวันถ่ายล่าสุด)
+          </p>
+        )}
         <div className="space-y-3">
           {bookings.map(b => (
             <div key={b.id} className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
@@ -257,6 +275,7 @@ export default function AdminPage() {
             </div>
           ))}
         </div>
+        </>
       )}
     </div>
   )

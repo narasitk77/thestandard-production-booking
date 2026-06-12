@@ -274,13 +274,24 @@ export async function DELETE(
     // for the audit log so retrospective reads can see what we cancelled.
     const before = await prisma.booking.findUnique({
       where: { id: params.id },
-      select: { id: true, status: true, bookingCode: true, createdByEmail: true, deletedAt: true },
+      select: {
+        id: true, status: true, bookingCode: true, createdByEmail: true,
+        deletedAt: true, calendarEventId: true, sheetRowIndex: true,
+      },
     })
     if (!before) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
     if (before.deletedAt) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+    // v1.54.1 — same transition rules as PATCH (CANCELLED is terminal;
+    // COMPLETED can't be cancelled). Previously this path skipped the
+    // whitelist entirely.
+    try {
+      assertStatusTransition(before.status as BookingStatus, 'CANCELLED')
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || 'Invalid status transition' }, { status: 400 })
     }
 
     // v1.50 — cancel is for the requester or console staff. Previously any
@@ -292,8 +303,20 @@ export async function DELETE(
 
     await prisma.booking.update({
       where: { id: params.id },
-      data: { status: 'CANCELLED' },
+      data: { status: 'CANCELLED', calendarEventId: null },
     })
+
+    // v1.54.1 — same cleanup as the PATCH cancel path: previously this route
+    // flipped the status but left the Google Calendar event live (the
+    // reconciler ignores CANCELLED rows, so it never got cleaned up), kept
+    // the sheet row saying CONFIRMED, and let auto-OT rows keep counting.
+    if (before.calendarEventId) {
+      deleteCalendarEvent(before.calendarEventId).catch(() => {})
+    }
+    if (before.sheetRowIndex) {
+      updateBookingRow(before.bookingCode || '', { status: 'CANCELLED' }).catch(() => {})
+    }
+    clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
 
     logAudit({
       actorEmail: session.email,

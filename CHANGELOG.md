@@ -5,6 +5,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.54.1] — 2026-06-12
+
+### Fixed — ชุดแก้บัคจาก multi-agent bug hunt (48 candidates → ยืนยันจริง 13)
+
+**Workflow integrity (สำคัญสุด):**
+
+- **Approve ชุบชีวิตใบที่ cancel แล้วได้** — route ไม่เคยเช็คสถานะ:
+  ใบ CANCELLED กด Approve ได้เลย (UI ก็โชว์ปุ่ม) เด้งกลับเป็น CONFIRMED
+  พร้อมสร้าง calendar event + OT ใหม่ → ตอนนี้ 409 ต้อง Restore ก่อน
+  และการเขียนเป็น conditional update กันสองแอดมินกดแข่งกัน
+- **Approve สร้าง calendar event ซ้ำ** — 3 ทาง: กดพร้อมกันสองคน /
+  re-approve ใบ COMPLETED ที่ event เดิมยังอยู่ / reconciler ตัดหน้า
+  background create → กันครบ: เช็ค event เดิมก่อนสร้าง, persist แบบ
+  guarded (ถ้าใบถูก cancel ระหว่างสร้าง ลบ event ทิ้ง),
+  reconciler ข้ามใบที่ PENDING สด ๆ และไม่สร้าง event ให้ใบที่ไม่ CONFIRMED
+- **DELETE /api/bookings/[id] (cancel) ทิ้ง side effects** — เดิมแค่เปลี่ยน
+  สถานะ: calendar event ยังค้าง (reconciler ไม่เก็บใบ CANCELLED),
+  sheet ยังเขียน CONFIRMED, OT ยังนับเงิน → ทำครบเหมือน PATCH cancel
+  แล้ว + เช็ค transition (cancel ใบ COMPLETED ไม่ได้แล้ว)
+- **autoComplete แข่งกับ cancel** — updateMany เช็คสถานะซ้ำตอนเขียน
+  กันใบที่เพิ่ง cancel โดนปั๊มเป็น COMPLETED
+
+**Dashboard / UI:**
+
+- **หน้า Home เรียงผิดทาง** — "My upcoming" กับ "Needs attention"
+  โชว์งานไกลสุดก่อนแล้วตัดงานใกล้ทิ้ง (API ส่ง desc) → เรียง
+  soonest-first ก่อน slice ทุก panel · KPI "Needs attention" เคยถูก cap
+  ที่ 6 → นับจากจำนวนจริง
+- **/admin โชว์แค่ 50 แถวเงียบ ๆ** → ขยายเป็น 200 + บอก "แสดง X จาก Y"
+  · กัน fetch แข่งกันตอนสลับแท็บเร็ว ๆ (ผลแท็บเก่าทับแท็บใหม่)
+  · loading ไม่ค้างเมื่อ fetch พัง
+- **Approve บน /admin/[id] ไม่อัปเดต sync chip** — อ่าน field ที่ API
+  ไม่ได้ส่ง → ใช้ booking จาก response แล้ว เห็น "sync pending" ทันที
+- **Team Workload ช่วงวันที่เพี้ยนก่อน 07:00 น.** — ใช้ UTC date
+  (toISOString) → ใช้วันที่ local แล้ว
+
+**ที่ตรวจพบแต่ยังไม่แก้ในรอบนี้** (บันทึกไว้เป็น backlog): CA fallback
+"จองโดยไม่มี Project ID" ที่ฟอร์มสัญญาแต่ server ปฏิเสธ 400 เสมอ
+(ต้องตัดสินใจ product ก่อน) · ลิงก์ Bookings ใน Sheet Monitor ที่ส่ง
+`?projectId=` แต่ dashboard ไม่อ่าน · sequence race ตอนสร้าง booking
+พร้อมกัน (เจอ 500 แทน 409 — เกิดยากบนทีมเล็ก)
+
 ## [1.54.0] — 2026-06-12
 
 ### Changed — Director ของ Content Agency เป็น optional

@@ -55,34 +55,41 @@ export default function HomeOverview() {
   const loading = allBookings === null || myBookings === null
 
   // Buckets — purely client-side splits of the two fetches.
-  const { today, thisWeek, mine, attention } = useMemo(() => {
+  const { today, thisWeek, mine, attention, attentionTotal } = useMemo(() => {
     const today0 = startOfToday()
     const isUpcoming = (b: Booking) => {
       const d = parseISO(b.shootDate)
       return !isNaN(d.getTime()) && (isToday(d) || isAfter(d, today0))
     }
+    // v1.54.1 — the API returns shootDate DESC; every "upcoming" panel must
+    // re-sort ascending (soonest first) before slicing, or the nearest shoots
+    // are the ones silently dropped (same fix my-bookings already carries).
+    const byDateAsc = (a: Booking, b: Booking) => a.shootDate.localeCompare(b.shootDate)
     const bs = allBookings || []
     const upcoming = bs.filter(isUpcoming)
+    const attentionAll = bs.filter(b => b.status === 'REQUESTED').sort(byDateAsc)
     return {
       today: upcoming.filter(b => isToday(parseISO(b.shootDate))),
       thisWeek: upcoming.filter(b => {
         const d = parseISO(b.shootDate)
         return !isToday(d) && isThisWeek(d, { weekStartsOn: 1 })
-      }),
-      // "My upcoming" — the user's own non-cancelled upcoming items, capped
-      // at 6, from the scope=mine fetch.
-      mine: (myBookings || []).filter(isUpcoming).filter(b => b.status !== 'CANCELLED').slice(0, 6),
+      }).sort(byDateAsc),
+      // "My upcoming" — the user's own non-cancelled upcoming items, soonest
+      // first, capped at 6, from the scope=mine fetch.
+      mine: (myBookings || []).filter(isUpcoming).filter(b => b.status !== 'CANCELLED').sort(byDateAsc).slice(0, 6),
       // "Attention" — REQUESTED bookings (waiting for coordinator action).
       // For an operator-style view this is the single most useful filter.
-      attention: bs.filter(b => b.status === 'REQUESTED').slice(0, 6),
+      attention: attentionAll.slice(0, 6),
+      // KPI shows the real backlog, not the sliced panel length
+      attentionTotal: attentionAll.length,
     }
   }, [allBookings, myBookings])
 
   const counts = useMemo(() => ({
     today: today.length,
     week: thisWeek.length,
-    attention: attention.length,
-  }), [today, thisWeek, attention])
+    attention: attentionTotal,
+  }), [today, thisWeek, attentionTotal])
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
@@ -148,7 +155,7 @@ export default function HomeOverview() {
         {/* Needs attention */}
         <Panel
           title="Needs attention"
-          subtitle={attention.length === 0 ? 'All caught up.' : `${attention.length} requested`}
+          subtitle={attentionTotal === 0 ? 'All caught up.' : `${attentionTotal} requested`}
           href="/my-bookings"
           loading={loading}
         >

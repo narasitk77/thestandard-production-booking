@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { createCalendarEvent } from '@/lib/google-calendar'
+import { createCalendarEvent, deleteCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
@@ -31,14 +31,28 @@ export async function POST(
     if (booking.deletedAt) {
       return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
     }
+    // v1.54.1 — CANCELLED is terminal (booking-status.ts whitelist); the
+    // sanctioned revival is /restore → REQUESTED → re-approve. Without this
+    // guard one click resurrected a cancelled shoot straight onto calendars.
+    if (booking.status === 'CANCELLED') {
+      return NextResponse.json({ error: 'Booking is cancelled — restore it first' }, { status: 409 })
+    }
 
     const approvedAt = new Date()
 
     // 1) Update DB immediately so the user gets instant feedback.
     //    v1.32.2 — also set calendarSyncStatus=PENDING so the UI shows
     //    a "sync pending" chip until the background task finishes.
-    const updated = await prisma.booking.update({
-      where: { id: params.id },
+    //    v1.54.1 — conditional write: only statuses that may become CONFIRMED
+    //    (REQUESTED/ASSIGNED, plus COMPLETED = the sanctioned re-open path).
+    //    count 0 means another admin cancelled/approved/deleted in the gap —
+    //    409 instead of silently double-approving (and double-creating events).
+    const writes = await prisma.booking.updateMany({
+      where: {
+        id: params.id,
+        deletedAt: null,
+        status: { in: ['REQUESTED', 'ASSIGNED', 'COMPLETED'] },
+      },
       data: {
         status: 'CONFIRMED',
         approvedAt,
@@ -46,12 +60,24 @@ export async function POST(
         calendarSyncError: null,
         calendarLastSyncedAt: new Date(),
       },
+    })
+    if (writes.count === 0) {
+      return NextResponse.json(
+        { error: 'Booking changed state — reload the page (already confirmed, cancelled, or deleted)' },
+        { status: 409 },
+      )
+    }
+    const updated = await prisma.booking.findUnique({
+      where: { id: params.id },
       include: {
         outlet: true,
         program: true,
         episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
       },
     })
+    if (!updated) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
 
     // 2) Fire calendar + sheet + OT in background; user doesn't wait.
     //    v1.32.2 — record OK / FAILED on completion so the UI never
@@ -59,6 +85,24 @@ export async function POST(
     //    FAILED rows every 10 min.
     ;(async () => {
       try {
+        // v1.54.1 — a re-approved COMPLETED booking still has its live event;
+        // creating another would duplicate it on the shared calendar. Keep the
+        // existing event — the reconciler verifies/patches it on its next tick.
+        if (booking.calendarEventId) {
+          await prisma.booking.update({
+            where: { id: params.id },
+            data: { calendarSyncStatus: 'OK', calendarLastSyncedAt: new Date() },
+          }).catch(e => console.error('save calendarSyncStatus error:', e?.message))
+          if (booking.sheetRowIndex) {
+            await updateBookingRow(booking.bookingCode || '', {
+              status: 'CONFIRMED',
+              calendarEventId: booking.calendarEventId,
+              approvedAt: approvedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
+            }).catch(e => console.error('updateBookingRow error:', e?.message))
+          }
+          return
+        }
+
         const calendarEventId = await createCalendarEvent({
           id: booking.id,
           bookingCode: booking.bookingCode,
@@ -86,15 +130,26 @@ export async function POST(
           requireAttendees: booking.assignedEmails.length > 0,
         })
         if (calendarEventId) {
-          await prisma.booking.update({
-            where: { id: params.id },
+          // v1.54.1 — guarded persist: if the booking was cancelled or
+          // deleted while the event was being created, drop the fresh event
+          // instead of attaching it to a row nothing will ever reconcile.
+          const saved = await prisma.booking.updateMany({
+            where: { id: params.id, status: 'CONFIRMED', deletedAt: null },
             data: {
               calendarEventId,
               calendarSyncStatus: 'OK',
               calendarSyncError: null,
               calendarLastSyncedAt: new Date(),
             },
-          }).catch(e => console.error('save calendarEventId error:', e?.message))
+          }).catch(e => {
+            console.error('save calendarEventId error:', e?.message)
+            return null
+          })
+          if (saved && saved.count === 0) {
+            console.warn(`[approve] booking ${params.id} changed state mid-create — deleting orphan event ${calendarEventId}`)
+            deleteCalendarEvent(calendarEventId).catch(e =>
+              console.warn(`[approve] orphan event delete failed: ${e}`))
+          }
         } else {
           // createCalendarEvent returned null without throwing — unusual
           // (post-v1.29.3 it should always throw). Treat as failure so

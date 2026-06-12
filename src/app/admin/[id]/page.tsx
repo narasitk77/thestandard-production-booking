@@ -311,7 +311,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       const res = await fetch(`/api/admin/${id}/approve`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setBooking(prev => prev ? { ...prev, status: 'CONFIRMED', calendarEventId: data.calendarEventId } : prev)
+      // v1.54.1 — the route returns { booking } (status, calendarSyncStatus
+      // PENDING, calendarLastSyncedAt); merge it so the sync-pending chip
+      // shows immediately instead of after a manual reload.
+      setBooking(prev => data.booking ? (prev ? { ...prev, ...data.booking } : data.booking) : prev)
       setApproved(true)
     } catch (e: any) {
       setError(e.message)

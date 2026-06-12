@@ -58,13 +58,19 @@ const STATUS_PIE: { name: string; key: string; color: string }[] = [
   { name: 'Cancelled', key: 'CANCELLED', color: '#94A3B8' },
 ]
 
+// v1.54.1 — local calendar dates, NOT toISOString (UTC): between 00:00 and
+// 06:59 Bangkok the UTC date is still yesterday, which shifted the default
+// workload range a day back (and monthStart into the previous month).
+function localISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return localISO(new Date())
 }
 function monthStartISO(): string {
   const d = new Date()
   d.setDate(1)
-  return d.toISOString().slice(0, 10)
+  return localISO(d)
 }
 
 export default function DashboardPage() {

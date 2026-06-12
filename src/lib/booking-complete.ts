@@ -35,6 +35,9 @@ export async function autoCompleteBookings(): Promise<number> {
     select: { id: true, shootDate: true, shootEndDate: true, estimatedWrap: true },
   })
 
+  // v1.54.1 — the updateMany writes below re-check status/deletedAt so a
+  // booking cancelled or deleted between this read and the write can't be
+  // resurrected to COMPLETED (CANCELLED is terminal).
   const pastIds: string[] = []
   const todayIds: string[] = []
 
@@ -54,7 +57,7 @@ export async function autoCompleteBookings(): Promise<number> {
 
   if (pastIds.length > 0) {
     const r = await prisma.booking.updateMany({
-      where: { id: { in: pastIds } },
+      where: { id: { in: pastIds }, status: 'CONFIRMED', deletedAt: null },
       data: { status: 'COMPLETED' },
     })
     completed += r.count
@@ -72,7 +75,7 @@ export async function autoCompleteBookings(): Promise<number> {
 
     if (doneToday.length > 0) {
       const r = await prisma.booking.updateMany({
-        where: { id: { in: doneToday } },
+        where: { id: { in: doneToday }, status: 'CONFIRMED', deletedAt: null },
         data: { status: 'COMPLETED' },
       })
       completed += r.count
