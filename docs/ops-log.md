@@ -5,6 +5,22 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-12 · v1.54.0 — Producer-per-outlet tags (schema: `users.producerOutlets`)
+
+**Schema change.** New `producerOutlets String[] @default([])` on `users` —
+applied automatically by `prisma db push` on the next stack update
+(additive, existing rows get `[]`).
+
+**What.** Users can be tagged as Producer of specific outlets on
+/admin/permissions (new column, chip editor). `GET /api/producers` serves
+the tags as dropdown data for the booking form's future per-outlet
+Producer dropdown. Tags grant no access. Also: Director is now optional
+for Content Agency bookings (form-side change only).
+
+**Deploy.** Normal flow — new `sha-<commit>` tag + Update; no new env vars.
+
+---
+
 ## 2026-06-11 · v1.51.0 — Booking soft delete (schema: `bookings.deleted_at`)
 
 **Schema change.** New nullable column `deletedAt` on `bookings` — applied

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess, canEditUser, assignableRoles, canAddUser, isRole } from '@/lib/roles'
+import { OUTLET_MAP } from '@/lib/data'
 
 // v1.50 — never ship signaturePng to the client: it's the base64 e-signature
 // used to sign OT records, and no caller of these routes renders it.
@@ -14,10 +15,21 @@ const USER_SELECT = {
   position: true,
   role: true,
   active: true,
+  producerOutlets: true,
   signatureUpdatedAt: true,
   createdAt: true,
   updatedAt: true,
 } as const
+
+// v1.54 — normalize + validate the producerOutlets payload: array of known
+// outlet codes (see OUTLETS in src/lib/data.ts), deduped, uppercased.
+// Returns null when the payload is malformed.
+function parseProducerOutlets(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  const codes = Array.from(new Set(value.map(v => String(v).trim().toUpperCase()).filter(Boolean)))
+  if (codes.some(c => !OUTLET_MAP[c])) return null
+  return codes
+}
 
 // v1.50 — a position containing "manager" mints an OT approver via the legacy
 // getOTApproverAccess path, so handing it out is a promotion act: only actors
@@ -50,8 +62,13 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   }
 
-  const { id, role, active, thaiName, employeeId, position } = await request.json()
+  const { id, role, active, thaiName, employeeId, position, producerOutlets } = await request.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+  const outlets = producerOutlets !== undefined ? parseProducerOutlets(producerOutlets) : undefined
+  if (outlets === null) {
+    return NextResponse.json({ error: 'producerOutlets must be an array of valid outlet codes' }, { status: 400 })
+  }
 
   const target = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } })
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -85,6 +102,7 @@ export async function PATCH(request: NextRequest) {
       ...(thaiName !== undefined && { thaiName: thaiName?.trim() || null }),
       ...(employeeId !== undefined && { employeeId: employeeId?.trim() || null }),
       ...(position !== undefined && { position: position?.trim() || null }),
+      ...(outlets !== undefined && { producerOutlets: outlets }),
     },
     select: USER_SELECT,
   })

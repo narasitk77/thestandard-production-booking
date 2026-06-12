@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.54.0] — 2026-06-12
+
+### Changed — Director ของ Content Agency เป็น optional
+
+- ฟอร์มจอง: เลิกบังคับเลือก Director สำหรับ outlet Content Agency
+  (label ติดป้าย "ไม่บังคับ", ตัวเลือกแรกเป็น "ไม่ระบุ") — ฝั่ง server
+  รองรับ null อยู่แล้ว ไม่ต้องแก้
+
+### Added — Producer แยกตาม outlet ในหมวด User (ฐานข้อมูลสำหรับ dropdown)
+
+- **Schema:** field ใหม่ `User.producerOutlets` (array ของ outlet code
+  เช่น `["NWS","POP"]`) — apply อัตโนมัติผ่าน `prisma db push`
+- **หน้า `/admin/permissions`:** คอลัมน์ใหม่ "Producer (Outlet)" —
+  ติด/ถอด tag outlet ต่อ user ได้ inline (chip toggle ทั้ง 9 outlet)
+  สิทธิ์การแก้ใช้ matrix เดิม (canEditUser) · ค้นหาด้วย outlet code ได้
+- **`GET /api/producers`** — แหล่งข้อมูล dropdown:
+  `?outlet=NWS` ได้รายชื่อ producer ของ outlet นั้น ·
+  ไม่ใส่ param ได้ map ทั้งหมด (`byOutlet`) · เฉพาะ user ที่ active
+- tag นี้**ไม่ให้สิทธิ์อะไรเพิ่ม** — Producer Dashboard ยังเช็คจาก
+  `position` ตามเดิม · ขั้นถัดไป: เปลี่ยนช่อง Producer ในฟอร์มจอง
+  (outlet ที่ไม่ใช่ CA) จาก free text เป็น dropdown จากข้อมูลชุดนี้
+
 ## [1.53.0] — 2026-06-11
 
 ### Added — Switcher + Photographer ในตัวเลือก Crew Required

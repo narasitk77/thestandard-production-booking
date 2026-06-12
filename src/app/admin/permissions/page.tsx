@@ -10,6 +10,7 @@ import {
   ROLES, ROLE_RANK, ROLE_LABEL, canEditUser, assignableRoles,
   canApproveOTByRole, type Role,
 } from '@/lib/roles'
+import { OUTLETS } from '@/lib/data'
 
 interface User {
   id: string
@@ -20,8 +21,13 @@ interface User {
   position: string | null
   role: Role
   active: boolean
+  producerOutlets: string[]
   createdAt: string
 }
+
+// v1.54 — outlet codes for the per-outlet Producer tag editor
+const OUTLET_CODES = OUTLETS.map(o => o.code)
+const OUTLET_NAME: Record<string, string> = Object.fromEntries(OUTLETS.map(o => [o.code, o.name]))
 
 type SortKey = 'name' | 'role' | 'createdAt'
 
@@ -55,6 +61,10 @@ export default function PermissionsPage() {
   const [editId, setEditId] = useState<string | null>(null)
   const [editPos, setEditPos] = useState('')
   const posInputRef = useRef<HTMLInputElement>(null)
+
+  // v1.54 — inline producer-outlets edit (chip toggles)
+  const [prodEditId, setProdEditId] = useState<string | null>(null)
+  const [prodSel, setProdSel] = useState<string[]>([])
 
   const load = async () => {
     setLoading(true)
@@ -110,6 +120,11 @@ export default function PermissionsPage() {
     if (ok) setEditId(null)
   }
 
+  const saveProducerOutlets = async (id: string) => {
+    const ok = await updateUser(id, { producerOutlets: prodSel })
+    if (ok) setProdEditId(null)
+  }
+
   // ── derived helpers ───────────────────────────────────────
   const canApproveOT = (u: User) =>
     canApproveOTByRole(u.role) || (u.position || '').toLowerCase().includes('manager')
@@ -128,6 +143,7 @@ export default function PermissionsPage() {
         || (u.name || '').toLowerCase().includes(q)
         || (u.employeeId || '').toLowerCase().includes(q)
         || (u.position || '').toLowerCase().includes(q)
+        || (u.producerOutlets || []).join(' ').toLowerCase().includes(q)
     })
     .sort((a, b) => {
       if (sortKey === 'role') {
@@ -262,12 +278,13 @@ export default function PermissionsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px]">
+            <table className="w-full text-sm min-w-[760px]">
               <thead className="border-b border-gray-100 bg-gray-50/60">
                 <tr className="text-[10px] text-gray-400 uppercase tracking-wider">
                   <th className="text-left px-4 py-2.5 font-medium">ผู้ใช้</th>
                   <th className="text-left px-3 py-2.5 font-medium">Role</th>
                   <th className="text-left px-3 py-2.5 font-medium">Position</th>
+                  <th className="text-left px-3 py-2.5 font-medium">Producer (Outlet)</th>
                   <th className="text-left px-3 py-2.5 font-medium">สถานะ</th>
                   <th className="text-right px-4 py-2.5 font-medium">Actions</th>
                 </tr>
@@ -354,6 +371,63 @@ export default function PermissionsPage() {
                         )}
                       </td>
 
+                      {/* v1.54 — Producer outlets (dropdown data source) */}
+                      <td className="px-3 py-3 min-w-[150px]">
+                        {prodEditId === u.id ? (
+                          <div className="flex items-center gap-1 flex-wrap max-w-[260px]">
+                            {OUTLET_CODES.map(code => {
+                              const on = prodSel.includes(code)
+                              return (
+                                <button
+                                  key={code}
+                                  onClick={() => setProdSel(prev => on ? prev.filter(c => c !== code) : [...prev, code])}
+                                  title={OUTLET_NAME[code]}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded border font-mono transition-colors ${
+                                    on
+                                      ? 'bg-[#673ab7] text-white border-[#673ab7]'
+                                      : 'bg-white text-gray-500 border-gray-200 hover:border-[#673ab7]'
+                                  }`}>
+                                  {code}
+                                </button>
+                              )
+                            })}
+                            <button
+                              onClick={() => saveProducerOutlets(u.id)}
+                              className="p-0.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                              title="บันทึก">
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setProdEditId(null)}
+                              className="p-0.5 text-gray-400 hover:bg-gray-100 rounded transition-colors"
+                              title="ยกเลิก">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 group flex-wrap">
+                            {(u.producerOutlets || []).length === 0 ? (
+                              <span className="text-xs text-gray-300">—</span>
+                            ) : (
+                              (u.producerOutlets || []).map(code => (
+                                <span key={code} title={OUTLET_NAME[code]}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                                  {code}
+                                </span>
+                              ))
+                            )}
+                            {mayEdit && (
+                              <button
+                                onClick={() => { setProdEditId(u.id); setProdSel(u.producerOutlets || []) }}
+                                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 p-0.5 text-gray-400 hover:text-[#673ab7] rounded transition-all"
+                                title="แก้ไข outlet ที่เป็น Producer">
+                                <Pencil className="w-2.5 h-2.5" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+
                       {/* Status */}
                       <td className="px-3 py-3">
                         <span className={`text-[11px] px-2 py-0.5 rounded-full ${
@@ -413,6 +487,7 @@ export default function PermissionsPage() {
         <div>• <strong>Manager</strong> — เข้า console เต็ม · approve OT · จัดการได้แค่ Coordinator + User (ตั้งได้สูงสุด Coordinator)</div>
         <div>• <strong>Coordinator</strong> — เข้า console เต็ม · <em>ไม่</em> approve OT · แก้ได้แค่ User (เลื่อนขั้น/เพิ่มคนไม่ได้)</div>
         <div>• <strong>OT Approver</strong> — Admin หรือ Manager (หรือ position มีคำว่า "manager")</div>
+        <div>• <strong>Producer (Outlet)</strong> — ติด tag outlet ที่ user คนนี้เป็น Producer · เป็นแหล่งข้อมูล dropdown Producer ในฟอร์มจอง (<code className="font-mono">GET /api/producers</code>) · ไม่มีผลต่อสิทธิ์เข้าระบบ</div>
         <div>• <strong>canUpload</strong> — ควบคุมที่ Admin → Team (role = video / sound) · Admin bypass อัตโนมัติ</div>
       </div>
     </div>

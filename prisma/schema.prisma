@@ -74,6 +74,12 @@ model User {
   signaturePng        String?   @db.Text
   signatureUpdatedAt  DateTime?
 
+  // v1.54.0 — outlets this user produces for (outlet codes, e.g. ["NWS","POP"]).
+  // Managed on /admin/permissions; data source for the per-outlet Producer
+  // dropdown in the booking form (GET /api/producers). Grants NO access by
+  // itself — producer-dashboard access still keys off `position`.
+  producerOutlets  String[]  @default([])
+
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

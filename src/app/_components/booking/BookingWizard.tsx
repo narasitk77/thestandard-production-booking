@@ -357,7 +357,7 @@ export default function BookingWizard() {
     } else if (s === 4) {
       if (isContentAgency) {
         if (!producerEmail) errs.producerEmail = 'กรุณาเลือก Producer'
-        if (!directorEmail) errs.directorEmail = 'กรุณาเลือก Director'
+        // v1.54 — Director เป็น optional สำหรับ Content Agency
         if (projectSelectable && !projectId) errs.projectId = 'กรุณาเลือก Project ID'
         if (projectId && selectedEpisodeIds.length === 0) errs.selectedEpisodeIds = 'กรุณาเลือกอย่างน้อย 1 Episode'
       } else {
@@ -1000,7 +1000,7 @@ export default function BookingWizard() {
                     then Episodes (depend on Project), then Director. */}
                 {isContentAgency && (
                   <div>
-                    <Label htmlFor="directorEmail" required>Director</Label>
+                    <Label htmlFor="directorEmail">Director <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></Label>
                     <select
                       id="directorEmail"
                       className={`ops-input ${fieldErrors.directorEmail ? 'ops-input-invalid' : ''}`}
@@ -1014,7 +1014,7 @@ export default function BookingWizard() {
                           ? 'Loading…'
                           : directors.length === 0
                             ? '— No directors loaded (sheet unreachable) —'
-                            : '— Select Director —'}
+                            : '— ไม่ระบุ / เลือก Director —'}
                       </option>
                       {directors.map(d => (
                         <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
