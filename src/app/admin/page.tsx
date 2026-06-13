@@ -90,6 +90,9 @@ export default function AdminPage() {
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Admin Console</h1>
           <div className="flex gap-2">
+            <Link href="/admin/workspace" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
+              Workspace
+            </Link>
             <Link href="/admin/team" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
               Team
             </Link>

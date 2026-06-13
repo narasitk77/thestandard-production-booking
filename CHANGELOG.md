@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.55.0] — 2026-06-13
+
+### Added — หน้า Workspace: โต๊ะทำงานรวมทุกฟังก์ชันสำหรับ admin
+
+หน้าใหม่ `/admin/workspace` (เข้าจากปุ่ม Workspace ใน Admin Console และเมนู
+More) — ตารางงานทั้งหมดในที่เดียว กรอง เลือก และ export ได้ละเอียด
+
+- **กรองครบ:** ค้นหา free-text (Production ID / project / producer / crew /
+  notes / episode / location) · chip เลือกหลาย Status + หลาย Outlet ·
+  ช่วงวันถ่าย (from–to) · toggle **"มี Freelance"** และ **"ยังไม่ assign"** ·
+  ปุ่มล้างตัวกรองบอกจำนวนที่ active
+- **ตาราง ~35 คอลัมน์** ครอบคลุมทุก field ของ booking (core / show / people /
+  crew & gear / meta รวม freelancer detail, อุปกรณ์, calendar sync ฯลฯ) ·
+  คลิกหัวคอลัมน์เพื่อ sort · sticky header + คอลัมน์ Production ID/checkbox
+  ค้างซ้าย · โหมด Compact/Comfortable · เลือกซ่อน-แสดงคอลัมน์ได้
+  (จำค่าใน localStorage)
+- **เลือกหลายแถว** (รวม select-all-filtered) + แถบสถิติสด (จำนวนที่กรอง /
+  เลือก / มี freelance / ยังไม่ assign)
+- **Export CSV ละเอียด** (`POST /api/admin/workspace/export`, console เท่านั้น):
+  เลือกได้ว่า export เฉพาะแถวที่เลือก หรือทั้งหมดที่กรอง · เฉพาะคอลัมน์ที่แสดง
+  หรือทุกคอลัมน์ · ใช้ `escapeCSVCell` กัน formula injection + BOM อ่าน Thai
+  ใน Excel ได้ · คอลัมน์ทั้งตารางและ export มาจาก registry เดียว
+  (`src/lib/workspace-columns.ts`) จึงตรงกันเสมอ
+
 ## [1.54.1] — 2026-06-12
 
 ### Fixed — ชุดแก้บัคจาก multi-agent bug hunt (48 candidates → ยืนยันจริง 13)
