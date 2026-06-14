@@ -15,6 +15,7 @@ interface Booking {
   program: { code: string; name: string }
   episodes: Episode[]
   createdAt: string
+  isRoutine?: boolean
   // Populated by /api/bookings (Prisma's default scalar select). Used by the
   // card to show a direct Google Calendar link when an event has been
   // created, or a warning + Re-sync button when CONFIRMED status drifted.
@@ -55,6 +56,7 @@ export default function AdminPage() {
   }, [])
 
   const showingDeleted = filter === 'DELETED'
+  const showingRoutine = filter === 'ROUTINE'
 
   // v1.54.1 — limit raised 50→200 (parity with the other list surfaces; at 50
   // the desc sort silently dropped the most imminent rows), the fetch is
@@ -65,9 +67,14 @@ export default function AdminPage() {
     const seq = ++fetchSeq.current
     setLoading(true)
     try {
+      // v1.56 — Routine tab shows only routine bookings (any status); the
+      // status/All tabs exclude routine so the normal queue stays focused on
+      // one-off jobs. Deleted tab unchanged.
       const params = filter === 'DELETED'
         ? new URLSearchParams({ limit: '200', deleted: '1' })
-        : new URLSearchParams({ limit: '200', ...(filter && { status: filter }) })
+        : filter === 'ROUTINE'
+          ? new URLSearchParams({ limit: '200', routine: 'only' })
+          : new URLSearchParams({ limit: '200', routine: 'exclude', ...(filter && { status: filter }) })
       const res = await fetch(`/api/bookings?${params}`)
       const data = await res.json()
       if (seq !== fetchSeq.current) return // stale response — a newer tab fetch won
@@ -92,6 +99,9 @@ export default function AdminPage() {
           <div className="flex gap-2">
             <Link href="/admin/workspace" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
               Workspace
+            </Link>
+            <Link href="/admin/routine" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
+              Routine
             </Link>
             <Link href="/admin/team" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
               Team
@@ -135,6 +145,17 @@ export default function AdminPage() {
         >
           All
         </button>
+        <button
+          onClick={() => setFilter('ROUTINE')}
+          title="งาน Routine รายสัปดาห์ (เช่น THE STANDARD NOW) — สร้างที่หน้า Routine Planner"
+          className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+            showingRoutine
+              ? 'border-[#673ab7] text-[#673ab7] font-medium'
+              : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          🔁 Routine
+        </button>
         {isAdmin && (
           <button
             onClick={() => setFilter('DELETED')}
@@ -172,6 +193,11 @@ export default function AdminPage() {
                     {showingDeleted && (
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-800 text-white">
                         DELETED
+                      </span>
+                    )}
+                    {b.isRoutine && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-[#673ab7]/10 text-[#673ab7] border border-[#673ab7]/30">
+                        🔁 Routine
                       </span>
                     )}
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || STATUS_BADGE.REQUESTED}`}>

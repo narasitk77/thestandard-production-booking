@@ -5,6 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.56.0] — 2026-06-14
+
+### Added — Routine Planner: จองงานรายการ daily ซ้ำรายสัปดาห์ (จ–ศ)
+
+หน้าใหม่ `/admin/routine` (console) สำหรับรายการที่ถ่ายประจำอย่าง
+THE STANDARD NOW — สร้างคิวยาว ๆ ทีเดียวแทนการจองมือวันต่อวัน
+
+- **เลือกช่วงวัน + วันในสัปดาห์** (ค่าเริ่ม จ–ศ) → ระบบ generate booking
+  1 ใบต่อวันทำการ · **ข้ามเสาร์-อาทิตย์ + วันหยุดราชการไทย + วันที่กำหนดเอง**
+- **พรีวิวสด** ก่อนสร้าง: เห็นว่าจะสร้างกี่ใบ วันไหนบ้าง และข้ามวันไหน
+  (พร้อมชื่อวันหยุด) — แก้ก่อนกดได้
+- ทุกใบสร้างเป็น **REQUESTED** ผ่าน flow เดียวกับการจองปกติ
+  (mint Episode ID, audit, validation ครบ) — approve/assign/ปฏิทิน/OT/upload
+  ทำงานรายวันได้ตามปกติ
+- **แยกชัดจากงานทั่วไป** (ตามที่ขอ): ติด `isRoutine` →
+  badge "🔁 Routine" บนการ์ด, แท็บ **🔁 Routine** ใน /admin
+  (status tab อื่นจะไม่ปนงาน routine), ตัวกรอง + คอลัมน์ใน Workspace
+- **จัดการเป็นชุด:** หน้า Routine โชว์ชุดที่สร้างไว้ (จำนวน/ช่วงวัน/สถานะ)
+  พร้อมปุ่ม "ลบทั้งชุด" (soft-delete กู้คืนได้)
+- **Schema:** field ใหม่ `Booking.isRoutine` + `Booking.routineGroupId`
+  (apply อัตโนมัติผ่าน `prisma db push`) · `GET /api/bookings?routine=only|exclude`
+  (ปฏิทิน/dashboard/หน้าแรกไม่เปลี่ยน — ยังเห็น routine ตามปกติ)
+- วันหยุดไทยปี 2026 อยู่ใน `src/lib/thai-holidays.ts` (วันพระเป็น best-effort
+  — พรีวิวให้ตรวจ/แก้ก่อนสร้างได้)
+- **กันจองซ้ำ:** ถ้า generate ทับวันที่มี booking ของรายการเดียวกันอยู่แล้ว
+  ระบบข้ามวันนั้นและรายงาน "ข้ามวันที่มี booking อยู่แล้ว N วัน"
+- ลบทั้งชุด (cancel) เป็นสิทธิ์ ADMIN (เทียบเท่า soft-delete รายใบ) ·
+  เพิ่ม unit test `src/lib/__tests__/routine.test.ts` (80 tests total)
+
 ## [1.55.0] — 2026-06-13
 
 ### Added — หน้า Workspace: โต๊ะทำงานรวมทุกฟังก์ชันสำหรับ admin

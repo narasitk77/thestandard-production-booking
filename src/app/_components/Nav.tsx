@@ -60,6 +60,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     // have it via the OT page link too, but this avoids the extra hop).
     { href: '/ot/admin', label: 'OT · Approve', show: !!canApproveOT },
     { href: '/admin/workspace', label: 'Workspace', show: isConsole },
+    { href: '/admin/routine', label: 'Routine', show: isConsole },
     { href: '/profile/signature', label: 'ลายเซ็น', show: !!session },
     { href: '/manual', label: 'คู่มือ', show: true },
     { href: '/changelog', label: 'อัปเดต', show: true },

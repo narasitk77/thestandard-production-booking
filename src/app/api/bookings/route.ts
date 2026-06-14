@@ -25,6 +25,10 @@ export async function GET(request: NextRequest) {
     // v1.51 — deleted=1 (ADMIN only) lists soft-deleted bookings for the
     // Deleted tab on /admin; every other request filters them out.
     const showDeleted = searchParams.get('deleted') === '1' && session.role === 'ADMIN'
+    // v1.56 — routine filter: 'only' = routine bookings, 'exclude' = hide them.
+    // Default (unset) includes both, so calendar/dashboard/home are unchanged;
+    // /admin uses 'exclude' for status tabs and 'only' for its Routine tab.
+    const routine = searchParams.get('routine')
 
     // scope=producer → only shoots where this user is the Producer (their own
     // email — safe, no leak). Otherwise plain USERs are restricted to their own
@@ -45,6 +49,8 @@ export async function GET(request: NextRequest) {
     const where = {
       ...userFilter,
       deletedAt: showDeleted ? { not: null } : null,
+      ...(routine === 'only' && { isRoutine: true }),
+      ...(routine === 'exclude' && { isRoutine: false }),
       ...(status && { status: status as any }),
       ...(outlet && { outlet: { code: outlet } }),
       ...(date && { shootDate: new Date(date) }),

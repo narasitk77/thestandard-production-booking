@@ -5,6 +5,23 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-14 · v1.56.0 — Routine planner (schema: `bookings.isRoutine` + `bookings.routineGroupId`)
+
+**Schema change.** Two new columns on `bookings`: `isRoutine Boolean @default(false)`
+and `routineGroupId String?` (+ index) — applied automatically by `prisma db push`
+in `start.sh` on the next stack update (additive; existing rows get false/null).
+
+**What.** New `/admin/routine` bulk-generates recurring weekday bookings for
+daily shows (THE STANDARD NOW etc.), skipping weekends + Thai holidays + custom
+dates, as REQUESTED bookings tagged isRoutine and grouped by routineGroupId.
+Routine bookings get a badge, a dedicated /admin tab, and Workspace filter;
+they're excluded from the normal /admin status tabs. `GET /api/bookings` gains
+`routine=only|exclude` (default includes both — calendar/dashboard unchanged).
+
+**Deploy.** Normal flow — new `sha-<commit>` tag + Update the stack; no new env.
+
+---
+
 ## 2026-06-12 · v1.54.0 — Producer-per-outlet tags (schema: `users.producerOutlets`)
 
 **Schema change.** New `producerOutlets String[] @default([])` on `users` —

@@ -42,6 +42,7 @@ export default function WorkspacePage() {
   const [dateTo, setDateTo] = useState('')
   const [freelanceOnly, setFreelanceOnly] = useState(false)
   const [unassignedOnly, setUnassignedOnly] = useState(false)
+  const [routineFilter, setRoutineFilter] = useState<'all' | 'only' | 'exclude'>('all')
 
   // ── table state ───────────────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -106,6 +107,8 @@ export default function WorkspacePage() {
       if (dateTo && day && day > dateTo) return false
       if (freelanceOnly && !hasFreelancers(b)) return false
       if (unassignedOnly && (b.assignedEmails || []).length > 0) return false
+      if (routineFilter === 'only' && !b.isRoutine) return false
+      if (routineFilter === 'exclude' && b.isRoutine) return false
       if (q) {
         const hay = [
           b.bookingCode, b.projectId, b.projectName, b.producer, b.producerEmail,
@@ -131,7 +134,7 @@ export default function WorkspacePage() {
       return av.localeCompare(bv, 'th') * dir
     })
     return out
-  }, [rows, search, statusSel, outletSel, dateFrom, dateTo, freelanceOnly, unassignedOnly, sort])
+  }, [rows, search, statusSel, outletSel, dateFrom, dateTo, freelanceOnly, unassignedOnly, routineFilter, sort])
 
   const filteredIds = useMemo(() => filtered.map(r => r.id), [filtered])
   const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => selected.has(id))
@@ -141,7 +144,8 @@ export default function WorkspacePage() {
   const activeFilterCount =
     (statusSel.size ? 1 : 0) + (outletSel.size ? 1 : 0) +
     (dateFrom || dateTo ? 1 : 0) + (freelanceOnly ? 1 : 0) +
-    (unassignedOnly ? 1 : 0) + (search.trim() ? 1 : 0)
+    (unassignedOnly ? 1 : 0) + (search.trim() ? 1 : 0) +
+    (routineFilter !== 'all' ? 1 : 0)
 
   // ── actions ─────────────────────────────────────────────────────────
   const toggleInSet = (set: Set<string>, key: string, setter: (s: Set<string>) => void) => {
@@ -166,6 +170,7 @@ export default function WorkspacePage() {
   const clearFilters = () => {
     setSearch(''); setStatusSel(new Set()); setOutletSel(new Set())
     setDateFrom(''); setDateTo(''); setFreelanceOnly(false); setUnassignedOnly(false)
+    setRoutineFilter('all')
   }
   const setSortKey = (key: string) => {
     setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' })
@@ -378,6 +383,15 @@ export default function WorkspacePage() {
               unassignedOnly ? 'bg-red-100 text-red-700 border-red-300 font-medium' : 'bg-white text-gray-500 border-gray-200 hover:border-red-300'
             }`}>
             <Filter className="w-3 h-3" /> ยังไม่ assign
+          </button>
+          <button onClick={() => setRoutineFilter(f => f === 'all' ? 'only' : f === 'only' ? 'exclude' : 'all')}
+            title="คลิกสลับ: ทั้งหมด → เฉพาะ Routine → ไม่เอา Routine"
+            className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+              routineFilter === 'only' ? 'bg-[#673ab7] text-white border-[#673ab7] font-medium'
+                : routineFilter === 'exclude' ? 'bg-gray-200 text-gray-700 border-gray-300 font-medium'
+                : 'bg-white text-gray-500 border-gray-200 hover:border-[#673ab7]'
+            }`}>
+            🔁 {routineFilter === 'only' ? 'เฉพาะ Routine' : routineFilter === 'exclude' ? 'ไม่เอา Routine' : 'Routine'}
           </button>
         </div>
       </div>

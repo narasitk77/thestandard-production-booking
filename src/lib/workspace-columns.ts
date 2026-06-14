@@ -46,6 +46,7 @@ export interface WorkspaceBooking {
   adminNotes?: string | null
   calendarSyncStatus?: string | null
   calendarEventId?: string | null
+  isRoutine?: boolean | null
   createdByEmail?: string | null
   createdAt?: string | Date | null
   approvedAt?: string | Date | null
@@ -109,6 +110,8 @@ export const WORKSPACE_COLUMNS: WorkspaceColumn[] = [
     value: b => b.bookingCode || b.id },
   { key: 'status', label: 'Status', group: 'Core', defaultVisible: true,
     value: b => statusLabel(b.status || '') },
+  { key: 'isRoutine', label: 'Routine', group: 'Core',
+    value: b => b.isRoutine ? 'Routine' : '' },
   { key: 'shootDate', label: 'Shoot Date', group: 'Core', defaultVisible: true,
     value: b => dateOnly(b.shootDate),
     num: b => { const d = new Date(b.shootDate as string); return isNaN(d.getTime()) ? 0 : d.getTime() } },

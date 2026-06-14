@@ -58,6 +58,8 @@ export async function createBookingFromPayload(
     episodeTitles,
     episodes,
     selectedEpisodeIds,
+    isRoutine,
+    routineGroupId,
   } = body || {}
 
   // Validate outlet and program
@@ -252,6 +254,8 @@ export async function createBookingFromPayload(
       projectName: projectName || null,
       notes: notes || null,
       status: 'REQUESTED',
+      isRoutine: isRoutine === true,
+      routineGroupId: routineGroupId || null,
       createdByEmail: actorEmail,
       outletId: outletDb.id,
       programId: programDb.id,
