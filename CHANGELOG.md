@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.57.0] — 2026-06-14
+
+### Changed — Routine เป็น "โหมด" ใน New Booking
+
+รวม Routine planner เข้าเป็นตัวเลือกโหมดในหน้า `/new` — coordinator เข้าที่
+เดียว "New Booking" แล้วสลับได้ระหว่าง **จองครั้งเดียว** (wizard เดิม) กับ
+**Routine (รายสัปดาห์)**
+
+- toggle โหมดด้านบน `/new` แสดง **เฉพาะ console** (ADMIN/Manager/Coordinator) —
+  USER ทั่วไปเห็นแค่ wizard จองครั้งเดียวเหมือนเดิม (Routine สร้างทีละหลายสิบใบ
+  เป็นอำนาจ console + API เป็น requireConsole อยู่แล้ว)
+- ตัว planner ถูกแยกเป็น component กลาง `src/app/_components/RoutinePlanner.tsx`
+  ใช้ร่วมกันทั้ง `/new` (โหมด Routine) และ `/admin/routine` (หน้าเฉพาะ) —
+  โค้ดเดียว ไม่ซ้ำ · `/admin/routine` ยังอยู่เหมือนเดิม (เข้าจากปุ่มใน Admin
+  Console และเมนู More)
+
 ## [1.56.0] — 2026-06-14
 
 ### Added — Routine Planner: จองงานรายการ daily ซ้ำรายสัปดาห์ (จ–ศ)
