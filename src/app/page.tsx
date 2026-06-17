@@ -228,10 +228,10 @@ function BookingRulesNotice() {
           <div>
             <div className="font-semibold text-gray-800 mb-1">✨ ทรัพยากรหลักที่เรามีให้บริการ</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5 text-[13px]">
-              <div>📷 Camera: Sony FX6 จำนวน 3 ตัว · Sony FX3 จำนวน 3 ตัว</div>
+              <div>📷 Camera: Sony FX6 จำนวน 3 ตัว · Sony FX3 จำนวน 3 ตัว · Sony FX30 จำนวน 3 ตัว</div>
               <div>🎥 Videographer: 8 คน</div>
               <div>🎙 Sound Engineer: 4 คน</div>
-              <div>🎛 Switcher: 1 คน</div>
+              <div>🎛 Switcher: 2 คน</div>
               <div>📸 Photographer: 1 คน</div>
             </div>
           </div>

@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.59.2] — 2026-06-14
+
+### Changed — อัปเดตทรัพยากรในการ์ดกติกาหน้าแรก
+
+- Camera: เพิ่ม Sony FX30 จำนวน 3 ตัว (เป็น FX6 ×3 · FX3 ×3 · FX30 ×3)
+- Switcher: 1 → 2 คน
+
 ## [1.59.1] — 2026-06-14
 
 ### Changed — เพิ่มรายการตามชีทล่าสุด
