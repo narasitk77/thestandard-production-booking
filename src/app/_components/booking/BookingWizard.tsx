@@ -21,6 +21,7 @@ import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } fro
 
 type ProjectOption = { projectId: string; projectName: string; producer?: string }
 type Person = { email: string; nickname: string }
+type OutletPerson = { email: string; name: string; nickname: string }
 // One row in the non-CA episode list: each episode picks its own program (show)
 // and is tagged Original Content or Advertorial (AD).
 type EpContentType = 'ORIGINAL_CONTENT' | 'ADVERTORIAL'
@@ -192,6 +193,14 @@ export default function BookingWizard() {
   const [producers, setProducers] = useState<Person[]>([])
   const [directors, setDirectors] = useState<Person[]>([])
   const [peopleLoading, setPeopleLoading] = useState(true)
+  // v1.59 — per-outlet Producer / Co-Producer dropdowns (non-AGN), sourced from
+  // GET /api/producers (Users tagged with the outlet). Falls back to free-text
+  // when an outlet has no producers configured.
+  const [outletProducers, setOutletProducers] = useState<OutletPerson[]>([])
+  const [outletCoProducers, setOutletCoProducers] = useState<OutletPerson[]>([])
+  const [outletPeopleLoading, setOutletPeopleLoading] = useState(false)
+  const [producerSel, setProducerSel] = useState('')
+  const [coProducerSel, setCoProducerSel] = useState('')
   const [notes, setNotes] = useState('')
   const [epCount, setEpCount] = useState(1)
   const [epRows, setEpRows] = useState<EpRow[]>([{ programCode: '', title: '', contentType: 'ORIGINAL_CONTENT' }])
@@ -230,6 +239,21 @@ export default function BookingWizard() {
     return () => { cancelled = true }
   }, [])
 
+  // v1.59 — load per-outlet producers/co-producers for the non-AGN dropdowns
+  // whenever the outlet changes. AGN keeps its _Users-based producer flow.
+  useEffect(() => {
+    setProducerSel(''); setCoProducerSel('')
+    if (!outletCode || outletCode === 'AGN') { setOutletProducers([]); setOutletCoProducers([]); return }
+    let cancelled = false
+    setOutletPeopleLoading(true)
+    fetch(`/api/producers?outlet=${encodeURIComponent(outletCode)}`)
+      .then(r => r.ok ? r.json() : { producers: [], coProducers: [] })
+      .then(d => { if (!cancelled) { setOutletProducers(d.producers || []); setOutletCoProducers(d.coProducers || []) } })
+      .catch(() => { if (!cancelled) { setOutletProducers([]); setOutletCoProducers([]) } })
+      .finally(() => { if (!cancelled) setOutletPeopleLoading(false) })
+    return () => { cancelled = true }
+  }, [outletCode])
+
   useEffect(() => {
     if (!projectId) { setProjectEpisodes([]); setSelectedEpisodeIds([]); return }
     let cancelled = false
@@ -251,6 +275,11 @@ export default function BookingWizard() {
   // excludes the L/S/A/T Episode-Type aliases used by the step-1 picker.
   const epPrograms = (selectedOutlet?.programs ?? []).filter(p => p.code.length > 1)
   const isContentAgency = outletCode === 'AGN'
+  // v1.59 — non-AGN outlets use the per-outlet Producer/Co-Producer dropdown
+  // when the outlet has people configured; otherwise fall back to free text.
+  const useProducerDropdown = !isContentAgency && outletProducers.length > 0
+  const selProd = outletProducers.find(p => p.email === producerSel)
+  const selCoProd = outletCoProducers.find(p => p.email === coProducerSel)
 
   const selectedProject = projectOptions.find(p => p.projectId === projectId)
   const selectedProducerNickname = (
@@ -373,6 +402,14 @@ export default function BookingWizard() {
         // v1.54 — Director เป็น optional สำหรับ Content Agency
         if (projectSelectable && !projectId) errs.projectId = 'กรุณาเลือก Project ID'
         if (projectId && selectedEpisodeIds.length === 0) errs.selectedEpisodeIds = 'กรุณาเลือกอย่างน้อย 1 Episode'
+      } else if (useProducerDropdown) {
+        if (!producerSel) errs.producerSel = 'กรุณาเลือก Producer'
+        const missing: string[] = []
+        epRows.forEach((r, i) => {
+          if (!r.programCode) missing.push(`โปรแกรม EP${i + 1}`)
+          if (!r.title.trim()) missing.push(`ชื่อ EP${i + 1}`)
+        })
+        if (missing.length > 0) errs.epRows = `กรุณากรอก: ${missing.join(', ')}`
       } else {
         if (!producerName.trim()) errs.producerName = 'กรุณากรอกชื่อ Producer'
         if (!producerPhone.trim()) errs.producerPhone = 'กรุณากรอกเบอร์โทร Producer'
@@ -409,6 +446,7 @@ export default function BookingWizard() {
     locationId, locationCustom, needsCustomText, shootType, mapLocation,
     isContentAgency, producerEmail, directorEmail, projectId, selectedEpisodeIds,
     producerName, producerPhone, producerEmailText, epRows, projectSelectable,
+    useProducerDropdown, producerSel, coProducerSel,
   ])
 
   /* ---- navigation ---- */
@@ -469,13 +507,22 @@ export default function BookingWizard() {
           estimatedWrap: estimatedWrap || null,
           producer: isContentAgency
             ? producers.find(p => p.email === producerEmail)?.nickname || ''
-            : producerName.trim(),
-          producerEmail: isContentAgency ? producerEmail : (producerEmailText.trim() || null),
-          producerPhone: isContentAgency ? null : (producerPhone.trim() || null),
+            : useProducerDropdown
+              ? (selProd?.nickname || selProd?.name || '')
+              : producerName.trim(),
+          producerEmail: isContentAgency
+            ? producerEmail
+            : useProducerDropdown
+              ? (producerSel || null)
+              : (producerEmailText.trim() || null),
+          producerPhone: isContentAgency || useProducerDropdown ? null : (producerPhone.trim() || null),
           director: isContentAgency
             ? directors.find(d => d.email === directorEmail)?.nickname || ''
             : null,
           directorEmail: isContentAgency ? directorEmail : null,
+          // v1.59 — Co-Producer (non-AGN dropdown only)
+          coProducer: useProducerDropdown ? (selCoProd?.nickname || selCoProd?.name || null) : null,
+          coProducerEmail: useProducerDropdown ? (coProducerSel || null) : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           videographerCount: crew.includes('Videographer') ? videographerCount : 1,
@@ -530,9 +577,12 @@ export default function BookingWizard() {
       ? (producers.find(p => p.email === producerEmail)?.nickname
           ? `${producers.find(p => p.email === producerEmail)?.nickname} (${producerEmail})`
           : producerEmail)
-      : (producerName
-          ? `${producerName}${producerPhone ? ` · ${producerPhone}` : ''}${producerEmailText ? ` · ${producerEmailText}` : ''}`
-          : ''),
+      : useProducerDropdown
+        ? (selProd ? `${selProd.nickname}` : '')
+        : (producerName
+            ? `${producerName}${producerPhone ? ` · ${producerPhone}` : ''}${producerEmailText ? ` · ${producerEmailText}` : ''}`
+            : ''),
+    coProducer: useProducerDropdown && selCoProd ? selCoProd.nickname : '',
     director: isContentAgency
       ? (directors.find(d => d.email === directorEmail)?.nickname
           ? `${directors.find(d => d.email === directorEmail)?.nickname} (${directorEmail})`
@@ -879,7 +929,7 @@ export default function BookingWizard() {
               <div className="space-y-5">
                 {/* Producer */}
                 <div>
-                  <Label required>Producer</Label>
+                  {!useProducerDropdown && <Label required>Producer</Label>}
                   {isContentAgency ? (
                     <>
                       <select
@@ -903,6 +953,45 @@ export default function BookingWizard() {
                       <FieldHelp>ดึงจาก &ldquo;_Users&rdquo; tab ของ Dashboard · กรอง Project ID ด้านล่างให้</FieldHelp>
                       <FieldError message={fieldErrors.producerEmail} />
                     </>
+                  ) : useProducerDropdown ? (
+                    /* v1.59 — per-outlet Producer + Co-Producer dropdowns */
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <Label htmlFor="producerSel" required>Producer</Label>
+                        <select
+                          id="producerSel"
+                          className={`ops-input ${fieldErrors.producerSel ? 'ops-input-invalid' : ''}`}
+                          value={producerSel}
+                          onChange={e => setProducerSel(e.target.value)}
+                          disabled={outletPeopleLoading}
+                          aria-invalid={!!fieldErrors.producerSel}
+                        >
+                          <option value="">{outletPeopleLoading ? 'Loading…' : '— เลือก Producer —'}</option>
+                          {outletProducers.map(p => (
+                            <option key={p.email} value={p.email}>{p.nickname}</option>
+                          ))}
+                        </select>
+                        <FieldError message={fieldErrors.producerSel} />
+                      </div>
+                      <div>
+                        <Label htmlFor="coProducerSel">
+                          Co-Producer <span className="text-[11px] font-normal text-gray-400">(ถ้ามี)</span>
+                        </Label>
+                        <select
+                          id="coProducerSel"
+                          className="ops-input"
+                          value={coProducerSel}
+                          onChange={e => setCoProducerSel(e.target.value)}
+                          disabled={outletPeopleLoading || outletCoProducers.length === 0}
+                        >
+                          <option value="">{outletCoProducers.length === 0 ? '— ไม่มี Co-Producer —' : '— ไม่มี / เลือก Co-Producer —'}</option>
+                          {outletCoProducers.map(p => (
+                            <option key={p.email} value={p.email}>{p.nickname}</option>
+                          ))}
+                        </select>
+                        <FieldHelp>รายชื่อตาม Outlet — จัดการได้ที่ /admin/permissions</FieldHelp>
+                      </div>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
@@ -1279,6 +1368,7 @@ export default function BookingWizard() {
                 </ReviewBlock>
                 <ReviewBlock title="People & Crew" onEdit={() => jumpTo(4)}>
                   <ReviewRow label="Producer" value={summary.producer} />
+                  {!!summary.coProducer && <ReviewRow label="Co-Producer" value={summary.coProducer} />}
                   {isContentAgency && <ReviewRow label="Director" value={summary.director} />}
                   {isContentAgency && <ReviewRow label="Project" value={summary.project} />}
                   <ReviewRow label="Episodes" value={summary.episodes} />
@@ -1342,8 +1432,9 @@ export default function BookingWizard() {
                 <KV k={offsite ? 'Map location' : 'Room'} v={summary.location} />
                 {offsite && needsVan && <KV k="Van" v="🚐 ต้องการรถตู้" />}
               </SummaryBlock>
-              <SummaryBlock title="People" filled={!!(producerEmail || producerName)}>
+              <SummaryBlock title="People" filled={!!(producerEmail || producerName || producerSel)}>
                 <KV k="Producer" v={summary.producer} />
+                {!!summary.coProducer && <KV k="Co-Producer" v={summary.coProducer} />}
                 {isContentAgency && <KV k="Director" v={summary.director} />}
                 <KV k="Crew" v={summary.crew} />
               </SummaryBlock>

@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.59.0] — 2026-06-14
+
+### Added — Producer / Co-Producer เป็น Dropdown แยกตาม Outlet + บัญชีผู้ใช้
+
+ดึงรายชื่อจากชีท "outlet DB" ของทีมมาเป็นแหล่งข้อมูล Producer/Co-Pro ต่อ outlet
+และสร้างบัญชีให้คนเหล่านี้บันทึกข้อมูลได้อย่างเป็นระบบ
+
+- **ฟอร์มจอง (non-AGN):** ช่อง Producer/ผู้ติดต่อแบบพิมพ์เอง → เปลี่ยนเป็น
+  **Dropdown Producer + Co-Producer แยกตาม outlet** (ดึงจาก
+  `GET /api/producers?outlet=`) · outlet ไหนยังไม่มีรายชื่อจะ fallback
+  เป็นช่องพิมพ์เองเหมือนเดิม · AGN ใช้ flow เดิม (_Users + Director)
+- **บัญชีผู้ใช้:** ปุ่ม **"↧ Import producers (sheet)"** ใน /admin/permissions
+  (ADMIN) → สร้าง/อัปเดต User จาก `src/lib/outlet-producers.ts` พร้อม tag
+  `producerOutlets` + ชื่อเล่น/ชื่อไทย/รหัสพนักงาน/ตำแหน่ง · idempotent
+  (merge outlet เดิม ไม่ลบ ไม่เปลี่ยน role) · คน role Switcher ได้บัญชี
+  แต่ไม่ขึ้นใน dropdown · ทุกคนล็อกอินด้วย Google SSO ได้ทันที
+- **Schema:** `User.nickname`, `Booking.coProducer` + `Booking.coProducerEmail`
+  (nullable, apply ผ่าน prisma db push) · Co-Producer โชว์ใน Review/summary
+  และคอลัมน์ Workspace
+- mapping outlet จากชีท: The Secret Sauce→TSS · Pop→POP · LIFE→LIF ·
+  Wealth→WLT · News Program→NWS · Podcast→POD · Video Production→AGN
+
+### หมายเหตุหลัง deploy
+- ต้องกด **Import producers** ที่ /admin/permissions หนึ่งครั้งเพื่อสร้างบัญชี
+  + เติม dropdown (รายชื่อมาจากชีท แก้เพิ่มภายหลังได้ที่ /admin/permissions)
+
 ## [1.58.0] — 2026-06-14
 
 ### Changed — ฟอร์มจอง: location + รถตู้ ปรับตามประเภทการถ่าย

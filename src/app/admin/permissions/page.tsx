@@ -190,6 +190,7 @@ export default function PermissionsPage() {
                 <UserPlus className="w-3.5 h-3.5" /> เพิ่มผู้ใช้
               </button>
             )}
+            {myRole === 'ADMIN' && <ImportProducersButton onDone={load} />}
           </div>
         </div>
       </div>
@@ -495,6 +496,33 @@ export default function PermissionsPage() {
 }
 
 // ── Test Email Button ─────────────────────────────────────────────────────────
+// v1.59 — one-click import of the outlet Producer/Co-Producer roster
+// (src/lib/outlet-producers.ts) into User accounts + producerOutlets tags.
+function ImportProducersButton({ onDone }: { onDone: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const run = async () => {
+    if (!confirm('Import รายชื่อ Producer / Co-Producer ต่อ Outlet จากชีท → สร้าง/อัปเดต account?\n(merge outlet เดิม ไม่ลบ ไม่เปลี่ยน role)')) return
+    setLoading(true)
+    try {
+      const res = await fetch('/api/admin/import-producers', { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`)
+      alert(`สำเร็จ: ทั้งหมด ${d.total} · สร้างใหม่ ${d.created} · อัปเดต ${d.updated}`)
+      onDone()
+    } catch (e: any) {
+      alert('Import ล้มเหลว: ' + (e?.message || e))
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <button onClick={run} disabled={loading}
+      className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-300 text-gray-600 rounded hover:bg-gray-50 disabled:opacity-50">
+      {loading ? 'กำลัง Import…' : '↧ Import producers (sheet)'}
+    </button>
+  )
+}
+
 function TestEmailButton() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; msg: string; hint?: string } | null>(null)

@@ -12,11 +12,20 @@ export const dynamic = 'force-dynamic'
  * (managed on /admin/permissions). Built so the booking form's free-text
  * Producer fields can become a dropdown per outlet.
  *
- *   ?outlet=NWS → { producers: [{ email, name }] } for that outlet
- *   (no param)  → { byOutlet: { NWS: [...], POP: [...], ... } } full map
+ *   ?outlet=NWS → { producers: [...], coProducers: [...] } for that outlet
+ *   (no param)  → { byOutlet: { NWS: { producers, coProducers }, ... } }
+ *
+ * Each entry is { email, name, nickname }. Producer vs Co-Producer is decided
+ * by User.position (anything matching /co.?produc/i is a Co-Producer). v1.59.
  *
  * Any logged-in user may read — the booking form is open to everyone.
  */
+type Entry = { email: string; name: string; nickname: string }
+
+function isCoProducer(position: string | null): boolean {
+  return /co.?produc/i.test(position || '')
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getSession()
@@ -34,23 +43,30 @@ export async function GET(request: NextRequest) {
           ? { producerOutlets: { has: outlet } }
           : { producerOutlets: { isEmpty: false } }),
       },
-      select: { email: true, name: true, thaiName: true, producerOutlets: true },
-      orderBy: { email: 'asc' },
+      select: { email: true, name: true, thaiName: true, nickname: true, position: true, producerOutlets: true },
+      orderBy: [{ nickname: 'asc' }, { email: 'asc' }],
     })
 
-    const toEntry = (u: { email: string; name: string | null; thaiName: string | null }) => ({
+    const toEntry = (u: { email: string; name: string | null; thaiName: string | null; nickname: string | null }): Entry => ({
       email: u.email,
       name: u.thaiName || u.name || u.email.split('@')[0],
+      nickname: u.nickname || u.thaiName || u.name || u.email.split('@')[0],
     })
 
     if (outlet) {
-      return NextResponse.json({ outlet, producers: users.map(toEntry) })
+      const producers: Entry[] = []
+      const coProducers: Entry[] = []
+      for (const u of users) (isCoProducer(u.position) ? coProducers : producers).push(toEntry(u))
+      return NextResponse.json({ outlet, producers, coProducers })
     }
 
-    const byOutlet: Record<string, Array<{ email: string; name: string }>> = {}
+    const byOutlet: Record<string, { producers: Entry[]; coProducers: Entry[] }> = {}
     for (const u of users) {
+      const e = toEntry(u)
+      const co = isCoProducer(u.position)
       for (const code of u.producerOutlets) {
-        ;(byOutlet[code] ||= []).push(toEntry(u))
+        const g = (byOutlet[code] ||= { producers: [], coProducers: [] })
+        ;(co ? g.coProducers : g.producers).push(e)
       }
     }
     return NextResponse.json({ byOutlet })

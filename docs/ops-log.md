@@ -5,6 +5,23 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-14 · v1.59.0 — Outlet producers (schema: `users.nickname`, `bookings.co_producer`/`co_producer_email`)
+
+**Schema change.** `User.nickname` + `Booking.coProducer` + `Booking.coProducerEmail`
+(all nullable) — applied by `prisma db push` in `start.sh` on next stack update.
+
+**Post-deploy action (one-time).** Go to /admin/permissions → click
+**"↧ Import producers (sheet)"** (ADMIN) to upsert the outlet Producer/Co-Producer
+roster (src/lib/outlet-producers.ts, from the ops sheet) into User accounts +
+producerOutlets tags. Without this, the per-outlet Producer/Co-Producer dropdowns
+in the booking form stay empty (form falls back to free-text). Idempotent;
+re-run after editing the seed. To add/remove producers later without a deploy,
+edit producerOutlets per user on /admin/permissions.
+
+**No new env.** Normal deploy: new `sha-<commit>` tag + Update the stack.
+
+---
+
 ## 2026-06-14 · v1.56.0 — Routine planner (schema: `bookings.isRoutine` + `bookings.routineGroupId`)
 
 **Schema change.** Two new columns on `bookings`: `isRoutine Boolean @default(false)`

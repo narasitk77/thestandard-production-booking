@@ -30,6 +30,8 @@ export interface WorkspaceBooking {
   producerPhone?: string | null
   director?: string | null
   directorEmail?: string | null
+  coProducer?: string | null
+  coProducerEmail?: string | null
   creative?: string[] | null
   crewRequired?: string[] | null
   videographerCount?: number | null
@@ -143,6 +145,8 @@ export const WORKSPACE_COLUMNS: WorkspaceColumn[] = [
   // ── People ────────────────────────────────────────────────────────
   { key: 'producer', label: 'Producer', group: 'People', defaultVisible: true,
     value: b => b.producer || '' },
+  { key: 'coProducer', label: 'Co-Producer', group: 'People',
+    value: b => b.coProducer || '' },
   { key: 'producerEmail', label: 'Producer Email', group: 'People',
     value: b => b.producerEmail || '' },
   { key: 'producerPhone', label: 'Producer Phone', group: 'People',

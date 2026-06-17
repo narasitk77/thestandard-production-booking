@@ -61,8 +61,9 @@ model User {
   email      String   @unique
   name       String?
   thaiName   String?  // ชื่อ-นามสกุลภาษาไทย
+  nickname   String?  // ชื่อเล่น — shown in the per-outlet Producer dropdown (v1.59)
   employeeId String?  // TSD00xxx
-  position   String?  // Producer / Videographer / etc
+  position   String?  // Producer / Co-Producer / Videographer / etc
   role       UserRole @default(USER)
   active     Boolean  @default(true)
 
@@ -231,11 +232,15 @@ model Booking {
   locationName     String?
   callTime         String        @db.VarChar(5)
   estimatedWrap    String?       @db.VarChar(5)
-  producer         String   // Content Agency: nickname from _Users tab; other outlets: free-text name
+  producer         String   // Content Agency: nickname from _Users tab; other outlets: per-outlet dropdown (v1.59) or free-text name
   producerEmail    String?  // Producer email (canonical id, or free-text email)
   producerPhone    String?  // Producer phone — free-text outlets only (Content Agency uses _Users)
   director         String?  // Director nickname (Content Agency only — null for other outlets)
   directorEmail    String?  // Director email (canonical id)
+  // v1.59.0 — Co-Producer for non-Agency outlets, picked from the per-outlet
+  // dropdown (same source as Producer). Null when none chosen.
+  coProducer       String?
+  coProducerEmail  String?
   creative         String[]
   crewRequired     String[]
   videographerCount     Int     @default(1)  // how many videographers requested at booking time
