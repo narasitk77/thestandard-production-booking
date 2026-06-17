@@ -145,7 +145,7 @@ export default function LoansPage() {
                 <div><label className="text-xs text-gray-500 mb-1 block">กำหนดคืน</label><input type="date" className="gf-input w-full" value={draft.dueDate} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })} /></div>
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">อุปกรณ์ (บรรทัดละชิ้น — "ชื่อ | tag")</label>
+                <label className="text-xs text-gray-500 mb-1 block">อุปกรณ์ (บรรทัดละชิ้น — "ชื่อ | tag") · พิมพ์ tag/ชื่อให้ตรงคลัง ระบบจะผูกสถานะ ON_LOAN ให้อัตโนมัติ</label>
                 <textarea className="gf-input resize-none w-full font-mono text-xs" rows={5} placeholder={'Sony FX3 No.1 | 25T&E-0026\nSony 24-70 GM | 25T&E-0029'} value={draft.items} onChange={(e) => setDraft({ ...draft, items: e.target.value })} />
               </div>
             </div>

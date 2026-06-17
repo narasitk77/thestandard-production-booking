@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
+import { reconcileEquipmentStatus } from '@/lib/equipment-status'
 import { RepairStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -51,9 +52,8 @@ export async function POST(request: NextRequest) {
           remark: cleanStr(b.remark),
         },
       })
-      if (equipmentId && (status === 'REPORTED' || status === 'SENT')) {
-        await tx.equipment.update({ where: { id: equipmentId }, data: { status: 'IN_REPAIR' } })
-      }
+      // Derive status (IN_REPAIR while the ticket is open) from the live world.
+      if (equipmentId) await reconcileEquipmentStatus(tx, [equipmentId])
       return created
     })
     logAudit({ actorEmail: session.email, action: 'repair.create', entityType: 'RepairTicket', entityId: ticket.id, changes: { itemLabel } })

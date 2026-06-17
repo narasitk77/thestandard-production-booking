@@ -4,6 +4,9 @@ import CrudTable, { type CrudConfig } from '../_components/CrudTable'
 
 const CATEGORIES = ['AUDIO', 'CAMERA', 'COMPUTER_MONITOR', 'GRIP_SUPPORT', 'LENS', 'LIGHTING', 'POWER', 'STORAGE_MEDIA', 'UNCATEGORIZED']
 const STATUSES = ['AVAILABLE', 'ON_LOAN', 'IN_REPAIR', 'RETIRED']
+// ON_LOAN / IN_REPAIR are derived from loans/repairs — only these two are
+// settable by hand (RETIRED = decommission, AVAILABLE = un-retire/normalize).
+const MANUAL_STATUSES = ['AVAILABLE', 'RETIRED']
 const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
 
 const config: CrudConfig = {
@@ -31,7 +34,7 @@ const config: CrudConfig = {
     { key: 'category', label: 'หมวด', type: 'select', options: opt(CATEGORIES), half: true },
     { key: 'serialNumber', label: 'Serial Number', half: true },
     { key: 'location', label: 'ที่เก็บ / ผู้ถือ', half: true },
-    { key: 'status', label: 'สถานะ', type: 'select', options: opt(STATUSES), half: true },
+    { key: 'status', label: 'สถานะ (พร้อมใช้ / ปลดระวาง)', type: 'select', options: opt(MANUAL_STATUSES), half: true },
     { key: 'loanable', label: 'ยืมได้', type: 'checkbox', placeholder: 'ให้ยืมออกได้', half: true },
     { key: 'description', label: 'รายละเอียด', type: 'textarea' },
     { key: 'fixedAssetTag', label: 'Asset Tag', half: true },

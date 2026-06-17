@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, inEnum } from '@/lib/admin-parse'
+import { reconcileEquipmentStatus, resolveEquipmentId } from '@/lib/equipment-status'
 import { LoanStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -53,9 +54,32 @@ export async function POST(request: NextRequest) {
     let loanCode = cleanStr(b.loanCode) || genLoanCode()
     if (await prisma.equipmentLoan.findUnique({ where: { loanCode } })) loanCode = `${loanCode}-${pad(new Date().getUTCSeconds())}`
 
-    const equipmentIds = items.map((i: any) => i.equipmentId).filter(Boolean) as string[]
-
     const loan = await prisma.$transaction(async (tx) => {
+      // Link each item to a real Equipment row when possible. The UI sends free
+      // text only ({nameSnapshot, tagSnapshot}); resolving it to an equipmentId
+      // here is what makes the AVAILABLE↔ON_LOAN status sync engage for loans
+      // created in the app (previously it only worked for imported loans).
+      const resolved: Array<{ equipmentId: string | null; nameSnapshot: string; tagSnapshot: string | null }> = []
+      for (const it of items as any[]) {
+        const equipmentId = it.equipmentId || (await resolveEquipmentId(tx, { tag: it.tagSnapshot, name: it.nameSnapshot }))
+        resolved.push({ equipmentId: equipmentId || null, nameSnapshot: it.nameSnapshot, tagSnapshot: it.tagSnapshot || null })
+      }
+      const equipmentIds = Array.from(new Set(resolved.map((i) => i.equipmentId).filter(Boolean))) as string[]
+
+      // Availability guard: refuse to check out gear that's not loanable,
+      // already out, at the repair shop, or retired.
+      if (equipmentIds.length) {
+        const eqs = await tx.equipment.findMany({
+          where: { id: { in: equipmentIds } },
+          select: { name: true, status: true, loanable: true },
+        })
+        const blocked = eqs.filter((e) => !e.loanable || e.status !== 'AVAILABLE')
+        if (blocked.length) {
+          const detail = blocked.map((e) => `${e.name} (${!e.loanable ? 'ห้ามยืม' : e.status})`).join(', ')
+          throw new Error(`BLOCKED:ยืมไม่ได้ — อุปกรณ์ไม่พร้อม: ${detail}`)
+        }
+      }
+
       const created = await tx.equipmentLoan.create({
         data: {
           loanCode,
@@ -67,19 +91,20 @@ export async function POST(request: NextRequest) {
           dueDate: dateOrNull(b.dueDate),
           borrowedAt: dateOrNull(b.borrowedAt) || new Date(),
           status: 'ACTIVE',
-          items: { create: items.map((it: any) => ({ equipmentId: it.equipmentId, nameSnapshot: it.nameSnapshot, tagSnapshot: it.tagSnapshot })) },
+          items: { create: resolved.map((it) => ({ equipmentId: it.equipmentId, nameSnapshot: it.nameSnapshot, tagSnapshot: it.tagSnapshot })) },
         },
         include: { items: true },
       })
-      if (equipmentIds.length) {
-        await tx.equipment.updateMany({ where: { id: { in: equipmentIds } }, data: { status: 'ON_LOAN' } })
-      }
+      // Derive ON_LOAN (and anything else) from the live world.
+      await reconcileEquipmentStatus(tx, equipmentIds)
       return created
     })
     logAudit({ actorEmail: session.email, action: 'loan.create', entityType: 'EquipmentLoan', entityId: loan.id, changes: { loanCode, photographer, items: items.length } })
     return NextResponse.json({ loan }, { status: 201 })
   } catch (e: any) {
+    const msg = e?.message || String(e)
+    if (msg.startsWith('BLOCKED:')) return NextResponse.json({ error: msg.slice('BLOCKED:'.length) }, { status: 409 })
     console.error('POST /api/admin/loans error:', e)
-    return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

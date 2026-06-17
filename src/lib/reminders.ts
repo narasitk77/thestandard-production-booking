@@ -143,8 +143,25 @@ async function detect(today: Date): Promise<Candidate[]> {
       program: { select: { name: true } },
     },
   })
+  // Gear allocated via an equipment loan tied to the booking also counts —
+  // otherwise the reminder keeps nagging after the admin checked gear out.
+  const loanedBookingIds = new Set<string>(
+    upcoming.length
+      ? (
+          await prisma.equipmentLoan.findMany({
+            where: { status: 'ACTIVE', bookingId: { in: upcoming.map((b) => b.id) } },
+            select: { bookingId: true },
+          })
+        )
+          .map((l) => l.bookingId)
+          .filter((x): x is string => !!x)
+      : [],
+  )
   for (const b of upcoming) {
-    const hasGear = (b.equipmentNote && b.equipmentNote.trim() !== '') || (b.assignedEquipmentIds?.length ?? 0) > 0
+    const hasGear =
+      (b.equipmentNote && b.equipmentNote.trim() !== '') ||
+      (b.assignedEquipmentIds?.length ?? 0) > 0 ||
+      loanedBookingIds.has(b.id)
     if (hasGear) continue
     out.push({
       type: 'SHOOT_MISSING_GEAR',

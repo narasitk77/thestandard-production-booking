@@ -5,6 +5,23 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-18 · v1.62.1 — equipment loan/return ↔ status-sync fix (deploy)
+
+**Code fix, no schema/env change.** Equipment.status is now DERIVED everywhere via
+`src/lib/equipment-status.ts` (`reconcileEquipmentStatus`), and UI loans resolve
+`equipmentId` from the typed tag/name server-side so the AVAILABLE↔ON_LOAN sync
+actually engages (it was dead for every UI-created loan). See CHANGELOG [1.62.1].
+
+**Deploy steps:** committed on `feat/unified-workspace`; built a new image via
+`gh workflow run docker-build.yml --ref feat/unified-workspace` (workflow_dispatch);
+then Portainer → stack `production-booking` → Environment variables → set
+`IMAGE_TAG=sha-<new commit>` → Save settings → Pull and redeploy → **Update** (compose
+still pulled from `main`, unchanged). Verify live: loan an AVAILABLE item via
+/admin/loans typing its catalog name/tag → /admin/equipment shows it ON_LOAN; mark
+returned → back to AVAILABLE.
+
+---
+
 ## 2026-06-17 · Fix — reminder worker env never reached the container
 
 **Symptom.** After deploying v1.62.0 (`sha-b68edc6`) the reminder worker logged

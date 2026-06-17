@@ -3,15 +3,17 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, inEnum } from '@/lib/admin-parse'
+import { reconcileEquipmentStatus } from '@/lib/equipment-status'
 import { LoanStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-// Free the equipment a loan holds (back to AVAILABLE) — used on return + delete.
-async function freeEquipment(tx: any, loanId: string) {
+// Equipment ids a loan currently references — reconciled (not blindly freed)
+// after the loan's state changes, so an item still held by another active loan
+// or sitting IN_REPAIR is not wrongly flipped to AVAILABLE.
+async function loanEquipmentIds(tx: any, loanId: string): Promise<string[]> {
   const items = await tx.equipmentLoanItem.findMany({ where: { loanId, equipmentId: { not: null } }, select: { equipmentId: true } })
-  const ids = items.map((i: any) => i.equipmentId).filter(Boolean)
-  if (ids.length) await tx.equipment.updateMany({ where: { id: { in: ids } }, data: { status: 'AVAILABLE' } })
+  return items.map((i: any) => i.equipmentId).filter(Boolean)
 }
 
 /**
@@ -33,7 +35,6 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if ('bookingId' in b) data.bookingId = cleanStr(b.bookingId)
     if ('eventDate' in b) data.eventDate = dateOrNull(b.eventDate)
     if ('dueDate' in b) data.dueDate = dateOrNull(b.dueDate)
-    const returning = inEnum(LoanStatus, b.status) && b.status === 'RETURNED' && before.status !== 'RETURNED'
     if ('status' in b && inEnum(LoanStatus, b.status)) {
       data.status = b.status
       if (b.status === 'RETURNED') data.returnedAt = dateOrNull(b.returnedAt) || new Date()
@@ -43,7 +44,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     const loan = await prisma.$transaction(async (tx) => {
       const updated = await tx.equipmentLoan.update({ where: { id: params.id }, data, include: { items: true } })
-      if (returning) await freeEquipment(tx, params.id)
+      // Loan active-ness may have flipped (return or un-return) — re-derive the
+      // linked gear's status instead of blindly freeing it.
+      if ('status' in data) await reconcileEquipmentStatus(tx, await loanEquipmentIds(tx, params.id))
       return updated
     })
     logAudit({ actorEmail: session.email, action: 'loan.update', entityType: 'EquipmentLoan', entityId: params.id, fromStatus: before.status, toStatus: (data.status as string) ?? undefined, changes: data })
@@ -60,8 +63,9 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     await prisma.$transaction(async (tx) => {
-      await freeEquipment(tx, params.id)
+      const ids = await loanEquipmentIds(tx, params.id)
       await tx.equipmentLoan.delete({ where: { id: params.id } })
+      await reconcileEquipmentStatus(tx, ids)
     })
     logAudit({ actorEmail: session.email, action: 'loan.delete', entityType: 'EquipmentLoan', entityId: params.id })
     return NextResponse.json({ success: true })

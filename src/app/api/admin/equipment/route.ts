@@ -49,7 +49,10 @@ export async function POST(request: NextRequest) {
     const name = cleanStr(b.name)
     if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 })
     const category = inEnum(EquipmentCategory, b.category) ? b.category : 'UNCATEGORIZED'
-    const status = inEnum(EquipmentStatus, b.status) ? b.status : 'AVAILABLE'
+    // Status is system-derived (loans/repairs). A brand-new item has neither, so
+    // only RETIRED is meaningful at creation; ON_LOAN/IN_REPAIR are rejected to
+    // keep the invariant that nothing sets those by hand (matches the PATCH guard).
+    const status = b.status === 'RETIRED' ? 'RETIRED' : 'AVAILABLE'
     const equipment = await prisma.equipment.create({
       data: {
         itemId: cleanStr(b.itemId),

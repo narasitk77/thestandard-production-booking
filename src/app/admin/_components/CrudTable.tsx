@@ -239,6 +239,12 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
                   ) : f.type === 'select' ? (
                     <select className="gf-input w-full" value={draft[f.key] ?? ''} onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}>
                       <option value="">—</option>
+                      {/* Show the current value even when it isn't an offered option
+                          (e.g. a system-derived Equipment.status like ON_LOAN) so the
+                          field never renders blank; disabled = can't be set by hand. */}
+                      {draft[f.key] && !fieldOptions(f).some((o) => o.value === draft[f.key]) && (
+                        <option value={draft[f.key]} disabled>{draft[f.key]} (ระบบจัดการ)</option>
+                      )}
                       {fieldOptions(f).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   ) : f.type === 'checkbox' ? (

@@ -30,6 +30,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.62.1] — 2026-06-18
+
+### Fixed — Equipment loan/return ↔ status sync (was effectively dead in the UI)
+
+ระบบยืม-คืนอุปกรณ์ไม่ผูกกับสถานะคลังจริง (พบจากการทดสอบ + audit 26 agent / 21 ข้อ; แก้แล้ว review 7 agent).
+
+- **ยืมผ่าน UI ไม่เคย sync สถานะ (บั๊กหลัก):** ฟอร์ม "ยืมอุปกรณ์" เป็น free-text จึงไม่ส่ง
+  `equipmentId` → ON_LOAN/คืน ไม่เคยทำงานสำหรับ loan ที่สร้างผ่านหน้าเว็บ. **แก้:** POST
+  /api/admin/loans resolve `equipmentId` ฝั่ง server จาก tag/ชื่อ (fixedAssetTag/itemId/
+  serialNumber/name เหมือน import) ก่อนผูกสถานะ.
+- **รวม writer ของ Equipment.status เป็นแหล่งเดียว:** เพิ่ม `src/lib/equipment-status.ts`
+  (`reconcileEquipmentStatus` + pure `deriveEquipmentStatus`, ลำดับ RETIRED>IN_REPAIR>ON_LOAN>
+  AVAILABLE). ทุก writer (ยืม/คืน/ลบ, ซ่อม สร้าง/แก้/ลบ) **derive** จากโลกจริงแทนการเขียนตรง —
+  คืน loan ไม่ทับ IN_REPAIR/RETIRED, ของมี 2 loan คืนอันเดียวไม่หลุด, เปลี่ยนอุปกรณ์ใน ticket ซ่อม
+  ไม่ทิ้งตัวเก่าค้าง, un-return กลับ ON_LOAN.
+- **guard:** ยืมเช็คความพร้อม (409 ถ้าไม่ loanable/ไม่ AVAILABLE); แก้สถานะมือได้เฉพาะ
+  RETIRED/AVAILABLE (ON_LOAN/IN_REPAIR ระบบ derive); CrudTable แสดงค่าปัจจุบันเป็น option
+  disabled เมื่อไม่อยู่ในตัวเลือก (สถานะ derive ไม่โผล่ว่าง).
+- **reminder กันลืม:** booking ที่มี loan active แล้ว ไม่ขึ้น "ยังไม่จัดอุปกรณ์" อีก.
+- ค้างไว้ (มีอยู่เดิม, ต่ำ): loanCode ชนกันได้ตอนสร้างพร้อมกัน → 500 เป็นครั้งคราว.
+- 103 tests (เพิ่ม equipment-status.test.ts), tsc 0 errors, build ผ่าน.
+
+---
+
 ## [1.62.0] — 2026-06-17
 
 ### Added — Unified admin workspace (เฟส 1: วางแผนอัตโนมัติ + ระบบเตือนกันลืม)

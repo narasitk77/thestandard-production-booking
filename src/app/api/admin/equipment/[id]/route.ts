@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
+import { reconcileEquipmentStatus } from '@/lib/equipment-status'
 import { EquipmentCategory, EquipmentStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -39,7 +40,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if ('serialNumber' in b) data.serialNumber = cleanStr(b.serialNumber)
     if ('category' in b && inEnum(EquipmentCategory, b.category)) data.category = b.category
     if ('location' in b) data.location = cleanStr(b.location)
-    if ('status' in b && inEnum(EquipmentStatus, b.status)) data.status = b.status
+    // Status is system-owned (derived from loans/repairs). The only valid
+    // manual moves are RETIRED (decommission) and un-retire — anything else is
+    // ignored and re-derived. normalizeStatus flags an un-retire so we recompute
+    // the real status (ON_LOAN/IN_REPAIR/AVAILABLE) after the update.
+    let normalizeStatus = false
+    if ('status' in b && inEnum(EquipmentStatus, b.status)) {
+      if (b.status === 'RETIRED') data.status = 'RETIRED'
+      else if (b.status === 'AVAILABLE') { data.status = 'AVAILABLE'; normalizeStatus = true }
+      // ON_LOAN / IN_REPAIR are derived — manual sets are ignored
+    }
     if ('loanable' in b) data.loanable = b.loanable === true
     if ('notes' in b) data.notes = cleanStr(b.notes)
     if ('isFixedAsset' in b) data.isFixedAsset = b.isFixedAsset === true
@@ -49,7 +59,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if ('warrantyExpiresAt' in b) data.warrantyExpiresAt = dateOrNull(b.warrantyExpiresAt)
     if ('depreciationNote' in b) data.depreciationNote = cleanStr(b.depreciationNote)
     if (Object.keys(data).length === 0) return NextResponse.json({ error: 'No editable fields' }, { status: 400 })
-    const equipment = await prisma.equipment.update({ where: { id: params.id }, data })
+    const equipment = await prisma.$transaction(async (tx) => {
+      const updated = await tx.equipment.update({ where: { id: params.id }, data })
+      if (normalizeStatus) {
+        await reconcileEquipmentStatus(tx, [params.id])
+        return tx.equipment.findUnique({ where: { id: params.id } })
+      }
+      return updated
+    })
     logAudit({ actorEmail: session.email, action: 'equipment.update', entityType: 'Equipment', entityId: params.id, changes: data })
     return NextResponse.json({ equipment })
   } catch (e: any) {
