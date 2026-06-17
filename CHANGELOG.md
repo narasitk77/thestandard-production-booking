@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.60.0] — 2026-06-14
+
+### Added — หน้า Calendar: สลับดู Google Calendar + Subscribe ได้
+
+- **Toggle ด้านบน** สลับระหว่าง **ปฏิทินในระบบ** (Month/Agenda เดิม) กับ
+  **Google Calendar** (ฝัง embed) · จำค่าที่เลือกไว้ใน localStorage
+- โหมด Google Calendar แสดง **embed เต็ม ๆ** + แผง **Subscribe**:
+  ปุ่ม "เพิ่มลงปฏิทินของฉัน" (เปิดหน้า add calendar ของ Google), "เปิดเต็มจอ",
+  และ **Calendar ID** พร้อมปุ่มคัดลอก (สำหรับ Subscribe ด้วยตนเอง)
+- Calendar ID = ปฏิทินที่งานอนุมัติแล้วซิงก์ไปอยู่แล้ว (`NEXT_PUBLIC_GOOGLE_CALENDAR_ID`
+  override ได้, default = production calendar)
+
 ## [1.59.2] — 2026-06-14
 
 ### Changed — อัปเดตทรัพยากรในการ์ดกติกาหน้าแรก

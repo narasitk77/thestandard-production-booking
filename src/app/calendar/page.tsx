@@ -3,7 +3,7 @@
 import { bookingShowName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Loader2, X, MapPin, User, Tag } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, X, MapPin, User, Tag, Copy, Check, ExternalLink, CalendarPlus } from 'lucide-react'
 import {
   format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameMonth, isSameDay, parseISO, startOfToday, addDays,
@@ -32,6 +32,19 @@ interface Booking {
 const showName = bookingShowName
 
 type ViewMode = 'month' | 'agenda'
+type CalSource = 'app' | 'google'
+
+// v1.60 — the shared Google Calendar all approved bookings sync to. Embed +
+// "subscribe" links use this. Defaults to the production calendar (same id as
+// GOOGLE_CALENDAR_ID's fallback in google-calendar.ts); override at build time
+// with NEXT_PUBLIC_GOOGLE_CALENDAR_ID if the target calendar ever changes.
+const CALENDAR_ID =
+  process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_ID ||
+  '72bf6ae390fb09d1e0a117dbaf421799be6bcc3b21ec2b7c3e2d7a65e65f9dc5@group.calendar.google.com'
+const CAL_ENC = encodeURIComponent(CALENDAR_ID)
+const EMBED_SRC = `https://calendar.google.com/calendar/embed?src=${CAL_ENC}&ctz=Asia%2FBangkok`
+const SUBSCRIBE_URL = `https://calendar.google.com/calendar/render?cid=${CAL_ENC}`
+const SOURCE_KEY = 'probook.calendar.source'
 
 export default function CalendarPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -43,6 +56,15 @@ export default function CalendarPage() {
   // but resets if the user navigates away — kept in component state.
   const [view, setView] = useState<ViewMode>('month')
   const [autoSwitched, setAutoSwitched] = useState(false)
+  // v1.60 — switch between the in-app calendar and the embedded Google Calendar
+  const [source, setSource] = useState<CalSource>('app')
+  useEffect(() => {
+    try { if (localStorage.getItem(SOURCE_KEY) === 'google') setSource('google') } catch {}
+  }, [])
+  const pickSource = (s: CalSource) => {
+    setSource(s)
+    try { localStorage.setItem(SOURCE_KEY, s) } catch {}
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -105,8 +127,24 @@ export default function CalendarPage() {
           <h1>Production Calendar</h1>
           <p className="text-xs text-gray-500 mt-0.5">All bookings · Asia/Bangkok</p>
         </div>
-        <div className="flex items-center gap-2">
-          {/* View toggle */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Source toggle: in-app calendar vs embedded Google Calendar */}
+          <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-white">
+            <button
+              onClick={() => pickSource('app')}
+              className={`px-2.5 py-1 text-xs rounded-md ${source === 'app' ? 'bg-[#673ab7] text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              ปฏิทินในระบบ
+            </button>
+            <button
+              onClick={() => pickSource('google')}
+              className={`px-2.5 py-1 text-xs rounded-md ${source === 'google' ? 'bg-[#673ab7] text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              Google Calendar
+            </button>
+          </div>
+          {/* View toggle (in-app only) */}
+          {source === 'app' && (
           <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-white">
             <button
               onClick={() => setView('month')}
@@ -121,7 +159,8 @@ export default function CalendarPage() {
               Agenda
             </button>
           </div>
-          {view === 'month' && (
+          )}
+          {source === 'app' && view === 'month' && (
             <div className="flex gap-1 items-center">
               <button onClick={() => setCursor(subMonths(cursor, 1))}
                 className="ops-btn-secondary ops-btn-sm" aria-label="Previous month">
@@ -140,7 +179,9 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {view === 'month' ? (
+      {source === 'google' && <GoogleCalendarPanel />}
+
+      {source === 'app' && (view === 'month' ? (
         <MonthGrid
           cursor={cursor}
           days={days}
@@ -156,10 +197,10 @@ export default function CalendarPage() {
           agenda={agenda}
           onOpenBooking={id => setOpenId(id)}
         />
-      )}
+      ))}
 
       {/* Selected-day list — only meaningful in month view. */}
-      {view === 'month' && selected && (
+      {source === 'app' && view === 'month' && selected && (
         <div className="mt-4 ops-card">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">{format(selected, 'EEEE, d MMMM yyyy')}</h2>
@@ -179,6 +220,66 @@ export default function CalendarPage() {
 
       {/* Booking detail drawer */}
       <BookingDrawer booking={openBooking} onClose={() => setOpenId(null)} />
+    </div>
+  )
+}
+
+/* ---------- Google Calendar embed + subscribe (v1.60) ---------- */
+function GoogleCalendarPanel() {
+  const [copied, setCopied] = useState(false)
+  const copyId = async () => {
+    try {
+      await navigator.clipboard.writeText(CALENDAR_ID)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {}
+  }
+  return (
+    <div className="space-y-3">
+      {/* Subscribe card */}
+      <div className="ops-card ops-card-pad">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-gray-900">ติดตามปฏิทินนี้ (Subscribe)</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              เพิ่มปฏิทินงานถ่ายเข้า Google Calendar ของคุณ — งานที่อนุมัติแล้วจะซิงก์มาที่นี่อัตโนมัติ
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <a href={SUBSCRIBE_URL} target="_blank" rel="noopener noreferrer"
+              className="ops-btn ops-btn-primary ops-btn-sm inline-flex items-center gap-1">
+              <CalendarPlus className="w-3.5 h-3.5" /> เพิ่มลงปฏิทินของฉัน
+            </a>
+            <a href={EMBED_SRC} target="_blank" rel="noopener noreferrer"
+              className="ops-btn ops-btn-secondary ops-btn-sm inline-flex items-center gap-1">
+              <ExternalLink className="w-3.5 h-3.5" /> เปิดเต็มจอ
+            </a>
+          </div>
+        </div>
+        <div className="mt-3">
+          <div className="text-[11px] text-gray-500 mb-1">Calendar ID (สำหรับ Subscribe ด้วยตนเองใน Google Calendar → “Subscribe to calendar”)</div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 min-w-0 truncate text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-gray-700">
+              {CALENDAR_ID}
+            </code>
+            <button onClick={copyId}
+              className="ops-btn ops-btn-secondary ops-btn-sm inline-flex items-center gap-1 flex-shrink-0">
+              {copied ? <><Check className="w-3.5 h-3.5 text-green-600" /> คัดลอกแล้ว</> : <><Copy className="w-3.5 h-3.5" /> คัดลอก</>}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Embed */}
+      <div className="ops-card overflow-hidden">
+        <iframe
+          src={EMBED_SRC}
+          title="THE STANDARD Production Bookings — Google Calendar"
+          className="w-full"
+          style={{ border: 0, height: '70vh', minHeight: 480 }}
+          loading="lazy"
+        />
+      </div>
     </div>
   )
 }
