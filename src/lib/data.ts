@@ -130,6 +130,7 @@ export const OUTLETS: Outlet[] = [
       { code: '4HR', name: '4Hours', category: 'Recurring' },
       { code: 'HDL', name: 'How do you live?', category: 'Recurring', notes: 'Photo-centric' },
       { code: 'PSC', name: 'Passion Calling (Short Clip)', category: 'Short-form' },
+      { code: 'ART', name: 'Article', category: 'Recurring' },
     ],
   },
   {
@@ -155,6 +156,8 @@ export const OUTLETS: Outlet[] = [
       { code: 'TSS', name: 'The Secret Sauce', category: 'Recurring', notes: 'Flagship' },
       { code: 'TSL', name: 'The Secret Sauce on Location', category: 'Recurring' },
       { code: 'TSC', name: 'The Secret Short Clip', category: 'Short-form' },
+      { code: 'KDM', name: 'Kendom', category: 'Recurring' },
+      { code: 'KSG', name: 'Kensight', category: 'Recurring' },
     ],
   },
   {

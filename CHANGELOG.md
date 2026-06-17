@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.59.1] — 2026-06-14
+
+### Changed — เพิ่มรายการตามชีทล่าสุด
+
+เทียบ `src/lib/data.ts` กับชีท outlet DB — เติมรายการที่ขาด:
+- **LIFE:** Article (ART)
+- **The Secret Sauce:** Kendom (KDM), Kensight (KSG)
+
+(รายการ "New!" อื่น ๆ — Sport 4 รายการ, TWD, Expertise Room, Geopolitics
+for business, Old school — มีในระบบอยู่แล้ว)
+
+### Ops
+- รัน Import producers บน production แล้ว (v1.59.0) → dropdown Producer/Co-Producer
+  ต่อ outlet ใช้งานได้: NWS=ศรุต/เค้ก · WLT=ปิ่น/แอ๊นท์ + เติร์ก(co) ·
+  TSS=แพร + มิ้ง(co) · POP=ขิม · LIF=มีน · POD=ฝัน/ใหญ่ (SPT ยังไม่มีในชีท → พิมพ์เอง)
+
 ## [1.59.0] — 2026-06-14
 
 ### Added — Producer / Co-Producer เป็น Dropdown แยกตาม Outlet + บัญชีผู้ใช้
