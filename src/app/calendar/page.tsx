@@ -280,6 +280,11 @@ function GoogleCalendarPanel() {
           loading="lazy"
         />
       </div>
+      <p className="text-[11px] text-gray-500 leading-snug">
+        ถ้าช่องด้านบนว่าง: ปฏิทินถูกตั้งเป็นส่วนตัว — กด <span className="text-[#673ab7]">“เพิ่มลงปฏิทินของฉัน”</span> เพื่อดู event ใน Google Calendar ของคุณ
+        (เห็นครบเมื่อล็อกอินบัญชีที่มีสิทธิ์) หรือให้แอดมินตั้งปฏิทินเป็น “สาธารณะ — เห็นรายละเอียด event” เพื่อให้ embed แสดงกับทุกคน ·
+        งานจะขึ้นปฏิทินเฉพาะที่ <strong>อนุมัติแล้ว (CONFIRMED)</strong> เท่านั้น
+      </p>
     </div>
   )
 }

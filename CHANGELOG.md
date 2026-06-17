@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.60.1] — 2026-06-14
+
+### Changed
+
+- หน้า Calendar (โหมด Google): เพิ่มหมายเหตุใต้ embed — ถ้าว่างเพราะปฏิทินเป็น
+  ส่วนตัว ให้กด "เพิ่มลงปฏิทินของฉัน" หรือให้แอดมินตั้งปฏิทินเป็นสาธารณะ ·
+  ย้ำว่างานขึ้นปฏิทินเฉพาะที่อนุมัติแล้ว (CONFIRMED) — แก้อาการ "embed ว่าง"
+  ที่จริง ๆ เป็น setting การแชร์ของ Google ไม่ใช่บั๊ก
+
 ## [1.60.0] — 2026-06-14
 
 ### Added — หน้า Calendar: สลับดู Google Calendar + Subscribe ได้
