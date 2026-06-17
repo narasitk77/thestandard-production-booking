@@ -166,6 +166,9 @@ export default function BookingWizard() {
   const [shootType, setShootType] = useState('Studio')
   const [locationId, setLocationId] = useState('')
   const [locationCustom, setLocationCustom] = useState('')
+  // v1.58 — off-site (On Location) shoots collect a free-text Map location
+  // instead of an office room.
+  const [mapLocation, setMapLocation] = useState('')
   const [callTime, setCallTime] = useState('')
   const [estimatedWrap, setEstimatedWrap] = useState('')
   const [producerEmail, setProducerEmail] = useState('')
@@ -261,11 +264,17 @@ export default function BookingWizard() {
 
   const selectedLocation = findLocation(locationId)
   const needsCustomText = !!selectedLocation && locationNeedsManualText(selectedLocation.id)
-  const resolvedLocationName = !selectedLocation
-    ? null
-    : needsCustomText
-      ? (locationCustom ? `${selectedLocation.fullName} — ${locationCustom}` : selectedLocation.fullName)
-      : selectedLocation.fullName
+  // v1.58 — On Location = off-site: show a Map location box + van option, hide
+  // the office-room picker. Studio/Event = office: pick a room, no external
+  // options, no van.
+  const offsite = shootType === 'On Location'
+  const resolvedLocationName = offsite
+    ? (mapLocation.trim() || null)
+    : !selectedLocation
+      ? null
+      : needsCustomText
+        ? (locationCustom ? `${selectedLocation.fullName} — ${locationCustom}` : selectedLocation.fullName)
+        : selectedLocation.fullName
 
   /* ---- cascade: outlet change ---- */
   const handleOutletChange = (code: string) => {
@@ -352,8 +361,12 @@ export default function BookingWizard() {
         errs.estimatedWrap = 'Estimated Wrap ต้องอยู่หลัง Call Time (เมื่อถ่ายวันเดียว)'
       }
     } else if (s === 3) {
-      if (!locationId) errs.locationId = 'กรุณาเลือก Location / Room'
-      if (needsCustomText && !locationCustom.trim()) errs.locationCustom = 'กรุณาระบุสถานที่จริง'
+      if (offsite) {
+        if (!mapLocation.trim()) errs.mapLocation = 'กรุณากรอกสถานที่ / Map location'
+      } else {
+        if (!locationId) errs.locationId = 'กรุณาเลือก Location / Room'
+        if (needsCustomText && !locationCustom.trim()) errs.locationCustom = 'กรุณาระบุสถานที่จริง'
+      }
     } else if (s === 4) {
       if (isContentAgency) {
         if (!producerEmail) errs.producerEmail = 'กรุณาเลือก Producer'
@@ -393,7 +406,7 @@ export default function BookingWizard() {
   }), [
     outletCode, programCode, category, videoType,
     shootDate, shootEndDate, callTime, estimatedWrap,
-    locationId, locationCustom, needsCustomText,
+    locationId, locationCustom, needsCustomText, shootType, mapLocation,
     isContentAgency, producerEmail, directorEmail, projectId, selectedEpisodeIds,
     producerName, producerPhone, producerEmailText, epRows, projectSelectable,
   ])
@@ -747,7 +760,16 @@ export default function BookingWizard() {
                           name="shootType"
                           value={t}
                           checked={shootType === t}
-                          onChange={() => setShootType(t)}
+                          onChange={() => {
+                            setShootType(t)
+                            // v1.58 — keep the two location modes from carrying
+                            // stale values across a switch, and van is off-site only.
+                            if (t === 'On Location') {
+                              setLocationId(''); setLocationCustom('')
+                            } else {
+                              setMapLocation(''); setNeedsVan(false)
+                            }
+                          }}
                           className="accent-brand-primary mt-0.5"
                         />
                         <span className="text-xs text-gray-700">{t}</span>
@@ -757,68 +779,89 @@ export default function BookingWizard() {
                   <FieldHelp>ประเภทการผลิต — ไม่ใช่ห้อง/สถานที่ ใส่ตรงข้างล่าง</FieldHelp>
                 </div>
 
-                {/* v1.41.0 — van request for off-site shoots. Adds 🚐 to the
+                {/* v1.41.0 — van request, v1.58 — off-site only. Adds 🚐 to the
                     calendar event title (web + Google) so logistics see it. */}
-                <div>
-                  <Label>การเดินทาง</Label>
-                  <label className={`ops-choice ${needsVan ? 'ops-choice-selected' : ''} cursor-pointer`}>
-                    <input
-                      type="checkbox"
-                      checked={needsVan}
-                      onChange={e => setNeedsVan(e.target.checked)}
-                      className="accent-brand-primary mt-0.5"
-                    />
-                    <span className="text-sm text-gray-700">🚐 ต้องการรถตู้ (งานออกนอกสถานที่)</span>
-                  </label>
-                  <FieldHelp>ถ้าเลือก ชื่องานบนปฏิทินจะขึ้น 🚐 นำหน้า</FieldHelp>
-                </div>
-
-                <div>
-                  <Label htmlFor="locationId" required>Location / Room</Label>
-                  <p className="text-xs text-gray-500 mb-2 leading-snug">ห้อง/สถานที่จริงที่ใช้ถ่าย (ไม่ขึ้นกับ Shoot Type ข้างบน)</p>
-                  <select
-                    id="locationId"
-                    className={`ops-input ${fieldErrors.locationId ? 'ops-input-invalid' : ''}`}
-                    value={locationId}
-                    onChange={e => { setLocationId(e.target.value); setLocationCustom('') }}
-                    aria-invalid={!!fieldErrors.locationId}
-                  >
-                    <option value="">Choose a room / location…</option>
-                    {LOCATION_GROUPS.map(g => (
-                      <optgroup key={g.key} label={g.label}>
-                        {LOCATIONS.filter(l => l.group === g.key).map(l => (
-                          <option key={l.id} value={l.id}>
-                            {l.name}{l.capacity ? ` · cap. ${l.capacity}` : ''}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <FieldError message={fieldErrors.locationId} />
-
-                  {selectedLocation && selectedLocation.group !== 'EXTERNAL' && (
-                    <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      {selectedLocation.fullName}{selectedLocation.capacity ? ` · capacity ${selectedLocation.capacity}` : ''}
-                    </p>
-                  )}
-
-                  {needsCustomText && (
-                    <div className="mt-3">
-                      <Label htmlFor="locationCustom" required>Specify Location</Label>
+                {offsite && (
+                  <div>
+                    <Label>การเดินทาง</Label>
+                    <label className={`ops-choice ${needsVan ? 'ops-choice-selected' : ''} cursor-pointer`}>
                       <input
-                        id="locationCustom"
-                        type="text"
-                        className={`ops-input ${fieldErrors.locationCustom ? 'ops-input-invalid' : ''}`}
-                        placeholder="ชื่อสถานที่ · ที่อยู่ · หรือลิงก์ Google Maps"
-                        value={locationCustom}
-                        onChange={e => setLocationCustom(e.target.value)}
-                        aria-invalid={!!fieldErrors.locationCustom}
+                        type="checkbox"
+                        checked={needsVan}
+                        onChange={e => setNeedsVan(e.target.checked)}
+                        className="accent-brand-primary mt-0.5"
                       />
-                      <FieldError message={fieldErrors.locationCustom} />
-                    </div>
-                  )}
-                </div>
+                      <span className="text-sm text-gray-700">🚐 ต้องการรถตู้ (งานออกนอกสถานที่)</span>
+                    </label>
+                    <FieldHelp>ถ้าเลือก ชื่องานบนปฏิทินจะขึ้น 🚐 นำหน้า</FieldHelp>
+                  </div>
+                )}
+
+                {offsite ? (
+                  /* v1.58 — off-site: Map location box, no office-room picker */
+                  <div>
+                    <Label htmlFor="mapLocation" required>สถานที่ / Map location</Label>
+                    <p className="text-xs text-gray-500 mb-2 leading-snug">สถานที่ถ่ายจริง — ใส่ชื่อสถานที่ ที่อยู่ หรือวางลิงก์ Google Maps</p>
+                    <input
+                      id="mapLocation"
+                      type="text"
+                      className={`ops-input ${fieldErrors.mapLocation ? 'ops-input-invalid' : ''}`}
+                      placeholder="เช่น ICONSIAM · 299 ถ.เจริญนคร · https://maps.app.goo.gl/…"
+                      value={mapLocation}
+                      onChange={e => setMapLocation(e.target.value)}
+                      aria-invalid={!!fieldErrors.mapLocation}
+                    />
+                    <FieldError message={fieldErrors.mapLocation} />
+                  </div>
+                ) : (
+                  /* v1.58 — office: room picker only (no external options) */
+                  <div>
+                    <Label htmlFor="locationId" required>Location / Room</Label>
+                    <p className="text-xs text-gray-500 mb-2 leading-snug">ห้อง/สถานที่ในออฟฟิศที่ใช้ถ่าย</p>
+                    <select
+                      id="locationId"
+                      className={`ops-input ${fieldErrors.locationId ? 'ops-input-invalid' : ''}`}
+                      value={locationId}
+                      onChange={e => { setLocationId(e.target.value); setLocationCustom('') }}
+                      aria-invalid={!!fieldErrors.locationId}
+                    >
+                      <option value="">Choose a room…</option>
+                      {LOCATION_GROUPS.filter(g => g.key !== 'EXTERNAL').map(g => (
+                        <optgroup key={g.key} label={g.label}>
+                          {LOCATIONS.filter(l => l.group === g.key).map(l => (
+                            <option key={l.id} value={l.id}>
+                              {l.name}{l.capacity ? ` · cap. ${l.capacity}` : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <FieldError message={fieldErrors.locationId} />
+
+                    {selectedLocation && selectedLocation.group !== 'EXTERNAL' && (
+                      <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {selectedLocation.fullName}{selectedLocation.capacity ? ` · capacity ${selectedLocation.capacity}` : ''}
+                      </p>
+                    )}
+
+                    {needsCustomText && (
+                      <div className="mt-3">
+                        <Label htmlFor="locationCustom" required>Specify Location</Label>
+                        <input
+                          id="locationCustom"
+                          type="text"
+                          className={`ops-input ${fieldErrors.locationCustom ? 'ops-input-invalid' : ''}`}
+                          placeholder="ชื่อสถานที่ · ที่อยู่ · หรือลิงก์ Google Maps"
+                          value={locationCustom}
+                          onChange={e => setLocationCustom(e.target.value)}
+                          aria-invalid={!!fieldErrors.locationCustom}
+                        />
+                        <FieldError message={fieldErrors.locationCustom} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1294,9 +1337,10 @@ export default function BookingWizard() {
                 <KV k="Date" v={summary.dateRange} />
                 <KV k="Time" v={summary.timeRange} />
               </SummaryBlock>
-              <SummaryBlock title="Location" filled={!!locationId}>
+              <SummaryBlock title="Location" filled={offsite ? !!mapLocation.trim() : !!locationId}>
                 <KV k="Shoot Type" v={summary.shootType} />
-                <KV k="Room" v={summary.location} />
+                <KV k={offsite ? 'Map location' : 'Room'} v={summary.location} />
+                {offsite && needsVan && <KV k="Van" v="🚐 ต้องการรถตู้" />}
               </SummaryBlock>
               <SummaryBlock title="People" filled={!!(producerEmail || producerName)}>
                 <KV k="Producer" v={summary.producer} />
