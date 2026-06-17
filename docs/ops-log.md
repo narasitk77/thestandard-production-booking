@@ -5,6 +5,41 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-17 · Fix — reminder worker env never reached the container
+
+**Symptom.** After deploying v1.62.0 (`sha-b68edc6`) the reminder worker logged
+`[reminders] REMINDERS_WORKER_ENABLED is off — exiting` on a loop and never sent a
+Discord/email digest, even though the env vars were "added" in Portainer.
+
+**Cause.** This stack is **git-based** (compose pulled from
+`github.com/narasitk77/thestandard-production-booking`). Portainer stack env vars
+are only used for `${VAR}` substitution *inside the compose file* — they are not
+injected into containers. `docker-compose.portainer.yml` had no passthrough for
+the reminder vars, so they could never reach the app container regardless of what
+was set in Portainer. (Container `docker inspect` confirmed: none of
+`REMINDERS_WORKER_ENABLED` / `DISCORD_WEBHOOK_URL` / `REMINDER_ADMIN_EMAIL` present.)
+
+**Fix.** Added a reminder env passthrough block to the app service in
+`docker-compose.portainer.yml` (mirrors the footage/calendar worker pattern):
+`REMINDERS_WORKER_ENABLED`, `REMINDERS_WORKER_INTERVAL_MS`, `REMINDERS_SECRET`
+(defaults to `NEXTAUTH_SECRET`), `DISCORD_WEBHOOK_URL`, `REMINDER_ADMIN_EMAIL`,
+`INVOICE_AGING_DAYS`, `SHOOT_GEAR_LOOKAHEAD_DAYS`. Committed to `feat/unified-workspace`.
+
+**To enable on prod (Portainer → stack `production-booking` → Environment variables):**
+- `REMINDERS_WORKER_ENABLED=1`
+- `DISCORD_WEBHOOK_URL=<webhook>`  ← secret, Portainer only, never in git
+- `REMINDER_ADMIN_EMAIL=narasit.k@thestandard.co`
+Then **Redeploy from git repository** (re-pulls the updated compose + applies env).
+`IMAGE_TAG` stays `sha-b68edc6` — no image rebuild needed (the worker code already
+ships in that image). Verify container logs show `[reminders] worker started` and
+`[reminders] detected=… discord=true`.
+
+**Prevention.** Any new supervised worker's env MUST be declared in the compose
+`environment:` block — setting it only in Portainer stack env is a silent no-op for
+git-based stacks.
+
+---
+
 ## 2026-06-17 · v1.62.0 (phases 2–4) — Finance + equipment/loans/repair UI + importer + MCP tools
 
 **No new infra.** Same `prisma db push` schema (the 8 tables were already in the

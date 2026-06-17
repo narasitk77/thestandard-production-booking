@@ -18,6 +18,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   อัตโนมัติ. ใหม่: POST(PATCH) /api/bookings/[id]/producer-edit + หน้า /bookings/[id]/edit
   (เซิร์ฟเวอร์บังคับสิทธิ์: เจ้าของงาน + สถานะ Requested เท่านั้น)
 
+### Fixed
+
+- **ระบบเตือน (reminders) ไม่ทำงานบน prod**: `docker-compose.portainer.yml` ไม่ได้
+  ส่ง env ของ worker เตือน (`REMINDERS_WORKER_ENABLED`, `DISCORD_WEBHOOK_URL`,
+  `REMINDER_ADMIN_EMAIL`, ฯลฯ) เข้า container เลย — Portainer stack env ใช้แค่แทนค่า
+  `${VAR}` ในไฟล์ compose เท่านั้น ถ้า compose ไม่อ้างถึง ตัวแปรก็ไม่เคยถึง container
+  worker จึงขึ้น `REMINDERS_WORKER_ENABLED is off` ตลอด. เพิ่ม passthrough block ใน
+  app service (ค่า secret ของ Discord ยังอยู่ใน Portainer stack env เท่านั้น ไม่ commit
+  ลงไฟล์). ป้องกันซ้ำ: env ของ worker ใหม่ต้องประกาศใน compose เสมอ ไม่ใช่แค่ตั้งใน Portainer.
+
 ---
 
 ## [1.62.0] — 2026-06-17
