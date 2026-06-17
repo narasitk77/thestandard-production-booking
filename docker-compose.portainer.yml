@@ -126,6 +126,21 @@ services:
       FOOTAGE_SYNC_SECRET: ${FOOTAGE_SYNC_SECRET:-${NEXTAUTH_SECRET}}
       # FOOTAGE_SYNC_URL: ${FOOTAGE_SYNC_URL:-}  # override only if app isn't on 127.0.0.1:3000
 
+      # --- กันลืม reminders (v1.62.0) ---
+      # Supervised worker (scripts/reminders-worker.js) scans loans / rentals /
+      # invoices / repairs / upcoming shoots / warranties once a day and pushes a
+      # digest to Discord + email. Dormant until REMINDERS_WORKER_ENABLED=1.
+      # DISCORD_WEBHOOK_URL is a secret — set it as a Portainer stack env var,
+      # never commit the value here.
+      REMINDERS_WORKER_ENABLED: ${REMINDERS_WORKER_ENABLED:-0}
+      REMINDERS_WORKER_INTERVAL_MS: ${REMINDERS_WORKER_INTERVAL_MS:-86400000}
+      REMINDERS_SECRET: ${REMINDERS_SECRET:-${NEXTAUTH_SECRET}}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      REMINDER_ADMIN_EMAIL: ${REMINDER_ADMIN_EMAIL:-}
+      INVOICE_AGING_DAYS: ${INVOICE_AGING_DAYS:-7}
+      SHOOT_GEAR_LOOKAHEAD_DAYS: ${SHOOT_GEAR_LOOKAHEAD_DAYS:-3}
+      # REMINDERS_URL: ${REMINDERS_URL:-}  # override only if app isn't on 127.0.0.1:3000
+
       # --- Wasabi S3 archive (dual-cloud upload, v1.35.x) ---
       # Required for outlets with storagePolicy=DUAL_WRITE (AGN, TSS, NWS). The
       # booking upload UI presigns multipart PUT URLs from these so the browser
