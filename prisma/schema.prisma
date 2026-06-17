@@ -195,6 +195,7 @@ model Outlet {
   storagePolicy StoragePolicy @default(DRIVE_ONLY)
   programs      Program[]
   bookings      Booking[]
+  rentalJobs    RentalJob[]
 
   @@map("outlets")
 }
@@ -248,6 +249,11 @@ model Booking {
   // Nullable: legacy bookings have none; 0/null both render as "not specified".
   cameraCount      Int?
   micCount         Int?
+  // v1.61.0 — fixed checklist of special gear requested at booking time
+  // (Gimbal/Ronin, Prompter, Clip-on Mic, Small Light). Surfaced on the
+  // calendar event description + admin detail. Free string[] (no enum) so
+  // the option list can grow without a schema change.
+  specialEquipment String[]
   // v1.41.0 — off-site shoots that need a company van. When true the calendar
   // event title (web + Google) is prefixed with 🚐 so it's obvious at a glance.
   needsVan         Boolean       @default(false)
@@ -294,12 +300,21 @@ model Booking {
   // `routineGroupId` ties one generated batch together for bulk cancel.
   isRoutine        Boolean       @default(false)
   routineGroupId   String?
+  // v1.62.0 — Auto-Planning fields. The only columns the manual planning sheet
+  // had that the booking system didn't; capturing them here kills the manual
+  // calendar→sheet copy. All nullable — legacy bookings unaffected.
+  equipmentNote        String?              // gear allocation free-text, e.g. "FX3 1, FX30 3"
+  rentalGearNote       String?              // the เช่า column — rental gear for this shoot
+  itinerary            String?  @db.Text    // minute-by-minute shoot breakdown
+  assignedEquipmentIds String[] @default([]) // physical Equipment.id list
   outlet           Outlet        @relation(fields: [outletId], references: [id])
   outletId         String
   program          Program       @relation(fields: [programId], references: [id])
   programId        String
   episodes         Episode[]
   uploads          Upload[]
+  equipmentLoans   EquipmentLoan[]
+  rentalJobs       RentalJob[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -418,4 +433,308 @@ model FootageLog {
   @@index([productionId])
   @@index([parseStatus])
   @@map("footage_log")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.62.0 — Unified admin workspace. Absorbs three manual Google Sheets
+// (equipment+repair, planning, rental/purchase/finance) into the platform so a
+// solo admin works in one place, with the reminder engine watching due dates.
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum EquipmentCategory {
+  AUDIO
+  CAMERA
+  COMPUTER_MONITOR
+  GRIP_SUPPORT
+  LENS
+  LIGHTING
+  POWER
+  STORAGE_MEDIA
+  UNCATEGORIZED
+}
+
+enum EquipmentStatus {
+  AVAILABLE
+  ON_LOAN
+  IN_REPAIR
+  RETIRED
+}
+
+enum LoanStatus {
+  ACTIVE
+  RETURNED
+}
+
+enum RepairStatus {
+  REPORTED
+  SENT
+  RETURNED
+  CANNOT_REPAIR
+}
+
+enum PaymentStatus {
+  PAID      // จ่ายแล้ว
+  INVOICED  // วางบิล
+  PENDING   // รอจ่าย
+}
+
+enum RentalStatus {
+  ACTIVE
+  RETURNED
+  ARCHIVED
+}
+
+enum PurchaseStatus {
+  OPEN
+  RECEIVED
+  CANCELLED
+}
+
+enum DocKind {
+  QUOTATION
+  INVOICE
+  TAX_INVOICE
+  TRANSFER_RECEIPT
+  RECEIPT
+  OTHER
+}
+
+enum ReminderType {
+  LOAN_DUE
+  LOAN_OVERDUE
+  RENTAL_RETURN_DUE
+  INVOICE_AGING
+  REPAIR_OUTSTANDING
+  SHOOT_MISSING_GEAR
+  WARRANTY_EXPIRING
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  DISMISSED
+  RESOLVED
+}
+
+// Physical gear inventory + the accounting fixed-asset register in one table.
+// `loanable=false` (set on imported depreciation rows) hides office/building
+// assets from the loan picker. Status is owned by loans, not edited by hand.
+model Equipment {
+  id           String            @id @default(cuid())
+  itemId       String?           @unique // ITEMID from the inventory sheet
+  name         String
+  description  String?
+  serialNumber String?
+  category     EquipmentCategory @default(UNCATEGORIZED)
+  location     String? // free-text: room or person, as in the sheet
+  status       EquipmentStatus   @default(AVAILABLE)
+  loanable     Boolean           @default(true)
+  notes        String?
+
+  // Fixed-asset register (Asset Depreciation tab) — imported as read-only
+  // metadata. No depreciation calc engine: park the numbers as text.
+  isFixedAsset      Boolean   @default(false)
+  fixedAssetTag     String?
+  purchaseDate      DateTime? @db.Date
+  purchasePrice     Decimal?  @db.Decimal(12, 2)
+  warrantyExpiresAt DateTime? @db.Date
+  depreciationNote  String?
+
+  loans     EquipmentLoanItem[]
+  repairs   RepairTicket[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([category, status])
+  @@index([loanable, status])
+  @@index([warrantyExpiresAt])
+  @@map("equipment")
+}
+
+model EquipmentLoan {
+  id           String     @id @default(cuid())
+  loanCode     String     @unique // LOAN-YYMMDDHHMM (reuses the sheet's format)
+  photographer String
+  email        String?
+  jobName      String?
+  bookingId    String?
+  booking      Booking?   @relation(fields: [bookingId], references: [id])
+  eventDate    DateTime?  @db.Date
+  dueDate      DateTime?  @db.Date
+  borrowedAt   DateTime?
+  returnedAt   DateTime?
+  status       LoanStatus @default(ACTIVE)
+
+  items     EquipmentLoanItem[]
+  documents DocumentRef[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([status, dueDate])
+  @@index([bookingId])
+  @@map("equipment_loans")
+}
+
+model EquipmentLoanItem {
+  id           String        @id @default(cuid())
+  loanId       String
+  loan         EquipmentLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  equipmentId  String?
+  equipment    Equipment?    @relation(fields: [equipmentId], references: [id])
+  nameSnapshot String // name captured at loan time (from the Items JSON)
+  tagSnapshot  String?
+
+  @@index([loanId])
+  @@index([equipmentId])
+  @@map("equipment_loan_items")
+}
+
+// The repair-tracking table the sheet never had (repair info was scattered in
+// free-text notes). itemLabel stays free-text since today's data isn't keyed
+// to inventory rows; equipmentId links it when resolvable.
+model RepairTicket {
+  id           String       @id @default(cuid())
+  equipmentId  String?
+  equipment    Equipment?   @relation(fields: [equipmentId], references: [id])
+  itemLabel    String
+  issue        String?
+  vendorId     String?
+  vendor       Vendor?      @relation(fields: [vendorId], references: [id])
+  status       RepairStatus @default(REPORTED)
+  sentDate     DateTime?    @db.Date
+  returnedDate DateTime?    @db.Date
+  cost         Decimal?     @db.Decimal(12, 2)
+  kind         String? // REPLACE / ADD / FIX (sheet remark)
+  remark       String?
+
+  documents DocumentRef[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([status])
+  @@index([equipmentId])
+  @@map("repair_tickets")
+}
+
+model Vendor {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  service     String? // CAMERA / GRIP / LIGHT / RADIO / DRONE
+  contact     String? // phone
+  bankAccount String?
+
+  rentals   RentalJob[]
+  repairs   RepairTicket[]
+  purchases PurchaseItem[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@map("vendors")
+}
+
+// Rental 2026 + Return/Archive tabs merged (one lifecycle, status separates).
+// returnDueDate/returnedAt are NEW — the sheet had no return tracking, which is
+// exactly what the reminder engine needs to stop forgotten returns.
+model RentalJob {
+  id            String        @id @default(cuid())
+  quoteNo       String? // QU-xxxx
+  adType        String? // AD / NON-AD
+  jobName       String?
+  bookingId     String?
+  booking       Booking?      @relation(fields: [bookingId], references: [id])
+  outletId      String?
+  outlet        Outlet?       @relation(fields: [outletId], references: [id])
+  vendorId      String?
+  vendor        Vendor?       @relation(fields: [vendorId], references: [id])
+  rentalDate    DateTime?     @db.Date
+  returnDueDate DateTime?     @db.Date
+  returnedAt    DateTime?     @db.Date
+  paymentStatus PaymentStatus @default(PENDING)
+  invoiceNo     String?
+  amount        Decimal?      @db.Decimal(12, 2)
+  status        RentalStatus  @default(ACTIVE)
+  remark        String?
+
+  documents DocumentRef[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([paymentStatus])
+  @@index([status, returnDueDate])
+  @@index([bookingId])
+  @@map("rental_jobs")
+}
+
+model PurchaseItem {
+  id          String         @id @default(cuid())
+  month       String? // YYYY-MM
+  item        String
+  quantity    Int            @default(1)
+  vendorId    String?
+  vendor      Vendor?        @relation(fields: [vendorId], references: [id])
+  productLink String?
+  unitPrice   Decimal?       @db.Decimal(12, 2)
+  total       Decimal?       @db.Decimal(12, 2)
+  kind        String? // ADD / REPLACE / FIX
+  status      PurchaseStatus @default(OPEN)
+  remark      String?
+
+  documents DocumentRef[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([month])
+  @@index([status])
+  @@map("purchase_items")
+}
+
+// Drive-file reference, attachable to a rental / purchase / repair / loan via
+// nullable FKs (lazy polymorphism — keeps integrity + Prisma include, cheaper
+// than a generic entityType/entityId table for this fixed set of owners).
+model DocumentRef {
+  id          String  @id @default(cuid())
+  kind        DocKind @default(OTHER)
+  fileName    String
+  driveFileId String?
+  driveUrl    String?
+
+  rentalJobId    String?
+  rentalJob      RentalJob?     @relation(fields: [rentalJobId], references: [id], onDelete: Cascade)
+  purchaseItemId String?
+  purchaseItem   PurchaseItem?  @relation(fields: [purchaseItemId], references: [id], onDelete: Cascade)
+  repairTicketId String?
+  repairTicket   RepairTicket?  @relation(fields: [repairTicketId], references: [id], onDelete: Cascade)
+  loanId         String?
+  loan           EquipmentLoan? @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([rentalJobId])
+  @@index([purchaseItemId])
+  @@index([repairTicketId])
+  @@index([loanId])
+  @@map("document_refs")
+}
+
+// Anti-forget engine. The daily scan upserts rows keyed by dedupeKey so it
+// never double-sends; the notifier dispatches PENDING rows (Discord + email)
+// and marks them SENT.
+model Reminder {
+  id         String         @id @default(cuid())
+  type       ReminderType
+  status     ReminderStatus @default(PENDING)
+  dueDate    DateTime?      @db.Date
+  title      String
+  body       String?
+  dedupeKey  String         @unique // e.g. "LOAN_OVERDUE:LOAN-2601151230"
+  entityType String?
+  entityId   String?
+  sentAt     DateTime?
+  resolvedAt DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([status, type])
+  @@index([dueDate])
+  @@map("reminders")
 }

@@ -38,6 +38,11 @@ export interface WorkspaceBooking {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  // v1.62.0 — Auto-Planning fields (replace the manual planning sheet)
+  equipmentNote?: string | null
+  rentalGearNote?: string | null
+  itinerary?: string | null
+  assignedEquipmentIds?: string[] | null
   freelancers?: unknown
   assignedEmails?: string[] | null
   mainVideographerEmail?: string | null
@@ -180,10 +185,18 @@ export const WORKSPACE_COLUMNS: WorkspaceColumn[] = [
     value: b => freelancerList(b)
       .map(f => `${f.name}${f.contract ? ` (${f.contract})` : ''}${f.email ? ` <${f.email}>` : ''}`)
       .join(' | ') },
+  // v1.62.0 — Auto-Planning: gear allocation + rental gear, replacing the manual
+  // CAMERA / เช่า columns of the old planning sheet.
+  { key: 'equipmentNote', label: 'Equipment', group: 'Crew & Gear', defaultVisible: true,
+    value: b => b.equipmentNote || '' },
+  { key: 'rentalGear', label: 'Rental Gear', group: 'Crew & Gear',
+    value: b => b.rentalGearNote || '' },
 
   // ── Meta ──────────────────────────────────────────────────────────
   { key: 'locationName', label: 'Location', group: 'Meta',
     value: b => b.locationName || '' },
+  { key: 'itinerary', label: 'Itinerary', group: 'Meta',
+    value: b => b.itinerary || '' },
   { key: 'agencyRef', label: 'Agency Ref', group: 'Meta',
     value: b => b.agencyRef || '' },
   { key: 'notes', label: 'Notes', group: 'Meta',

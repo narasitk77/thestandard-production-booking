@@ -15,7 +15,8 @@ interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]; videographerCount?: number
-  cameraCount?: number | null; micCount?: number | null; needsVan?: boolean
+  cameraCount?: number | null; micCount?: number | null; needsVan?: boolean; specialEquipment?: string[]
+  equipmentNote?: string | null; rentalGearNote?: string | null; itinerary?: string | null; assignedEquipmentIds?: string[]
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
   freelancers?: unknown
   outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
@@ -115,6 +116,8 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   // Edit Booking Details mode
   const [editMode, setEditMode] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
+  // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot
+  const [cameraOverload, setCameraOverload] = useState('')
   const [editForm, setEditForm] = useState({
     callTime: '',
     estimatedWrap: '',
@@ -126,6 +129,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     cameraCount: '',
     micCount: '',
     needsVan: false,
+    specialEquipment: [] as string[],
+    equipmentNote: '',
+    rentalGearNote: '',
+    itinerary: '',
     agencyRef: '',
     notes: '',
     episodeTitles: [] as { id: string; episodeId: string; title: string }[],
@@ -144,11 +151,40 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       cameraCount: b.cameraCount === null || b.cameraCount === undefined ? '' : String(b.cameraCount),
       micCount: b.micCount === null || b.micCount === undefined ? '' : String(b.micCount),
       needsVan: !!b.needsVan,
+      specialEquipment: b.specialEquipment || [],
+      equipmentNote: b.equipmentNote || '',
+      rentalGearNote: b.rentalGearNote || '',
+      itinerary: b.itinerary || '',
       agencyRef: b.agencyRef || '',
       notes: b.notes || '',
       episodeTitles: b.episodes.map(e => ({ id: e.id, episodeId: e.episodeId, title: e.title })),
     })
   }
+
+  // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot.
+  // Excludes this booking's own row (excludeBookingId) and re-adds its own
+  // cameraCount via the endpoint, so the total isn't double-counted.
+  useEffect(() => {
+    if (!booking || !booking.cameraCount || booking.cameraCount <= 0) { setCameraOverload(''); return }
+    if (booking.status === 'CANCELLED' || booking.status === 'COMPLETED') { setCameraOverload(''); return }
+    let cancelled = false
+    fetch('/api/camera-load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shootDate: booking.shootDate,
+        shootEndDate: booking.shootEndDate || null,
+        callTime: booking.callTime,
+        estimatedWrap: booking.estimatedWrap || null,
+        cameraCount: booking.cameraCount,
+        excludeBookingId: booking.id,
+      }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d) setCameraOverload(d.exceedsLimit ? `กล้องเต็ม: ช่วงเวลานี้จองรวม ${d.totalCameras}/${d.limit} ตัว — ต้องเช่ากล้องเพิ่ม` : '') })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [booking])
 
   useEffect(() => {
     fetch(`/api/bookings/${id}`)
@@ -338,6 +374,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         cameraCount: editForm.cameraCount.trim() === '' ? null : Math.max(0, parseInt(editForm.cameraCount, 10) || 0),
         micCount: editForm.micCount.trim() === '' ? null : Math.max(0, parseInt(editForm.micCount, 10) || 0),
         needsVan: editForm.needsVan,
+        specialEquipment: editForm.specialEquipment,
+        equipmentNote: editForm.equipmentNote || null,
+        rentalGearNote: editForm.rentalGearNote || null,
+        itinerary: editForm.itinerary || null,
         agencyRef: editForm.agencyRef || null,
         notes: editForm.notes || null,
         episodeTitles: editForm.episodeTitles.map(e => ({ id: e.id, title: e.title })),
@@ -417,6 +457,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
              booking.status === 'CANCELLED' ? 'CANCELLED' :
              '[REQUESTED]'}
           </span>
+          {cameraOverload && (
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-300 font-medium">
+              <AlertTriangle className="w-3 h-3" /> {cameraOverload}
+            </span>
+          )}
         </div>
         <h1 className="text-2xl font-normal text-gray-800">
           {booking.outlet.name} · {bookingShowName(booking)}
@@ -529,6 +574,18 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                     .join(', ')
             }</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
+            {booking.specialEquipment && booking.specialEquipment.length > 0 && (
+              <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Special Equipment</div><div className="text-gray-800">{booking.specialEquipment.join(', ')}</div></div>
+            )}
+            {booking.equipmentNote && (
+              <div><div className="text-xs text-gray-400 mb-0.5">🎬 Equipment</div><div className="text-gray-800">{booking.equipmentNote}</div></div>
+            )}
+            {booking.rentalGearNote && (
+              <div><div className="text-xs text-gray-400 mb-0.5">📦 Rental Gear</div><div className="text-gray-800">{booking.rentalGearNote}</div></div>
+            )}
+            {booking.itinerary && (
+              <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">🗒️ Itinerary</div><div className="text-gray-800 whitespace-pre-line">{booking.itinerary}</div></div>
+            )}
             <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Project ID</div><div className="text-gray-800">{booking.projectId ? <><span className="font-mono">{booking.projectId}</span>{booking.projectName ? <span className="text-gray-500"> · {booking.projectName}</span> : null}</> : '—'}</div></div>
             {booking.notes && <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Notes</div><div className="text-gray-800 whitespace-pre-line">{booking.notes}</div></div>}
           </div>
@@ -623,6 +680,47 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                   <span className="text-sm text-gray-700">🚐 ต้องการรถตู้</span>
                 </label>
               </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">⚙️ Special Equipment</label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Gimbal/Ronin', 'Prompter', 'Clip-on Mic (DJI Mic)', 'ไฟดวงเล็ก'].map(item => {
+                  const checked = editForm.specialEquipment.includes(item)
+                  return (
+                    <label key={item} className="flex items-center gap-2 px-2 py-1 cursor-pointer">
+                      <input type="checkbox" className="accent-[#673ab7]" checked={checked}
+                        onChange={() => setEditForm({ ...editForm, specialEquipment: checked ? editForm.specialEquipment.filter(x => x !== item) : [...editForm.specialEquipment, item] })} />
+                      <span className="text-sm text-gray-700">{item}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* v1.62.0 — Auto-Planning fields. Filling these replaces the manual
+                calendar→planning-sheet copy; they show in /admin/workspace + the
+                planning export, and feed the "shoot missing gear" reminder. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">🎬 จัดอุปกรณ์ (Equipment)</label>
+                <input className="gf-input" placeholder="เช่น FX3 1, FX30 3"
+                  value={editForm.equipmentNote}
+                  onChange={e => setEditForm({ ...editForm, equipmentNote: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">📦 ของเช่า (Rental gear)</label>
+                <input className="gf-input" placeholder="อุปกรณ์ที่ต้องเช่าสำหรับงานนี้"
+                  value={editForm.rentalGearNote}
+                  onChange={e => setEditForm({ ...editForm, rentalGearNote: e.target.value })} />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">🗒️ คิวถ่าย / Itinerary</label>
+              <textarea className="gf-input resize-none" rows={4} placeholder="ไทม์ไลน์ทีละช่วง / รายละเอียดกองถ่าย"
+                value={editForm.itinerary}
+                onChange={e => setEditForm({ ...editForm, itinerary: e.target.value })} />
             </div>
 
             <div>

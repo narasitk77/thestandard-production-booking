@@ -316,5 +316,17 @@ echo "==> Starting footage sheet sync worker (supervised)..."
   done
 ) &
 
+# v1.62.0 — reminder engine worker. Stays dormant when REMINDERS_WORKER_ENABLED
+# is unset/0; supervisor still re-launches so flipping the env var live in
+# Portainer is enough to turn it on. Daily scan → Discord + email digest.
+echo "==> Starting reminder worker (supervised)..."
+(
+  while true; do
+    node scripts/reminders-worker.js
+    echo "[reminders] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start

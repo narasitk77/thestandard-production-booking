@@ -5,6 +5,89 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-17 · v1.62.0 (phases 2–4) — Finance + equipment/loans/repair UI + importer + MCP tools
+
+**No new infra.** Same `prisma db push` schema (the 8 tables were already in the
+v1.62.0 phase-0 entry below). Adds admin pages + CRUD APIs under `/admin/{equipment,
+loans,repairs,rentals,purchases,vendors}` and `/api/admin/*`. Finance writes
+(rentals/purchases) gated to **ADMIN**; everything else to console tiers. No new
+required env for these to run.
+
+**Data migration (one-time, manual, off-deploy).** `scripts/import-workspace.ts`
+pulls the legacy sheets into the new tables. Run from the app container or any
+box with the repo + service-account env:
+```
+npx tsx scripts/import-workspace.ts all            # DRY RUN — prints counts only
+npx tsx scripts/import-workspace.ts all --commit   # actually writes
+```
+Requires the service account (`GOOGLE_SERVICE_ACCOUNT_*`) to have **read** access
+to both sheets. Sheet ids default to the equipment sheet (`1U5Yhd…`) and finance
+sheet (`1MQMu…`); override with `EQUIP_SHEET_ID` / `FINANCE_SHEET_ID` and the
+`*_TAB` envs if tab names differ (the script auto-matches tab names case-insensitively
+and prints the tab list if it can't find one). Idempotent (upserts). **⚠ Before
+importing loans:** find + retire whatever external tool writes the sheet's
+"Equipment Loans" tab (likely a bound Apps Script) or it will fight the DB.
+
+**Build note (2026-06-17).** A concurrent editor's in-progress "Producer edit"
+feature (`/bookings/[id]/edit`, untracked) had a TS error at hand-off time that
+would block `next build` (next.config does not ignore TS errors). The v1.62.0
+workspace code itself typechecks clean (verified: `tsc --noEmit` shows errors only
+in that foreign WIP file) and 99/99 tests pass. Resolve that file before building.
+
+---
+
+## 2026-06-17 · v1.62.0 — Unified workspace phase 1: auto-planning + reminder engine (schema + new worker + new env)
+
+**Schema change (additive, no data loss).** New columns on `bookings`:
+`equipmentNote`, `rentalGearNote`, `itinerary`, `assignedEquipmentIds` (all
+nullable / default []). Eight new tables: `equipment`, `equipment_loans`,
+`equipment_loan_items`, `repair_tickets`, `vendors`, `rental_jobs`,
+`purchase_items`, `document_refs`, `reminders`. All applied automatically by
+`prisma db push` in `start.sh` on the next stack update. Existing rows
+unaffected; the new tables start empty (phase 2–4 imports populate them).
+
+**New supervised worker.** `start.sh` now launches a third worker
+(`scripts/reminders-worker.js`) alongside calendar-reconcile and footage-sync.
+It stays **dormant unless `REMINDERS_WORKER_ENABLED=1`** (same dormant-by-default
+pattern as footage-sync), so the stack update is safe with no behavior change
+until you flip the env. It polls `GET /api/internal/reminders/run` once per
+interval (default 24h) → scan + dispatch (Discord + email digest).
+
+**New env to set when turning reminders on:**
+- `REMINDERS_WORKER_ENABLED=1` — turn the worker on (default off)
+- `DISCORD_WEBHOOK_URL` — Discord channel webhook (primary push channel)
+- `REMINDER_ADMIN_EMAIL` — recipient for the daily email digest
+- Optional tuning: `INVOICE_AGING_DAYS` (7), `SHOOT_GEAR_LOOKAHEAD_DAYS` (3),
+  `LOAN_DUE_LOOKAHEAD_DAYS` (2), `REPAIR_AGING_DAYS` (7),
+  `WARRANTY_LOOKAHEAD_DAYS` (30), `REMINDERS_WORKER_INTERVAL_MS` (86400000),
+  `REMINDERS_SECRET` (falls back to `NEXTAUTH_SECRET`)
+
+**Email digest caveat.** The worker has no logged-in user, so Gmail-OAuth is
+NOT available to it — the email digest only sends if a non-interactive provider
+is configured (`SMTP_USER`/`SMTP_PASS` or `RESEND_API_KEY` / `SENDGRID_API_KEY`).
+Discord works with just the webhook URL, no email provider needed.
+
+**Post-deploy check.** After redeploy, container logs should show
+`[reminders] worker started` (if enabled) and a `[reminders] supervisor` line.
+Verify the scan without sending:
+`curl 'http://127.0.0.1:3000/api/internal/reminders/run?dryRun=1' -H 'x-reminders-secret: <secret>'`.
+Normal deploy: new `sha-<commit>` tag + Update the stack.
+
+---
+
+## 2026-06-17 · v1.61.0 — Special equipment + camera-overload warning (schema: `bookings.special_equipment`)
+
+**Schema change.** One new column on `bookings`: `specialEquipment String[]`
+(defaults to empty array; existing rows unaffected) — applied automatically by
+`prisma db push` in `start.sh` on the next stack update. Additive, no data loss.
+
+**No new env, no post-deploy action.** The 9-camera limit is a constant
+(`CAMERA_LIMIT` in src/lib/booking-overlap.ts) — change it there if the studio's
+camera inventory changes. The warning is advisory only (never blocks a booking).
+Normal deploy: new `sha-<commit>` tag + Update the stack.
+
+---
+
 ## 2026-06-14 · v1.59.0 — Outlet producers (schema: `users.nickname`, `bookings.co_producer`/`co_producer_email`)
 
 **Schema change.** `User.nickname` + `Booking.coProducer` + `Booking.coProducerEmail`
