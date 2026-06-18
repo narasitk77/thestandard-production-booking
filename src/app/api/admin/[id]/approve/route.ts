@@ -9,7 +9,7 @@ import { logAudit } from '@/lib/audit'
 import { ensureShootCameraFolders, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
 import { outletDriveFolderName, programFolderName, buildBookingFolderName, camerasToPreCreate } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
-import { renderBookingInfo } from '@/lib/booking-info'
+import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 
 export async function POST(
   _request: NextRequest,
@@ -108,32 +108,7 @@ export async function POST(
         await upsertTextFile({
           parentFolderId: bookingFolderId,
           name: '_SHOOT.txt',
-          content: renderBookingInfo({
-            bookingCode: updated.bookingCode,
-            projectName: updated.projectName,
-            projectId: updated.projectId,
-            outletName: updated.outlet.name,
-            outletCode: updated.outlet.code,
-            category: updated.category,
-            videoType: updated.videoType,
-            shootType: updated.shootType,
-            shootDate: updated.shootDate,
-            shootEndDate: updated.shootEndDate,
-            callTime: updated.callTime,
-            estimatedWrap: updated.estimatedWrap,
-            locationName: updated.locationName,
-            producer: updated.producer,
-            producerEmail: updated.producerEmail,
-            director: updated.director,
-            directorEmail: updated.directorEmail,
-            mainVideographerEmail: updated.mainVideographerEmail,
-            assignedEmails: updated.assignedEmails,
-            crewRequired: updated.crewRequired,
-            agencyRef: updated.agencyRef,
-            notes: updated.notes,
-            episodes: updated.episodes,
-            generatedAt: new Date(),
-          }),
+          content: renderBookingInfo(bookingInfoInput(updated)),
         })
       } catch (e: any) {
         console.error('[approve] Drive pre-create failed (non-fatal):', e?.message || e)

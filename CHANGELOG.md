@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.70.1] — 2026-06-18
+
+### Removed / Cleanup (ponytail audit — dead code, ~320 lines)
+
+- ลบ route เก่าที่ตายแล้ว `/api/upload` (อัปโหลดลงดิสก์รุ่นเก่า — ถูกแทนด้วย
+  init/complete/cancel/list ตั้งแต่ v1.35) และ component `LogoutButton` ที่ไม่มี
+  ใครเรียก (Nav มีปุ่ม sign-out ของตัวเอง)
+- ลบ dead exports: `sendApprovalNotification` (email.ts), `PRODUCERS`/
+  `CATEGORY_OPTIONS`/`SHOOT_TYPE_OPTIONS` (data.ts), `generateEpisodeIds`,
+  `findProject`, `listByRole`, `isVideoCamera`, `formatThaiDate`/`formatDate`/
+  `cn` (utils.ts) — ไม่มีผู้เรียกในทั้ง repo
+- เอา dependency `clsx` ออก (เหลือผู้ใช้เดียวคือ `cn` ที่ลบไป) + ลบ npm script
+  `db:migrate` ที่ตาย (โปรเจกต์ใช้ `prisma db push`)
+- เลิก dead UI state (error banner ใน UploadSection ที่ตั้งค่าไม่ได้) + props
+  `size`/`dot` ของ StatusPill ที่ไม่มีใครส่ง
+- ลบ dead query param `?all` ใน /api/ot
+- DRY: `bookingInfoInput()` ตัวเดียวสำหรับเขียน `_SHOOT.txt` (เลิก map 24 ฟิลด์
+  ซ้ำใน init + approve) + เอา field `programFolderId` ที่ไม่มีใครอ่านออก
+  (ทั้งหมดผ่าน tsc + 108 tests + next build)
+
+---
+
 ## [1.70.0] — 2026-06-18
 
 ### Changed

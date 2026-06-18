@@ -362,8 +362,6 @@ async function ensureChildFolderByCanonicalName(
 }
 
 export interface UploadFolderTarget {
-  /** id of "<outlet>/<program>/" */
-  programFolderId: string
   /** id of "<outlet>/<program>/<bookingFolder>/" — where _SHOOT.txt lives. */
   bookingFolderId: string
   /** id of "<outlet>/<program>/<bookingFolder>/<camera>/" — where the file goes. */
@@ -390,11 +388,11 @@ interface ShootFolderInput {
 async function resolveShootFolder(
   drive: drive_v3.Drive,
   input: ShootFolderInput,
-): Promise<{ programFolderId: string; bookingFolderId: string }> {
+): Promise<{ bookingFolderId: string }> {
   const outletId = await ensureChildFolderByCanonicalName(drive, input.rootFolderId, input.outletCanonicalName)
   const programFolderId = await ensureChildFolderByCanonicalName(drive, outletId, input.programFolderName)
   const bookingFolderId = await ensureChildFolder(drive, programFolderId, input.bookingFolderName)
-  return { programFolderId, bookingFolderId }
+  return { bookingFolderId }
 }
 
 /**
@@ -407,9 +405,9 @@ export async function ensureUploadFolderPath(input: ShootFolderInput & {
   camera: string
 }): Promise<UploadFolderTarget> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
-  const { programFolderId, bookingFolderId } = await resolveShootFolder(drive, input)
+  const { bookingFolderId } = await resolveShootFolder(drive, input)
   const cameraFolderId = await ensureChildFolder(drive, bookingFolderId, input.camera)
-  return { programFolderId, bookingFolderId, cameraFolderId }
+  return { bookingFolderId, cameraFolderId }
 }
 
 /**

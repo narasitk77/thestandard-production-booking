@@ -437,35 +437,3 @@ THE STANDARD Production Booking`
     }
   )
 }
-
-export async function sendApprovalNotification(opts: {
-  producerEmail: string
-  producerName: string
-  bookingId: string
-  outletName: string
-  programName: string
-  shootDate: string
-  episodes: Array<{ episodeId: string; title: string }>
-}) {
-  if (!isEmailConfigured()) return
-
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
-
-  const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')
-
-  await sendEmail({
-    to: opts.producerEmail,
-    subject: `[Approved] ${opts.outletName} · ${opts.programName} — ${opts.shootDate}`,
-    text: `Booking ของคุณได้รับการอนุมัติแล้ว
-
-${opts.outletName} · ${opts.programName}
-วันถ่าย: ${opts.shootDate}
-
-Episode IDs:
-${epList}
-
-ดูรายละเอียดได้ที่: ${appUrl}/dashboard/${opts.bookingId}
-
-THE STANDARD Production Booking`,
-  })
-}

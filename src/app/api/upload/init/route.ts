@@ -24,7 +24,7 @@ import {
   deleteDriveFile,
   upsertTextFile,
 } from '@/lib/google-drive'
-import { renderBookingInfo } from '@/lib/booking-info'
+import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 
 export const dynamic = 'force-dynamic'
 
@@ -269,35 +269,10 @@ export async function POST(request: NextRequest) {
         await upsertTextFile({
           parentFolderId: bookingFolderId,
           name: '_SHOOT.txt',
-          content: renderBookingInfo({
-            bookingCode: booking.bookingCode,
-            projectName: booking.projectName,
-            projectId: booking.projectId,
-            outletName: booking.outlet.name,
-            outletCode: booking.outlet.code,
-            category: booking.category,
-            videoType: booking.videoType,
-            shootType: booking.shootType,
-            shootDate: booking.shootDate,
-            shootEndDate: booking.shootEndDate,
-            callTime: booking.callTime,
-            estimatedWrap: booking.estimatedWrap,
-            locationName: booking.locationName,
-            producer: booking.producer,
-            producerEmail: booking.producerEmail,
-            director: booking.director,
-            directorEmail: booking.directorEmail,
-            mainVideographerEmail: booking.mainVideographerEmail,
-            assignedEmails: booking.assignedEmails,
-            crewRequired: booking.crewRequired,
-            agencyRef: booking.agencyRef,
-            notes: booking.notes,
-            episodes: booking.episodes,
-            generatedAt: new Date(),
-          }),
+          content: renderBookingInfo(bookingInfoInput(booking)),
         })
       } catch (infoErr: any) {
-        console.error('booking-info.txt write failed (non-fatal):', infoErr?.message || infoErr)
+        console.error('_SHOOT.txt write failed (non-fatal):', infoErr?.message || infoErr)
       }
 
       const driveSession = await createResumableUploadSession({

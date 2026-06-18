@@ -138,9 +138,3 @@ export async function listProjects(opts: { force?: boolean } = {}): Promise<Proj
 export function invalidateProjectsCache() {
   cache = null
 }
-
-export async function findProject(projectId: string): Promise<ProjectOption | null> {
-  if (!projectId) return null
-  const rows = await listProjects()
-  return rows.find(r => r.projectId === projectId) || null
-}

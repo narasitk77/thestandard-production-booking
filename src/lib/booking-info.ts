@@ -43,6 +43,51 @@ export interface BookingInfoInput {
   generatedAt: Date
 }
 
+/**
+ * Map a booking row (the upload-init select OR the approve include — both carry
+ * these fields) into a BookingInfoInput. One mapper so the two _SHOOT.txt write
+ * sites can't drift. Caller guarantees bookingCode is set before writing.
+ */
+export function bookingInfoInput(b: {
+  bookingCode: string | null
+  projectName?: string | null
+  projectId?: string | null
+  outlet: { name: string; code: string }
+  category?: string | null
+  videoType?: string | null
+  shootType?: string | null
+  shootDate: Date
+  shootEndDate?: Date | null
+  callTime?: string | null
+  estimatedWrap?: string | null
+  locationName?: string | null
+  producer?: string | null
+  producerEmail?: string | null
+  director?: string | null
+  directorEmail?: string | null
+  mainVideographerEmail?: string | null
+  assignedEmails?: string[]
+  crewRequired?: string[]
+  agencyRef?: string | null
+  notes?: string | null
+  episodes: BookingInfoEpisode[]
+}): BookingInfoInput {
+  return {
+    bookingCode: b.bookingCode || '',
+    projectName: b.projectName, projectId: b.projectId,
+    outletName: b.outlet.name, outletCode: b.outlet.code,
+    category: b.category, videoType: b.videoType, shootType: b.shootType,
+    shootDate: b.shootDate, shootEndDate: b.shootEndDate,
+    callTime: b.callTime, estimatedWrap: b.estimatedWrap, locationName: b.locationName,
+    producer: b.producer, producerEmail: b.producerEmail,
+    director: b.director, directorEmail: b.directorEmail,
+    mainVideographerEmail: b.mainVideographerEmail,
+    assignedEmails: b.assignedEmails, crewRequired: b.crewRequired,
+    agencyRef: b.agencyRef, notes: b.notes, episodes: b.episodes,
+    generatedAt: new Date(),
+  }
+}
+
 const TZ = 'Asia/Bangkok'
 
 function fmtDate(d: Date): string {

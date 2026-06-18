@@ -67,11 +67,6 @@ export async function listPeople(opts: { force?: boolean } = {}): Promise<Person
   }
 }
 
-export async function listByRole(role: string): Promise<Person[]> {
-  const people = await listPeople()
-  return people.filter(p => p.role.toLowerCase() === role.toLowerCase())
-}
-
 export function invalidatePeopleCache() {
   cache = null
 }

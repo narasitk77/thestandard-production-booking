@@ -18,15 +18,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const month = searchParams.get('month') || currentMonthYYYYMM()
     const email = searchParams.get('email')
-    const all = searchParams.get('all') === '1'
 
     // v1.33.4 — OT approvers (ADMIN || position contains "manager") can
     // query other users' records via ?email=... so the review page works
     // for managers, not just admins.
     const canSeeOthers = session.role === 'ADMIN' || (await getOTApproverAccess(session.email))
-    const targetEmail = (canSeeOthers && (email || all))
-      ? email
-      : session.email
+    const targetEmail = (canSeeOthers && email) ? email : session.email
 
     const records = await prisma.oTRecord.findMany({
       where: {

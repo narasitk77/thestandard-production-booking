@@ -76,19 +76,6 @@ export function generateEpisodeId(
   return `${outletCode}-${prog}${yy}${mm}${dd}-${typeCode}-${seq}`
 }
 
-export function generateEpisodeIds(
-  outletCode: string,
-  shootDate: Date,
-  typeCode: string,
-  count: number,
-  startSeq = 1,
-  programCode?: string | null
-): string[] {
-  return Array.from({ length: count }, (_, i) =>
-    generateEpisodeId(outletCode, shootDate, typeCode, startSeq + i, programCode)
-  )
-}
-
 export function parseEpisodeId(episodeId: string): {
   outletCode: string
   /** Program segment (e.g. KYM) — null on legacy IDs that don't carry one. */

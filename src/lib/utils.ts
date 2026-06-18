@@ -1,24 +1,9 @@
-import { clsx, type ClassValue } from 'clsx'
 import { format, parseISO } from 'date-fns'
-
-export function cn(...inputs: ClassValue[]) {
-  return clsx(inputs)
-}
 
 function safeDate(date: Date | string): Date | null {
   if (!date) return null
   const d = typeof date === 'string' ? parseISO(date) : date
   return d instanceof Date && !isNaN(d.getTime()) ? d : null
-}
-
-export function formatThaiDate(date: Date | string): string {
-  const d = safeDate(date)
-  return d ? format(d, 'd MMM yyyy') : '—'
-}
-
-export function formatDate(date: Date | string): string {
-  const d = safeDate(date)
-  return d ? format(d, 'yyyy-MM-dd') : ''
 }
 
 export function formatDisplayDate(date: Date | string): string {

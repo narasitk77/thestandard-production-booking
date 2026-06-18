@@ -82,11 +82,11 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const CAMERAS = cameraUploadOptions(booking.cameraCount, booking.micCount)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [camera, setCamera] = useState(defaultCamera && CAMERAS.includes(defaultCamera) ? defaultCamera : CAMERAS[0])
+  // (no top-level error banner — per-queue-item errors render inline below)
   const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
   const [history, setHistory] = useState<UploadItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [queue, setQueue] = useState<InFlight[]>([])
-  const [error, setError] = useState('')
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
 
@@ -236,11 +236,6 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
 
   return (
     <div className="space-y-3">
-      {error && (
-        <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error}
-        </div>
-      )}
 
       <div className="gf-card p-4 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">

@@ -27,11 +27,6 @@ export function isSoundCamera(camera: string | null | undefined): boolean {
   return SOUND_LABELS.has(camera.trim().toLowerCase())
 }
 
-export function isVideoCamera(camera: string | null | undefined): boolean {
-  if (!camera) return false
-  return !isSoundCamera(camera)
-}
-
 export interface UploadRow {
   camera: string
   status: string
