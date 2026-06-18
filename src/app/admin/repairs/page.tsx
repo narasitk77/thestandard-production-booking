@@ -1,6 +1,7 @@
 'use client'
 
 import CrudTable, { type CrudConfig, baht, ymd } from '../_components/CrudTable'
+import { Badge, REPAIR_STATUS as REPAIR_BADGE } from '../_components/badges'
 
 const REPAIR_STATUS = ['REPORTED', 'SENT', 'RETURNED', 'CANNOT_REPAIR']
 const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
@@ -18,7 +19,7 @@ const config: CrudConfig = {
     { key: 'itemLabel', label: 'อุปกรณ์' },
     { key: 'equipment', label: 'ในคลัง', render: (r) => r.equipment?.name || '—' },
     { key: 'vendor', label: 'ร้าน', render: (r) => r.vendor?.name || '—' },
-    { key: 'status', label: 'สถานะ' },
+    { key: 'status', label: 'สถานะ', render: (r) => <Badge map={REPAIR_BADGE} value={r.status} /> },
     { key: 'sentDate', label: 'ส่ง', render: (r) => ymd(r.sentDate) },
     { key: 'returnedDate', label: 'รับคืน', render: (r) => ymd(r.returnedDate) },
     { key: 'cost', label: 'ค่าซ่อม (฿)', align: 'right', render: (r) => baht(r.cost) },

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Plus, Loader2, AlertCircle, Pencil, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, AlertCircle, Pencil, Trash2, X, Search } from 'lucide-react'
 
 /* =============================================================================
    CrudTable — config-driven list + create/edit/delete for the workspace admin
@@ -49,6 +49,7 @@ export interface CrudConfig {
   filters?: CrudFilter[]
   addLabel?: string
   rowKey?: string // default 'id'
+  search?: boolean // render a text-search box that sends ?q= (endpoint must support it)
 }
 
 export default function CrudTable({ config }: { config: CrudConfig }) {
@@ -59,11 +60,30 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
   const [editing, setEditing] = useState<'new' | any | null>(null)
   const [draft, setDraft] = useState<Record<string, any>>({})
   const [saving, setSaving] = useState(false)
+  const [q, setQ] = useState('')
+  const [qApplied, setQApplied] = useState('') // debounced — drives the fetch
   const [optionCache, setOptionCache] = useState<Record<string, { value: string; label: string }[]>>({})
 
-  const qs = new URLSearchParams(
-    Object.entries(filterVals).filter(([, v]) => v && v !== 'all') as [string, string][],
-  ).toString()
+  // Seed filter + search from the URL once (so the dashboard's alert chips can
+  // deep-link straight to a filtered view, e.g. /admin/rentals?payment=PENDING).
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    const fv: Record<string, string> = {}
+    for (const f of config.filters || []) { const v = sp.get(f.key); if (v) fv[f.key] = v }
+    if (Object.keys(fv).length) setFilterVals(fv)
+    const qq = sp.get('q'); if (qq) { setQ(qq); setQApplied(qq) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Debounce the search box so we don't fetch on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setQApplied(q), 300)
+    return () => clearTimeout(t)
+  }, [q])
+
+  const params = Object.entries(filterVals).filter(([, v]) => v && v !== 'all') as [string, string][]
+  if (qApplied.trim()) params.push(['q', qApplied.trim()])
+  const qs = new URLSearchParams(params).toString()
 
   const load = useCallback(async () => {
     setError('')
@@ -150,8 +170,8 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
 
   return (
     <div className="max-w-[1400px] mx-auto px-3 sm:px-4 py-4 sm:py-6">
-      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
-        <ArrowLeft className="w-4 h-4" /> Admin Console
+      <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
+        <ArrowLeft className="w-4 h-4" /> Production Admin Space
       </Link>
 
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
@@ -164,9 +184,20 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
         </button>
       </div>
 
-      {config.filters && config.filters.length > 0 && (
+      {(config.search || (config.filters && config.filters.length > 0)) && (
         <div className="flex items-center gap-3 mb-3 flex-wrap text-sm">
-          {config.filters.map((flt) => (
+          {config.search && (
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="ค้นหา ชื่อ / serial / รหัส…"
+                className="border border-gray-300 rounded pl-8 pr-2 py-1 text-sm w-64"
+              />
+            </div>
+          )}
+          {(config.filters || []).map((flt) => (
             <label key={flt.key} className="flex items-center gap-1.5">
               <span className="text-gray-500 text-xs">{flt.label}</span>
               <select
@@ -178,6 +209,13 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
               </select>
             </label>
           ))}
+        </div>
+      )}
+
+      {rows !== null && (
+        <div className="text-xs text-gray-400 mb-2">
+          แสดง {rows.length.toLocaleString('th-TH')} รายการ
+          {rows.length === 1000 && <span className="text-amber-600"> · จำกัด 1000 — ใช้ช่องค้นหา/ตัวกรองเพื่อดูที่เหลือ</span>}
         </div>
       )}
 

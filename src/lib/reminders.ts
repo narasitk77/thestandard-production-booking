@@ -13,13 +13,10 @@
 import { prisma } from './db'
 import { notifyDiscord, notifyEmailDigest } from './notify'
 import type { ReminderType } from '@prisma/client'
+import { startOfTodayBangkok } from './bangkok-day'
 
 const DAY = 86_400_000
 
-function startOfTodayUTC(): Date {
-  const n = new Date()
-  return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()))
-}
 function addDays(d: Date, n: number): Date {
   return new Date(d.getTime() + n * DAY)
 }
@@ -240,7 +237,7 @@ export type ReminderScanResult = {
 
 export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<ReminderScanResult> {
   const dryRun = !!opts.dryRun
-  const today = startOfTodayUTC()
+  const today = startOfTodayBangkok()
   const candidates = await detect(today)
 
   if (dryRun) {

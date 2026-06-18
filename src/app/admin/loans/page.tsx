@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Loader2, AlertCircle, X, RotateCcw } from 'lucide-react'
+import { Badge, LOAN_STATUS } from '../_components/badges'
+import { todayBangkokStr } from '@/lib/bangkok-day'
+
+const isOverdue = (l: { status: string; dueDate?: string | null }) =>
+  l.status === 'ACTIVE' && !!l.dueDate && String(l.dueDate).slice(0, 10) < todayBangkokStr()
 
 /* /admin/loans — equipment checkout. Read-heavy (loans mostly arrive via import
    / the external generator); this page lists them, lets you check out new gear,
@@ -72,7 +77,7 @@ export default function LoansPage() {
 
   return (
     <div className="max-w-[1200px] mx-auto px-3 sm:px-4 py-4 sm:py-6">
-      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3"><ArrowLeft className="w-4 h-4" /> Admin Console</Link>
+      <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3"><ArrowLeft className="w-4 h-4" /> Production Admin Space</Link>
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
         <div>
           <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Equipment Loans</h1>
@@ -114,8 +119,11 @@ export default function LoansPage() {
                   <td className="px-3 py-2">{l.photographer}</td>
                   <td className="px-3 py-2">{l.jobName || '—'}</td>
                   <td className="px-3 py-2 text-xs text-gray-600">{l.items.map((it) => it.equipment?.name || it.nameSnapshot).join(', ')}</td>
-                  <td className="px-3 py-2">{ymd(l.dueDate)}</td>
-                  <td className="px-3 py-2">{l.status === 'RETURNED' ? <span className="text-gray-400">คืนแล้ว {ymd(l.returnedAt)}</span> : <span className="text-amber-700">ยืมอยู่</span>}</td>
+                  <td className={`px-3 py-2 ${isOverdue(l) ? 'text-red-600 font-medium' : ''}`}>{ymd(l.dueDate)}</td>
+                  <td className="px-3 py-2">
+                    <Badge map={LOAN_STATUS} value={isOverdue(l) ? 'OVERDUE' : l.status} />
+                    {l.status === 'RETURNED' && <span className="text-gray-400 text-xs ml-1">{ymd(l.returnedAt)}</span>}
+                  </td>
                   <td className="px-3 py-2 text-right">
                     {l.status === 'ACTIVE' && (
                       <button onClick={() => markReturned(l.id)} disabled={busy === l.id} className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-green-300 text-green-700 rounded hover:bg-green-50 disabled:opacity-50">

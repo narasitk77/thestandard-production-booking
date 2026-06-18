@@ -1,6 +1,7 @@
 'use client'
 
 import CrudTable, { type CrudConfig } from '../_components/CrudTable'
+import { Badge, EQUIP_STATUS, CATEGORY_TH } from '../_components/badges'
 
 const CATEGORIES = ['AUDIO', 'CAMERA', 'COMPUTER_MONITOR', 'GRIP_SUPPORT', 'LENS', 'LIGHTING', 'POWER', 'STORAGE_MEDIA', 'UNCATEGORIZED']
 const STATUSES = ['AVAILABLE', 'ON_LOAN', 'IN_REPAIR', 'RETIRED']
@@ -15,18 +16,20 @@ const config: CrudConfig = {
   title: 'Equipment',
   subtitle: 'คลังอุปกรณ์ — ค้นด้วยชื่อ/serial/รหัส, สถานะผูกกับการยืม/ซ่อม',
   addLabel: 'เพิ่มอุปกรณ์',
+  search: true,
   filters: [
     { key: 'category', label: 'หมวด', options: [{ value: 'all', label: 'ทั้งหมด' }, ...opt(CATEGORIES)] },
     { key: 'status', label: 'สถานะ', options: [{ value: 'all', label: 'ทั้งหมด' }, ...opt(STATUSES)] },
     { key: 'fixedAsset', label: 'ประเภท', options: [{ value: 'all', label: 'ทั้งหมด' }, { value: '0', label: 'อุปกรณ์ยืมได้' }, { value: '1', label: 'ทรัพย์สิน (อ่านอย่างเดียว)' }] },
+    { key: 'warranty', label: 'ประกัน', options: [{ value: 'all', label: 'ทั้งหมด' }, { value: 'soon', label: 'ใกล้หมด 30 วัน' }] },
   ],
   columns: [
     { key: 'itemId', label: 'รหัส', render: (r) => r.itemId || r.fixedAssetTag || '—' },
     { key: 'name', label: 'ชื่อ' },
-    { key: 'category', label: 'หมวด' },
+    { key: 'category', label: 'หมวด', render: (r) => CATEGORY_TH[r.category] || r.category },
     { key: 'serialNumber', label: 'S/N', render: (r) => r.serialNumber || '—' },
     { key: 'location', label: 'ที่เก็บ', render: (r) => r.location || '—' },
-    { key: 'status', label: 'สถานะ' },
+    { key: 'status', label: 'สถานะ', render: (r) => <Badge map={EQUIP_STATUS} value={r.status} /> },
   ],
   fields: [
     { key: 'name', label: 'ชื่อ', required: true },

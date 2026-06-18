@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { EquipmentCategory, EquipmentStatus } from '@prisma/client'
+import { startOfTodayBangkok } from '@/lib/bangkok-day'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +25,10 @@ export async function GET(request: NextRequest) {
   if (sp.get('loanable') === '1') where.loanable = true
   if (sp.get('fixedAsset') === '1') where.isFixedAsset = true
   if (sp.get('fixedAsset') === '0') where.isFixedAsset = false
+  if (sp.get('warranty') === 'soon') {
+    const today = startOfTodayBangkok()
+    where.warrantyExpiresAt = { gte: today, lte: new Date(today.getTime() + 30 * 86_400_000) }
+  }
   if (q) {
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },

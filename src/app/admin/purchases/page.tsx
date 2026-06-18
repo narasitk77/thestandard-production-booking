@@ -1,6 +1,7 @@
 'use client'
 
 import CrudTable, { type CrudConfig, baht } from '../_components/CrudTable'
+import { Badge, PURCHASE_STATUS as PURCHASE_BADGE } from '../_components/badges'
 
 const PURCHASE_STATUS = ['OPEN', 'RECEIVED', 'CANCELLED']
 const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
@@ -21,7 +22,7 @@ const config: CrudConfig = {
     { key: 'vendor', label: 'ซื้อจาก', render: (r) => r.vendor?.name || '—' },
     { key: 'total', label: 'รวม (฿)', align: 'right', render: (r) => baht(r.total) },
     { key: 'kind', label: 'ประเภท', render: (r) => r.kind || '—' },
-    { key: 'status', label: 'สถานะ' },
+    { key: 'status', label: 'สถานะ', render: (r) => <Badge map={PURCHASE_BADGE} value={r.status} /> },
     { key: 'productLink', label: 'ลิงก์', render: (r) => r.productLink ? <a href={r.productLink} target="_blank" rel="noreferrer" className="text-[#673ab7] hover:underline">เปิด</a> : '—' },
   ],
   fields: [

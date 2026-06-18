@@ -1,9 +1,9 @@
 'use client'
 
 import CrudTable, { type CrudConfig, baht, ymd } from '../_components/CrudTable'
+import { Badge, PAYMENT_STATUS, RENTAL_STATUS as RENTAL_BADGE } from '../_components/badges'
 
 const PAY = ['PAID', 'INVOICED', 'PENDING']
-const PAY_TH: Record<string, string> = { PAID: 'จ่ายแล้ว', INVOICED: 'วางบิล', PENDING: 'รอจ่าย' }
 const RENTAL_STATUS = ['ACTIVE', 'RETURNED', 'ARCHIVED']
 const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
 
@@ -22,9 +22,9 @@ const config: CrudConfig = {
     { key: 'vendor', label: 'Vendor', render: (r) => r.vendor?.name || '—' },
     { key: 'rentalDate', label: 'วันเช่า', render: (r) => ymd(r.rentalDate) },
     { key: 'returnDueDate', label: 'คืนภายใน', render: (r) => ymd(r.returnDueDate) },
-    { key: 'paymentStatus', label: 'จ่าย', render: (r) => PAY_TH[r.paymentStatus] || r.paymentStatus },
+    { key: 'paymentStatus', label: 'จ่าย', render: (r) => <Badge map={PAYMENT_STATUS} value={r.paymentStatus} /> },
     { key: 'amount', label: 'ยอด (฿)', align: 'right', render: (r) => baht(r.amount) },
-    { key: 'status', label: 'สถานะ' },
+    { key: 'status', label: 'สถานะ', render: (r) => <Badge map={RENTAL_BADGE} value={r.status} /> },
   ],
   fields: [
     { key: 'jobName', label: 'ชื่องาน', required: true },
