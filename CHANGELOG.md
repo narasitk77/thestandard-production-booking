@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.64.0] — 2026-06-18
+
+### Changed
+
+- ย้ายเมนูโมดูลหลังบ้าน (Equipment, Loans, Repairs, Rentals, Purchases,
+  Vendors) ออกจากหน้า Admin Console (`/admin`) ไปไว้ในหน้าใหม่
+  **Production Admin Space** (`/admin/production-space`) ที่เข้าได้
+  **เฉพาะ role = ADMIN** เท่านั้น (non-admin redirect → `/admin`) — แยกเป็น
+  เมนู "Admin Space" บนแถบนำทางหลัก (โผล่เฉพาะ ADMIN) ให้เข้าทำงานตรงๆ ไม่ปน
+  กับหน้าจัดการคิว
+
+### Security
+
+- ล็อกโมดูลหลังบ้านทั้งหมดเป็น **ADMIN เท่านั้น** (เดิม `requireConsole`):
+  API 10 เส้น (`/api/admin/{equipment,loans,repairs,rentals,purchases,vendors}`
+  + `/[id]`) เปลี่ยนเป็น `requireAdmin`, และ middleware เด้ง non-admin ที่เปิด
+  หน้า `/admin/{module}` กลับไป `/admin` — Coordinator/Manager/Support ไม่
+  สามารถเข้าถึงได้อีก (rentals/[id], purchases/[id] เป็น ADMIN อยู่แล้ว)
+
+---
+
 ## [1.63.0] — 2026-06-18
 
 ### Added

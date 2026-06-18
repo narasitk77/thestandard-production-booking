@@ -23,6 +23,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Production Admin Space modules are ADMIN-only. Non-admin staff get bounced
+  // back to the console (the module APIs also enforce requireAdmin themselves).
+  const isAdminOnlyModule =
+    /^\/admin\/(equipment|loans|repairs|rentals|purchases|vendors)(\/|$)/.test(pathname)
+  if (isAdminOnlyModule && (token as any)?.role !== 'ADMIN') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/admin'
+    return NextResponse.redirect(url)
+  }
+
   return NextResponse.next()
 }
 

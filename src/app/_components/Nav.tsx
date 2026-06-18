@@ -28,6 +28,9 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
   const pathname = usePathname() || '/'
   // Console access = every staff tier (Admin / Support / Manager / Coordinator).
   const isConsole = hasConsoleAccess(session?.role)
+  // Production Admin Space (equipment/loans/etc.) is ADMIN-only — its own
+  // working menu, kept separate from the booking-queue console.
+  const isAdmin = session?.role === 'ADMIN'
   const close = () => { setOpen(false); setMoreOpen(false) }
 
   const isActive = (href: string) =>
@@ -52,6 +55,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     { href: '/producer', label: 'Producer', show: !!canSeeProducer },
     { href: '/dashboard', label: 'Dashboard', show: isConsole },
     { href: '/admin', label: 'Admin', show: isConsole, tone: 'danger' as const },
+    { href: '/admin/production-space', label: 'Admin Space', show: isAdmin },
   ] as Item[]).filter(i => i.show)
 
   const secondary: Item[] = [

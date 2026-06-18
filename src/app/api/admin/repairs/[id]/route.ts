@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { reconcileEquipmentStatus } from '@/lib/equipment-status'
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 /** PATCH /api/admin/repairs/[id] — update; status is re-derived for the equipment. */
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()
@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
 /** DELETE /api/admin/repairs/[id] — hard delete (documents cascade). */
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     await prisma.$transaction(async (tx) => {

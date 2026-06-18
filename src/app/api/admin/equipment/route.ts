@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { EquipmentCategory, EquipmentStatus } from '@prisma/client'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
  * Query: ?category=, ?status=, ?loanable=1, ?q=<search>, ?fixedAsset=1|0
  */
 export async function GET(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const sp = new URL(request.url).searchParams
   const category = (sp.get('category') || '').toUpperCase()
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 
 /** POST /api/admin/equipment — create one item. */
 export async function POST(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()

@@ -121,22 +121,7 @@ export default function AdminPage() {
         <p className="text-xs sm:text-sm text-gray-500 mt-1">
           Review, assign crew, and approve bookings → Google Calendar
         </p>
-        {/* v1.62.0 — unified workspace modules */}
-        <div className="flex gap-1.5 mt-2 flex-wrap">
-          <span className="text-[11px] text-gray-400 self-center mr-1">Workspace:</span>
-          {[
-            { href: '/admin/equipment', label: '🎒 Equipment' },
-            { href: '/admin/loans', label: '🔑 Loans' },
-            { href: '/admin/repairs', label: '🔧 Repairs' },
-            { href: '/admin/rentals', label: '📦 Rentals' },
-            { href: '/admin/purchases', label: '🛒 Purchases' },
-            { href: '/admin/vendors', label: '🏷️ Vendors' },
-          ].map(m => (
-            <Link key={m.href} href={m.href} className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
-              {m.label}
-            </Link>
-          ))}
-        </div>
+        {/* v1.64.0 — back-office modules moved to ADMIN-only /admin/production-space */}
       </div>
 
       {/* Status tabs */}

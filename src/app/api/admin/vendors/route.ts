@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr } from '@/lib/admin-parse'
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 /** GET /api/admin/vendors — list vendors (with rental/repair/purchase counts). */
 export async function GET() {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const vendors = await prisma.vendor.findMany({
     orderBy: { name: 'asc' },
@@ -19,7 +19,7 @@ export async function GET() {
 
 /** POST /api/admin/vendors — create. Body: { name, service?, contact?, bankAccount? } */
 export async function POST(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()

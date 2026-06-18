@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr } from '@/lib/admin-parse'
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 /** PATCH /api/admin/vendors/[id] — body: subset of { name, service, contact, bankAccount } */
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()
@@ -33,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
 /** DELETE /api/admin/vendors/[id] — vendorId on rentals/repairs/purchases becomes null. */
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     await prisma.vendor.delete({ where: { id: params.id } })

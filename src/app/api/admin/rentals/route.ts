@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole, requireAdmin } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { PaymentStatus, RentalStatus } from '@prisma/client'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
  * ?payment=PAID|INVOICED|PENDING.
  */
 export async function GET(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const sp = new URL(request.url).searchParams
   const status = (sp.get('status') || '').toUpperCase()

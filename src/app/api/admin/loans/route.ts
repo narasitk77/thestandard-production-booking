@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, inEnum } from '@/lib/admin-parse'
 import { reconcileEquipmentStatus, resolveEquipmentId } from '@/lib/equipment-status'
@@ -17,7 +17,7 @@ function genLoanCode(): string {
 
 /** GET /api/admin/loans — list. Query: ?status=ACTIVE|RETURNED|all */
 export async function GET(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const status = (new URL(request.url).searchParams.get('status') || '').toUpperCase()
   const where: any = {}
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
  * Referenced equipment is flipped to ON_LOAN in the same transaction.
  */
 export async function POST(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()

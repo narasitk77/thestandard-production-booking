@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { reconcileEquipmentStatus } from '@/lib/equipment-status'
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 /** GET /api/admin/equipment/[id] — one item + its loan & repair history. */
 export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const equipment = await prisma.equipment.findUnique({
     where: { id: params.id },
@@ -25,7 +25,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
 /** PATCH /api/admin/equipment/[id] — update. */
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()
@@ -78,7 +78,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
 /** DELETE /api/admin/equipment/[id] — only when it has no loan/repair history. */
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const counts = await prisma.equipment.findUnique({

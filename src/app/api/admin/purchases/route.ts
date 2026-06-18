@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole, requireAdmin } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, decOrNull, intOr, inEnum } from '@/lib/admin-parse'
 import { PurchaseStatus } from '@prisma/client'
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 /** GET /api/admin/purchases — list. Query: ?status=, ?month=YYYY-MM */
 export async function GET(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const sp = new URL(request.url).searchParams
   const status = (sp.get('status') || '').toUpperCase()

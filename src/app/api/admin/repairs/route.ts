@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { reconcileEquipmentStatus } from '@/lib/equipment-status'
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 /** GET /api/admin/repairs — list. Query: ?status=REPORTED|SENT|RETURNED|CANNOT_REPAIR|all */
 export async function GET(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const status = (new URL(request.url).searchParams.get('status') || '').toUpperCase()
   const where: any = {}
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
  * If linked to equipment and the status is open, the item flips to IN_REPAIR.
  */
 export async function POST(request: NextRequest) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()

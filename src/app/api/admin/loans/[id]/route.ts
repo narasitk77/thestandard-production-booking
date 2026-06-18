@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireConsole } from '@/lib/session'
+import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, inEnum } from '@/lib/admin-parse'
 import { reconcileEquipmentStatus } from '@/lib/equipment-status'
@@ -21,7 +21,7 @@ async function loanEquipmentIds(tx: any, loanId: string): Promise<string[]> {
  * (status=RETURNED → sets returnedAt + frees the gear). Also edits dueDate/etc.
  */
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     const b = await request.json()
@@ -59,7 +59,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
 /** DELETE /api/admin/loans/[id] — remove loan (items cascade) + free its gear. */
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await requireConsole()
+  const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
     await prisma.$transaction(async (tx) => {
