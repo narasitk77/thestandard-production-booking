@@ -5,10 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [1.63.0] — 2026-06-18
 
 ### Added
 
+- อุปกรณ์พิเศษ (Special Equipment): เช็กบ็อกซ์ 4 รายการ (Gimbal/Ronin, Prompter,
+  Clip-on Mic (DJI Mic), ไฟดวงเล็ก) ในฟอร์มจอง (/new ขั้น People & Crew) + ขั้น
+  Review + หน้าแอดมิน /admin/[id] (ดู + แก้) + description ของ Google Calendar —
+  เก็บเป็น `Booking.specialEquipment` (string[])
+- เตือนกล้องเต็ม (>9 ตัว): แถบสีแดงแบบ "ไม่บล็อก" ขึ้นในฟอร์มจอง (/new) และหน้า
+  แอดมิน เมื่อผลรวม cameraCount ของงานที่ช่วงเวลาทับกัน (REQUESTED + CONFIRMED
+  รวมงานที่กำลังจอง) เกิน 9 ตัว → เตือนว่าต้องเช่ากล้องเพิ่ม รองรับด้วย
+  `POST /api/camera-load` + `src/lib/booking-overlap.ts` (CAMERA_LIMIT=9)
 - Producer แก้ไขงานเองได้ (เฉพาะสถานะ Requested): Producer/เจ้าของงานแก้รายละเอียด
   งานของตัวเองที่ยังเป็น Requested ได้จาก /my-bookings (ปุ่ม "✏️ แก้ไข") — แก้ได้
   ทุกฟิลด์รายละเอียด (เวลา Call/Wrap, ประเภทงาน, สถานที่, Producer, Creative, Crew,

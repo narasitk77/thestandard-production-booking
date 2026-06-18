@@ -5,6 +5,24 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-18 · v1.63.0 — Special equipment + camera-overload warning + producer self-edit (schema: `bookings.special_equipment`)
+
+**Schema change.** One new column on `bookings`: `specialEquipment String[]`
+(defaults to empty array; existing rows unaffected) — applied automatically by
+`prisma db push` in `start.sh` on the next stack update. Additive, no data loss.
+(Note: the column already landed on `origin/main` via the v1.62 merge; this
+release wires the rest of the feature to it.)
+
+**No new env, no post-deploy action.** The 9-camera limit is the constant
+`CAMERA_LIMIT` in `src/lib/booking-overlap.ts`; the producer-edit change email
+reuses the existing `sendEmail` path (no new provider). The warning is advisory
+only (never blocks a booking); producer-edit is server-gated to the booking
+owner while `status==='REQUESTED'`. Deploy: build image from
+`feat/producer-edit-special-equipment` (or after merge to main) → bump
+`IMAGE_TAG` → Pull and redeploy.
+
+---
+
 ## 2026-06-18 · Workspace data migration into prod + serial-date import fix
 
 **What ran.** Imported the remaining Google-Sheets datasets into the prod DB by

@@ -183,6 +183,7 @@ export default function BookingWizard() {
   const [cameraCount, setCameraCount] = useState('')
   const [micCount, setMicCount] = useState('')
   const [needsVan, setNeedsVan] = useState(false)
+  const [specialEquipment, setSpecialEquipment] = useState<string[]>([])
   const [agencyRef, setAgencyRef] = useState('')
   const [projectId, setProjectId] = useState('')
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
@@ -266,6 +267,34 @@ export default function BookingWizard() {
       .finally(() => { if (!cancelled) setEpisodesLoading(false) })
     return () => { cancelled = true }
   }, [projectId])
+
+  // v1.63.0 — live, NON-BLOCKING camera-overload check. Sums cameraCount across
+  // time-overlapping active bookings (+ this one) and warns when total > 9.
+  // Debounced; only sets a red banner — never blocks Next/Submit.
+  useEffect(() => {
+    const own = parseInt(cameraCount, 10)
+    if (!shootDate || !callTime || cameraCount.trim() === '' || isNaN(own) || own <= 0) {
+      setCameraLoadWarning('')
+      return
+    }
+    let cancelled = false
+    const t = setTimeout(() => {
+      fetch('/api/camera-load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shootDate, shootEndDate: shootEndDate || null, callTime, estimatedWrap: estimatedWrap || null, cameraCount: own }),
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (cancelled || !d) return
+          setCameraLoadWarning(d.exceedsLimit
+            ? `⚠️ กล้องเต็มแล้ว — ช่วงเวลานี้จองกล้องรวม ${d.totalCameras}/${d.limit} ตัว (ของคุณ ${own} + งานอื่น ${d.otherCameras}) ต้องเช่ากล้องเพิ่ม`
+            : '')
+        })
+        .catch(() => {})
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [shootDate, shootEndDate, callTime, estimatedWrap, cameraCount])
 
   /* ---- derived ---- */
   const selectedOutlet = OUTLETS.find(o => o.code === outletCode)
@@ -359,6 +388,14 @@ export default function BookingWizard() {
 
   const toggleCrew = (c: string) =>
     setCrew(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
+
+  // v1.63.0 — special-gear checklist (power users tick what they already know they need)
+  const SPECIAL_EQUIPMENT_OPTIONS = ['Gimbal/Ronin', 'Prompter', 'Clip-on Mic (DJI Mic)', 'ไฟดวงเล็ก'] as const
+  const toggleSpecialEquipment = (item: string) =>
+    setSpecialEquipment(prev => prev.includes(item) ? prev.filter(x => x !== item) : [...prev, item])
+
+  // v1.63.0 — live, NON-BLOCKING camera-overload warning (set by the effect below)
+  const [cameraLoadWarning, setCameraLoadWarning] = useState('')
 
   const toggleEpisode = (epId: string) =>
     setSelectedEpisodeIds(prev =>
@@ -529,6 +566,7 @@ export default function BookingWizard() {
           cameraCount: cameraCount.trim() === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
           micCount: micCount.trim() === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
           needsVan,
+          specialEquipment,
           agencyRef: agencyRef || null,
           projectId: isContentAgency ? (projectId || null) : null,
           projectName: isContentAgency ? (selectedProject?.projectName || null) : null,
@@ -610,6 +648,7 @@ export default function BookingWizard() {
       cameraCount.trim() && Number(cameraCount) > 0 ? `🎥 ${parseInt(cameraCount, 10)}` : '',
       micCount.trim() && Number(micCount) > 0 ? `🎙 ${parseInt(micCount, 10)}` : '',
     ].filter(Boolean).join(' · '),
+    specialEquipment: specialEquipment.length > 0 ? specialEquipment.join(', ') : '',
     van: needsVan ? '🚐 ต้องการรถตู้' : '',
     notes,
   }
@@ -641,6 +680,11 @@ export default function BookingWizard() {
       {error && (
         <div className="ops-card px-3 py-2 mb-3 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">
           {error}
+        </div>
+      )}
+      {cameraLoadWarning && (
+        <div className="ops-card px-3 py-2 mb-3 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">
+          {cameraLoadWarning}
         </div>
       )}
 
@@ -1328,6 +1372,26 @@ export default function BookingWizard() {
                     </div>
                   </div>
                   <FieldHelp>ระบุจำนวนกล้องและไมค์ที่ต้องใช้ — จะแสดงบน Google Calendar (เว้นว่างได้)</FieldHelp>
+                  <div className="mt-3">
+                    <Label>อุปกรณ์พิเศษ (Special Equipment)</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {SPECIAL_EQUIPMENT_OPTIONS.map(item => {
+                        const checked = specialEquipment.includes(item)
+                        return (
+                          <label key={item} className={`ops-choice ${checked ? 'ops-choice-selected' : ''} cursor-pointer`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSpecialEquipment(item)}
+                              className="accent-brand-primary mt-0.5"
+                            />
+                            <span className="text-sm text-gray-700">{item}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <FieldHelp>เลือกอุปกรณ์พิเศษที่ต้องใช้ (เลือกได้หลายอย่าง · เว้นว่างได้)</FieldHelp>
+                  </div>
                 </div>
 
                 {/* Notes */}
@@ -1376,6 +1440,7 @@ export default function BookingWizard() {
                   <ReviewRow label="Product Code" value={summary.productCode} />
                   <ReviewRow label="Crew" value={summary.crew} />
                   <ReviewRow label="Equipment" value={summary.equipment} />
+                  {!!summary.specialEquipment && <ReviewRow label="Special Equipment" value={summary.specialEquipment} />}
                   <ReviewRow label="Notes" value={summary.notes} />
                 </ReviewBlock>
               </div>

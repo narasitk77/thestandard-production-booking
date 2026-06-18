@@ -18,6 +18,8 @@ interface Booking {
   shootType: string
   locationName?: string
   producer: string
+  createdByEmail?: string | null
+  producerEmail?: string | null
   projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -41,9 +43,12 @@ export default function MyBookingsPage() {
   const [search, setSearch] = useState('')
   // v1.35.3 — whether to render Upload buttons next to CONFIRMED/COMPLETED rows
   const [canUpload, setCanUpload] = useState(false)
+  // v1.63 — current user email, used to show the Edit button only to the owner
+  const [meEmail, setMeEmail] = useState('')
   useEffect(() => {
     fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.user?.canUpload) setCanUpload(true)
+      if (d?.user?.email) setMeEmail(String(d.user.email).toLowerCase())
     }).catch(() => {})
   }, [])
 
@@ -180,17 +185,19 @@ export default function MyBookingsPage() {
         </div>
       ) : (
         <ul className="ops-card divide-y divide-gray-100 overflow-hidden">
-          {filtered.map(b => <BookingRow key={b.id} b={b} canUpload={canUpload} />)}
+          {filtered.map(b => <BookingRow key={b.id} b={b} canUpload={canUpload} meEmail={meEmail} />)}
         </ul>
       )}
     </div>
   )
 }
 
-function BookingRow({ b, canUpload }: { b: Booking; canUpload: boolean }) {
+function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean; meEmail: string }) {
   const d = parseISO(b.shootDate)
   const valid = !isNaN(d.getTime())
   const showUpload = canUpload && (b.status === 'CONFIRMED' || b.status === 'COMPLETED')
+  const isOwner = !!meEmail && ((b.createdByEmail || '').toLowerCase() === meEmail || (b.producerEmail || '').toLowerCase() === meEmail)
+  const canEdit = b.status === 'REQUESTED' && isOwner
   return (
     <li className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
       <Link
@@ -216,6 +223,15 @@ function BookingRow({ b, canUpload }: { b: Booking; canUpload: boolean }) {
         </div>
         <StatusPill status={b.status} />
       </Link>
+      {canEdit && (
+        <Link
+          href={`/bookings/${b.id}/edit`}
+          title="แก้ไขรายละเอียดงาน (เฉพาะงานสถานะ Requested)"
+          className="ml-1 shrink-0 px-2.5 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] bg-white rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1"
+        >
+          ✏️ แก้ไข
+        </Link>
+      )}
       {showUpload && (
         <Link
           href={`/upload?bookingId=${b.id}`}
