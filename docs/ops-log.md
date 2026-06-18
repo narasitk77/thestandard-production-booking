@@ -14,12 +14,26 @@ rentals/purchases/vendors) moved to a new ADMIN-only page `/admin/production-spa
 hits on `/admin/{module}` back to `/admin`. Coordinator/Manager/Support lose
 access to these tools.
 
-**Deploy.** Fast-forwarded `feat/production-admin-space` → `main`
-(254aad9..cb1d1ae, pushed direct) → docker-build + CI green → image
-`ghcr.io/narasitk77/thestandard-production-booking:sha-cb1d1ae` (bundles v1.63.0
-+ v1.64.0). **Pending Portainer redeploy**: bump `IMAGE_TAG=sha-cb1d1ae` on stack
-125 → Re-pull image and redeploy. `start.sh` `prisma db push` still adds the
-v1.63.0 `special_equipment` column on boot (first deploy carrying it to prod).
+**Deploy — ✅ DONE + VERIFIED LIVE 2026-06-18 ~17:22.** Fast-forwarded
+`feat/production-admin-space` → `main` (254aad9..cb1d1ae) → docker-build + CI
+green → image `sha-cb1d1ae` (bundles v1.63.0 + v1.64.0). Redeployed via Portainer
+stack 125 → Pull and redeploy (Re-pull image ON). `production-booking-app` now
+runs `sha-cb1d1ae`, state=running, db=healthy; verified `/login`→200 (LAN :3001 +
+public probook.xtec9.xyz), `/api/bookings`→401 (DB connected), `/`→307. Both
+v1.63.0 (`start.sh prisma db push` added `bookings.special_equipment` — first
+deploy carrying it to prod) and v1.64.0 are live.
+
+**DNS-intermittent incident (the ~1h deploy blocker).** Office DNS
+`192.168.21.221` returned SERVFAIL ("server misbehaving") so the host could
+resolve neither `ghcr.io` (image pull) nor `github.com` (git-stack compose
+clone) → "Failed to pull images of the stack" / "Unable to clone git
+repository". It is FLAKY, not down (deploys succeeded both before and after the
+window); a Pull-and-redeploy retry once it recovered just worked. Durable fix if
+it recurs: server/network admin repairs `192.168.21.221` or points the Docker
+host's resolver at a public DNS (1.1.1.1). Note: `daemon.json` `dns:` does NOT
+affect the daemon's own registry pulls (only containers) — the host resolver is
+the lever. Portainer UI lives at `http://thestandard.fortiddns.com:9000`
+(the `docker.xtec9.xyz` Cloudflare tunnel was returning 530).
 
 ---
 
