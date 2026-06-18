@@ -8,6 +8,7 @@ import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw,
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
 import { normalizeFreelancers, splitLegacyFreelancers } from '@/lib/freelancers'
+import { CameraMicTag } from '../_components/CameraMicTag'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -488,6 +489,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           {' · '}{shootTypeLabel(booking.shootType)}
           {booking.locationName && ` @ ${booking.locationName}`}
         </p>
+        <div className="mt-2">
+          <CameraMicTag cameraCount={booking.cameraCount} micCount={booking.micCount} isBlockShot={booking.isBlockShot} size="md" />
+        </div>
       </div>
 
       {/* v1.68 — incomplete-details warning, surfaced right on the card */}
@@ -600,6 +604,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                       : c)
                     .join(', ')
             }</div></div>
+            <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-1">กล้อง / ไมค์ (Camera / Mic)</div><CameraMicTag cameraCount={booking.cameraCount} micCount={booking.micCount} isBlockShot={booking.isBlockShot} size="md" /></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
             {booking.specialEquipment && booking.specialEquipment.length > 0 && (
               <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Special Equipment</div><div className="text-gray-800">{booking.specialEquipment.join(', ')}</div></div>

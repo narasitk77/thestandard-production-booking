@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.69.0] — 2026-06-18
+
+### Added
+
+- **แสดงจำนวนกล้อง/ไมค์เป็นไฮไลท์สีแดงเด่นๆ** ทุกที่ — ป้าย 🎥/🎙 พื้นแดงตัวหนา
+  บนการ์ดในหน้า queue (/admin) และในหน้า booking detail (/admin/[id]) ทั้งส่วนหัว
+  และตาราง Booking Details (เดิมไม่โชว์กล้อง/ไมค์เลย) · ถ้าไม่ระบุ → ป้ายแดง
+  "⚠️ ไม่ระบุกล้อง/ไมค์" · ถ้าเป็น Block Shot → ป้ายม่วง 📦 (component ร่วม
+  `CameraMicTag`)
+
+---
+
 ## [1.68.0] — 2026-06-18
 
 ### Added

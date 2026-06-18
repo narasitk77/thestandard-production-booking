@@ -1,6 +1,7 @@
 'use client'
 
 import { bookingShowName } from '@/lib/display'
+import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
@@ -10,6 +11,7 @@ interface Episode { episodeId: string; title: string; program?: { code?: string;
 interface Booking {
   id: string; shootDate: string; callTime: string; status: string
   producer: string; assignedEmails: string[]
+  cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean
   projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -222,10 +224,13 @@ export default function AdminPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-1 mt-2">
+                  <div className="flex flex-wrap items-center gap-1 mt-2">
                     {b.episodes.map(ep => (
                       <span key={ep.episodeId} className="episode-badge text-xs">{ep.episodeId}</span>
                     ))}
+                    {!showingDeleted && (
+                      <CameraMicTag cameraCount={b.cameraCount} micCount={b.micCount} isBlockShot={b.isBlockShot} />
+                    )}
                   </div>
                   {/* Calendar status — only meaningful once approved.
                       v1.29.2 — surfaces the actual Google Calendar state so
