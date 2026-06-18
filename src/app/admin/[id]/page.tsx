@@ -15,7 +15,7 @@ interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]; videographerCount?: number
-  cameraCount?: number | null; micCount?: number | null; needsVan?: boolean; specialEquipment?: string[]
+  cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean; needsVan?: boolean; specialEquipment?: string[]
   equipmentNote?: string | null; rentalGearNote?: string | null; itinerary?: string | null; assignedEquipmentIds?: string[]
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
   freelancers?: unknown
@@ -425,6 +425,16 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const isCancelled = booking.status === 'CANCELLED'
   const totalAssigned = assignEmails.length + freelancers.length
 
+  // v1.68 — flag incomplete bookings right on the detail card. Camera/mic only
+  // count as "missing" when it's NOT a Block Shot (those defer gear on purpose).
+  const missingDetails = isCancelled ? [] : ([
+    !booking.isBlockShot && (booking.cameraCount === null || booking.cameraCount === undefined) ? 'จำนวนกล้อง' : '',
+    !booking.isBlockShot && (booking.micCount === null || booking.micCount === undefined) ? 'จำนวนไมค์' : '',
+    !booking.estimatedWrap ? 'เวลาเลิก (Wrap)' : '',
+    !booking.locationName ? 'สถานที่' : '',
+    (!booking.crewRequired || booking.crewRequired.length === 0) ? 'ทีมงาน (Crew)' : '',
+  ].filter(Boolean) as string[])
+
   return (
     <div className="max-w-[680px] mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
 
@@ -479,6 +489,23 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           {booking.locationName && ` @ ${booking.locationName}`}
         </p>
       </div>
+
+      {/* v1.68 — incomplete-details warning, surfaced right on the card */}
+      {missingDetails.length > 0 && (
+        <div className="gf-card p-3 text-sm border-l-4 border-amber-400 bg-amber-50 text-amber-800 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">รายละเอียดไม่ครบ — ยังไม่ได้ระบุ: {missingDetails.join(', ')}</div>
+            <div className="text-xs text-amber-700 mt-0.5">กด EDIT เพื่อเติมให้ครบ{booking.isBlockShot ? ' · งานนี้เป็น Block Shot จึงไม่นับจำนวนกล้อง/ไมค์' : ''}</div>
+          </div>
+        </div>
+      )}
+
+      {booking.isBlockShot && (
+        <div className="gf-card p-2.5 text-xs border-l-4 border-[#673ab7] bg-[#f3f0fb] text-[#5e35b1] inline-flex items-center gap-1.5">
+          📦 Block Shot — ไม่ระบุจำนวนกล้อง/ไมค์โดยตั้งใจ
+        </div>
+      )}
 
       {error && <div className="gf-card p-4 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
       {saved && (
