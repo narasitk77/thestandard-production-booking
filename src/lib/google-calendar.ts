@@ -265,6 +265,7 @@ export function buildEventDescription(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  specialEquipment?: string[] | null
   freelancers?: unknown
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -293,6 +294,7 @@ Location / Room: ${location}
 Producer: ${booking.producer}
 Crew: ${booking.crewRequired.join(', ') || '—'}
 Equipment: ${equip || '—'}
+Special Equipment: ${booking.specialEquipment && booking.specialEquipment.length > 0 ? booking.specialEquipment.join(', ') : '—'}
 Van required: ${booking.needsVan ? 'Yes 🚐' : 'No'}
 Agency Ref: ${booking.agencyRef || '—'}
 Notes: ${booking.notes || '—'}
@@ -319,6 +321,7 @@ export async function createCalendarEvent(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  specialEquipment?: string[] | null
   projectName?: string | null
   freelancers?: unknown
   assignedEmails?: string[]
@@ -582,6 +585,7 @@ export async function updateCalendarEventDetails(
     cameraCount?: number | null
     micCount?: number | null
     needsVan?: boolean | null
+    specialEquipment?: string[] | null
     projectName?: string | null
     freelancers?: unknown
     assignedEmails?: string[]

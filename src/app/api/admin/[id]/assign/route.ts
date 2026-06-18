@@ -181,6 +181,7 @@ export async function POST(
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           needsVan: booking.needsVan,
+          specialEquipment: booking.specialEquipment,
           projectName: booking.projectName,
           freelancers: booking.freelancers,
           // Bake the just-assigned crew into the new event so it has guests
