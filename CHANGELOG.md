@@ -20,6 +20,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Migration import: rentals ล้มทั้งชุดเพราะวันที่ผิดฟอร์แมต.** `parseSheetDate`
+  ใน `scripts/import-workspace.ts` ตกมาที่ `new Date(s)` เมื่อเจอค่าที่ไม่เข้า
+  รูปแบบเดิม. ค่า serial date ดิบของ Google Sheets (เช่น `46035` = เซลล์วันที่
+  ที่ไม่ได้ฟอร์แมต) ถูก V8 ตีเป็น **ปี 46035** → Prisma `rentalJob.findFirst()`
+  พังทั้ง import (rentals: FAILED, 0 แถว). **แก้:** แปลง serial 5 หลักเป็นวันที่
+  จริง (ฐาน 1899-12-30) + clamp ปีให้อยู่ 1990–2100 (ค่าหลุดช่วง/NaN → null)
+  เพื่อให้เซลล์เพี้ยนเซลล์เดียวไม่ทำให้ทั้ง import ล่มอีก. ใช้ร่วมทุก importer.
 - **ระบบเตือน (reminders) ไม่ทำงานบน prod**: `docker-compose.portainer.yml` ไม่ได้
   ส่ง env ของ worker เตือน (`REMINDERS_WORKER_ENABLED`, `DISCORD_WEBHOOK_URL`,
   `REMINDER_ADMIN_EMAIL`, ฯลฯ) เข้า container เลย — Portainer stack env ใช้แค่แทนค่า

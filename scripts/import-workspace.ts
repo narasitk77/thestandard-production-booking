@@ -75,28 +75,36 @@ function colIndex(headers: string[], ...keywords: string[]): number {
 }
 const cell = (row: string[], i: number) => (i >= 0 && i < row.length ? String(row[i]).trim() : '')
 
-/** Tolerant date parse: ISO, DD-Mon-YYYY, DD/MM/YYYY, Thai DD/MM/BBBB (>2500 → -543). */
+/** Tolerant date parse: ISO, DD-Mon-YYYY, DD/MM/YYYY, Thai DD/MM/BBBB (>2500 → -543), Sheets serial. */
 function parseSheetDate(v: string): Date | null {
   const s = (v || '').trim()
   if (!s) return null
+  let d: Date | null = null
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (m) return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`)
-  m = s.match(/^(\d{1,2})[-/](\d{1,2}|[A-Za-z]{3,})[-/](\d{2,4})/)
-  if (m) {
-    const day = parseInt(m[1], 10)
-    let mon: number
-    if (/^\d+$/.test(m[2])) mon = parseInt(m[2], 10) - 1
-    else {
-      const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-      mon = MON.indexOf(m[2].slice(0, 3).toLowerCase())
+  if (m) d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`)
+  if (!d) {
+    m = s.match(/^(\d{1,2})[-/](\d{1,2}|[A-Za-z]{3,})[-/](\d{2,4})/)
+    if (m) {
+      const day = parseInt(m[1], 10)
+      let mon: number
+      if (/^\d+$/.test(m[2])) mon = parseInt(m[2], 10) - 1
+      else {
+        const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+        mon = MON.indexOf(m[2].slice(0, 3).toLowerCase())
+      }
+      let year = parseInt(m[3], 10)
+      if (year < 100) year += 2000
+      if (year > 2500) year -= 543 // Thai Buddhist year
+      if (mon >= 0 && day >= 1) d = new Date(Date.UTC(year, mon, day))
     }
-    let year = parseInt(m[3], 10)
-    if (year < 100) year += 2000
-    if (year > 2500) year -= 543 // Thai Buddhist year
-    if (mon >= 0 && day >= 1) return new Date(Date.UTC(year, mon, day))
   }
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? null : d
+  // Bare 5-digit value = unformatted Google Sheets serial (days since 1899-12-30).
+  if (!d && /^\d{5}$/.test(s)) d = new Date(Date.UTC(1899, 11, 30) + parseInt(s, 10) * 86400000)
+  if (!d) d = new Date(s)
+  // Reject NaN and implausible years so a stray cell can't crash Prisma's DateTime binding.
+  if (isNaN(d.getTime())) return null
+  const y = d.getUTCFullYear()
+  return y >= 1990 && y <= 2100 ? d : null
 }
 
 function mapPayment(v: string): PaymentStatus {
