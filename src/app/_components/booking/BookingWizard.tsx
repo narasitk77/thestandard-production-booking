@@ -182,6 +182,8 @@ export default function BookingWizard() {
   const [videographerCount, setVideographerCount] = useState(1)
   const [cameraCount, setCameraCount] = useState('')
   const [micCount, setMicCount] = useState('')
+  // v1.67 — Block Shot: relaxes the camera/mic requirement for flexible-queue shoots.
+  const [isBlockShot, setIsBlockShot] = useState(false)
   const [needsVan, setNeedsVan] = useState(false)
   const [specialEquipment, setSpecialEquipment] = useState<string[]>([])
   const [agencyRef, setAgencyRef] = useState('')
@@ -458,13 +460,16 @@ export default function BookingWizard() {
         })
         if (missing.length > 0) errs.epRows = `กรุณากรอก: ${missing.join(', ')}`
       }
-      // v1.66 — camera + mic counts are now REQUIRED for every flow. Bookings
+      // v1.66 — camera + mic counts are REQUIRED for every flow. Bookings
       // arriving without them broke the camera-overload check + crew planning.
       // 0 is allowed (audio-only / no-camera shoots) but the field can't be blank.
-      const camN = parseInt(cameraCount, 10)
-      if (cameraCount.trim() === '' || isNaN(camN) || camN < 0) errs.cameraCount = 'กรุณาระบุจำนวนกล้อง (ใส่ 0 ถ้าไม่ใช้กล้อง)'
-      const micN = parseInt(micCount, 10)
-      if (micCount.trim() === '' || isNaN(micN) || micN < 0) errs.micCount = 'กรุณาระบุจำนวนไมค์ (ใส่ 0 ถ้าไม่ใช้ไมค์)'
+      // v1.67 — except a Block Shot booking, where gear isn't pinned down yet.
+      if (!isBlockShot) {
+        const camN = parseInt(cameraCount, 10)
+        if (cameraCount.trim() === '' || isNaN(camN) || camN < 0) errs.cameraCount = 'กรุณาระบุจำนวนกล้อง (ใส่ 0 ถ้าไม่ใช้กล้อง)'
+        const micN = parseInt(micCount, 10)
+        if (micCount.trim() === '' || isNaN(micN) || micN < 0) errs.micCount = 'กรุณาระบุจำนวนไมค์ (ใส่ 0 ถ้าไม่ใช้ไมค์)'
+      }
     }
     return errs
   }
@@ -572,6 +577,7 @@ export default function BookingWizard() {
           videographerCount: crew.includes('Videographer') ? videographerCount : 1,
           cameraCount: cameraCount.trim() === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
           micCount: micCount.trim() === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
+          isBlockShot,
           needsVan,
           specialEquipment,
           agencyRef: agencyRef || null,
@@ -652,6 +658,7 @@ export default function BookingWizard() {
       ? crew.map(c => c === 'Videographer' && videographerCount > 1 ? `${c} ×${videographerCount}` : c).join(', ')
       : '',
     equipment: [
+      isBlockShot ? '📦 Block Shot (ไม่ระบุจำนวนกล้อง/ไมค์)' : '',
       cameraCount.trim() && Number(cameraCount) > 0 ? `🎥 ${parseInt(cameraCount, 10)}` : '',
       micCount.trim() && Number(micCount) > 0 ? `🎙 ${parseInt(micCount, 10)}` : '',
     ].filter(Boolean).join(' · '),
@@ -1348,9 +1355,21 @@ export default function BookingWizard() {
                     calendar event title so crew see gear needs at a glance. */}
                 <div>
                   <Label>อุปกรณ์ (Equipment)</Label>
+                  <label className="flex items-center gap-2 mb-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="accent-[#673ab7]"
+                      checked={isBlockShot}
+                      onChange={e => {
+                        setIsBlockShot(e.target.checked)
+                        if (e.target.checked) setFieldErrors(p => { const n = { ...p }; delete n.cameraCount; delete n.micCount; return n })
+                      }}
+                    />
+                    <span className="text-sm text-gray-700">📦 จองเป็นคิว Block Shot — ยังไม่ต้องระบุจำนวนกล้อง/ไมค์</span>
+                  </label>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="cameraCount" required>🎥 จำนวนกล้อง</Label>
+                      <Label htmlFor="cameraCount" required={!isBlockShot}>🎥 จำนวนกล้อง</Label>
                       <input
                         id="cameraCount"
                         type="number"
@@ -1366,7 +1385,7 @@ export default function BookingWizard() {
                       <FieldError message={fieldErrors.cameraCount} />
                     </div>
                     <div>
-                      <Label htmlFor="micCount" required>🎙 จำนวนไมค์</Label>
+                      <Label htmlFor="micCount" required={!isBlockShot}>🎙 จำนวนไมค์</Label>
                       <input
                         id="micCount"
                         type="number"
@@ -1382,7 +1401,7 @@ export default function BookingWizard() {
                       <FieldError message={fieldErrors.micCount} />
                     </div>
                   </div>
-                  <FieldHelp>ระบุจำนวนกล้องและไมค์ที่ต้องใช้ (จำเป็น — ใส่ 0 ถ้าไม่ใช้) · จะแสดงบน Google Calendar</FieldHelp>
+                  <FieldHelp>{isBlockShot ? 'Block Shot — ระบุจำนวนกล้อง/ไมค์ภายหลังได้ (ไม่บังคับ)' : 'ระบุจำนวนกล้องและไมค์ที่ต้องใช้ (จำเป็น — ใส่ 0 ถ้าไม่ใช้) · จะแสดงบน Google Calendar'}</FieldHelp>
                   <div className="mt-3">
                     <Label>อุปกรณ์พิเศษ (Special Equipment)</Label>
                     <div className="grid grid-cols-2 gap-2">

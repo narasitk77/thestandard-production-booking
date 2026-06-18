@@ -52,6 +52,7 @@ export async function createBookingFromPayload(
     videographerCount,
     cameraCount,
     micCount,
+    isBlockShot,
     needsVan,
     specialEquipment,
     agencyRef,
@@ -117,10 +118,14 @@ export async function createBookingFromPayload(
   // routine generator, API/MCP). 0 is valid (audio-only / no-camera shoots) but
   // the count can't be missing — bookings without it broke the camera-overload
   // check and crew planning.
-  const camNum = cameraCount === undefined || cameraCount === null || cameraCount === '' ? NaN : parseInt(cameraCount, 10)
-  if (!Number.isInteger(camNum) || camNum < 0) return fail(400, 'cameraCount is required (use 0 for no camera)')
-  const micNum = micCount === undefined || micCount === null || micCount === '' ? NaN : parseInt(micCount, 10)
-  if (!Number.isInteger(micNum) || micNum < 0) return fail(400, 'micCount is required (use 0 for no mic)')
+  // v1.67 — Block Shot bookings are exempt (gear isn't pinned down at booking).
+  const blockShot = isBlockShot === true || isBlockShot === 'true' || isBlockShot === 1
+  if (!blockShot) {
+    const camNum = cameraCount === undefined || cameraCount === null || cameraCount === '' ? NaN : parseInt(cameraCount, 10)
+    if (!Number.isInteger(camNum) || camNum < 0) return fail(400, 'cameraCount is required (use 0 for no camera) unless isBlockShot')
+    const micNum = micCount === undefined || micCount === null || micCount === '' ? NaN : parseInt(micCount, 10)
+    if (!Number.isInteger(micNum) || micNum < 0) return fail(400, 'micCount is required (use 0 for no mic) unless isBlockShot')
+  }
 
   // Upsert outlet DB record
   const outletDb = await prisma.outlet.upsert({
@@ -262,6 +267,7 @@ export async function createBookingFromPayload(
       videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)),
       cameraCount: cameraCount === undefined || cameraCount === null || cameraCount === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
       micCount: micCount === undefined || micCount === null || micCount === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
+      isBlockShot: blockShot,
       needsVan: needsVan === true,
       specialEquipment: Array.isArray(specialEquipment) ? specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') : [],
       agencyRef: agencyRef || null,

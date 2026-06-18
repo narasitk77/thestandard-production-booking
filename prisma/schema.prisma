@@ -249,6 +249,9 @@ model Booking {
   // Nullable: legacy bookings have none; 0/null both render as "not specified".
   cameraCount      Int?
   micCount         Int?
+  // v1.67 — "Block Shot" booking: a flexible-queue shoot where the exact gear
+  // isn't pinned down yet, so cameraCount/micCount are NOT required at booking.
+  isBlockShot      Boolean @default(false)
   // v1.61.0 — fixed checklist of special gear requested at booking time
   // (Gimbal/Ronin, Prompter, Clip-on Mic, Small Light). Surfaced on the
   // calendar event description + admin detail. Free string[] (no enum) so

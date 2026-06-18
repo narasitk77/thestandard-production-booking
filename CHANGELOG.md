@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.67.0] — 2026-06-18
+
+### Added
+
+- **ตัวเลือก "จองเป็นคิว Block Shot"** ในฟอร์มจอง (/new ขั้น People & Crew) —
+  เช็กบ็อกซ์ 📦 เมื่อเลือกแล้ว **ไม่บังคับ**กรอกจำนวนกล้อง/ไมค์ (สำหรับคิวที่ยัง
+  ไม่ฟิกซ์อุปกรณ์) ป้ายกล้อง/ไมค์เลิกขึ้น * และ validation ข้ามให้ · บันทึกเป็น
+  `Booking.isBlockShot` (แสดงในขั้น Review) · ตรวจซ้ำที่ server (`create-booking.ts`
+  ข้ามเงื่อนไข required ของ v1.66 เมื่อ isBlockShot) + MCP `create_booking`
+  (cameraCount/micCount กลับเป็นไม่บังคับ, เพิ่มพารามิเตอร์ isBlockShot)
+
+---
+
 ## [1.66.0] — 2026-06-18
 
 ### Changed
