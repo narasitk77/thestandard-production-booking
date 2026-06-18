@@ -5,6 +5,24 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-18 · v1.64.0 — Production Admin Space (ADMIN-only back-office modules)
+
+**No schema change, no new env.** Back-office modules (equipment/loans/repairs/
+rentals/purchases/vendors) moved to a new ADMIN-only page `/admin/production-space`
+(top-nav "Admin Space" menu) and locked to ADMIN throughout: 10 API routes
+`requireConsole`→`requireAdmin` + a middleware redirect bouncing non-admin page
+hits on `/admin/{module}` back to `/admin`. Coordinator/Manager/Support lose
+access to these tools.
+
+**Deploy.** Fast-forwarded `feat/production-admin-space` → `main`
+(254aad9..cb1d1ae, pushed direct) → docker-build + CI green → image
+`ghcr.io/narasitk77/thestandard-production-booking:sha-cb1d1ae` (bundles v1.63.0
++ v1.64.0). **Pending Portainer redeploy**: bump `IMAGE_TAG=sha-cb1d1ae` on stack
+125 → Re-pull image and redeploy. `start.sh` `prisma db push` still adds the
+v1.63.0 `special_equipment` column on boot (first deploy carrying it to prod).
+
+---
+
 ## 2026-06-18 · v1.63.0 — Special equipment + camera-overload warning + producer self-edit (schema: `bookings.special_equipment`)
 
 **Schema change.** One new column on `bookings`: `specialEquipment String[]`
