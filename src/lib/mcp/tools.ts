@@ -169,6 +169,63 @@ export function buildMcpRegistry(): McpRegistry {
           required: ['code'],
         },
       },
+      {
+        name: 'list_reminders',
+        description: 'List open anti-forget reminders (loans/rentals/invoices/repairs/upcoming shoots/warranties). Ask "what is overdue / needs attention?".',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'list_overdue_loans',
+        description: 'List equipment loans that are still out and past (or near) their due date.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'list_unpaid_rentals',
+        description: 'List rental jobs whose payment is still วางบิล (INVOICED) or รอจ่าย (PENDING).',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'list_open_repairs',
+        description: 'List repair tickets still open (REPORTED or SENT to the vendor).',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'list_equipment',
+        description: 'Search the equipment inventory by free text (name/serial/itemId) and/or status.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            q: { type: 'string', description: 'Search name / serial / itemId' },
+            status: { type: 'string', enum: ['AVAILABLE', 'ON_LOAN', 'IN_REPAIR', 'RETIRED'] },
+            limit: { type: 'number', description: 'Max rows (default 50, max 200)' },
+          },
+        },
+      },
+      {
+        name: 'create_repair_ticket',
+        description: 'Open a repair ticket for a piece of gear (status REPORTED). itemLabel is free text; optionally name the vendor (matched by name).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            itemLabel: { type: 'string', description: 'What needs repair, e.g. "Sony FX3 No.1 — shutter"' },
+            issue: { type: 'string', description: 'Description of the fault' },
+            vendorName: { type: 'string', description: 'Repair shop name (matched to an existing vendor)' },
+          },
+          required: ['itemLabel'],
+        },
+      },
+      {
+        name: 'mark_rental_paid',
+        description: 'Mark a rental job as PAID (จ่ายแล้ว). Identify it by id, invoiceNo, or quoteNo.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            invoiceNo: { type: 'string' },
+            quoteNo: { type: 'string' },
+          },
+        },
+      },
     ],
 
     handlers: {
@@ -273,6 +330,84 @@ export function buildMcpRegistry(): McpRegistry {
           changes: { via: 'mcp', reason: args.reason ?? null },
         })
         return { cancelled: true, bookingCode: b.bookingCode, previousStatus: b.status }
+      },
+
+      async list_reminders() {
+        const rows = await prisma.reminder.findMany({
+          where: { status: { in: ['PENDING', 'SENT'] } },
+          orderBy: [{ dueDate: 'asc' }],
+          take: 200,
+        })
+        return { count: rows.length, reminders: rows.map(r => ({ type: r.type, title: r.title, detail: r.body, dueDate: r.dueDate ? r.dueDate.toISOString().slice(0, 10) : null })) }
+      },
+
+      async list_overdue_loans() {
+        const today = new Date(); today.setUTCHours(0, 0, 0, 0)
+        const rows = await prisma.equipmentLoan.findMany({
+          where: { status: 'ACTIVE', dueDate: { not: null, lte: today } },
+          orderBy: { dueDate: 'asc' },
+          include: { items: { select: { nameSnapshot: true } } },
+        })
+        return { count: rows.length, loans: rows.map(l => ({ loanCode: l.loanCode, photographer: l.photographer, jobName: l.jobName, dueDate: l.dueDate?.toISOString().slice(0, 10), items: l.items.map(i => i.nameSnapshot) })) }
+      },
+
+      async list_unpaid_rentals() {
+        const rows = await prisma.rentalJob.findMany({
+          where: { paymentStatus: { in: ['INVOICED', 'PENDING'] } },
+          orderBy: { rentalDate: 'asc' },
+          include: { vendor: { select: { name: true } } },
+        })
+        return { count: rows.length, rentals: rows.map(r => ({ id: r.id, jobName: r.jobName, quoteNo: r.quoteNo, invoiceNo: r.invoiceNo, vendor: r.vendor?.name || null, amount: r.amount ? r.amount.toString() : null, paymentStatus: r.paymentStatus, rentalDate: r.rentalDate?.toISOString().slice(0, 10) })) }
+      },
+
+      async list_open_repairs() {
+        const rows = await prisma.repairTicket.findMany({
+          where: { status: { in: ['REPORTED', 'SENT'] } },
+          orderBy: { createdAt: 'asc' },
+          include: { vendor: { select: { name: true } } },
+        })
+        return { count: rows.length, repairs: rows.map(t => ({ id: t.id, item: t.itemLabel, status: t.status, vendor: t.vendor?.name || null, sentDate: t.sentDate?.toISOString().slice(0, 10), cost: t.cost ? t.cost.toString() : null })) }
+      },
+
+      async list_equipment(args) {
+        const limit = Math.min(Math.max(1, Number(args.limit) || 50), 200)
+        const where: any = {}
+        if (args.status) where.status = String(args.status)
+        const q = String(args.q || '').trim()
+        if (q) where.OR = [
+          { name: { contains: q, mode: 'insensitive' } },
+          { serialNumber: { contains: q, mode: 'insensitive' } },
+          { itemId: { contains: q, mode: 'insensitive' } },
+        ]
+        const rows = await prisma.equipment.findMany({ where, orderBy: [{ category: 'asc' }, { name: 'asc' }], take: limit })
+        return { count: rows.length, equipment: rows.map(e => ({ itemId: e.itemId, name: e.name, category: e.category, serialNumber: e.serialNumber, status: e.status, location: e.location })) }
+      },
+
+      async create_repair_ticket(args) {
+        const itemLabel = String(args.itemLabel || '').trim()
+        if (!itemLabel) throw new McpToolError('itemLabel is required')
+        let vendorId: string | null = null
+        const vendorName = String(args.vendorName || '').trim()
+        if (vendorName) {
+          const v = await prisma.vendor.findFirst({ where: { name: { equals: vendorName, mode: 'insensitive' } }, select: { id: true } })
+          vendorId = v?.id || null
+        }
+        const ticket = await prisma.repairTicket.create({ data: { itemLabel, issue: String(args.issue || '').trim() || null, vendorId, status: 'REPORTED' } })
+        logAudit({ actorEmail: mcpActorEmail(), action: 'repair.create', entityType: 'RepairTicket', entityId: ticket.id, changes: { via: 'mcp', itemLabel } })
+        return { created: true, id: ticket.id, itemLabel, status: ticket.status }
+      },
+
+      async mark_rental_paid(args) {
+        const id = String(args.id || '').trim()
+        const invoiceNo = String(args.invoiceNo || '').trim()
+        const quoteNo = String(args.quoteNo || '').trim()
+        if (!id && !invoiceNo && !quoteNo) throw new McpToolError('provide id, invoiceNo, or quoteNo')
+        const rental = await prisma.rentalJob.findFirst({ where: { OR: [...(id ? [{ id }] : []), ...(invoiceNo ? [{ invoiceNo }] : []), ...(quoteNo ? [{ quoteNo }] : [])] } })
+        if (!rental) throw new McpToolError('Rental not found')
+        if (rental.paymentStatus === 'PAID') return { updated: false, note: 'Already PAID', id: rental.id }
+        await prisma.rentalJob.update({ where: { id: rental.id }, data: { paymentStatus: 'PAID' } })
+        logAudit({ actorEmail: mcpActorEmail(), action: 'rental.update', entityType: 'RentalJob', entityId: rental.id, fromStatus: rental.paymentStatus, toStatus: 'PAID', changes: { via: 'mcp' } })
+        return { updated: true, id: rental.id, jobName: rental.jobName }
       },
     },
   }

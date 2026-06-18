@@ -80,6 +80,11 @@ const EDITABLE_BOOKING_FIELDS = [
   'producerPhone',
   'director',
   'directorEmail',
+  // v1.62.0 — Auto-Planning fields (replace the manual planning sheet)
+  'equipmentNote',
+  'rentalGearNote',
+  'itinerary',
+  'assignedEquipmentIds',
 ] as const
 
 type Diff = Record<string, { from: unknown; to: unknown }>

@@ -116,6 +116,12 @@ export async function PATCH(
       cameraCount,
       micCount,
       needsVan,
+      specialEquipment,
+      // v1.62.0 — Auto-Planning fields (replace the manual planning sheet)
+      equipmentNote,
+      rentalGearNote,
+      itinerary,
+      assignedEquipmentIds,
       episodeTitles, // Array<{ id: string, title: string }> — only updates titles, NOT episodeId
     } = body
 
@@ -180,6 +186,11 @@ export async function PATCH(
           ...(cameraCount !== undefined && { cameraCount: cameraCount === null || cameraCount === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0) }),
           ...(micCount !== undefined && { micCount: micCount === null || micCount === '' ? null : Math.max(0, parseInt(micCount, 10) || 0) }),
           ...(typeof needsVan === 'boolean' && { needsVan }),
+          ...(Array.isArray(specialEquipment) && { specialEquipment: specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
+          ...(equipmentNote !== undefined && { equipmentNote: equipmentNote || null }),
+          ...(rentalGearNote !== undefined && { rentalGearNote: rentalGearNote || null }),
+          ...(itinerary !== undefined && { itinerary: itinerary || null }),
+          ...(Array.isArray(assignedEquipmentIds) && { assignedEquipmentIds: assignedEquipmentIds.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
         },
         include: {
           outlet: true,

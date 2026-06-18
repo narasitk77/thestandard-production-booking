@@ -303,6 +303,12 @@ export default function WorkspacePage() {
                   className="w-full text-left px-2 py-1.5 rounded hover:bg-gray-50">
                   ทั้งหมดที่กรอง ({filtered.length}) · ทุกคอลัมน์
                 </button>
+                {/* v1.62.0 — legacy planning-sheet format for the transition */}
+                <div className="border-t border-gray-100 my-1" />
+                <a href="/api/admin/workspace/export-planning" download
+                  className="block w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-gray-600">
+                  📋 Planning sheet (รูปแบบเดิม)
+                </a>
               </div>
             )}
           </div>

@@ -5,6 +5,116 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- Producer แก้ไขงานเองได้ (เฉพาะสถานะ Requested): Producer/เจ้าของงานแก้รายละเอียด
+  งานของตัวเองที่ยังเป็น Requested ได้จาก /my-bookings (ปุ่ม "✏️ แก้ไข") — แก้ได้
+  ทุกฟิลด์รายละเอียด (เวลา Call/Wrap, ประเภทงาน, สถานที่, Producer, Creative, Crew,
+  จำนวนกล้อง/ไมค์, รถตู้, อุปกรณ์พิเศษ, Agency Ref, Notes, ชื่อตอน) **ยกเว้น**
+  วันถ่าย/Outlet/Program/Episode ID (กำหนดตายตัว) และฟิลด์ฝั่งแอดมิน (สถานะ/มอบหมาย/
+  admin notes). เมื่อบันทึก ระบบส่งอีเมลสรุปสิ่งที่แก้ให้ทีมคิวงาน (Coordinator/Admin)
+  อัตโนมัติ. ใหม่: POST(PATCH) /api/bookings/[id]/producer-edit + หน้า /bookings/[id]/edit
+  (เซิร์ฟเวอร์บังคับสิทธิ์: เจ้าของงาน + สถานะ Requested เท่านั้น)
+
+### Fixed
+
+- **ระบบเตือน (reminders) ไม่ทำงานบน prod**: `docker-compose.portainer.yml` ไม่ได้
+  ส่ง env ของ worker เตือน (`REMINDERS_WORKER_ENABLED`, `DISCORD_WEBHOOK_URL`,
+  `REMINDER_ADMIN_EMAIL`, ฯลฯ) เข้า container เลย — Portainer stack env ใช้แค่แทนค่า
+  `${VAR}` ในไฟล์ compose เท่านั้น ถ้า compose ไม่อ้างถึง ตัวแปรก็ไม่เคยถึง container
+  worker จึงขึ้น `REMINDERS_WORKER_ENABLED is off` ตลอด. เพิ่ม passthrough block ใน
+  app service (ค่า secret ของ Discord ยังอยู่ใน Portainer stack env เท่านั้น ไม่ commit
+  ลงไฟล์). ป้องกันซ้ำ: env ของ worker ใหม่ต้องประกาศใน compose เสมอ ไม่ใช่แค่ตั้งใน Portainer.
+
+---
+
+## [1.62.1] — 2026-06-18
+
+### Fixed — Equipment loan/return ↔ status sync (was effectively dead in the UI)
+
+ระบบยืม-คืนอุปกรณ์ไม่ผูกกับสถานะคลังจริง (พบจากการทดสอบ + audit 26 agent / 21 ข้อ; แก้แล้ว review 7 agent).
+
+- **ยืมผ่าน UI ไม่เคย sync สถานะ (บั๊กหลัก):** ฟอร์ม "ยืมอุปกรณ์" เป็น free-text จึงไม่ส่ง
+  `equipmentId` → ON_LOAN/คืน ไม่เคยทำงานสำหรับ loan ที่สร้างผ่านหน้าเว็บ. **แก้:** POST
+  /api/admin/loans resolve `equipmentId` ฝั่ง server จาก tag/ชื่อ (fixedAssetTag/itemId/
+  serialNumber/name เหมือน import) ก่อนผูกสถานะ.
+- **รวม writer ของ Equipment.status เป็นแหล่งเดียว:** เพิ่ม `src/lib/equipment-status.ts`
+  (`reconcileEquipmentStatus` + pure `deriveEquipmentStatus`, ลำดับ RETIRED>IN_REPAIR>ON_LOAN>
+  AVAILABLE). ทุก writer (ยืม/คืน/ลบ, ซ่อม สร้าง/แก้/ลบ) **derive** จากโลกจริงแทนการเขียนตรง —
+  คืน loan ไม่ทับ IN_REPAIR/RETIRED, ของมี 2 loan คืนอันเดียวไม่หลุด, เปลี่ยนอุปกรณ์ใน ticket ซ่อม
+  ไม่ทิ้งตัวเก่าค้าง, un-return กลับ ON_LOAN.
+- **guard:** ยืมเช็คความพร้อม (409 ถ้าไม่ loanable/ไม่ AVAILABLE); แก้สถานะมือได้เฉพาะ
+  RETIRED/AVAILABLE (ON_LOAN/IN_REPAIR ระบบ derive); CrudTable แสดงค่าปัจจุบันเป็น option
+  disabled เมื่อไม่อยู่ในตัวเลือก (สถานะ derive ไม่โผล่ว่าง).
+- **reminder กันลืม:** booking ที่มี loan active แล้ว ไม่ขึ้น "ยังไม่จัดอุปกรณ์" อีก.
+- ค้างไว้ (มีอยู่เดิม, ต่ำ): loanCode ชนกันได้ตอนสร้างพร้อมกัน → 500 เป็นครั้งคราว.
+- 103 tests (เพิ่ม equipment-status.test.ts), tsc 0 errors, build ผ่าน.
+
+---
+
+## [1.62.0] — 2026-06-17
+
+### Added — Unified admin workspace (เฟส 1: วางแผนอัตโนมัติ + ระบบเตือนกันลืม)
+
+เฟสแรกของการรวม 3 Google Sheet ที่ทำมือ (อุปกรณ์+ซ่อม, วางแผนงาน, เช่า/ซื้อ/การเงิน)
+เข้ามาในระบบ probook แทน Airtable — ใช้ Postgres/worker/อีเมล/ปฏิทิน/auth เดิมซ้ำ
+
+- **วางแผนงานอัตโนมัติ** (เลิกก๊อปปฏิทิน→ชีตด้วยมือ): เพิ่ม 3 ฟิลด์บน Booking —
+  `equipmentNote` (จัดอุปกรณ์), `rentalGearNote` (ของเช่า), `itinerary` (คิวถ่าย) +
+  `assignedEquipmentIds` — กรอกได้ในหน้า /admin/[id], แสดงเป็นคอลัมน์ใน
+  /admin/workspace, และ export รูปแบบชีตเดิมได้ที่
+  `GET /api/admin/workspace/export-planning` (START/END/DESCRIPTION/DURATION/
+  NOTES/LOCATION/CAMERA/เช่า)
+- **ระบบเตือน "กันลืม"** (`src/lib/reminders.ts`): สแกนรายวันหา ยืมอุปกรณ์
+  ใกล้ครบ/เกินกำหนด, ของเช่าถึงกำหนดคืน, ใบแจ้งหนี้ค้าง, งานซ่อมค้าง, งานถ่าย
+  ที่ยังไม่จัดอุปกรณ์, ประกันใกล้หมด — ส่ง **Discord** (webhook) + **อีเมลสรุป**
+  รายวัน, มีกล่องในแอปที่ `/admin/reminders` (กด Dismiss/Resolve) ·
+  worker `scripts/reminders-worker.js` (supervised ใน start.sh) →
+  `GET /api/internal/reminders/run` (secret-gated) · กันส่งซ้ำด้วย `dedupeKey`
+- **เฟส 2 — การเงิน:** หน้า + CRUD API สำหรับ **Rentals** (สถานะจ่าย จ่ายแล้ว/
+  วางบิล/รอจ่าย + ติดตามวันคืน), **Purchases**, **Vendors**, แนบ **เอกสาร** Drive
+  ผ่าน `/api/admin/documents` · ทุกหน้าใช้ `CrudTable` ตัวเดียวร่วมกัน (config-driven)
+  · เขียนการเงินเฉพาะ ADMIN, ดูได้ทุก console tier
+- **เฟส 3 — อุปกรณ์/ยืม/ซ่อม:** หน้า **Equipment** (คลัง + ค้น/กรอง),
+  **Loans** (ยืม-คืน, กดคืนแล้ว→ปล่อยอุปกรณ์เป็น AVAILABLE, รหัส LOAN-YYMMDDHHMM),
+  **Repairs** (ตารางที่ขาดไป: อาการ→ร้าน→วันส่ง/รับ→ค่าซ่อม) · สถานะอุปกรณ์ผูกกับ
+  loan/repair อัตโนมัติ (ON_LOAN/IN_REPAIR)
+- **นำเข้าข้อมูล:** สคริปต์เดียว `scripts/import-workspace.ts <what> [--commit]`
+  (vendors|equipment|fixed-assets|loans|rentals|purchases|repairs|all) — อ่านชีตเดิม,
+  map คอลัมน์แบบ header-based (ทน typo QUATITY/Catelogies), **dry-run เป็นค่าเริ่มต้น**,
+  upsert ซ้ำได้, พิมพ์สรุป inserted/updated/skipped/unresolved
+- **เฟส 4 — MCP:** เพิ่ม read tools (`list_reminders`, `list_overdue_loans`,
+  `list_unpaid_rentals`, `list_open_repairs`, `list_equipment`) + write tools
+  (`create_repair_ticket`, `mark_rental_paid`) ใน `/api/mcp` — ถามผู้ช่วยได้ว่า
+  "มีอะไรค้าง/เกินกำหนด" · LINE ยังเลื่อน (Notify ตายแล้ว)
+- **โครงสร้างข้อมูล (เฟส 0):** models `Equipment`, `EquipmentLoan`
+  (+`EquipmentLoanItem`), `RepairTicket`, `Vendor`, `RentalJob`, `PurchaseItem`,
+  `DocumentRef`, `Reminder` (additive, `prisma db push`)
+
+### Notes
+
+- env ใหม่: `DISCORD_WEBHOOK_URL`, `REMINDERS_WORKER_ENABLED=1`,
+  `REMINDER_ADMIN_EMAIL`, (ปรับได้) `INVOICE_AGING_DAYS`, `SHOOT_GEAR_LOOKAHEAD_DAYS`,
+  `LOAN_DUE_LOOKAHEAD_DAYS`, `REPAIR_AGING_DAYS`, `WARRANTY_LOOKAHEAD_DAYS`,
+  `REMINDERS_WORKER_INTERVAL_MS` (ดีฟอลต์รายวัน)
+- อีเมลสรุปต้องใช้ provider แบบ non-interactive (SMTP/Resend/SendGrid) เพราะ
+  worker ไม่มี session ผู้ใช้ (ใช้ Gmail-OAuth ไม่ได้); Discord ทำงานได้เลย
+
+## [1.61.0] — 2026-06-17
+
+### Added
+
+- อุปกรณ์พิเศษ (Special Equipment): New Booking (ขั้น People & Crew) และหน้า
+  แอดมินมีเช็กบ็อกซ์ 4 รายการ — Gimbal/Ronin, Prompter, Clip-on Mic (DJI Mic),
+  ไฟดวงเล็ก — เก็บเป็น `specialEquipment` (string[]) แสดงในขั้น Review, หน้า
+  รายละเอียดแอดมิน, และ description ของอีเวนต์ Google Calendar
+- เตือนกล้องเต็ม: แถบสีแดงแบบไม่บล็อก ขึ้นใน New Booking และหน้าแอดมิน เมื่อ
+  ผลรวม cameraCount ของงานที่ช่วงเวลาทับกัน (REQUESTED + CONFIRMED รวมงานนี้)
+  เกิน 9 ตัว — เตือนว่าต้องเช่ากล้องเพิ่ม รองรับด้วย POST /api/camera-load +
+  src/lib/booking-overlap.ts
+
 ## [1.60.1] — 2026-06-14
 
 ### Changed
