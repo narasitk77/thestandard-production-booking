@@ -5,6 +5,39 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-18 · Workspace data migration into prod + serial-date import fix
+
+**What ran.** Imported the remaining Google-Sheets datasets into the prod DB by
+exec'ing the importer inside the running container (Portainer → container
+`production-booking-app` → Console → `/bin/sh`), the proven path:
+`npx tsx scripts/import-workspace.ts <vendors|fixed-assets|rentals|purchases|repairs> --commit`.
+Final DB counts (verified via `prisma .count()`): vendors=5, equipment=1719
+(1248 fixedAssets + 471 loanable), rentalJobs=221, purchaseItems=93,
+repairTickets=3, equipmentLoan=0.
+
+**Bug found + fixed mid-migration.** `rentals` crashed first run:
+`prisma.rentalJob.findFirst()` → `Could not convert argument value … DateTime
+"+046035-01-01"`. Root cause: `parseSheetDate` fell through to `new Date(s)`,
+and a raw **Google Sheets serial date** (`46035` = an unformatted date cell)
+was read by V8 as **year 46035**. Fix: convert bare 5-digit serials via the
+1899-12-30 epoch and clamp results to 1990–2100 (out-of-range/NaN → null).
+Committed to `main` as `f527cab` (GHCR built `sha-f527cab` clean — a consolidated
+main image = all v1.62 code + this fix, available for the next redeploy).
+
+**In-container hotpatch (so no redeploy was needed just for a CLI script).** The
+running container is `sha-3c8ef1e` (pre-fix script). Patched its
+`/app/scripts/import-workspace.ts` in place with an atomic, pattern-guarded
+`node` script (heredoc → `/tmp/fix.js`; `if (!s.includes(before)) exit(1)` before
+writing), then re-ran `rentals` → inserted=221 updated=3 skipped=58.
+⚠ This hotpatch lives only in the current container and **reverts on the next
+redeploy** — which is fine, because `sha-f527cab` already has the fix baked in.
+
+**NOT migrated: loans.** `import-workspace.ts loans --commit` is deliberately
+deferred until the external Apps Script that auto-writes the sheet's "Equipment
+Loans" tab is retired (two writers would collide). equipmentLoan table is empty.
+
+---
+
 ## 2026-06-18 · v1.62.1 — equipment loan/return ↔ status-sync fix (deploy)
 
 **Code fix, no schema/env change.** Equipment.status is now DERIVED everywhere via
