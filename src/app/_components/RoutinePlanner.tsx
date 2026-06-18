@@ -104,7 +104,10 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
     }
   }
 
-  const canGenerate = !!preview && !preview.error && preview.dates.length > 0 && !!producer.trim() && !!episodeTitle.trim()
+  // v1.66 — camera + mic counts are required (0 allowed, blank not).
+  const camOk = cameraCount.trim() !== '' && Number.isInteger(Number(cameraCount)) && Number(cameraCount) >= 0
+  const micOk = micCount.trim() !== '' && Number.isInteger(Number(micCount)) && Number(micCount) >= 0
+  const canGenerate = !!preview && !preview.error && preview.dates.length > 0 && !!producer.trim() && !!episodeTitle.trim() && camOk && micOk
 
   const generate = async () => {
     if (!canGenerate || !preview) return
@@ -280,12 +283,12 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="ops-label">กล้อง</label>
-                <input type="number" min="0" className="ops-input" value={cameraCount} onChange={e => setCameraCount(e.target.value)} />
+                <label className="ops-label">กล้อง <span className="ops-required">*</span></label>
+                <input type="number" min="0" className="ops-input" placeholder="ใส่ 0 ถ้าไม่ใช้" value={cameraCount} onChange={e => setCameraCount(e.target.value)} />
               </div>
               <div>
-                <label className="ops-label">ไมค์</label>
-                <input type="number" min="0" className="ops-input" value={micCount} onChange={e => setMicCount(e.target.value)} />
+                <label className="ops-label">ไมค์ <span className="ops-required">*</span></label>
+                <input type="number" min="0" className="ops-input" placeholder="ใส่ 0 ถ้าไม่ใช้" value={micCount} onChange={e => setMicCount(e.target.value)} />
               </div>
             </div>
             <div>

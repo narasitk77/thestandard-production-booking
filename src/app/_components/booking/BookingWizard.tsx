@@ -458,6 +458,13 @@ export default function BookingWizard() {
         })
         if (missing.length > 0) errs.epRows = `กรุณากรอก: ${missing.join(', ')}`
       }
+      // v1.66 — camera + mic counts are now REQUIRED for every flow. Bookings
+      // arriving without them broke the camera-overload check + crew planning.
+      // 0 is allowed (audio-only / no-camera shoots) but the field can't be blank.
+      const camN = parseInt(cameraCount, 10)
+      if (cameraCount.trim() === '' || isNaN(camN) || camN < 0) errs.cameraCount = 'กรุณาระบุจำนวนกล้อง (ใส่ 0 ถ้าไม่ใช้กล้อง)'
+      const micN = parseInt(micCount, 10)
+      if (micCount.trim() === '' || isNaN(micN) || micN < 0) errs.micCount = 'กรุณาระบุจำนวนไมค์ (ใส่ 0 ถ้าไม่ใช้ไมค์)'
     }
     return errs
   }
@@ -1343,35 +1350,39 @@ export default function BookingWizard() {
                   <Label>อุปกรณ์ (Equipment)</Label>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="cameraCount">🎥 จำนวนกล้อง</Label>
+                      <Label htmlFor="cameraCount" required>🎥 จำนวนกล้อง</Label>
                       <input
                         id="cameraCount"
                         type="number"
                         min={0}
                         max={50}
                         inputMode="numeric"
-                        className="ops-input tabular-nums"
+                        className={`ops-input tabular-nums ${fieldErrors.cameraCount ? 'ops-input-invalid' : ''}`}
+                        aria-invalid={!!fieldErrors.cameraCount}
                         placeholder="เช่น 2"
                         value={cameraCount}
-                        onChange={e => setCameraCount(e.target.value)}
+                        onChange={e => { setCameraCount(e.target.value); if (fieldErrors.cameraCount) setFieldErrors(p => { const n = { ...p }; delete n.cameraCount; return n }) }}
                       />
+                      <FieldError message={fieldErrors.cameraCount} />
                     </div>
                     <div>
-                      <Label htmlFor="micCount">🎙 จำนวนไมค์</Label>
+                      <Label htmlFor="micCount" required>🎙 จำนวนไมค์</Label>
                       <input
                         id="micCount"
                         type="number"
                         min={0}
                         max={50}
                         inputMode="numeric"
-                        className="ops-input tabular-nums"
+                        className={`ops-input tabular-nums ${fieldErrors.micCount ? 'ops-input-invalid' : ''}`}
+                        aria-invalid={!!fieldErrors.micCount}
                         placeholder="เช่น 1"
                         value={micCount}
-                        onChange={e => setMicCount(e.target.value)}
+                        onChange={e => { setMicCount(e.target.value); if (fieldErrors.micCount) setFieldErrors(p => { const n = { ...p }; delete n.micCount; return n }) }}
                       />
+                      <FieldError message={fieldErrors.micCount} />
                     </div>
                   </div>
-                  <FieldHelp>ระบุจำนวนกล้องและไมค์ที่ต้องใช้ — จะแสดงบน Google Calendar (เว้นว่างได้)</FieldHelp>
+                  <FieldHelp>ระบุจำนวนกล้องและไมค์ที่ต้องใช้ (จำเป็น — ใส่ 0 ถ้าไม่ใช้) · จะแสดงบน Google Calendar</FieldHelp>
                   <div className="mt-3">
                     <Label>อุปกรณ์พิเศษ (Special Equipment)</Label>
                     <div className="grid grid-cols-2 gap-2">

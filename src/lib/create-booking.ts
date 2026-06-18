@@ -113,6 +113,15 @@ export async function createBookingFromPayload(
   const parsedDate = new Date(shootDate)
   if (isNaN(parsedDate.getTime())) return fail(400, `Invalid shootDate: ${shootDate}`)
 
+  // v1.66 — camera + mic counts are REQUIRED for every creation path (wizard,
+  // routine generator, API/MCP). 0 is valid (audio-only / no-camera shoots) but
+  // the count can't be missing — bookings without it broke the camera-overload
+  // check and crew planning.
+  const camNum = cameraCount === undefined || cameraCount === null || cameraCount === '' ? NaN : parseInt(cameraCount, 10)
+  if (!Number.isInteger(camNum) || camNum < 0) return fail(400, 'cameraCount is required (use 0 for no camera)')
+  const micNum = micCount === undefined || micCount === null || micCount === '' ? NaN : parseInt(micCount, 10)
+  if (!Number.isInteger(micNum) || micNum < 0) return fail(400, 'micCount is required (use 0 for no mic)')
+
   // Upsert outlet DB record
   const outletDb = await prisma.outlet.upsert({
     where: { code: outletCode },

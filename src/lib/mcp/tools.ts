@@ -114,7 +114,7 @@ export function buildMcpRegistry(): McpRegistry {
           'Create a new booking request (status REQUESTED — an admin approves it later; nothing is put on the calendar yet). ' +
           'Two modes. (1) Outlet booking: pass outletCode (e.g. NWS), programCode = the Episode Type bucket (L=long-form, S=short-form, A=album/photo, T=teaser/spot), and episodes = [{programCode: <show code from list_outlets_and_programs, e.g. KYM>, title: <episode title>}]. ' +
           '(2) Content Agency: pass outletCode AGN, programCode = one of AGN-LF/AGN-SC/AGN-ST/AGN-AP/AGN-EVT/AGN-VAD, projectId + projectName from list_projects, and selectedEpisodeIds from list_project_episodes. ' +
-          'Always required: shootDate (YYYY-MM-DD), callTime (HH:MM), shootType (STUDIO | ON_LOCATION | EVENT), category (ORIGINAL_CONTENT | ADVERTORIAL), producer (name). Recommended: estimatedWrap (HH:MM), locationName, producerEmail, notes.',
+          'Always required: shootDate (YYYY-MM-DD), callTime (HH:MM), shootType (STUDIO | ON_LOCATION | EVENT), category (ORIGINAL_CONTENT | ADVERTORIAL), producer (name), cameraCount (0 if none), micCount (0 if none). Recommended: estimatedWrap (HH:MM), locationName, producerEmail, notes.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -132,8 +132,8 @@ export function buildMcpRegistry(): McpRegistry {
             videoType: { type: 'string' },
             notes: { type: 'string' },
             videographerCount: { type: 'number' },
-            cameraCount: { type: 'number' },
-            micCount: { type: 'number' },
+            cameraCount: { type: 'number', description: 'Required — number of cameras needed (0 if none)' },
+            micCount: { type: 'number', description: 'Required — number of mics needed (0 if none)' },
             needsVan: { type: 'boolean' },
             episodes: {
               type: 'array',
@@ -153,7 +153,7 @@ export function buildMcpRegistry(): McpRegistry {
             selectedEpisodeIds: { type: 'array', items: { type: 'string' }, description: 'Content Agency only' },
             requestedBy: { type: 'string', description: 'Email of the human who asked for this booking (recorded in the audit trail)' },
           },
-          required: ['outletCode', 'programCode', 'shootDate', 'callTime', 'shootType', 'category', 'producer'],
+          required: ['outletCode', 'programCode', 'shootDate', 'callTime', 'shootType', 'category', 'producer', 'cameraCount', 'micCount'],
         },
       },
       {
