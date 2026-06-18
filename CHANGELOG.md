@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.71.0] — 2026-06-18
+
+### Fixed — `AUTH_DISABLED` is now wired up (was dead config)
+
+- `AUTH_DISABLED=1` previously did nothing — it was documented in
+  `docker-compose.portainer.yml` + echoed by `start.sh`, but no application
+  code read it, so the app always required Google OAuth.
+- ตอนนี้ `AUTH_DISABLED=1` ข้าม OAuth จริง: `getSession()`
+  (`src/lib/session.ts`) คืน session ของ ADMIN ที่ seed ไว้ และ
+  `src/middleware.ts` ไม่ redirect ไป `/login` — ใช้บน LAN ที่เชื่อถือได้ /
+  ทดสอบ local โดยไม่ต้องตั้ง OAuth
+- Admin email มาจาก `SEED_ADMIN_EMAIL` (default `narasit.k@thestandard.co`)
+- ปลอดภัยโดย default: ปิดอยู่ (`${AUTH_DISABLED:-0}`), ต้องเป็นสตริง `'1'`
+  เป๊ะ ๆ, และมี warning ดังทั้งใน `start.sh` banner และ runtime log เพื่อให้
+  การเปิดโดยไม่ตั้งใจมองเห็นได้ทันที — **ห้ามตั้งบน prod ที่เปิดสู่อินเทอร์เน็ต**
+
 ## [1.70.1] — 2026-06-18
 
 ### Removed / Cleanup (ponytail audit — dead code, ~320 lines)

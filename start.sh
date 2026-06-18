@@ -13,6 +13,11 @@ echo "  NEXT_PUBLIC_APP_URL = ${NEXT_PUBLIC_APP_URL:-(unset)}"
 echo "  AUTH_DISABLED       = ${AUTH_DISABLED:-0}"
 echo "  NODE_ENV            = ${NODE_ENV:-(unset)}"
 echo "=========================================="
+if [ "${AUTH_DISABLED:-0}" = "1" ]; then
+  echo "  ⚠️  AUTH_DISABLED=1 — LOGIN BYPASSED, every request is ADMIN."
+  echo "      For trusted LAN only. NEVER on a public deploy."
+  echo "=========================================="
+fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1) Wait for Postgres to accept connections

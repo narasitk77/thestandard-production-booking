@@ -5,6 +5,23 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-18 · v1.71.0 — `AUTH_DISABLED` wired up (was dead config)
+
+**Behavior change, opt-in.** `AUTH_DISABLED=1` now actually bypasses Google
+OAuth (`getSession()` returns a seeded ADMIN; `src/middleware.ts` skips the
+`/login` redirect). Previously the flag was documented + echoed at boot but no
+code read it, so it did nothing.
+
+**Env.** New optional `SEED_ADMIN_EMAIL` (default `narasit.k@thestandard.co`)
+controls which admin the bypass acts as — should match an existing ADMIN user
+row so DB-backed reads resolve. Already added to `docker-compose.portainer.yml`.
+
+**⚠️ Prod must keep `AUTH_DISABLED=0`.** The internet-facing
+`probook.xtec9.xyz` stack must never set it to 1. Default is off
+(`${AUTH_DISABLED:-0}`), requires the exact string `1`, and logs a loud warning
+in both the `start.sh` banner and the app runtime when active. No schema change,
+no redeploy required beyond the normal image bump.
+
 ## 2026-06-18 · v1.70.0 — Footage Drive path → new "VIDEO 2026 [JUL–DEC]" (issue #5)
 
 **Schema change.** One new column `Booking.isBlockShot Boolean @default(false)`

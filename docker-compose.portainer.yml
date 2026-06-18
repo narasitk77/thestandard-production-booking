@@ -60,7 +60,11 @@ services:
       # --- Auth ---
       # AUTH_DISABLED=1 → no login, every request is the seeded admin (LAN use).
       # AUTH_DISABLED=0 → Google OAuth sign-in (needs the OAuth env vars below).
+      # NEVER set AUTH_DISABLED=1 on the public internet-facing prod.
       AUTH_DISABLED: ${AUTH_DISABLED:-0}
+      # Which admin AUTH_DISABLED acts as. Should be an existing ADMIN user row
+      # so DB-backed reads resolve. Defaults to narasit.k@thestandard.co.
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
       NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public URL of the app}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${NEXTAUTH_URL}}

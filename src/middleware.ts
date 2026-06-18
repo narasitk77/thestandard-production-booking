@@ -4,6 +4,11 @@ import { getToken } from 'next-auth/jwt'
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // AUTH_DISABLED=1 — trusted-LAN/dev bypass. Without a JWT cookie this gate
+  // would bounce every request to /login, so it must short-circuit too. Mirrors
+  // getSession() in src/lib/session.ts. Off by default; never set on public prod.
+  if (process.env.AUTH_DISABLED === '1') return NextResponse.next()
+
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
   const hasSession = !!token?.email
 

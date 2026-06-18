@@ -3,7 +3,22 @@ import { authOptions } from './auth'
 import { prisma } from './db'
 import { hasConsoleAccess, type Role } from './roles'
 
+// AUTH_DISABLED=1 — bypass Google OAuth and run every request as a seeded
+// ADMIN. For trusted-LAN deploys and local/dev testing without OAuth set up.
+// Off by default; requires the exact string '1'. The startup banner (start.sh)
+// + the warn below make an accidental enable impossible to miss in logs.
+// NEVER set this on the public internet-facing prod (probook.xtec9.xyz).
+export const AUTH_DISABLED = process.env.AUTH_DISABLED === '1'
+const SEED_ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL || 'narasit.k@thestandard.co').toLowerCase()
+if (AUTH_DISABLED) {
+  console.warn(`⚠️  AUTH_DISABLED=1 — login bypassed; every request runs as ADMIN <${SEED_ADMIN_EMAIL}>. Do NOT use on a public deploy.`)
+}
+
 export async function getSession() {
+  // ponytail: trusted-LAN/dev bypass — skip OAuth, act as the seeded admin.
+  if (AUTH_DISABLED) {
+    return { email: SEED_ADMIN_EMAIL, name: 'LAN Admin', role: 'ADMIN' as Role, id: undefined }
+  }
   const s = await getServerSession(authOptions)
   if (!s?.user?.email) return null
   // v1.50 — deactivating a user revokes access immediately, not at token
