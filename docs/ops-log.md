@@ -5,6 +5,33 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-18 · v1.70.0 — Footage Drive path → new "VIDEO 2026 [JUL–DEC]" (issue #5)
+
+**Schema change.** One new column `Booking.isBlockShot Boolean @default(false)`
+(from v1.67) — applied by `prisma db push` in `start.sh` on the next stack
+update. Additive, no data loss.
+
+**⚠️ REQUIRED ENV CHANGE AT CUTOVER (≥ 1 Jul, set in Portainer).** Set
+`DRIVE_FOOTAGE_ROOT=0AH7f4FZNrHsOUk9PVA` (the new Shared Drive "VIDEO 2026
+[JUL–DEC]"). The code now writes the new tree
+`<root>/<NN · Outlet>/<program|category>/<Production ID · job>/<CAM-x>/` into
+whatever `DRIVE_FOOTAGE_ROOT` points at. **Sequence: deploy the code, then flip
+the env to the new Drive id** — if the env is flipped before the code ships,
+uploads land in the new Drive with the OLD layout; if the code ships before the
+flip, uploads write the new layout into the OLD (soon-frozen) Drive. PMC freezes
+the old "Video 2026" read-only at cutover and has pre-created the outlet +
+program boxes; the app creates the shoot + camera folders (pre-create at
+CONFIRMED, ensure-create at upload). Wasabi keys are unchanged (ASCII archive,
+keyed by Production ID).
+
+**No other env.** Drive write needs the existing service-account + DWD `drive`
+scope (already used by the calendar path). The approve-time pre-create is
+best-effort (never blocks approval if Drive is down / `DRIVE_FOOTAGE_ROOT`
+unset). A critical duplicate-folder bug (asymmetric fuzzy match vs PMC's
+numbered boxes) was caught in adversarial review and fixed before ship.
+
+---
+
 ## 2026-06-18 · v1.64.0 — Production Admin Space (ADMIN-only back-office modules)
 
 **No schema change, no new env.** Back-office modules (equipment/loans/repairs/

@@ -3,13 +3,15 @@
 import { useEffect, useState, useRef } from 'react'
 import { Upload, X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
 import { uploadToDrive as driveUpload, uploadToWasabi as wasabiUpload, type RetryStatus } from '@/lib/upload-client'
-
-const CAMERAS = ['Cam1', 'Cam2', 'Cam3', 'Cam4', 'Sound', 'Drone', 'BTS', 'Switcher', 'Atem']
+import { cameraUploadOptions } from '@/lib/outlet-folders'
 
 interface BookingContext {
   id: string
   bookingCode: string | null
   status: string
+  // v1.70 — drive the camera dropdown: CAM-A..CAM-{cameraCount} + AUDIO (if mics) + specials.
+  cameraCount?: number | null
+  micCount?: number | null
   outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
 }
 
@@ -74,9 +76,12 @@ function statusChip(status: string) {
   }
 }
 
-export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props) {
+export default function UploadSection({ booking, defaultCamera }: Props) {
+  // v1.70 — camera options derived from the booking: CAM-A..CAM-{cameraCount}
+  // (min CAM-A) + AUDIO (if mics) + specials (DRONE/SWITCHER/PHOTO/SCREEN).
+  const CAMERAS = cameraUploadOptions(booking.cameraCount, booking.micCount)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [camera, setCamera] = useState(defaultCamera)
+  const [camera, setCamera] = useState(defaultCamera && CAMERAS.includes(defaultCamera) ? defaultCamera : CAMERAS[0])
   const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
   const [history, setHistory] = useState<UploadItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -297,11 +302,10 @@ export default function UploadSection({ booking, defaultCamera = 'Cam1' }: Props
           </div>
           <p className="text-[10px] text-gray-500 mt-1">
             จะ upload ตรงเข้า Drive {wasabiLocked || includeWasabi ? '+ Wasabi' : ''} ที่
-            {/* v1.36.1 — hint reflects the real v1.36.0 layout: footage lands in
-                the outlet's existing folder, under "<Production ID> - <ชื่องาน>",
-                then the camera. (Exact outlet folder + job name are resolved
-                server-side, shown here as placeholders.) */}
-            {' '}<code className="text-gray-700">{`[outlet]/${booking.bookingCode} - [ชื่องาน]/${camera}/`}</code>
+            {/* v1.70 — hint reflects the new "VIDEO 2026 [JUL–DEC]" layout:
+                <NN · Outlet>/<program|category>/<Production ID · ชื่องาน>/<camera>/.
+                Exact outlet/program/job are resolved server-side (placeholders). */}
+            {' '}<code className="text-gray-700">{`[outlet]/[program]/${booking.bookingCode} · [ชื่องาน]/${camera}/`}</code>
             {' · '}
             <span className="text-gray-400">chunked + auto-retry (network drop ปลอดภัย)</span>
           </p>

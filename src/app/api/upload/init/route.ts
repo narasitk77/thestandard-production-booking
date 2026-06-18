@@ -4,9 +4,11 @@ import { getSession, canUploadToBooking } from '@/lib/session'
 import {
   buildStoragePath,
   hasOutletFolderMapping,
-  outletFolderName,
+  outletDriveFolderName,
+  programFolderName,
   buildBookingFolderName,
 } from '@/lib/outlet-folders'
+import { bookingShowName } from '@/lib/display'
 import {
   isWasabiConfigured,
   createMultipart,
@@ -142,9 +144,12 @@ export async function POST(request: NextRequest) {
         agencyRef: true,
         notes: true,
         outlet: { select: { code: true, name: true, storagePolicy: true } },
+        // v1.70 — program name (booking-level + per-episode) drives the new
+        // Drive "program / รายการ" folder layer via bookingShowName().
+        program: { select: { name: true } },
         episodes: {
           orderBy: { sequence: 'asc' },
-          select: { episodeId: true, title: true, sequence: true },
+          select: { episodeId: true, title: true, sequence: true, program: { select: { name: true } } },
         },
       },
     })
@@ -200,7 +205,7 @@ export async function POST(request: NextRequest) {
     }
     if (!process.env.DRIVE_FOOTAGE_ROOT?.trim()) {
       return NextResponse.json({
-        error: 'DRIVE_FOOTAGE_ROOT env var is not set. Admin: set it in the Portainer stack to the Shared Drive root folder id (currently expected: 0APhGxxryY4pzUk9PVA) and redeploy.',
+        error: 'DRIVE_FOOTAGE_ROOT env var is not set. Admin: set it in the Portainer stack to the Shared Drive root folder id (VIDEO 2026 [JUL–DEC] = 0AH7f4FZNrHsOUk9PVA) and redeploy.',
         code: 'DRIVE_NOT_CONFIGURED',
       }, { status: 503 })
     }
@@ -219,6 +224,14 @@ export async function POST(request: NextRequest) {
       (booking.episodes[0]?.title && booking.episodes[0].title.trim()) ||
       null
     const bookingFolderName = buildBookingFolderName(booking.bookingCode, jobName)
+
+    // v1.70 (issue #5) — the new Drive "program / รายการ" layer. Outlet shows →
+    // real show name (bookingShowName); Content Agency → category box.
+    const driveProgramFolder = programFolderName({
+      outletCode: booking.outlet.code,
+      showName: bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes }),
+      category: booking.category,
+    })
 
     // 5. Create Upload row first (lets us reference its id below)
     const upload = await prisma.upload.create({
@@ -243,18 +256,19 @@ export async function POST(request: NextRequest) {
     try {
       const { bookingFolderId, cameraFolderId } = await ensureUploadFolderPath({
         rootFolderId: process.env.DRIVE_FOOTAGE_ROOT!.trim(),
-        outletCanonicalName: outletFolderName(booking.outlet.code),
+        outletCanonicalName: outletDriveFolderName(booking.outlet.code),
+        programFolderName: driveProgramFolder,
         bookingFolderName,
         camera,
       })
 
-      // Drop / refresh booking-info.txt at the booking-folder level so editors
-      // who open the folder have the shoot's context. Best-effort: never let
-      // an info-file hiccup block the actual footage upload.
+      // Drop / refresh _SHOOT.txt at the shoot-folder level so editors who open
+      // the folder have the shoot's context. Best-effort: never let an info-file
+      // hiccup block the actual footage upload.
       try {
         await upsertTextFile({
           parentFolderId: bookingFolderId,
-          name: 'booking-info.txt',
+          name: '_SHOOT.txt',
           content: renderBookingInfo({
             bookingCode: booking.bookingCode,
             projectName: booking.projectName,
@@ -373,7 +387,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       uploadId: upload.id,
       bookingCode: booking.bookingCode,
-      outletFolder: outletFolderName(booking.outlet.code),
+      outletFolder: outletDriveFolderName(booking.outlet.code),
       targets: {
         drive: driveTarget,
         wasabi: wasabiTarget,

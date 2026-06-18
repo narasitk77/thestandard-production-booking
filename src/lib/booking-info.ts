@@ -76,7 +76,7 @@ export function renderBookingInfo(b: BookingInfoInput): string {
 
   const out: string[] = []
   out.push(sep)
-  out.push('  PRODUCTION BOOKING — ข้อมูลงาน / Shoot info')
+  out.push('  _SHOOT.txt — ข้อมูลงานถ่ายทำ / Shoot info')
   out.push(sep)
   out.push('')
 

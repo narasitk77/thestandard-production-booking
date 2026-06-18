@@ -5,6 +5,11 @@ import { updateBookingRow } from '@/lib/google-sheets'
 import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
+// v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
+import { ensureShootCameraFolders, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
+import { outletDriveFolderName, programFolderName, buildBookingFolderName, camerasToPreCreate } from '@/lib/outlet-folders'
+import { bookingShowName } from '@/lib/display'
+import { renderBookingInfo } from '@/lib/booking-info'
 
 export async function POST(
   _request: NextRequest,
@@ -78,6 +83,62 @@ export async function POST(
     if (!updated) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
+
+    // 1b) v1.70 (issue #5) — best-effort Drive pre-create: make the shoot folder
+    //     + CAM-A..CAM-{cameraCount} (+ AUDIO if mics) + _SHOOT.txt so the crew
+    //     opens the new "VIDEO 2026 [JUL–DEC]" tree and sees the camera slots
+    //     waiting (empty slot = that camera hasn't delivered). Own try/catch IIFE
+    //     — never blocks approval, runs only when Drive is configured.
+    ;(async () => {
+      const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+      if (!root || !updated.bookingCode || !hasDriveCredentials()) return
+      try {
+        const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
+        const { bookingFolderId } = await ensureShootCameraFolders({
+          rootFolderId: root,
+          outletCanonicalName: outletDriveFolderName(updated.outlet.code),
+          programFolderName: programFolderName({
+            outletCode: updated.outlet.code,
+            showName: bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
+            category: updated.category,
+          }),
+          bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName),
+          cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
+        })
+        await upsertTextFile({
+          parentFolderId: bookingFolderId,
+          name: '_SHOOT.txt',
+          content: renderBookingInfo({
+            bookingCode: updated.bookingCode,
+            projectName: updated.projectName,
+            projectId: updated.projectId,
+            outletName: updated.outlet.name,
+            outletCode: updated.outlet.code,
+            category: updated.category,
+            videoType: updated.videoType,
+            shootType: updated.shootType,
+            shootDate: updated.shootDate,
+            shootEndDate: updated.shootEndDate,
+            callTime: updated.callTime,
+            estimatedWrap: updated.estimatedWrap,
+            locationName: updated.locationName,
+            producer: updated.producer,
+            producerEmail: updated.producerEmail,
+            director: updated.director,
+            directorEmail: updated.directorEmail,
+            mainVideographerEmail: updated.mainVideographerEmail,
+            assignedEmails: updated.assignedEmails,
+            crewRequired: updated.crewRequired,
+            agencyRef: updated.agencyRef,
+            notes: updated.notes,
+            episodes: updated.episodes,
+            generatedAt: new Date(),
+          }),
+        })
+      } catch (e: any) {
+        console.error('[approve] Drive pre-create failed (non-fatal):', e?.message || e)
+      }
+    })()
 
     // 2) Fire calendar + sheet + OT in background; user doesn't wait.
     //    v1.32.2 — record OK / FAILED on completion so the UI never

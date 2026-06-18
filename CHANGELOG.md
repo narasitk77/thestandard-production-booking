@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.70.0] — 2026-06-18
+
+### Changed
+
+- **Footage Drive path ตรงกับโครงใหม่ของ PMC "VIDEO 2026 [JUL–DEC]"** (issue #5):
+  `<root>/<NN · Outlet>/<program|category>/<Production ID · งาน>/<CAM-x>/`
+  - Outlet folder = `NN · Name` จาก master `OUTLETS` (field `sort`) เช่น
+    `01 · News` … `09 · Content Agency` (เลิกพึ่ง `OUTLET_FOLDER_BY_CODE` สำหรับ
+    Drive — เหลือใช้เฉพาะ Wasabi archive key ที่คง ASCII เดิม)
+  - เพิ่มชั้น **program / รายการ**: outlet shows = ชื่อโชว์จริง (`bookingShowName`),
+    Content Agency = category (`Advertorial` / `Event / Forum`)
+  - shoot folder separator → ` · ` (U+00B7) เช่น `TSS-EXE-260826-L-01 · งาน`
+  - camera vocab ใหม่ **CAM-A..CAM-D + AUDIO + DRONE/SWITCHER/PHOTO/SCREEN**
+    (เดิม Cam1…) — dropdown จำกัด CAM-A..ตาม cameraCount + AUDIO (ถ้า micCount>0)
+    + specials เสมอ
+  - **pre-create โฟลเดอร์กล้องตอน CONFIRMED** (อนุมัติ): สร้าง CAM-A..CAM-{cameraCount}
+    (+ AUDIO) + `_SHOOT.txt` ให้ช่างเห็นช่องรอ (best-effort ไม่บล็อกการอนุมัติ;
+    ช่องว่าง = กล้องนั้นยังไม่ส่ง) — Block Shot/ไม่ระบุจำนวน = ไม่ pre-create กล้อง
+  - context file `booking-info.txt` → **`_SHOOT.txt`**
+  - fuzzy matcher รองรับกล่อง `NN · ` ของ PMC; footage scanner รองรับ vocab ใหม่
+  - **ต้องตั้ง env `DRIVE_FOOTAGE_ROOT=0AH7f4FZNrHsOUk9PVA` ใน Portainer ตอน cutover**
+    (1 ก.ค.) — โค้ดเขียนเข้าโครงใหม่ตาม root ที่ env ชี้
+
+---
+
 ## [1.69.0] — 2026-06-18
 
 ### Added

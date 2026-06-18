@@ -297,11 +297,14 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
 // Known camera/source tokens — matched against either a folder name
 // (whole-string) or a filename segment between separators. Adding a new
 // camera is a one-line change to this regex source.
-const CAMERA_TOKEN_RE = /^(Cam\d+|Sound|Drone|BTS|Atem|Switcher|Multi|Master|Proxy)$/i
-const CAMERA_FILENAME_RE = /(?:^|[_\-.\s])(Cam\d+|Sound|Drone|BTS|Atem|Switcher|Multi|Master|Proxy)(?:[_\-.\s]|$)/i
+// v1.70 (issue #5) — new vocab CAM-A..D / AUDIO / PHOTO / SCREEN added alongside
+// the legacy Cam1.. tokens so the scanner still recognises the new Drive tree.
+const CAMERA_TOKEN_RE = /^(Cam\d+|CAM-[A-Z]|Sound|Audio|Drone|BTS|Atem|Switcher|Photo|Screen|Multi|Master|Proxy)$/i
+const CAMERA_FILENAME_RE = /(?:^|[_\-.\s])(Cam\d+|CAM-[A-Z]|Sound|Audio|Drone|BTS|Atem|Switcher|Photo|Screen|Multi|Master|Proxy)(?:[_\-.\s]|$)/i
 
 function normalizeCameraToken(tok: string): string {
   if (/^cam\d+$/i.test(tok)) return 'Cam' + tok.slice(3)
+  if (/^cam-[a-z]$/i.test(tok)) return tok.toUpperCase() // CAM-A..CAM-D
   return tok.charAt(0).toUpperCase() + tok.slice(1).toLowerCase()
 }
 

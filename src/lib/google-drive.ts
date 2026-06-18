@@ -283,9 +283,11 @@ export async function ensureFolderPath(
   return parent
 }
 
-/** Strip a leading ordering prefix like "9." / "10) " / "3 - " from a folder name. */
+/** Strip a leading ordering prefix like "9." / "10) " / "3 - " / "09 · " from a folder name. */
 function stripOrderingPrefix(name: string): string {
-  return name.replace(/^\s*\d+\s*[.)\-]\s*/, '').trim()
+  // v1.70 — also strip a "NN · " middle-dot prefix (PMC's new "09 · Content
+  // Agency" boxes) so the fuzzy matcher recognizes them as the canonical name.
+  return name.replace(/^\s*\d+\s*[.)\-·]\s*/, '').trim()
 }
 
 /**
@@ -310,7 +312,12 @@ async function ensureChildFolderByCanonicalName(
   parentId: string,
   canonicalName: string,
 ): Promise<string> {
-  const want = canonicalName.trim().toLowerCase()
+  // v1.70 — strip the ordering prefix from the WANTED name too, so the compare
+  // is suffix-vs-suffix. The new outlet name is itself prefixed ("09 · Content
+  // Agency"); without this it would never equal an existing box's stripped name
+  // ("content agency") and we'd spawn a duplicate outlet folder on every run.
+  // Idempotent for un-prefixed program/show names.
+  const want = stripOrderingPrefix(canonicalName).trim().toLowerCase()
   // List all child folders under the parent (the root has ~17 — cheap).
   const children: Array<{ id: string; name: string }> = []
   let pageToken: string | undefined = undefined
@@ -355,36 +362,71 @@ async function ensureChildFolderByCanonicalName(
 }
 
 export interface UploadFolderTarget {
-  /** id of "<outlet>/<bookingFolder>/" — where booking-info.txt lives. */
+  /** id of "<outlet>/<program>/" */
+  programFolderId: string
+  /** id of "<outlet>/<program>/<bookingFolder>/" — where _SHOOT.txt lives. */
   bookingFolderId: string
-  /** id of "<outlet>/<bookingFolder>/<camera>/" — where the file goes. */
+  /** id of "<outlet>/<program>/<bookingFolder>/<camera>/" — where the file goes. */
   cameraFolderId: string
 }
 
-/**
- * v1.36.0 — resolve (and create where needed) the Drive folder path for an
- * upload, reusing the team's existing outlet folder:
- *
- *   <root>/<existing outlet folder>/<bookingFolder>/<camera>/
- *
- * - outlet segment is matched fuzzily (ordering-prefix tolerant) so we land
- *   in "9.ADVERTORIAL" instead of making a new "ADVERTORIAL".
- * - bookingFolder + camera are our own naming → exact ensure/create.
- *
- * Returns both the booking-folder id (for the info .txt) and the camera-folder
- * id (for the file itself).
- */
-export async function ensureUploadFolderPath(input: {
+interface ShootFolderInput {
   rootFolderId: string
+  /** "01 · News" … "09 · Content Agency" (from OUTLETS master). */
   outletCanonicalName: string
+  /** program name (outlet shows) or category box (AGN). */
+  programFolderName: string
+  /** "<Production ID> · <job>" */
   bookingFolderName: string
+}
+
+/**
+ * Resolve (creating where missing) <root>/<outlet>/<program>/<bookingFolder>/.
+ * outlet + program are matched FUZZILY (ordering-prefix tolerant) so we land in
+ * PMC's pre-created "09 · Content Agency" / "Key Message" boxes instead of
+ * making duplicates; the shoot (booking) folder is our own naming → exact.
+ * Shared by the upload path and the approve-time pre-create so they never drift.
+ */
+async function resolveShootFolder(
+  drive: drive_v3.Drive,
+  input: ShootFolderInput,
+): Promise<{ programFolderId: string; bookingFolderId: string }> {
+  const outletId = await ensureChildFolderByCanonicalName(drive, input.rootFolderId, input.outletCanonicalName)
+  const programFolderId = await ensureChildFolderByCanonicalName(drive, outletId, input.programFolderName)
+  const bookingFolderId = await ensureChildFolder(drive, programFolderId, input.bookingFolderName)
+  return { programFolderId, bookingFolderId }
+}
+
+/**
+ * v1.70 (issue #5) — resolve the Drive folder path for an upload under the new
+ * "VIDEO 2026 [JUL–DEC]" tree:
+ *
+ *   <root>/<NN · Outlet>/<program|category>/<Production ID · job>/<camera>/
+ */
+export async function ensureUploadFolderPath(input: ShootFolderInput & {
   camera: string
 }): Promise<UploadFolderTarget> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
-  const outletId = await ensureChildFolderByCanonicalName(drive, input.rootFolderId, input.outletCanonicalName)
-  const bookingFolderId = await ensureChildFolder(drive, outletId, input.bookingFolderName)
+  const { programFolderId, bookingFolderId } = await resolveShootFolder(drive, input)
   const cameraFolderId = await ensureChildFolder(drive, bookingFolderId, input.camera)
-  return { bookingFolderId, cameraFolderId }
+  return { programFolderId, bookingFolderId, cameraFolderId }
+}
+
+/**
+ * v1.70 — pre-create the shoot folder + a set of camera folders when a booking
+ * becomes CONFIRMED, so the crew opens Drive and sees the slots waiting (an
+ * empty CAM-x = that camera hasn't delivered yet). Idempotent; returns the
+ * booking-folder id so the caller can also drop _SHOOT.txt there.
+ */
+export async function ensureShootCameraFolders(input: ShootFolderInput & {
+  cameras: string[]
+}): Promise<{ bookingFolderId: string }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const { bookingFolderId } = await resolveShootFolder(drive, input)
+  for (const cam of input.cameras) {
+    await ensureChildFolder(drive, bookingFolderId, cam)
+  }
+  return { bookingFolderId }
 }
 
 /**

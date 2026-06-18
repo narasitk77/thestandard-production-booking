@@ -12,6 +12,8 @@ interface BookingRow {
   shootDate: string
   callTime: string
   status: string
+  cameraCount?: number | null
+  micCount?: number | null
   outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
   program: { code: string; name: string }
   assignedEmails: string[]
@@ -171,6 +173,8 @@ function UploadPage() {
                 id: single.id,
                 bookingCode: single.bookingCode ?? null,
                 status: single.status,
+                cameraCount: single.cameraCount,
+                micCount: single.micCount,
                 outlet: single.outlet,
               }} />
             ) : (

@@ -1,5 +1,14 @@
+import { OUTLETS } from './data'
+
 /**
  * Outlet code → folder name mapping.
+ *
+ * NOTE (v1.70, issue #5): the OUTLET_FOLDER_BY_CODE map below is now used
+ * ONLY for the Wasabi archive key (ASCII-stable, keyed by Production ID).
+ * The Google Drive footage path moved to PMC's new "VIDEO 2026 [JUL–DEC]"
+ * structure and derives outlet folders straight from the OUTLETS master
+ * (`outletDriveFolderName`, "01 · News" … "09 · Content Agency"), so the two
+ * storages no longer drift.
  *
  * The Shared Drive root (`DRIVE_FOOTAGE_ROOT`) and the Wasabi key prefix
  * (`WASABI_KEY_PREFIX`) both lay out files per-outlet. The folder names
@@ -67,6 +76,79 @@ export function hasOutletFolderMapping(outletCode: string): boolean {
   return Object.prototype.hasOwnProperty.call(OUTLET_FOLDER_BY_CODE, outletCode.toUpperCase())
 }
 
+/* =============================================================================
+   v1.70 (issue #5) — Google Drive footage path for the new "VIDEO 2026
+   [JUL–DEC]" structure:  <root>/<NN · Outlet>/<program|category>/<ProdID · job>/<CAM-x>/
+   PMC pre-creates the <NN · Outlet> and <program/category> boxes; the app
+   creates the shoot + camera folders at CONFIRMED / upload time.
+   ============================================================================= */
+
+// U+00B7 MIDDLE DOT — the exact separator PMC uses in the Drive tree.
+const MIDDLE_DOT = '·'
+
+/**
+ * Drive outlet folder name from the OUTLETS master (single source of truth):
+ *   "01 · News" … "09 · Content Agency". The number is the outlet's `sort`
+ *   (stable even if the array is reordered). Falls back to the bare code.
+ */
+export function outletDriveFolderName(outletCode: string): string {
+  const o = OUTLETS.find(x => x.code === outletCode.toUpperCase())
+  if (!o) return outletCode.toUpperCase()
+  return `${String(o.sort).padStart(2, '0')} ${MIDDLE_DOT} ${o.name}`
+}
+
+/**
+ * The "program / รายการ" layer between outlet and shoot.
+ *   - Content Agency (AGN): keyed off the booking `category` —
+ *       ADVERTORIAL → "Advertorial", EVENT → "Event / Forum"
+ *       (other categories fall back to the show name, then "Advertorial").
+ *   - Every other outlet: the real show name (e.g. "Key Message"), no code.
+ * `showName` should be the resolved bookingShowName(booking).
+ * AGN strings are returned VERBATIM (the "Event / Forum" slash is intentional
+ * and must byte-match PMC's box); non-AGN names are sanitized.
+ */
+export function programFolderName(input: {
+  outletCode: string
+  showName?: string | null
+  category?: string | null
+}): string {
+  if (input.outletCode.toUpperCase() === 'AGN') {
+    const cat = String(input.category || '').toUpperCase()
+    if (cat === 'ADVERTORIAL') return 'Advertorial'
+    if (cat === 'EVENT') return 'Event / Forum'
+    return sanitizeNameSegment(input.showName || '') || 'Advertorial'
+  }
+  return sanitizeNameSegment(input.showName || '') || 'รายการ'
+}
+
+// Full camera vocab (issue #5). CAM-A..D are pre-created from cameraCount;
+// AUDIO from micCount; the specials are created on demand at upload time.
+export const CAM_LETTERS = ['A', 'B', 'C', 'D'] as const
+export const CAMERA_SPECIALS = ['DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'] as const
+
+/**
+ * Camera folders to PRE-CREATE when a booking is CONFIRMED: CAM-A..CAM-{n}
+ * (capped at CAM-D) + AUDIO when micCount > 0. Returns [] for a Block Shot /
+ * unspecified count — the shoot folder is still made; cameras come at upload
+ * time via the ensure-create fallback.
+ */
+export function camerasToPreCreate(cameraCount?: number | null, micCount?: number | null): string[] {
+  const n = Math.max(0, Math.min(cameraCount ?? 0, CAM_LETTERS.length))
+  const cams = CAM_LETTERS.slice(0, n).map(l => `CAM-${l}`)
+  if ((micCount ?? 0) > 0) cams.push('AUDIO')
+  return cams
+}
+
+/**
+ * Camera options for the upload dropdown: CAM-A..CAM-{n} (min CAM-A so the
+ * list is never empty) + AUDIO (if mics) + the always-available specials.
+ */
+export function cameraUploadOptions(cameraCount?: number | null, micCount?: number | null): string[] {
+  const slots = camerasToPreCreate(cameraCount, micCount)
+  const cams = slots.some(s => s.startsWith('CAM-')) ? slots : ['CAM-A', ...slots]
+  return [...cams, ...CAMERA_SPECIALS]
+}
+
 /**
  * Sanitize a string for safe use as a single Drive folder / file name.
  * Drive itself tolerates almost anything (it keys on ids, not paths), but
@@ -95,7 +177,7 @@ export function sanitizeNameSegment(raw: string, maxLen = 120): string {
 export function buildBookingFolderName(bookingCode: string, jobName?: string | null): string {
   const code = String(bookingCode || '').trim()
   const job = sanitizeNameSegment(jobName || '', 100)
-  return job ? `${code} - ${job}` : code
+  return job ? `${code} ${MIDDLE_DOT} ${job}` : code
 }
 
 /**
