@@ -181,9 +181,14 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // 3. Determine which clouds we're writing to
+    // 3. Determine which clouds we're writing to.
+    //   v1.72 — Wasabi is OFF by default (Drive-only). Set WASABI_ENABLED=1 in
+    //   the stack env to turn the dual-write archive back on; until then every
+    //   upload goes to Drive only, regardless of outlet storagePolicy or the
+    //   per-upload "include Wasabi" opt-in.
     const policy = booking.outlet.storagePolicy
-    const wantWasabi = policy === 'DUAL_WRITE' || operatorWantsWasabi
+    const wasabiEnabled = process.env.WASABI_ENABLED === '1'
+    const wantWasabi = wasabiEnabled && (policy === 'DUAL_WRITE' || operatorWantsWasabi)
     if (wantWasabi && !isWasabiConfigured()) {
       // v1.35.12 — surface which env vars are missing so the admin can
       // see at a glance what to set in Portainer instead of going to a

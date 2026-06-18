@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.72.0] — 2026-06-18
+
+### Changed
+
+- **อัปโหลดไป Google Drive อย่างเดียว — ข้าม Wasabi (ชั่วคราว)**: เพิ่มสวิตช์
+  `WASABI_ENABLED` (ค่าเริ่มต้น = ปิด). ตอนนี้ทุกการอัปโหลดลง Drive เท่านั้น
+  ไม่ว่า outlet จะเป็น DUAL_WRITE หรือผู้ใช้ติ๊ก "include Wasabi" ก็ตาม. เปิด
+  dual-write archive กลับเมื่อพร้อมได้โดยตั้ง `WASABI_ENABLED=1` ใน stack env
+  (เพิ่ม passthrough ใน `docker-compose.portainer.yml` แล้ว — ไม่งั้น env ไม่เข้า
+  container). คีย์ Wasabi เดิมคงไว้ ไม่ถูกแตะ.
+
+---
+
 ## [1.71.0] — 2026-06-18
 
 ### Fixed — `AUTH_DISABLED` is now wired up (was dead config)

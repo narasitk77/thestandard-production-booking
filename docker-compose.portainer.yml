@@ -150,6 +150,9 @@ services:
       # booking upload UI presigns multipart PUT URLs from these so the browser
       # uploads directly to Wasabi (server never touches the bytes). ACCESS/SECRET
       # keys are injected from the Portainer stack env — never commit values here.
+      # v1.72 — master switch: OFF by default = uploads go to Drive only. Set
+      # WASABI_ENABLED=1 in the stack env to turn the dual-write archive back on.
+      WASABI_ENABLED: ${WASABI_ENABLED:-0}
       WASABI_ENDPOINT: ${WASABI_ENDPOINT:-}
       WASABI_REGION: ${WASABI_REGION:-}
       WASABI_BUCKET: ${WASABI_BUCKET:-}
