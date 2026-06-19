@@ -23,7 +23,7 @@ async function getStats() {
     repairsByStatus,
     rentalsActive, rentalsUnpaid, rentalsPending, rentalsReturnOverdue,
     purchasesByStatus,
-    vendorsTotal,
+    vendorsTotal, vendorPricesTotal,
   ] = await Promise.all([
     prisma.equipment.groupBy({ by: ['status'], where: { loanable: true }, _count: { _all: true } }),
     prisma.equipment.count(),
@@ -38,6 +38,7 @@ async function getStats() {
     prisma.rentalJob.count({ where: { status: 'ACTIVE', returnedAt: null, returnDueDate: { not: null, lt: today } } }),
     prisma.purchaseItem.groupBy({ by: ['status'], _count: { _all: true } }),
     prisma.vendor.count(),
+    prisma.vendorPrice.count(),
   ])
 
   const g = (rows: any[], v: string) => rows.find((r) => r.status === v)?._count._all ?? 0
@@ -52,6 +53,7 @@ async function getStats() {
     rentals: { active: rentalsActive, unpaid: rentalsUnpaid, pending: rentalsPending, returnOverdue: rentalsReturnOverdue },
     purchases: { open: g(purchasesByStatus, 'OPEN'), received: g(purchasesByStatus, 'RECEIVED') },
     vendors: { total: vendorsTotal },
+    vendorPrices: { total: vendorPricesTotal },
   }
 }
 
@@ -197,6 +199,9 @@ export default async function ProductionAdminSpacePage() {
         </ModuleCard>
         <ModuleCard href="/admin/vendors" emoji="🏷️" title="Vendors · ผู้ขาย" sub="ร้านเช่า/ซ่อม/ขาย">
           <Metric label="ทั้งหมด" value={s.vendors.total} tone="gray" />
+        </ModuleCard>
+        <ModuleCard href="/admin/vendor-prices" emoji="💰" title="ราคาเช่า" sub="เปรียบเทียบราคาข้าม vendor">
+          <Metric label="รายการราคา" value={s.vendorPrices.total} tone="gray" />
         </ModuleCard>
       </div>
 

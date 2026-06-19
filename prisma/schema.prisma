@@ -741,3 +741,20 @@ model Reminder {
   @@index([dueDate])
   @@map("reminders")
 }
+
+model VendorPrice {
+  id          String   @id @default(cuid())
+  vendor      String
+  category    String
+  item        String
+  spec        String?
+  unit        String   @default("วัน")
+  pricePerDay Decimal  @db.Decimal(10, 2)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([vendor])
+  @@index([category])
+  @@map("vendor_prices")
+}
