@@ -13,6 +13,7 @@ import Link from 'next/link'
 import { ArrowLeft, Loader2, CalendarPlus, X, Trash2, Check, AlertTriangle } from 'lucide-react'
 import { OUTLETS, OUTLET_MAP } from '@/lib/data'
 import { generateRoutineDates } from '@/lib/routine'
+import NumberStepper from './NumberStepper'
 
 const WEEKDAYS = [
   { n: 1, label: 'จ' }, { n: 2, label: 'อ' }, { n: 3, label: 'พ' },
@@ -284,11 +285,11 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="ops-label">กล้อง <span className="ops-required">*</span></label>
-                <input type="number" min="0" className="ops-input" placeholder="ใส่ 0 ถ้าไม่ใช้" value={cameraCount} onChange={e => setCameraCount(e.target.value)} />
+                <NumberStepper min={0} max={50} ariaLabel="จำนวนกล้อง" placeholder="0" value={cameraCount} onChange={setCameraCount} />
               </div>
               <div>
                 <label className="ops-label">ไมค์ <span className="ops-required">*</span></label>
-                <input type="number" min="0" className="ops-input" placeholder="ใส่ 0 ถ้าไม่ใช้" value={micCount} onChange={e => setMicCount(e.target.value)} />
+                <NumberStepper min={0} max={50} ariaLabel="จำนวนไมค์" placeholder="0" value={micCount} onChange={setMicCount} />
               </div>
             </div>
             <div>

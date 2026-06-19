@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { Loader2, ArrowLeft, Save } from 'lucide-react'
 import { bookingShowName } from '@/lib/display'
 import { shootTypeLabel } from '@/lib/utils'
+import NumberStepper from '@/app/_components/NumberStepper'
 
 const SHOOT_TYPES = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT']
 const SPECIAL_EQUIPMENT_OPTIONS = ['Gimbal/Ronin', 'Prompter', 'Clip-on Mic (DJI Mic)', 'ไฟดวงเล็ก']
@@ -214,11 +215,11 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs text-gray-500 mb-1 block">🎥 จำนวนกล้อง</label>
-            <input type="number" min={0} max={50} inputMode="numeric" className="ops-input tabular-nums" value={form.cameraCount} onChange={e => setForm({ ...form, cameraCount: e.target.value })} />
+            <NumberStepper min={0} max={50} ariaLabel="จำนวนกล้อง" value={form.cameraCount} onChange={v => setForm({ ...form, cameraCount: v })} />
           </div>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">🎙 จำนวนไมค์</label>
-            <input type="number" min={0} max={50} inputMode="numeric" className="ops-input tabular-nums" value={form.micCount} onChange={e => setForm({ ...form, micCount: e.target.value })} />
+            <NumberStepper min={0} max={50} ariaLabel="จำนวนไมค์" value={form.micCount} onChange={v => setForm({ ...form, micCount: v })} />
           </div>
         </div>
 

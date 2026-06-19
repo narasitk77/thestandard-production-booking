@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { OUTLETS, CREW_OPTIONS } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } from '@/lib/locations'
+import NumberStepper from '@/app/_components/NumberStepper'
 
 /* =============================================================================
    Booking Wizard — v1.28 redesign
@@ -179,7 +180,7 @@ export default function BookingWizard() {
   const [producerEmailText, setProducerEmailText] = useState('')
   const [creative, setCreative] = useState('')
   const [crew, setCrew] = useState<string[]>([])
-  const [videographerCount, setVideographerCount] = useState(1)
+  const [videographerCount, setVideographerCount] = useState('1') // string so the field can be cleared & retyped
   const [cameraCount, setCameraCount] = useState('')
   const [micCount, setMicCount] = useState('')
   // v1.67 — Block Shot: relaxes the camera/mic requirement for flexible-queue shoots.
@@ -574,7 +575,7 @@ export default function BookingWizard() {
           coProducerEmail: useProducerDropdown ? (coProducerSel || null) : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
-          videographerCount: crew.includes('Videographer') ? videographerCount : 1,
+          videographerCount: crew.includes('Videographer') ? Math.max(1, parseInt(videographerCount, 10) || 1) : 1,
           cameraCount: cameraCount.trim() === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
           micCount: micCount.trim() === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
           isBlockShot,
@@ -655,7 +656,8 @@ export default function BookingWizard() {
     subject: creative,
     productCode: agencyRef,
     crew: crew.length > 0
-      ? crew.map(c => c === 'Videographer' && videographerCount > 1 ? `${c} ×${videographerCount}` : c).join(', ')
+      ? (() => { const vc = Math.max(1, parseInt(videographerCount, 10) || 1)
+          return crew.map(c => c === 'Videographer' && vc > 1 ? `${c} ×${vc}` : c).join(', ') })()
       : '',
     equipment: [
       isBlockShot ? '📦 Block Shot (ไม่ระบุจำนวนกล้อง/ไมค์)' : '',
@@ -1330,16 +1332,15 @@ export default function BookingWizard() {
                             <span className="text-sm text-gray-700">{c}</span>
                           </label>
                           {c === 'Videographer' && checked && (
-                            <span className="inline-flex items-center gap-1 text-xs text-gray-500 shrink-0">
-                              ×
-                              <input
-                                type="number"
+                            <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 shrink-0">
+                              <NumberStepper
+                                value={videographerCount}
+                                onChange={setVideographerCount}
                                 min={1}
                                 max={10}
-                                value={videographerCount}
-                                onChange={e => setVideographerCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
-                                className="w-12 border border-gray-300 rounded px-1.5 py-0.5 text-sm tabular-nums"
-                                aria-label="Videographer count"
+                                allowEmpty={false}
+                                ariaLabel="จำนวน Videographer"
+                                className="w-36"
                               />
                               คน
                             </span>
@@ -1370,33 +1371,29 @@ export default function BookingWizard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="cameraCount" required={!isBlockShot}>🎥 จำนวนกล้อง</Label>
-                      <input
+                      <NumberStepper
                         id="cameraCount"
-                        type="number"
                         min={0}
                         max={50}
-                        inputMode="numeric"
-                        className={`ops-input tabular-nums ${fieldErrors.cameraCount ? 'ops-input-invalid' : ''}`}
-                        aria-invalid={!!fieldErrors.cameraCount}
+                        ariaLabel="จำนวนกล้อง"
+                        invalid={!!fieldErrors.cameraCount}
                         placeholder="เช่น 2"
                         value={cameraCount}
-                        onChange={e => { setCameraCount(e.target.value); if (fieldErrors.cameraCount) setFieldErrors(p => { const n = { ...p }; delete n.cameraCount; return n }) }}
+                        onChange={v => { setCameraCount(v); if (fieldErrors.cameraCount) setFieldErrors(p => { const n = { ...p }; delete n.cameraCount; return n }) }}
                       />
                       <FieldError message={fieldErrors.cameraCount} />
                     </div>
                     <div>
                       <Label htmlFor="micCount" required={!isBlockShot}>🎙 จำนวนไมค์</Label>
-                      <input
+                      <NumberStepper
                         id="micCount"
-                        type="number"
                         min={0}
                         max={50}
-                        inputMode="numeric"
-                        className={`ops-input tabular-nums ${fieldErrors.micCount ? 'ops-input-invalid' : ''}`}
-                        aria-invalid={!!fieldErrors.micCount}
+                        ariaLabel="จำนวนไมค์"
+                        invalid={!!fieldErrors.micCount}
                         placeholder="เช่น 1"
                         value={micCount}
-                        onChange={e => { setMicCount(e.target.value); if (fieldErrors.micCount) setFieldErrors(p => { const n = { ...p }; delete n.micCount; return n }) }}
+                        onChange={v => { setMicCount(v); if (fieldErrors.micCount) setFieldErrors(p => { const n = { ...p }; delete n.micCount; return n }) }}
                       />
                       <FieldError message={fieldErrors.micCount} />
                     </div>

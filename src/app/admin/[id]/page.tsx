@@ -9,6 +9,7 @@ import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
 import { normalizeFreelancers, splitLegacyFreelancers } from '@/lib/freelancers'
 import { CameraMicTag } from '../_components/CameraMicTag'
+import NumberStepper from '@/app/_components/NumberStepper'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -694,15 +695,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">🎥 จำนวนกล้อง</label>
-                <input type="number" min={0} max={50} inputMode="numeric" className="gf-input tabular-nums"
+                <NumberStepper min={0} max={50} ariaLabel="จำนวนกล้อง"
                   value={editForm.cameraCount}
-                  onChange={e => setEditForm({ ...editForm, cameraCount: e.target.value })} />
+                  onChange={v => setEditForm({ ...editForm, cameraCount: v })} />
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">🎙 จำนวนไมค์</label>
-                <input type="number" min={0} max={50} inputMode="numeric" className="gf-input tabular-nums"
+                <NumberStepper min={0} max={50} ariaLabel="จำนวนไมค์"
                   value={editForm.micCount}
-                  onChange={e => setEditForm({ ...editForm, micCount: e.target.value })} />
+                  onChange={v => setEditForm({ ...editForm, micCount: v })} />
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">การเดินทาง</label>
