@@ -65,6 +65,9 @@ services:
       # Which admin AUTH_DISABLED acts as. Should be an existing ADMIN user row
       # so DB-backed reads resolve. Defaults to narasit.k@thestandard.co.
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      # Comma-separated emails auto-promoted to ADMIN on first OAuth login.
+      # Defaults to the original owner when unset.
+      INITIAL_ADMIN_EMAILS: ${INITIAL_ADMIN_EMAILS:-}
       NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public URL of the app}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${NEXTAUTH_URL}}
@@ -147,6 +150,18 @@ services:
       INVOICE_AGING_DAYS: ${INVOICE_AGING_DAYS:-7}
       SHOOT_GEAR_LOOKAHEAD_DAYS: ${SHOOT_GEAR_LOOKAHEAD_DAYS:-3}
       # REMINDERS_URL: ${REMINDERS_URL:-}  # override only if app isn't on 127.0.0.1:3000
+
+      # --- Automated DB backup (v1.77) ---
+      # Supervised worker (scripts/backup-worker.js) pg_dumps the DB daily, gzips
+      # it, and uploads to BACKUP_DRIVE_FOLDER_ID (service account needs edit
+      # access). Dormant until BACKUP_WORKER_ENABLED=1. The dead-man check alerts
+      # (Discord+email) if no backup lands within ~26h. Old backups are pruned
+      # after BACKUP_RETENTION_DAYS.
+      BACKUP_WORKER_ENABLED: ${BACKUP_WORKER_ENABLED:-0}
+      BACKUP_DRIVE_FOLDER_ID: ${BACKUP_DRIVE_FOLDER_ID:-}
+      BACKUP_INTERVAL_MS: ${BACKUP_INTERVAL_MS:-86400000}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_SECRET: ${BACKUP_SECRET:-${NEXTAUTH_SECRET}}
 
       # --- Wasabi S3 archive (dual-cloud upload, v1.35.x) ---
       # Required for outlets with storagePolicy=DUAL_WRITE (AGN, TSS, NWS). The

@@ -758,3 +758,14 @@ model VendorPrice {
   @@index([category])
   @@map("vendor_prices")
 }
+
+// Last-successful-run timestamp per background worker. The health-summary
+// endpoint + the dead-man check read this to tell a dead worker (app still
+// serving, worker silently gone) from a healthy one. One row per worker key.
+model SystemHeartbeat {
+  key  String   @id
+  at   DateTime
+  note String?
+
+  @@map("system_heartbeats")
+}

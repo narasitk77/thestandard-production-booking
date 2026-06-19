@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { reconcileCalendarGuests } from '@/lib/calendar-reconcile'
+import { recordHeartbeat, maybeAlertStaleWorkers } from '@/lib/heartbeat'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,6 +43,11 @@ export async function GET(request: NextRequest) {
       dryRun,
       actorEmail: allowed.actorEmail,
     })
+    if (!dryRun) {
+      // Always-on worker → record our own tick, then dead-man-check the others.
+      await recordHeartbeat('calendar-reconcile')
+      await maybeAlertStaleWorkers()
+    }
     return NextResponse.json({ success: true, dryRun, ...result })
   } catch (e: any) {
     console.error('GET /api/internal/calendar/reconcile error:', e)

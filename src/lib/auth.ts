@@ -4,7 +4,13 @@ import { prisma } from './db'
 import { findProfileByEmail } from './team-profiles'
 
 const ALLOWED_DOMAIN = 'thestandard.co'
-const INITIAL_ADMINS = ['narasit.k@thestandard.co']
+// Who is auto-promoted to ADMIN on first login. Configurable so the seed admin
+// isn't a hidden single-person dependency baked in code; defaults to the
+// original owner when the env var is unset.
+const INITIAL_ADMINS = (process.env.INITIAL_ADMIN_EMAILS || 'narasit.k@thestandard.co')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean)
 
 async function refreshAccessToken(token: any) {
   try {

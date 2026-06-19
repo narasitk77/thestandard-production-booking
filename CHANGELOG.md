@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.78.0] — 2026-06-19
+
+### Added — ops reliability (จาก product review)
+- **Backup DB อัตโนมัติ** → worker รายวัน `pg_dump` + gzip อัปขึ้น Google Drive (`scripts/backup-worker.js`), prune เก่ากว่า retention. เปิดด้วย env `BACKUP_WORKER_ENABLED=1` + `BACKUP_DRIVE_FOLDER_ID`.
+- **Dead-man switch** — worker ทุกตัวบันทึก heartbeat; ถ้า worker ที่เปิดอยู่เงียบเกิน interval+2 ชม. (เช่น backup >~26 ชม.) ส่ง alert Discord+email (throttle 6 ชม.). + endpoint `GET /api/health-summary` (200/503, public) สำหรับ uptime probe ภายนอก.
+- **`/api/version`** บอก version + commit ที่รันจริง; CI ยืนยัน manifest pull ได้ก่อน build เขียว (กัน "manifest unknown") + พิมพ์ tag ที่จะ deploy ใน job summary.
+- `INITIAL_ADMIN_EMAILS` ตั้ง admin เริ่มต้นผ่าน env (เลิก hardcode คนเดียวใน auth.ts).
+
+⚠️ deploy: model ใหม่ `SystemHeartbeat` (auto `db push` ตอน start) + env ใหม่ดูใน docker-compose.portainer.yml
+
+---
+
+## [1.77.0] — 2026-06-19
+
+### Added — ฐานราคาผู้ขาย (vendor price database)
+- โมดูล Admin จัดการราคาเช่าต่อวันต่อ vendor/หมวด/รายการ (`/admin/vendor-prices`, CRUD) + API lookup สาธารณะ `GET /api/vendor-prices`. model `VendorPrice` ใหม่.
+
+---
+
 ## [1.76.1] — 2026-06-19
 
 ### Changed (ponytail audit — lean cleanup, no behavior change)

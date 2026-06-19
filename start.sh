@@ -333,5 +333,17 @@ echo "==> Starting reminder worker (supervised)..."
   done
 ) &
 
+# v1.77 — DB backup worker. Stays dormant when BACKUP_WORKER_ENABLED is unset/0;
+# supervisor still re-launches so flipping the env var live is enough. Daily
+# pg_dump → gzip → Google Drive (BACKUP_DRIVE_FOLDER_ID).
+echo "==> Starting DB backup worker (supervised)..."
+(
+  while true; do
+    node scripts/backup-worker.js
+    echo "[backup] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start

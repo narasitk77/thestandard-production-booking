@@ -5,6 +5,37 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-19 · v1.77.0 — ops reliability (backup + dead-man + version)
+
+**New DB model `SystemHeartbeat`** — auto-applied by `prisma db push` on
+container start; no manual migration.
+
+**Automated backup (opt-in).** Set in the stack env to enable:
+- `BACKUP_WORKER_ENABLED=1`
+- `BACKUP_DRIVE_FOLDER_ID=<Drive folder id>` — service account needs **edit**
+  access; the daily `pg_dump | gzip` lands here as `backup-<ts>.sql.gz`.
+- optional: `BACKUP_INTERVAL_MS` (default 86400000), `BACKUP_RETENTION_DAYS`
+  (default 30), `BACKUP_SECRET` (defaults to `NEXTAUTH_SECRET`).
+- Until enabled, the worker stays dormant (supervisor re-launches harmlessly).
+
+**Dead-man alerts.** Once any worker is enabled and has ticked, a silent stall
+> interval+2h fires a throttled Discord+email alert (reuses
+`DISCORD_WEBHOOK_URL` / `REMINDER_ADMIN_EMAIL`). External probes can poll
+`GET /api/health-summary` (200/503, unauthenticated, no secrets).
+
+**Deploy traceability.** CI now stamps `APP_GIT_SHA` into the image and verifies
+the `sha-` tag is pullable before going green (kills the "manifest unknown"
+race); `GET /api/version` reports the running version + commit. The build job
+summary prints the exact `IMAGE_TAG` to deploy.
+
+**Optional:** `INITIAL_ADMIN_EMAILS` (comma-separated) overrides the seed-admin
+list; defaults to the original owner when unset.
+
+Compose passthrough for all of the above is already wired in
+`docker-compose.portainer.yml`.
+
+---
+
 ## 2026-06-19 · DEPLOYED sha-2a3f403 (v1.73 + v1.74 + v1.75) — VERIFIED LIVE
 
 Bumped stack 125 `IMAGE_TAG=sha-2a3f403` and Pull-and-redeploy'd. Container

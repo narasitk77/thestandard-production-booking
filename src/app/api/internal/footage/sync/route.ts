@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { runFootageSync } from '@/lib/footage-sync'
+import { recordHeartbeat } from '@/lib/heartbeat'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await runFootageSync({ dryRun })
+    if (!dryRun) await recordHeartbeat('footage')
     return NextResponse.json(result)
   } catch (e: any) {
     console.error('[footage-sync] route error:', e)
