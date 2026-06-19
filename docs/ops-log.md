@@ -5,6 +5,25 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-19 · DEPLOYED sha-2a3f403 (v1.73 + v1.74 + v1.75) — VERIFIED LIVE
+
+Bumped stack 125 `IMAGE_TAG=sha-2a3f403` and Pull-and-redeploy'd. Container
+`production-booking-app` now running `ghcr.io/narasitk77/thestandard-production-booking:sha-2a3f403`
+(created 12:11; db healthy). Verified on `probook.xtec9.xyz/admin/rentals`:
+universal search box + sortable headers + count (v1.74) and the per-row 📎
+document button (v1.75) all render; nav shows คิวงาน/Admin split (v1.73).
+
+**The earlier "manifest unknown" pull failure** was a timing race — the user
+hit Pull-and-redeploy while the GHCR build of sha-2a3f403 was still running,
+so the tag wasn't pushed yet. No env/typo issue (IMAGE_TAG was already
+correct). Fix was simply to wait for the build to finish, then redeploy.
+
+**Still pending:** `DRIVE_DOCS_ROOT` is NOT set, so the 📎 upload returns
+"ยังไม่ได้ตั้งค่า DRIVE_DOCS_ROOT" (listing/viewing works). Set it to a Drive
+folder id the service account can edit to enable uploads.
+
+---
+
 ## 2026-06-19 · v1.75.0 — Admin document attachments → Google Drive
 
 **New optional env `DRIVE_DOCS_ROOT`.** A Drive folder id (My Drive or a
