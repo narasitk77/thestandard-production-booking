@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   AlertCircle, Check, ChevronLeft, ChevronRight, Loader2,
@@ -216,6 +216,11 @@ export default function BookingWizard() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [outletChangeWarning, setOutletChangeWarning] = useState('')
   const [summaryOpen, setSummaryOpen] = useState(false) // mobile-only
+  // v1.78 — draft autosave/resume so closing the browser mid-edit (esp. mobile)
+  // doesn't lose everything. draftDecided gates autosave until the user has
+  // chosen to resume or discard a found draft (else empty state clobbers it).
+  const [draftFound, setDraftFound] = useState(false)
+  const [draftDecided, setDraftDecided] = useState(false)
 
   /* ---- data loads ---- */
   useEffect(() => {
@@ -291,7 +296,7 @@ export default function BookingWizard() {
         .then(d => {
           if (cancelled || !d) return
           setCameraLoadWarning(d.exceedsLimit
-            ? `⚠️ กล้องเต็มแล้ว — ช่วงเวลานี้จองกล้องรวม ${d.totalCameras}/${d.limit} ตัว (ของคุณ ${own} + งานอื่น ${d.otherCameras}) ต้องเช่ากล้องเพิ่ม`
+            ? `⚠️ กล้องเต็ม / Cameras full — ช่วงเวลานี้จองรวม ${d.totalCameras}/${d.limit} ตัว (ของคุณ ${own} + งานอื่น ${d.otherCameras}) · ต้องเช่ากล้องเพิ่ม / rent extra cameras`
             : '')
         })
         .catch(() => {})
@@ -336,6 +341,80 @@ export default function BookingWizard() {
       : needsCustomText
         ? (locationCustom ? `${selectedLocation.fullName} — ${locationCustom}` : selectedLocation.fullName)
         : selectedLocation.fullName
+
+  /* ---- draft autosave / resume (v1.78) ---- */
+  const DRAFT_KEY = 'booking-draft-v1'
+  const draftSnapshot = () => ({
+    outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType,
+    locationId, locationCustom, mapLocation, callTime, estimatedWrap,
+    producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
+    creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan,
+    specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel,
+    notes, epCount, epRows, step,
+  })
+
+  // On mount: offer to resume a saved draft; if none, enable autosave right away.
+  useEffect(() => {
+    try { if (localStorage.getItem(DRAFT_KEY)) { setDraftFound(true); return } } catch {}
+    setDraftDecided(true)
+  }, [])
+
+  // Autosave (debounced) — only after the user has resumed/discarded any prior
+  // draft, so the empty initial state never clobbers a saved one.
+  useEffect(() => {
+    if (!draftDecided) return
+    const t = setTimeout(() => {
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draftSnapshot())) } catch {}
+    }, 800)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+
+  const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
+  const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
+  const resumeDraft = () => {
+    try {
+      const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}')
+      // Raw setters only (NOT handleOutletChange) so the outlet cascade doesn't
+      // wipe the very fields we're restoring.
+      if (d.outletCode != null) setOutletCode(d.outletCode)
+      if (d.programCode != null) setProgramCode(d.programCode)
+      if (d.shootDate != null) setShootDate(d.shootDate)
+      if (d.shootEndDate != null) setShootEndDate(d.shootEndDate)
+      if (d.category != null) setCategory(d.category)
+      if (d.videoType != null) setVideoType(d.videoType)
+      if (d.shootType != null) setShootType(d.shootType)
+      if (d.locationId != null) setLocationId(d.locationId)
+      if (d.locationCustom != null) setLocationCustom(d.locationCustom)
+      if (d.mapLocation != null) setMapLocation(d.mapLocation)
+      if (d.callTime != null) setCallTime(d.callTime)
+      if (d.estimatedWrap != null) setEstimatedWrap(d.estimatedWrap)
+      if (d.producerEmail != null) setProducerEmail(d.producerEmail)
+      if (d.directorEmail != null) setDirectorEmail(d.directorEmail)
+      if (d.producerName != null) setProducerName(d.producerName)
+      if (d.producerPhone != null) setProducerPhone(d.producerPhone)
+      if (d.producerEmailText != null) setProducerEmailText(d.producerEmailText)
+      if (d.creative != null) setCreative(d.creative)
+      if (Array.isArray(d.crew)) setCrew(d.crew)
+      if (d.videographerCount != null) setVideographerCount(d.videographerCount)
+      if (d.cameraCount != null) setCameraCount(d.cameraCount)
+      if (d.micCount != null) setMicCount(d.micCount)
+      if (typeof d.isBlockShot === 'boolean') setIsBlockShot(d.isBlockShot)
+      if (typeof d.needsVan === 'boolean') setNeedsVan(d.needsVan)
+      if (Array.isArray(d.specialEquipment)) setSpecialEquipment(d.specialEquipment)
+      if (d.agencyRef != null) setAgencyRef(d.agencyRef)
+      if (d.projectId != null) setProjectId(d.projectId)
+      if (Array.isArray(d.selectedEpisodeIds)) setSelectedEpisodeIds(d.selectedEpisodeIds)
+      if (d.producerSel != null) setProducerSel(d.producerSel)
+      if (d.coProducerSel != null) setCoProducerSel(d.coProducerSel)
+      if (d.notes != null) setNotes(d.notes)
+      if (typeof d.epCount === 'number') setEpCount(d.epCount)
+      if (Array.isArray(d.epRows) && d.epRows.length) setEpRows(d.epRows)
+      if (d.step) setStep(d.step)
+    } catch {}
+    setDraftFound(false)
+    setDraftDecided(true)
+  }
 
   /* ---- cascade: outlet change ---- */
   const handleOutletChange = (code: string) => {
@@ -606,6 +685,7 @@ export default function BookingWizard() {
       }
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
+      clearDraft() // booking created — drop the saved draft
       router.push(`/booking/success?id=${data.booking.id}`)
     } catch (err: any) {
       setError(err.message)
@@ -679,6 +759,17 @@ export default function BookingWizard() {
           </p>
         </div>
       </div>
+
+      {/* Resume-draft prompt (v1.78) */}
+      {draftFound && (
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-sm text-amber-900">พบฉบับร่างที่ค้างไว้ — ทำต่อจากเดิมไหม?</span>
+          <span className="flex items-center gap-2">
+            <button type="button" onClick={resumeDraft} className="px-3 py-1.5 text-sm rounded bg-[#673ab7] text-white hover:bg-[#5e35b1]">ทำต่อ</button>
+            <button type="button" onClick={discardDraft} className="px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-600 hover:bg-white">เริ่มใหม่</button>
+          </span>
+        </div>
+      )}
 
       {/* Stepper */}
       <div className="ops-card ops-card-pad mb-3">
@@ -1248,6 +1339,16 @@ export default function BookingWizard() {
                                 <option key={p.code} value={p.code}>{p.code} · {p.name}</option>
                               ))}
                             </select>
+                            {idx > 0 && (
+                              <button
+                                type="button"
+                                title="คัดลอกโปรแกรม + ประเภทจาก EP ก่อนหน้า"
+                                onClick={() => updateEpRow(idx, { programCode: epRows[idx - 1].programCode, contentType: epRows[idx - 1].contentType })}
+                                className="shrink-0 text-xs text-brand-primary hover:underline whitespace-nowrap"
+                              >
+                                ↑ เหมือนก่อนหน้า
+                              </button>
+                            )}
                           </div>
                           <input
                             type="text"

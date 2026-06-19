@@ -272,13 +272,29 @@ async function sendViaSmtp(message: EmailMessage): Promise<EmailSendResult> {
   }
   const provider = 'smtp'
   const transport = getTransport()
-  const info = await transport.sendMail({
+  const payload = {
     from: getSender(provider),
     to: normalizeRecipients(message.to),
     subject: message.subject,
     text: message.text,
     html: message.html,
-  })
+  }
+  // Retry once on a transient failure (timeout / dropped connection) so a single
+  // SMTP hiccup doesn't drop the day's reminder digest. Two attempts total.
+  let info
+  let lastErr: any
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      info = await transport.sendMail(payload)
+      break
+    } catch (err: any) {
+      lastErr = err
+      if (attempt === 2) throw err
+      console.warn(`[email] SMTP attempt ${attempt} failed (${err?.code || err?.message}); retrying in 2s`)
+      await new Promise((r) => setTimeout(r, 2_000))
+    }
+  }
+  if (!info) throw lastErr
   return {
     provider,
     messageId: info.messageId,
