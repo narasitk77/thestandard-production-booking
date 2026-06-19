@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.79.0] — 2026-06-19
+
+### Added — UX จาก product review
+- **ฉบับร่างจองคิว auto-save + “ทำต่อ”** — ฟอร์ม /new เซฟลง localStorage อัตโนมัติ; ปิดเบราว์เซอร์กลางคัน (โดยเฉพาะมือถือ) แล้วกลับมาทำต่อได้ ไม่หาย. ล้างอัตโนมัติเมื่อจองสำเร็จ.
+- งานหลายตอน: ปุ่ม **“↑ เหมือนก่อนหน้า”** คัดลอกโปรแกรม+ประเภทจาก EP ก่อนหน้า (ลดการกรอกซ้ำ).
+- error boundary เฉพาะหน้า /new (บอกว่าฉบับร่างถูกเซฟ + ปุ่มลองใหม่).
+
+### Changed
+- camera-load warning เป็นสองภาษา (ไทย/อังกฤษ).
+- SMTP ส่งอีเมล retry 1 ครั้งเมื่อ fail ชั่วคราว (กัน digest เตือนหายทั้งวันเพราะ hiccup เดียว).
+
+---
+
 ## [1.78.0] — 2026-06-19
 
 ### Added — ops reliability (จาก product review)
@@ -21,7 +34,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added — ฐานราคาผู้ขาย (vendor price database)
 - โมดูล Admin จัดการราคาเช่าต่อวันต่อ vendor/หมวด/รายการ (`/admin/vendor-prices`, CRUD) + API lookup สาธารณะ `GET /api/vendor-prices`. model `VendorPrice` ใหม่.
-- นำเข้าราคาจริง **676 รายการ** (17thanwafilm + Baanfilm; Hiya อยู่ระหว่างนำเข้า) ผ่าน Admin API.
+- นำเข้าราคาจริง **676 รายการ** (17thanwafilm 144 รายการ + Baanfilm 532 รายการ) ผ่าน Admin API. Hiya: ภาพแหล่งข้อมูลไม่มีราคา — เพิ่มได้ภายหลัง.
 - ช่อง **Price Lookup** ใน Cost Sheet Tool — ค้นหาชื่ออุปกรณ์แล้วดึงราคาจาก probook API (`/api/vendor-prices`) แบบ real-time.
 
 ---
