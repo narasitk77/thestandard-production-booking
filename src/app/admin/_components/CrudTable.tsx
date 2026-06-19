@@ -1,8 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Plus, Loader2, AlertCircle, Pencil, Trash2, X, Search } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, AlertCircle, Pencil, Trash2, X, Search, ChevronUp, ChevronDown, ChevronsUpDown, RotateCcw } from 'lucide-react'
 
 /* =============================================================================
    CrudTable — config-driven list + create/edit/delete for the workspace admin
@@ -31,6 +31,8 @@ export interface CrudColumn {
   label: string
   render?: (row: any) => React.ReactNode
   align?: 'right'
+  sortable?: boolean // default true; set false for action/link-only columns
+  sortValue?: (row: any) => string | number // custom sort key (else row[key])
 }
 
 export interface CrudFilter {
@@ -61,7 +63,8 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
   const [draft, setDraft] = useState<Record<string, any>>({})
   const [saving, setSaving] = useState(false)
   const [q, setQ] = useState('')
-  const [qApplied, setQApplied] = useState('') // debounced — drives the fetch
+  const [qApplied, setQApplied] = useState('') // debounced — drives the fetch + client filter
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
   const [optionCache, setOptionCache] = useState<Record<string, { value: string; label: string }[]>>({})
 
   // Seed filter + search from the URL once (so the dashboard's alert chips can
@@ -82,7 +85,9 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
   }, [q])
 
   const params = Object.entries(filterVals).filter(([, v]) => v && v !== 'all') as [string, string][]
-  if (qApplied.trim()) params.push(['q', qApplied.trim()])
+  // Server-side search only for endpoints that support ?q= (config.search).
+  // The client-side filter below always runs, so non-q endpoints still search.
+  if (config.search && qApplied.trim()) params.push(['q', qApplied.trim()])
   const qs = new URLSearchParams(params).toString()
 
   const load = useCallback(async () => {
@@ -168,6 +173,42 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
 
   const fieldOptions = (f: CrudField) => f.options || optionCache[f.key] || []
 
+  // Client-side search (across every scalar field) + column sort, applied on top
+  // of whatever the server returned. Keeps filtering instant + works for every
+  // module even when its API has no ?q=.
+  const displayRows = useMemo(() => {
+    if (!rows) return null
+    let out = rows
+    const term = qApplied.trim().toLowerCase()
+    if (term) {
+      out = out.filter((r) =>
+        Object.values(r).some((v) =>
+          (typeof v === 'string' || typeof v === 'number') && String(v).toLowerCase().includes(term),
+        ),
+      )
+    }
+    if (sort) {
+      const col = config.columns.find((c) => c.key === sort.key)
+      const val = (r: any) => (col?.sortValue ? col.sortValue(r) : r[sort.key])
+      const dir = sort.dir === 'asc' ? 1 : -1
+      out = [...out].sort((a, b) => {
+        const av = val(a), bv = val(b)
+        if (av == null && bv == null) return 0
+        if (av == null) return 1 // nulls last regardless of dir
+        if (bv == null) return -1
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+        return String(av).localeCompare(String(bv), 'th', { numeric: true }) * dir
+      })
+    }
+    return out
+  }, [rows, qApplied, sort, config.columns])
+
+  const toggleSort = (key: string) =>
+    setSort((s) => (s?.key === key ? (s.dir === 'asc' ? { key, dir: 'desc' } : null) : { key, dir: 'asc' }))
+
+  const activeFilters = Object.values(filterVals).filter((v) => v && v !== 'all').length + (qApplied.trim() ? 1 : 0) + (sort ? 1 : 0)
+  const clearAll = () => { setFilterVals({}); setQ(''); setQApplied(''); setSort(null) }
+
   return (
     <div className="max-w-[1400px] mx-auto px-3 sm:px-4 py-4 sm:py-6">
       <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
@@ -184,38 +225,45 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
         </button>
       </div>
 
-      {(config.search || (config.filters && config.filters.length > 0)) && (
-        <div className="flex items-center gap-3 mb-3 flex-wrap text-sm">
-          {config.search && (
-            <div className="relative">
-              <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="ค้นหา ชื่อ / serial / รหัส…"
-                className="border border-gray-300 rounded pl-8 pr-2 py-1 text-sm w-64"
-              />
-            </div>
+      <div className="flex items-center gap-3 mb-3 flex-wrap text-sm">
+        <div className="relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="ค้นหา ชื่อ / รหัส / ทุกคอลัมน์…"
+            className="border border-gray-300 rounded pl-8 pr-7 py-1 text-sm w-72"
+          />
+          {q && (
+            <button onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700" aria-label="ล้างคำค้น">
+              <X className="w-3.5 h-3.5" />
+            </button>
           )}
-          {(config.filters || []).map((flt) => (
-            <label key={flt.key} className="flex items-center gap-1.5">
-              <span className="text-gray-500 text-xs">{flt.label}</span>
-              <select
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
-                value={filterVals[flt.key] || ''}
-                onChange={(e) => setFilterVals((v) => ({ ...v, [flt.key]: e.target.value }))}
-              >
-                {flt.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </label>
-          ))}
         </div>
-      )}
+        {(config.filters || []).map((flt) => (
+          <label key={flt.key} className="flex items-center gap-1.5">
+            <span className="text-gray-500 text-xs">{flt.label}</span>
+            <select
+              className="border border-gray-300 rounded px-2 py-1 text-sm"
+              value={filterVals[flt.key] || ''}
+              onChange={(e) => setFilterVals((v) => ({ ...v, [flt.key]: e.target.value }))}
+            >
+              {flt.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
+        ))}
+        {activeFilters > 0 && (
+          <button onClick={clearAll} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 border border-gray-200 rounded px-2 py-1">
+            <RotateCcw className="w-3.5 h-3.5" /> ล้างตัวกรอง ({activeFilters})
+          </button>
+        )}
+      </div>
 
-      {rows !== null && (
+      {displayRows !== null && rows !== null && (
         <div className="text-xs text-gray-400 mb-2">
-          แสดง {rows.length.toLocaleString('th-TH')} รายการ
-          {rows.length === 1000 && <span className="text-amber-600"> · จำกัด 1000 — ใช้ช่องค้นหา/ตัวกรองเพื่อดูที่เหลือ</span>}
+          แสดง {displayRows.length.toLocaleString('th-TH')} รายการ
+          {displayRows.length !== rows.length && <span> (กรองจาก {rows.length.toLocaleString('th-TH')})</span>}
+          {rows.length === 1000 && <span className="text-amber-600"> · จำกัด 1000 — ค้นหาเพื่อดูที่เหลือ</span>}
         </div>
       )}
 
@@ -225,23 +273,42 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
         </div>
       )}
 
-      {rows === null ? (
+      {displayRows === null ? (
         <div className="py-12 text-center text-gray-400"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
-      ) : rows.length === 0 ? (
+      ) : (rows?.length ?? 0) === 0 ? (
         <div className="py-12 text-center text-gray-400 text-sm">ยังไม่มีข้อมูล</div>
+      ) : displayRows.length === 0 ? (
+        <div className="py-12 text-center text-gray-400 text-sm">
+          ไม่พบรายการที่ตรงกับตัวกรอง
+          <button onClick={clearAll} className="block mx-auto mt-2 text-[#673ab7] hover:underline text-xs">ล้างตัวกรอง</button>
+        </div>
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+        <div className="overflow-x-auto overflow-y-auto max-h-[72vh] border border-gray-200 rounded-lg">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-xs">
+            <thead className="bg-gray-50 text-gray-500 text-xs sticky top-0 z-10">
               <tr>
-                {config.columns.map((c) => (
-                  <th key={c.key} className={`px-3 py-2 text-left font-medium ${c.align === 'right' ? 'text-right' : ''}`}>{c.label}</th>
-                ))}
-                <th className="px-3 py-2 w-20"></th>
+                {config.columns.map((c) => {
+                  const sortable = c.sortable !== false
+                  return (
+                    <th
+                      key={c.key}
+                      onClick={sortable ? () => toggleSort(c.key) : undefined}
+                      className={`px-3 py-2 font-medium whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'} ${sortable ? 'cursor-pointer select-none hover:text-gray-800' : ''}`}
+                    >
+                      <span className={`inline-flex items-center gap-1 ${c.align === 'right' ? 'flex-row-reverse' : ''}`}>
+                        {c.label}
+                        {sortable && (sort?.key === c.key
+                          ? (sort.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)
+                          : <ChevronsUpDown className="w-3 h-3 opacity-25" />)}
+                      </span>
+                    </th>
+                  )
+                })}
+                <th className="px-3 py-2 w-20 bg-gray-50"></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {displayRows.map((row) => (
                 <tr key={row[rowKey]} className="border-t border-gray-100 hover:bg-gray-50">
                   {config.columns.map((c) => (
                     <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>
