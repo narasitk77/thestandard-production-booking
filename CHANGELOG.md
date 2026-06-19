@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.80.0] — 2026-06-20
+
+### Added/Changed — ตาราง Rentals ดูง่ายขึ้น + migrate ข้อมูลที่ขาด
+- **ฟิลเตอร์ ปี / เดือน / Outlet** ในตาราง Rentals (เหมือนชีท) + เพิ่มคอลัมน์ Outlet. กรอง rentalDate ตามปี (เลือกเดือนในปีนั้นได้) + กรองตาม outlet.
+- **ขยาย importer** (`scripts/import-workspace.ts rentals`) ให้ดึงคอลัมน์ที่เคยข้าม: กำหนดคืน (returnDueDate), วันคืนจริง (returnedAt), หมายเหตุ (remark).
+- **migrate เอกสารจากชีท** — คอลัมน์ที่เป็นลิงก์ (ใบเสนอราคา/ใบแจ้งหนี้/ใบกำกับ/ใบเสร็จ/ไฟล์แนบ) สร้างเป็น DocumentRef ผูกกับงานเช่า → กดดูผ่านปุ่ม 📎 ในตารางได้.
+
+⚠️ ข้อมูล/เอกสารจะเข้าจริงเมื่อ **รัน importer ใหม่กับชีท prod**: `tsx scripts/import-workspace.ts rentals --commit` (ในคอนเทนเนอร์ที่ service account อ่านชีทได้).
+
+---
+
 ## [1.79.0] — 2026-06-19
 
 ### Added — UX จาก product review

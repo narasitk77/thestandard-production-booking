@@ -2,10 +2,17 @@
 
 import CrudTable, { type CrudConfig, baht, ymd } from '../_components/CrudTable'
 import { Badge, PAYMENT_STATUS, RENTAL_STATUS as RENTAL_BADGE } from '../_components/badges'
+import { OUTLETS } from '@/lib/data'
 
 const PAY = ['PAID', 'INVOICED', 'PENDING']
 const RENTAL_STATUS = ['ACTIVE', 'RETURNED', 'ARCHIVED']
 const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
+const ALL = { value: 'all', label: 'ทั้งหมด' }
+
+// Year list = 2024 → next year, newest first (mirrors the sheet's per-year tabs).
+const THIS_YEAR = new Date().getFullYear()
+const YEARS = Array.from({ length: THIS_YEAR + 1 - 2024 + 1 }, (_, i) => THIS_YEAR + 1 - i)
+const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
 
 const config: CrudConfig = {
   endpoint: '/api/admin/rentals',
@@ -15,11 +22,15 @@ const config: CrudConfig = {
   subtitle: 'งานเช่าอุปกรณ์ — สถานะจ่าย, วันคืน, ผูกกับ vendor (เฉพาะ ADMIN แก้ได้)',
   addLabel: 'เพิ่มงานเช่า',
   filters: [
-    { key: 'status', label: 'สถานะ', options: [{ value: 'all', label: 'ทั้งหมด' }, ...opt(RENTAL_STATUS)] },
-    { key: 'payment', label: 'การจ่าย', options: [{ value: 'all', label: 'ทั้งหมด' }, ...opt(PAY)] },
+    { key: 'year', label: 'ปี', options: [ALL, ...YEARS.map((y) => ({ value: String(y), label: String(y) }))] },
+    { key: 'month', label: 'เดือน', options: [ALL, ...TH_MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))] },
+    { key: 'outlet', label: 'Outlet', options: [ALL, ...OUTLETS.map((o) => ({ value: o.code, label: `${o.code} · ${o.name}` }))] },
+    { key: 'status', label: 'สถานะ', options: [ALL, ...opt(RENTAL_STATUS)] },
+    { key: 'payment', label: 'การจ่าย', options: [ALL, ...opt(PAY)] },
   ],
   columns: [
     { key: 'jobName', label: 'งาน', render: (r) => r.jobName || r.quoteNo || '—' },
+    { key: 'outlet', label: 'Outlet', render: (r) => r.outlet?.code || '—', sortValue: (r) => r.outlet?.code || '' },
     { key: 'vendor', label: 'Vendor', render: (r) => r.vendor?.name || '—' },
     { key: 'rentalDate', label: 'วันเช่า', render: (r) => ymd(r.rentalDate) },
     { key: 'returnDueDate', label: 'คืนภายใน', render: (r) => ymd(r.returnDueDate) },

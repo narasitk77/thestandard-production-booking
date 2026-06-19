@@ -75,6 +75,29 @@ function colIndex(headers: string[], ...keywords: string[]): number {
 }
 const cell = (row: string[], i: number) => (i >= 0 && i < row.length ? String(row[i]).trim() : '')
 
+// Columns that hold a document link (quotation / invoice / receipt file URL).
+// Returns each such column's index + the DocKind it maps to, so rows can be
+// migrated into DocumentRef rows that the app's 📎 attachment UI renders.
+function docColumns(headers: string[]): { idx: number; kind: string }[] {
+  const out: { idx: number; kind: string }[] = []
+  headers.forEach((h, idx) => {
+    const n = (h || '').toLowerCase()
+    let kind = ''
+    if (/quotation|ใบเสนอราคา|เสนอราคา|quote/.test(n)) kind = 'QUOTATION'
+    else if (/tax|กำกับภาษี/.test(n)) kind = 'TAX_INVOICE'
+    else if (/invoice|ใบแจ้งหนี้|แจ้งหนี้|วางบิล/.test(n)) kind = 'INVOICE'
+    else if (/receipt|ใบเสร็จ|สลิป|โอน|transfer/.test(n)) kind = 'RECEIPT'
+    else if (/เอกสาร|ลิงก์|link|ไฟล์|file|drive|url|แนบ|attach/.test(n)) kind = 'OTHER'
+    if (kind) out.push({ idx, kind })
+  })
+  return out
+}
+const isUrl = (s: string) => /^https?:\/\//i.test((s || '').trim())
+const driveFileIdFromUrl = (u: string): string | null => {
+  const m = u.match(/\/d\/([a-zA-Z0-9_-]{20,})/) || u.match(/[?&]id=([a-zA-Z0-9_-]{20,})/)
+  return m ? m[1] : null
+}
+
 /** Tolerant date parse: ISO, DD-Mon-YYYY, DD/MM/YYYY, Thai DD/MM/BBBB (>2500 → -543), Sheets serial. */
 function parseSheetDate(v: string): Date | null {
   const s = (v || '').trim()

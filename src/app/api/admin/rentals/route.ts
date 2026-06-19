@@ -17,9 +17,22 @@ export async function GET(request: NextRequest) {
   const sp = new URL(request.url).searchParams
   const status = (sp.get('status') || '').toUpperCase()
   const payment = (sp.get('payment') || '').toUpperCase()
+  const outlet = (sp.get('outlet') || '').trim()
+  const year = parseInt(sp.get('year') || '', 10)
+  const month = parseInt(sp.get('month') || '', 10)
   const where: any = {}
   if (inEnum(RentalStatus, status)) where.status = status
   if (inEnum(PaymentStatus, payment)) where.paymentStatus = payment
+  if (outlet && outlet !== 'all') where.outlet = { code: outlet }
+  // Year / month filter on rentalDate — month is within the chosen year, mirroring
+  // the sheet's per-year monthly tabs. Rows with no rentalDate fall out of a dated
+  // filter (expected).
+  if (year && !Number.isNaN(year)) {
+    const m = month >= 1 && month <= 12 ? month : 0
+    const start = new Date(Date.UTC(year, m ? m - 1 : 0, 1))
+    const end = m ? new Date(Date.UTC(year, m, 1)) : new Date(Date.UTC(year + 1, 0, 1))
+    where.rentalDate = { gte: start, lt: end }
+  }
   const rentals = await prisma.rentalJob.findMany({
     where,
     orderBy: [{ rentalDate: 'desc' }],
