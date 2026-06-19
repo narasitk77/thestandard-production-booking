@@ -614,6 +614,9 @@ export default function BookingWizard() {
   }
 
   /* ---- summary values (used by both panel + review step) ---- */
+  const caProducer = producers.find(p => p.email === producerEmail)
+  const caDirector = directors.find(d => d.email === directorEmail)
+  const filledEpRows = epRows.filter(r => r.title.trim())
   const summary = {
     outlet: selectedOutlet ? `${selectedOutlet.name} (${selectedOutlet.code})` : '',
     episodeType: selectedProgram ? `${selectedProgram.code} · ${selectedProgram.name}` : '',
@@ -626,9 +629,7 @@ export default function BookingWizard() {
     shootType,
     location: resolvedLocationName || '',
     producer: isContentAgency
-      ? (producers.find(p => p.email === producerEmail)?.nickname
-          ? `${producers.find(p => p.email === producerEmail)?.nickname} (${producerEmail})`
-          : producerEmail)
+      ? (caProducer?.nickname ? `${caProducer.nickname} (${producerEmail})` : producerEmail)
       : useProducerDropdown
         ? (selProd ? `${selProd.nickname}` : '')
         : (producerName
@@ -636,9 +637,7 @@ export default function BookingWizard() {
             : ''),
     coProducer: useProducerDropdown && selCoProd ? selCoProd.nickname : '',
     director: isContentAgency
-      ? (directors.find(d => d.email === directorEmail)?.nickname
-          ? `${directors.find(d => d.email === directorEmail)?.nickname} (${directorEmail})`
-          : directorEmail)
+      ? (caDirector?.nickname ? `${caDirector.nickname} (${directorEmail})` : directorEmail)
       : '',
     project: isContentAgency && selectedProject
       ? `${selectedProject.projectId} — ${selectedProject.projectName}`
@@ -647,9 +646,8 @@ export default function BookingWizard() {
       ? selectedEpisodeIds.length > 0
           ? `${selectedEpisodeIds.length} ตอน · ${selectedEpisodeIds.join(', ')}`
           : ''
-      : (epRows.filter(r => r.title.trim()).length > 0
-          ? `${epRows.filter(r => r.title.trim()).length} ตอน · ${epRows
-              .filter(r => r.title.trim())
+      : (filledEpRows.length > 0
+          ? `${filledEpRows.length} ตอน · ${filledEpRows
               .map(r => `${r.programCode || '?'} · ${r.title.trim()}${r.contentType === 'ADVERTORIAL' ? ' (AD)' : ''}`)
               .join(', ')}`
           : ''),

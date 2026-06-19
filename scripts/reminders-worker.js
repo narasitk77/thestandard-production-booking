@@ -9,11 +9,7 @@
 // Mirrors scripts/footage-sheet-sync-worker.js (interval, secret resolution,
 // SIGTERM handling) so anyone who's debugged that one knows the shape of this.
 
-function parsePositiveInt(envValue, fallback) {
-  if (envValue == null || envValue === '') return fallback
-  const n = Number(envValue)
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
+const { parsePositiveInt } = require('./lib/env')
 
 const enabled = String(process.env.REMINDERS_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {

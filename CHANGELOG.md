@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.76.1] — 2026-06-19
+
+### Changed (ponytail audit — lean cleanup, no behavior change)
+- รวม `parsePositiveInt()` ที่ก็อปซ้ำ 3 worker → `scripts/lib/env.js`; ลบ dead env `GOOGLE_SHEETS_ID` (3 ไฟล์ config, ไม่มีโค้ดอ่าน); hoist subexpression ซ้ำใน BookingWizard summary (producers/directors find, epRows filter).
+
+---
+
 ## [1.76.0] — 2026-06-19
 
 ### Fixed
