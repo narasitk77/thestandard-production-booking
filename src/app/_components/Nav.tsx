@@ -47,15 +47,20 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
     } ${extra}`
 
-  type Item = { href: string; label: string; show: boolean; tone?: 'default' | 'danger' }
+  // v1.73 — nav split by role: "คิวงาน" (booking queue, Coordinator+) vs "Admin"
+  // (back-office + system, ADMIN only). The Admin hub owns these /admin/* sub-
+  // routes; everything else under /admin belongs to the queue.
+  const ADMIN_HUB = /^\/admin\/(production-space|equipment|loans|repairs|rentals|purchases|vendors|team|reminders|permissions|health)(\/|$)/
+  const queueActive = pathname === '/admin' || (pathname.startsWith('/admin/') && !ADMIN_HUB.test(pathname))
+
+  type Item = { href: string; label: string; show: boolean; tone?: 'default' | 'danger'; match?: (p: string) => boolean }
   const primary: Item[] = ([
     { href: '/', label: 'Overview', show: !!session },
     { href: '/calendar', label: 'Calendar', show: true },
     { href: '/my-bookings', label: 'My Bookings', show: !!session },
     { href: '/producer', label: 'Producer', show: !!canSeeProducer },
-    { href: '/dashboard', label: 'Dashboard', show: isConsole },
-    { href: '/admin', label: 'Admin', show: isConsole, tone: 'danger' as const },
-    { href: '/admin/production-space', label: 'Admin Space', show: isAdmin },
+    { href: '/admin', label: 'คิวงาน', show: isConsole, match: () => queueActive },
+    { href: '/admin/production-space', label: 'Admin', show: isAdmin, match: (p) => ADMIN_HUB.test(p) },
   ] as Item[]).filter(i => i.show)
 
   const secondary: Item[] = [
@@ -63,7 +68,8 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     // Manager / OT approver shortcut — admins also see it (admins already
     // have it via the OT page link too, but this avoids the extra hop).
     { href: '/ot/admin', label: 'OT · Approve', show: !!canApproveOT },
-    { href: '/admin/workspace', label: 'Workspace', show: isConsole },
+    // v1.73 — Workspace renamed "รายงาน"; Dashboard analytics folded in here.
+    { href: '/admin/workspace', label: 'รายงาน', show: isConsole },
     { href: '/admin/routine', label: 'Routine', show: isConsole },
     { href: '/profile/signature', label: 'ลายเซ็น', show: !!session },
     { href: '/manual', label: 'คู่มือ', show: true },
@@ -74,6 +80,10 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     // v1.35.5 — Admin-only review queue for Mark-as-Done
     { href: '/admin/upload-review', label: 'Upload Review', show: isConsole },
   ].filter(i => i.show)
+
+  // Active state: primary hubs (คิวงาน / Admin) use their own match fn so the
+  // split /admin/* routes highlight the right hub; everything else by href.
+  const active = (item: Item) => (item.match ? item.match(pathname) : isActive(item.href))
 
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-30">
@@ -95,7 +105,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
               key={item.href}
               href={item.href}
               onClick={close}
-              className={linkClass(isActive(item.href), item.tone === 'danger' && !isActive(item.href) ? 'text-red-600 hover:text-red-700' : '')}
+              className={linkClass(active(item), item.tone === 'danger' && !active(item) ? 'text-red-600 hover:text-red-700' : '')}
             >
               {item.label}
             </Link>
@@ -192,7 +202,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
                   href={item.href}
                   onClick={close}
                   className={`py-2.5 px-2 text-sm rounded-md ${
-                    isActive(item.href)
+                    active(item)
                       ? 'bg-gray-900 text-white font-medium'
                       : item.tone === 'danger'
                         ? 'text-red-600 hover:bg-red-50'

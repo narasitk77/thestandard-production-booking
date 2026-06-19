@@ -114,7 +114,7 @@ export default async function ProductionAdminSpacePage() {
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
       <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
-        <ArrowLeft className="w-4 h-4" /> Admin Console
+        <ArrowLeft className="w-4 h-4" /> คิวงาน
       </Link>
 
       <div className="mb-2">
@@ -198,6 +198,23 @@ export default async function ProductionAdminSpacePage() {
         <ModuleCard href="/admin/vendors" emoji="🏷️" title="Vendors · ผู้ขาย" sub="ร้านเช่า/ซ่อม/ขาย">
           <Metric label="ทั้งหมด" value={s.vendors.total} tone="gray" />
         </ModuleCard>
+      </div>
+
+      {/* ── ระบบ / จัดการ (v1.73 — moved here from the queue console) ── */}
+      <SectionTitle>ระบบ / จัดการ</SectionTitle>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { href: '/admin/team', emoji: '👥', title: 'ทีมงาน', sub: 'Crew roster' },
+          { href: '/admin/permissions', emoji: '🔑', title: 'สิทธิ์ผู้ใช้', sub: 'Roles & access' },
+          { href: '/admin/reminders', emoji: '⏰', title: 'Reminders', sub: 'แจ้งเตือนของค้าง' },
+          { href: '/admin/health', emoji: '🩺', title: 'Health', sub: 'สถานะระบบ' },
+        ].map(m => (
+          <Link key={m.href} href={m.href} className="group block border border-gray-200 rounded-lg p-3 bg-white hover:border-[#673ab7] hover:shadow-sm transition-colors">
+            <div className="text-lg">{m.emoji}</div>
+            <div className="text-sm font-medium text-gray-800 mt-1">{m.title}</div>
+            <div className="text-[11px] text-gray-500">{m.sub}</div>
+          </Link>
+        ))}
       </div>
     </div>
   )

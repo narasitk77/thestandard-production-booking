@@ -28,10 +28,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Production Admin Space modules are ADMIN-only. Non-admin staff get bounced
-  // back to the console (the module APIs also enforce requireAdmin themselves).
+  // v1.73 — the Admin hub (back-office + system management) is ADMIN-only.
+  // Non-admin console staff (Coordinator/Manager/Support) get bounced back to
+  // the booking queue. Keep this list in sync with ADMIN_HUB in Nav.tsx.
   const isAdminOnlyModule =
-    /^\/admin\/(equipment|loans|repairs|rentals|purchases|vendors)(\/|$)/.test(pathname)
+    /^\/admin\/(production-space|equipment|loans|repairs|rentals|purchases|vendors|team|reminders|permissions|health)(\/|$)/.test(pathname)
   if (isAdminOnlyModule && (token as any)?.role !== 'ADMIN') {
     const url = request.nextUrl.clone()
     url.pathname = '/admin'

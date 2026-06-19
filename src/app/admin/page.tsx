@@ -97,25 +97,15 @@ export default function AdminPage() {
       {/* Header */}
       <div className="mb-4 sm:mb-6">
         <div className="flex items-start justify-between gap-2 flex-wrap">
-          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Admin Console</h1>
+          <h1 className="text-xl sm:text-2xl font-normal text-gray-800">คิวงาน</h1>
+          {/* v1.73 — queue-only tools. Back-office + system (Reminders/Team/
+              Health/Permissions) moved to the Admin hub (/admin/production-space). */}
           <div className="flex gap-2">
             <Link href="/admin/workspace" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
-              Workspace
+              รายงาน
             </Link>
             <Link href="/admin/routine" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
               Routine
-            </Link>
-            <Link href="/admin/reminders" className="px-3 py-1.5 text-xs sm:text-sm border border-amber-500 text-amber-700 rounded hover:bg-amber-500 hover:text-white transition-colors">
-              ⏰ Reminders
-            </Link>
-            <Link href="/admin/team" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
-              Team
-            </Link>
-            <Link href="/admin/health" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
-              Health
-            </Link>
-            <Link href="/admin/permissions" className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded hover:bg-gray-50">
-              Permissions
             </Link>
             <Link href="/new" className="gf-submit text-xs sm:text-sm">+ New</Link>
           </div>

@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.73.0] — 2026-06-19
+
+### Changed — แยกเมนูตาม role (เลิกความสับสน Admin / Admin Space)
+
+- **Top nav แยกเป็น 2 hub ตามบทบาท:**
+  - **คิวงาน** (Coordinator ขึ้นไป) = หน้าจัดการคิวจอง (เดิมชื่อ "Admin") + ปุ่ม
+    รายงาน / Routine / + New
+  - **Admin** (ADMIN เท่านั้น) = งานหลังบ้าน (เดิมชื่อ "Admin Space"): คลังอุปกรณ์/
+    ยืม-คืน/ซ่อม/เช่า/จัดซื้อ/ผู้ขาย **+ เพิ่มกลุ่ม "ระบบ/จัดการ"** (ทีมงาน · สิทธิ์
+    ผู้ใช้ · Reminders · Health)
+- **Workspace → "รายงาน"** และ**ยุบเมนู Dashboard เข้ามา** (รายงาน = ตาราง+export,
+  มีลิงก์ "📊 ดูกราฟสรุป" ไปหน้า analytics เดิม) — ลดเมนูบนสุดลง
+- **ย้ายเครื่องมือจัดการ (Team/Permissions/Reminders/Health) ออกจากหน้าคิว** ไปอยู่
+  Admin hub และล็อกเป็น **ADMIN เท่านั้น** (middleware เด้ง Coordinator/Manager/
+  Support กลับหน้าคิว) — ตรงเจตนา "จัดการคิว = Coordinator, จัดการ+หลังบ้าน = Admin"
+- active-state ของ nav แยกถูก hub (เส้นทาง /admin/* ที่เป็นหลังบ้าน ไฮไลต์ "Admin",
+  ที่เหลือไฮไลต์ "คิวงาน")
+
+---
+
 ## [1.72.0] — 2026-06-18
 
 ### Changed
