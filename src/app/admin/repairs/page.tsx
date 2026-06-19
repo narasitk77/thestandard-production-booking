@@ -9,6 +9,7 @@ const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
 const config: CrudConfig = {
   endpoint: '/api/admin/repairs',
   responseKey: 'repairs',
+  docsOwnerType: 'repair',
   title: 'Repairs',
   subtitle: 'งานซ่อม/บำรุงรักษา — อาการ → ร้าน → วันส่ง/รับ → ค่าซ่อม',
   addLabel: 'เปิดงานซ่อม',

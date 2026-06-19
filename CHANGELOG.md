@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.75.0] — 2026-06-19
+
+### Added — แนบเอกสารเข้า Google Drive (จัดโฟลเดอร์ตามงานอัตโนมัติ)
+
+- ปุ่ม 📎 ในทุกแถวของ **Rentals / Purchases / Repairs / Loans** — อัปโหลด
+  ใบเสนอราคา/ใบแจ้งหนี้/ใบกำกับภาษี/สลิป/ใบเสร็จ เก็บเข้า Google Drive
+- ระบบ **สร้างโฟลเดอร์ให้เองตามงาน**: `<DRIVE_DOCS_ROOT>/<หมวด>/<ชื่องาน>`
+  (เช่น `เช่า (Rentals)/<ชื่องาน>`) — ไม่ต้องจัดโฟลเดอร์เอง
+- เลือกประเภทเอกสารตอนอัปโหลด · เปิดไฟล์ใน Drive · ลบได้ (ลบไฟล์ใน Drive ให้ด้วย)
+- ตัวเลขข้างคลิปบอกจำนวนเอกสารที่แนบไว้แล้ว เห็นทันทีว่างานไหนมีเอกสารครบ
+- ไฟล์ละไม่เกิน 25MB · อัปโหลดผ่านเซิร์ฟเวอร์ (ไม่แวะ Wasabi)
+- **ต้องตั้ง env `DRIVE_DOCS_ROOT`** (folder id ใน Drive) จึงจะอัปโหลดได้ —
+  เพิ่ม passthrough ใน docker-compose.portainer.yml แล้ว
+
+API: `/api/admin/documents` รองรับ `multipart/form-data` (อัปโหลดจริง) +
+`GET ?ownerType=&ownerId=` (ลิสต์) + `DELETE` ลบไฟล์ Drive พร้อม ref
+
+---
+
 ## [1.74.0] — 2026-06-19
 
 ### Changed — ตารางโมดูล Admin: filter/ค้นหา/เรียง ระดับโปรแกรมจริงจัง

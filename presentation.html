@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Production Booking — Presentation</title>
+<style>
+  :root{
+    --bg:#0c0d12; --surface:#14151d; --surface2:#1b1d27; --border:#242636;
+    --text:#e8eaf2; --muted:#797f98; --accent:#5b8cff; --green:#2fd49b;
+    --orange:#f6913b; --purple:#a974ff; --pink:#ec4899; --cyan:#2bd4e0; --red:#ff6b6b;
+    --r:14px; --font:'Inter',-apple-system,'Segoe UI','Noto Sans Thai',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden;-webkit-font-smoothing:antialiased}
+
+  #bar{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--green));z-index:50;transition:width .3s ease}
+  #counter{position:fixed;bottom:18px;right:24px;font-size:12px;color:var(--muted);z-index:50;letter-spacing:.04em}
+  #timing{position:fixed;bottom:18px;left:24px;font-size:12px;color:var(--muted);z-index:50;display:flex;align-items:center;gap:7px}
+  #timing b{color:var(--accent);font-weight:600}
+  #hint{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--muted);opacity:.45;z-index:50}
+
+  .slide{position:fixed;inset:0;display:none;flex-direction:column;justify-content:center;padding:60px 76px 70px;opacity:0;transition:opacity .35s ease}
+  .slide.active{display:flex;opacity:1}
+  .slide.active .anim{animation:rise .5s ease both}
+  .slide.active .anim:nth-child(2){animation-delay:.05s}
+  .slide.active .anim:nth-child(3){animation-delay:.10s}
+  .slide.active .anim:nth-child(4){animation-delay:.15s}
+  .slide.active .anim:nth-child(5){animation-delay:.20s}
+  .slide.active .anim:nth-child(6){animation-delay:.25s}
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+  .kicker{font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
+  h1{font-size:58px;line-height:1.06;font-weight:700;letter-spacing:-.02em;margin-bottom:18px}
+  h2{font-size:38px;line-height:1.12;font-weight:700;letter-spacing:-.01em;margin-bottom:8px}
+  .sub{font-size:18px;color:var(--muted);line-height:1.55;max-width:920px}
+  .sub b{color:var(--text)}
+  .slide-num{position:absolute;top:52px;right:76px;font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.1em}
+
+  .grid{display:grid;gap:14px;margin-top:30px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:1fr 1fr 1fr}
+  .g4{grid-template-columns:repeat(4,1fr)}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px 22px}
+  .card .ic{font-size:23px;margin-bottom:10px;display:block}
+  .card h3{font-size:17px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .card p{font-size:14px;color:var(--muted);line-height:1.5}
+  .card .tag{font-size:11px;font-weight:700;color:var(--accent);background:rgba(91,140,255,.12);padding:2px 8px;border-radius:5px;letter-spacing:.03em}
+
+  .pill{display:inline-block;font-size:12px;font-weight:600;padding:4px 11px;border-radius:7px;margin:0 5px 8px 0}
+  .p-blue{background:rgba(91,140,255,.15);color:#86a8ff}
+  .p-green{background:rgba(47,212,155,.15);color:#43e0ad}
+  .p-orange{background:rgba(246,145,59,.15);color:#fba868}
+  .p-purple{background:rgba(169,116,255,.15);color:#c49bff}
+  .p-cyan{background:rgba(43,212,224,.15);color:#5fe2ec}
+  .p-red{background:rgba(255,107,107,.15);color:#ff9090}
+  .p-muted{background:rgba(121,127,152,.13);color:var(--muted)}
+
+  code{font-family:'JetBrains Mono','SF Mono',Menlo,monospace;font-size:.86em;background:var(--surface2);border:1px solid var(--border);padding:2px 6px;border-radius:5px;color:var(--cyan)}
+  .codeblock{background:#080910;border:1px solid var(--border);border-radius:10px;padding:16px 20px;font-family:'JetBrains Mono','SF Mono',Menlo,monospace;font-size:13.5px;line-height:1.7;color:#c3c8e0;margin-top:18px;overflow:auto}
+  .codeblock .c{color:var(--muted)}
+  .codeblock .k{color:#ff9ec0}
+  .codeblock .s{color:var(--green)}
+  .codeblock .f{color:var(--cyan)}
+  .codeblock .o{color:var(--orange)}
+
+  .flow{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap;margin-top:28px}
+  .flow .node{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;text-align:center;flex:1;min-width:120px}
+  .flow .node .n{font-size:11px;font-weight:700;color:var(--accent);margin-bottom:5px;letter-spacing:.05em}
+  .flow .node .t{font-size:14.5px;font-weight:600;margin-bottom:3px}
+  .flow .node .d{font-size:11.5px;color:var(--muted);line-height:1.35}
+  .flow .arrow{display:flex;align-items:center;color:var(--accent);font-size:20px;font-weight:700}
+
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:26px;align-items:start}
+  ul.feat{list-style:none}
+  ul.feat li{font-size:15.5px;line-height:1.65;color:var(--text);padding-left:24px;position:relative;margin-bottom:8px}
+  ul.feat li::before{content:'';position:absolute;left:0;top:9px;width:7px;height:7px;border-radius:50%;background:var(--green)}
+  ul.feat li small{color:var(--muted);font-size:13px}
+
+  .logo-mark{display:inline-flex;align-items:center;gap:13px;margin-bottom:26px}
+  .logo-mark .box{width:52px;height:52px;border-radius:13px;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-size:26px}
+  .logo-mark .nm{font-size:14px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+  .logo-mark .nm b{display:block;color:var(--text);font-size:19px;letter-spacing:0}
+
+  .meta-row{display:flex;gap:36px;margin-top:36px;flex-wrap:wrap}
+  .meta-row .m .v{font-size:28px;font-weight:700;color:var(--text)}
+  .meta-row .m .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+
+  .idflow{display:flex;align-items:center;gap:16px;margin-top:30px;flex-wrap:wrap}
+  .idcard{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 24px;flex:1;min-width:200px}
+  .idcard .layer{font-size:12px;font-weight:700;letter-spacing:.05em;margin-bottom:8px}
+  .idcard .code{font-family:'JetBrains Mono',monospace;font-size:21px;font-weight:700;color:var(--text);margin-bottom:6px}
+  .idcard .owner{font-size:12.5px;color:var(--muted)}
+
+  .speaker{position:fixed;left:0;right:0;bottom:0;background:rgba(8,9,16,.97);border-top:1px solid var(--border);padding:18px 76px 26px;display:none;z-index:40;max-height:42vh;overflow:auto}
+  .speaker.show{display:block;animation:rise .25s ease both}
+  .speaker .lbl{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:7px}
+  .speaker p{font-size:15px;line-height:1.6;color:#c8cce0;max-width:1040px}
+
+  .statline{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .stat{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12.5px;color:var(--muted)}
+  .stat b{color:var(--text);font-weight:700}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div id="counter"></div>
+<div id="timing"><span>⏱</span><span>ช่วงนี้ <b id="t-slot">—</b> · รวม <b>10:00</b></span></div>
+<div id="hint">← → เลื่อนสไลด์ · กด <b>S</b> เปิด speaker notes · <b>F</b> เต็มจอ</div>
+
+<!-- 1 TITLE -->
+<section class="slide" data-time="0:20">
+  <div class="logo-mark anim"><div class="box">🎬</div><div class="nm">THE STANDARD · Internal Tool<b>Production Booking</b></div></div>
+  <div class="kicker anim">ระบบจองคิวถ่าย → อนุมัติ → จัดทีม → ลง Google Calendar อัตโนมัติ</div>
+  <h1 class="anim">จองคิวถ่ายครั้งเดียว<br>จบครบทั้งกระบวนการผลิต</h1>
+  <p class="sub anim">Producer กรอก Booking ครั้งเดียว → Coordinator อนุมัติ → ระบบสร้าง Production ID + Google Calendar event + เชิญทีมงานทุกคนอัตโนมัติ → worker เบื้องหลังคอยซิงก์รายชื่อให้ตรงตลอด <b>แทนที่ Google Form + การกรอก Sheet ด้วยมือ</b></p>
+  <div class="meta-row anim">
+    <div class="m"><div class="v">v1.36.1</div><div class="l">เวอร์ชันปัจจุบัน</div></div>
+    <div class="m"><div class="v">9 / 56</div><div class="l">Outlets / Programs</div></div>
+    <div class="m"><div class="v">Next.js 14</div><div class="l">+ Postgres + Prisma</div></div>
+    <div class="m"><div class="v">Live</div><div class="l">probook.xtec9.xyz</div></div>
+  </div>
+</section>
+
+<!-- 2 PROBLEM -->
+<section class="slide" data-time="0:35">
+  <div class="slide-num">02</div>
+  <div class="kicker anim">ปัญหาที่แก้</div>
+  <h2 class="anim">เดิมทำด้วยมือ · หลายขั้นตอน · พลาดง่าย</h2>
+  <div class="grid g3">
+    <div class="card anim"><span class="ic">📝</span><h3>กรอกซ้ำหลายที่</h3><p>Google Form → ก็อปลง Sheet → สร้าง Calendar event เอง → เชิญทีมทีละคน — งานซ้ำซ้อนทุกครั้ง</p></div>
+    <div class="card anim"><span class="ic">🔀</span><h3>รายชื่อหลุดง่าย</h3><p>เปลี่ยนทีมงานแล้วลืมอัปเดต Calendar → คนที่ถูก assign ไม่ได้รับ invite</p></div>
+    <div class="card anim"><span class="ic">🆔</span><h3>ID กระจัดกระจาย</h3><p>Project / Episode / Production ID อยู่คนละที่ ไม่เชื่อมกัน — สาวกลับต้นทางไม่ได้</p></div>
+  </div>
+  <p class="sub anim" style="margin-top:26px">→ Production Booking รวมทุกอย่างเป็น <b>workflow เดียว</b> มี source of truth ชัดเจน และทำงานเบื้องหลังให้เองอัตโนมัติ</p>
+</section>
+
+<!-- 3 ID LAYERS -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">03</div>
+  <div class="kicker anim">แนวคิดหลัก · 3 ชั้น ID</div>
+  <h2 class="anim">ทุก booking เชื่อมกลับต้นทางได้เสมอ</h2>
+  <div class="idflow">
+    <div class="idcard anim" style="border-color:var(--purple)"><div class="layer" style="color:var(--purple)">PROJECT ID</div><div class="code">PP-26-008</div><div class="owner">เจ้าของ: Producer Dashboard</div></div>
+    <div class="arrow" style="color:var(--accent);font-size:22px">→</div>
+    <div class="idcard anim" style="border-color:var(--cyan)"><div class="layer" style="color:var(--cyan)">EPISODE ID</div><div class="code">PP-26-008-L01</div><div class="owner">เจ้าของ: Producer Dashboard (Director)</div></div>
+    <div class="arrow" style="color:var(--accent);font-size:22px">→</div>
+    <div class="idcard anim" style="border-color:var(--green)"><div class="layer" style="color:var(--green)">PRODUCTION ID</div><div class="code">AGN-260423-VAD-01</div><div class="owner">เจ้าของ: แอปนี้</div></div>
+  </div>
+  <p class="sub anim" style="margin-top:26px">Producer เลือก <b>Project ID</b> จาก dropdown (ดึงสดจาก Producer Dashboard Sheet) → แอปสร้าง <b>Production ID</b> <code>[OUT]-[YYMMDD]-[PROG]-[EE]</code> ที่ <b>immutable</b> (ไม่เปลี่ยนชื่อหลังสร้าง) และใช้เป็นชื่อโฟลเดอร์เท่านั้น</p>
+</section>
+
+<!-- 4 ARCHITECTURE -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">04</div>
+  <div class="kicker anim">สถาปัตยกรรม</div>
+  <h2 class="anim">Next.js เดียว คุม UI + API + งานเบื้องหลัง</h2>
+  <div class="flow anim">
+    <div class="node"><div class="n">CLIENT</div><div class="t">เบราว์เซอร์</div><div class="d">React · Tailwind · Recharts</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="n">SERVER</div><div class="t">Next.js 14 App Router</div><div class="d">Pages + API routes · NextAuth</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="n">DATA</div><div class="t">Postgres 16</div><div class="d">Prisma ORM</div></div>
+    <div class="arrow">→</div>
+    <div class="node" style="border-color:var(--orange)"><div class="n">GOOGLE</div><div class="t">Sheets · Calendar · Drive</div><div class="d">DWD impersonate</div></div>
+  </div>
+  <div class="grid g4 anim" style="margin-top:24px">
+    <div class="card"><span class="tag">AUTH</span><p style="margin-top:9px">NextAuth + Google OAuth · จำกัดโดเมน <code>@thestandard.co</code></p></div>
+    <div class="card"><span class="tag">STORAGE</span><p style="margin-top:9px">Footage ขึ้น <b>Google Drive</b> + <b>Wasabi S3</b> (presigned, multipart)</p></div>
+    <div class="card"><span class="tag">WORKER</span><p style="margin-top:9px">Reconciler worker ทุก 10 นาที คุมโดย <code>start.sh</code></p></div>
+    <div class="card"><span class="tag">DEPLOY</span><p style="margin-top:9px">Docker · Portainer (หลัก) · Nginx · GHCR · GitHub Actions</p></div>
+  </div>
+</section>
+
+<!-- 5 LIFECYCLE -->
+<section class="slide" data-time="0:55">
+  <div class="slide-num">05</div>
+  <div class="kicker anim">หัวใจของระบบ · วงจรชีวิต Booking</div>
+  <h2 class="anim">6 ขั้นตอน — Submit → ... → Auto-complete</h2>
+  <div class="flow anim" style="margin-top:24px">
+    <div class="node"><div class="n">1 · USER</div><div class="t">Submit</div><div class="d">กรอก wizard 5 ขั้น → REQUESTED</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="n">2 · ADMIN</div><div class="t">Triage</div><div class="d">ดูที่ /admin แท็บ REQUESTED</div></div>
+    <div class="arrow">→</div>
+    <div class="node" style="border-color:var(--green)"><div class="n">3 · ADMIN</div><div class="t">Approve</div><div class="d">→ CONFIRMED + สร้าง Calendar event</div></div>
+  </div>
+  <div class="flow anim" style="margin-top:12px">
+    <div class="node"><div class="n">4 · ADMIN</div><div class="t">Assign crew</div><div class="d">เลือกทีม → ซิงก์ guest + ส่งอีเมล</div></div>
+    <div class="arrow">→</div>
+    <div class="node" style="border-color:var(--purple)"><div class="n">5 · WORKER</div><div class="t">Reconcile</div><div class="d">ทุก 10 นาที แก้ guest ที่หลุด</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="n">6 · AUTO</div><div class="t">Complete</div><div class="d">งานที่เลยวันแล้ว → COMPLETED เอง</div></div>
+  </div>
+  <p class="sub anim" style="margin-top:24px"><code>REQUESTED → ASSIGNED → CONFIRMED → COMPLETED</code> (เส้นตรง) · <code>CANCELLED</code> เป็นทางตัน กู้คืนได้ด้วยปุ่ม Restore · สถานะ <code>calendarSyncStatus</code> (PENDING/OK/FAILED) เป็นแหล่งความจริงของการซิงก์</p>
+</section>
+
+<!-- 6 WIZARD + OUTLETS -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">06</div>
+  <div class="kicker anim">ฟีเจอร์ · หน้าจอง <code>/new</code></div>
+  <h2 class="anim">Booking Wizard 5 ขั้น</h2>
+  <div class="twocol">
+    <div class="anim">
+      <ul class="feat">
+        <li><b>5-step wizard</b><br><small>สรุปแบบ sticky บน desktop · action bar ล่างบนมือถือ</small></li>
+        <li><b>Outlet → Program</b><br><small>เลือก outlet แล้ว dropdown program กรองให้อัตโนมัติ</small></li>
+        <li><b>Project ID dropdown</b><br><small>ดึงสดจาก Producer Dashboard ทุกครั้ง</small></li>
+        <li><b>หน้า success</b><br><small>โชว์ ID ทั้งหมด + <b>Calendar Packet</b> ก็อปวางให้ coordinator ได้ทันที</small></li>
+      </ul>
+    </div>
+    <div class="anim">
+      <p style="font-size:14px;color:var(--muted);margin-bottom:12px">9 Outlets · 56 Programs (master list hardcoded, seed ลง DB ตอน start)</p>
+      <div class="statline">
+        <div class="stat"><b>NWS</b> News · 8</div>
+        <div class="stat"><b>WLT</b> Wealth · 5</div>
+        <div class="stat"><b>SPT</b> Sport · 4</div>
+        <div class="stat"><b>POP</b> · 8</div>
+        <div class="stat"><b>POD</b> Podcast · 5</div>
+        <div class="stat"><b>KND</b> คำนี้ดี · 3</div>
+        <div class="stat"><b>LIF</b> LIFE · 5</div>
+        <div class="stat"><b>TSS</b> The Secret Sauce · 14</div>
+        <div class="stat"><b>AGN</b> Content Agency · 3</div>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-top:16px">เพิ่ม CA booking → แอปเขียนกลับเข้า Bookings tab ของ Producer Dashboard ให้ด้วย</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7 CALENDAR AUTO-CREATE -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">07</div>
+  <div class="kicker anim">ฟีเจอร์เด่น #1 · Google Calendar</div>
+  <h2 class="anim">Approve แล้วสร้าง event + เชิญทีมอัตโนมัติ</h2>
+  <p class="sub anim">กด Approve → ระบบสร้าง event ในปฏิทิน "THE STANDARD Production Bookings" พร้อมใส่ทีมงานเป็น guest และส่ง invite ให้ทุกคน — ไม่ต้องสร้างเอง</p>
+  <div class="grid g3 anim" style="margin-top:26px">
+    <div class="card"><span class="ic">📅</span><h3>1 booking = 1 event</h3><p>event เดียวต่อ booking เป็นแหล่งความจริงของ invite + RSVP</p></div>
+    <div class="card"><span class="ic">🔑</span><h3>DWD impersonate</h3><p>ใช้ Domain-Wide Delegation สวมสิทธิ์ user เพื่อสร้าง event ในนามองค์กร</p></div>
+    <div class="card"><span class="ic">👥</span><h3>Assign = ซิงก์ทันที</h3><p>เปลี่ยนทีม → patch attendees แบบ sync + ส่งอีเมลแจ้งคนที่ถูก assign</p></div>
+  </div>
+  <p class="sub anim" style="margin-top:22px">มี runbook สำหรับสลับ impersonate user เมื่อมีคนออกจาก Workspace</p>
+</section>
+
+<!-- 8 RECONCILER -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">08</div>
+  <div class="kicker anim" style="color:var(--purple)">ฟีเจอร์เด่น #2 · งานเบื้องหลังที่ Form ทำไม่ได้</div>
+  <h2 class="anim">Guest Auto-Reconciler — ทุก 10 นาที</h2>
+  <p class="sub anim">รายชื่อใน Calendar กับทีมที่ assign อาจ "หลุดออกจากกัน" (มีคนลบ guest, event หาย) — worker เบื้องหลังคอยตรวจและแก้ให้ตรงตลอด</p>
+  <div class="twocol">
+    <div class="anim">
+      <ul class="feat">
+        <li><b>worker แยก process</b><br><small><code>scripts/calendar-reconcile-worker.js</code> คุมโดย start.sh ใน container</small></li>
+        <li><b>ตรวจทุก confirmed booking</b><br><small>เทียบ assigned crew กับ attendees จริง → patch / สร้าง event ใหม่ถ้าหาย</small></li>
+        <li><b>มองเห็นสถานะได้</b><br><small><code>calendarSyncStatus</code> PENDING / OK / FAILED โชว์สดใน admin UI</small></li>
+        <li><b>dry-run verify</b><br><small>หน้า detail ตรวจรายชื่อ guest แบบไม่แก้จริงได้</small></li>
+      </ul>
+    </div>
+    <div class="anim">
+      <div class="flow" style="flex-direction:column;align-items:stretch;gap:8px;margin-top:4px">
+        <div class="node" style="text-align:left"><div class="t">⏱ ทุก 10 นาที</div><div class="d">worker ตื่นขึ้นมา scan</div></div>
+        <div class="arrow" style="justify-content:center">↓</div>
+        <div class="node" style="text-align:left"><div class="t">🔍 เทียบ crew ↔ guests</div><div class="d">พบ drift?</div></div>
+        <div class="arrow" style="justify-content:center">↓</div>
+        <div class="node" style="text-align:left;border-color:var(--green)"><div class="t">✅ patch ให้ตรง</div><div class="d">เขียน calendarSyncStatus = OK</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 ADMIN CONSOLE -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">09</div>
+  <div class="kicker anim">ฟีเจอร์ · ฝั่ง Admin / Coordinator</div>
+  <h2 class="anim">Admin Console — <code>/admin</code></h2>
+  <div class="grid g2">
+    <div class="card anim"><span class="ic">📥</span><h3>Inbox-style tabs</h3><p>REQUESTED / Confirmed / Completed / Cancelled — ทำงานเหมือนกล่องอีเมล</p></div>
+    <div class="card anim"><span class="ic">⚡</span><h3>Bulk approve</h3><p>อนุมัติหลายงานทีเดียว + re-sync calendar รายตัวได้</p></div>
+    <div class="card anim"><span class="ic">📄</span><h3>หน้า detail <code>/admin/[id]</code></h3><p>แก้ไข · approve · assign crew · re-sync · Restore booking ที่ถูกยกเลิก</p></div>
+    <div class="card anim"><span class="ic">🎥</span><h3>Main Videographer</h3><p>กำหนดช่างหลัก → propagate กลับเข้า Bookings tab ของ Producer Dashboard</p></div>
+  </div>
+</section>
+
+<!-- 10 USER PAGES -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">10</div>
+  <div class="kicker anim">ฟีเจอร์ · ฝั่งผู้ใช้</div>
+  <h2 class="anim">หน้าจอสำหรับทุกบทบาท</h2>
+  <div class="grid g2">
+    <div class="card anim"><h3>🏠 <code>/</code> · Overview</h3><p>หน้าแรก KPI cards สรุปภาพรวม</p></div>
+    <div class="card anim"><h3>📆 <code>/calendar</code></h3><p>มุมมองรายเดือน + agenda drawer ดูรายละเอียดงาน</p></div>
+    <div class="card anim"><h3>📨 <code>/my-bookings</code></h3><p>กล่อง inbox 6 แท็บ เฉพาะงานของผู้ใช้ที่ล็อกอิน</p></div>
+    <div class="card anim"><h3>🎬 <code>/producer</code></h3><p>dashboard ราย producer (gate ด้วย _Users sheet)</p></div>
+    <div class="card anim"><h3>📊 <code>/dashboard</code></h3><p>กราฟ (Recharts) + workload ทีม + export CSV</p></div>
+    <div class="card anim"><h3>✅ <code>/booking/success</code></h3><p>ยืนยัน + ID ทั้งหมด + Calendar Packet</p></div>
+  </div>
+</section>
+
+<!-- 11 UPLOAD -->
+<section class="slide" data-time="0:45">
+  <div class="slide-num">11</div>
+  <div class="kicker anim">ฟีเจอร์เด่น #3 · ระบบส่งฟุตเทจ</div>
+  <h2 class="anim">Footage Upload — <code>/upload</code> · เข้า Drive + Wasabi</h2>
+  <div class="twocol">
+    <div class="anim">
+      <ul class="feat">
+        <li><b>Log ด้วย Production ID + กล้อง</b><br><small>เลือก booking → ช่องกล้อง (รวม Switcher / Atem)</small></li>
+        <li><b>ลงโฟลเดอร์จริงของทีม</b><br><small>เข้าโฟลเดอร์ "VIDEO 2026" ที่มีอยู่ — จับ outlet ตามเลขนำหน้า ไม่สร้างซ้ำ</small></li>
+        <li><b>เก็บ 2 ที่</b><br><small>Google Drive (resumable) + Wasabi S3 (multipart presigned)</small></li>
+        <li><b>booking-info.txt</b><br><small>เขียนไฟล์สรุปข้อมูลงานลงทุกโฟลเดอร์ ให้ editor อ่านได้โดยไม่ต้องเปิดแอป</small></li>
+      </ul>
+    </div>
+    <div class="anim">
+      <div class="codeblock"><span class="c"># โครงสร้างโฟลเดอร์ปลายทาง</span>
+<span class="o">[outlet]</span>/
+  <span class="f">AGN-260529-STD-01 - PTTPLC ปตท.</span>/
+    <span class="s">camA</span>/  ← ไฟล์เก็บชื่อกล้องเดิม
+    <span class="s">camB</span>/
+    <span class="f">booking-info.txt</span>
+
+<span class="c"># 9.ADVERTORIAL ↔ Advertorial</span>
+<span class="c"># match โดยตัด prefix "N." ออก</span></div>
+      <p style="font-size:13px;color:var(--muted);margin-top:14px">หน้า <code>/admin/upload-review</code> สำหรับตรวจไฟล์ที่ส่งเข้ามา</p>
+    </div>
+  </div>
+</section>
+
+<!-- 12 OT -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">12</div>
+  <div class="kicker anim">ฟีเจอร์ · OT / ค่าล่วงเวลา</div>
+  <h2 class="anim">OT Module — มี state machine + ลายเซ็น</h2>
+  <div class="twocol">
+    <div class="anim">
+      <ul class="feat">
+        <li><b>2 ประเภท</b><br><small>HOLIDAY (วันหยุด = 1 วัน) · OVERTIME (เกิน 8 ชม. = นับชั่วโมง)</small></li>
+        <li><b>workflow อนุมัติ</b><br><small><code>DRAFT → SUBMITTED → APPROVED / REJECTED</code> · reject แล้วแก้ส่งใหม่ได้</small></li>
+        <li><b>ลายเซ็นดิจิทัล</b><br><small>snapshot ลายเซ็นผู้ขอ + ผู้อนุมัติ เก็บติดเรคคอร์ด (แก้ทีหลังไม่กระทบของเก่า)</small></li>
+        <li><b>auto จาก booking</b><br><small>OT ที่เกิดจากงานผูก bookingId ได้ · ผูกรายเดือน YYYY-MM</small></li>
+      </ul>
+    </div>
+    <div class="anim">
+      <div class="flow" style="flex-direction:column;align-items:stretch;gap:8px;margin-top:4px">
+        <div class="node" style="text-align:left"><div class="t"><code>/ot</code> · ผู้ใช้</div><div class="d">กรอก task · เซ็น · ส่งให้ approve</div></div>
+        <div class="arrow" style="justify-content:center">↓</div>
+        <div class="node" style="text-align:left;border-color:var(--orange)"><div class="t"><code>/ot/admin</code> · ผู้จัดการ</div><div class="d">review · เซ็นอนุมัติ / ตีกลับพร้อมเหตุผล</div></div>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-top:14px">OT Approver = role ADMIN หรือ position มี "manager"</p>
+    </div>
+  </div>
+</section>
+
+<!-- 13 ADMIN TOOLS -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">13</div>
+  <div class="kicker anim">ฟีเจอร์ · เครื่องมือดูแลระบบ</div>
+  <h2 class="anim">Roster · Permissions · Health · Profile · Audit</h2>
+  <div class="grid g3">
+    <div class="card anim"><span class="ic">👥</span><h3><code>/admin/team</code></h3><p>Crew roster CRUD เก็บใน DB (v1.31)</p></div>
+    <div class="card anim"><span class="ic">🔐</span><h3><code>/admin/permissions</code></h3><p>จัดการ role USER ↔ ADMIN · ค้นหา/เรียง · OT badge · แก้ inline · นับ Admin/Approver</p></div>
+    <div class="card anim"><span class="ic">❤️</span><h3><code>/admin/health</code></h3><p>โชว์ config + 4 live checks: DB · Calendar DWD · Sheets อ่าน · Sheets เขียน</p></div>
+    <div class="card anim"><span class="ic">✍️</span><h3><code>/profile/signature</code></h3><p>วาด/อัปโหลดลายเซ็นส่วนตัว ใช้ในรายงาน OT</p></div>
+    <div class="card anim"><span class="ic">📜</span><h3>Audit Log</h3><p>บันทึกการกระทำสำคัญ · มี purge + export</p></div>
+    <div class="card anim"><span class="ic">📖</span><h3><code>/manual</code> · <code>/changelog</code></h3><p>คู่มือผู้ใช้ + ประวัติเวอร์ชัน ในแอป</p></div>
+  </div>
+</section>
+
+<!-- 14 EMAIL + DEPLOY -->
+<section class="slide" data-time="0:40">
+  <div class="slide-num">14</div>
+  <div class="kicker anim">Email & DevOps</div>
+  <h2 class="anim">การส่งอีเมล + การ Deploy</h2>
+  <div class="twocol">
+    <div class="anim">
+      <h3 style="font-size:17px;margin-bottom:10px">📧 Email Delivery</h3>
+      <ul class="feat">
+        <li><b>Gmail HTTPS API</b><br><small>ส่งผ่านบัญชี admin ที่ล็อกอิน — เลี่ยงพอร์ต SMTP ที่ถูกบล็อก</small></li>
+        <li><b>provider สำรอง</b><br><small>รองรับ Resend / SendGrid / SMTP (พอร์ต 2525)</small></li>
+      </ul>
+    </div>
+    <div class="anim">
+      <h3 style="font-size:17px;margin-bottom:10px">🚀 Deploy Pipeline</h3>
+      <ul class="feat">
+        <li><b>push → build → GHCR</b><br><small>GitHub Actions build image อัตโนมัติ tag <code>sha-xxx</code></small></li>
+        <li><b>Portainer redeploy</b><br><small>แก้ IMAGE_TAG → Pull & redeploy</small></li>
+        <li><b><code>start.sh</code> ตอน boot</b><br><small>prisma db push · backfill · seed · start worker · npm start</small></li>
+      </ul>
+    </div>
+  </div>
+  <p class="sub anim" style="margin-top:18px">มี runbooks: สลับ impersonate user · สลับ Sheet (sandbox↔prod) · backup/restore Postgres</p>
+</section>
+
+<!-- 15 VERSION + ROADMAP -->
+<section class="slide" data-time="0:25">
+  <div class="slide-num">15</div>
+  <div class="kicker anim">เส้นทาง & อนาคต</div>
+  <h2 class="anim">โตจาก v1.0 → v1.36 · ต่อ Phase 3</h2>
+  <div class="grid g2">
+    <div class="card anim"><span class="tag">✅ Phase 2 (เสร็จแล้ว)</span><p style="margin-top:10px">Calendar create on approve · auto-reconciler 10 นาที · sync status · health dashboard · team roster DB · guest dry-run verify · footage upload เข้า Drive+Wasabi · OT + ลายเซ็น</p></div>
+    <div class="card anim"><span class="tag">🔜 Phase 3 (ถัดไป)</span><p style="margin-top:10px">Prisma migrations จริง · automated tests · Sentry/structured logging · staging env · bulk + resumable upload · proxy workflow + MAM search · delivery tracker</p></div>
+  </div>
+  <p class="sub anim" style="margin-top:22px">ทุกการเปลี่ยนแปลงบันทึกใน <code>CHANGELOG.md</code> และดูได้ในแอปที่ <code>/changelog</code></p>
+</section>
+
+<!-- 16 CLOSING -->
+<section class="slide" data-time="0:20">
+  <div class="slide-num">16</div>
+  <div class="logo-mark anim"><div class="box">🎬</div><div class="nm">THE STANDARD · Internal Tool<b>Production Booking</b></div></div>
+  <h1 class="anim" style="font-size:46px">จองครั้งเดียว — ระบบจัดการที่เหลือให้</h1>
+  <div class="anim" style="margin-top:20px">
+    <span class="pill p-blue">Booking wizard 5 ขั้น</span>
+    <span class="pill p-green">Calendar auto-create</span>
+    <span class="pill p-purple">Guest reconciler 10 นาที</span>
+    <span class="pill p-orange">Footage → Drive + Wasabi</span>
+    <span class="pill p-cyan">3-layer ID traceable</span>
+    <span class="pill p-red">OT + ลายเซ็น</span>
+    <span class="pill p-muted">Health · Permissions · Audit</span>
+  </div>
+  <p class="sub anim" style="margin-top:28px">แทนงานมือซ้ำซ้อนด้วย workflow เดียวที่อัตโนมัติ ตรวจสอบย้อนกลับได้ และดูแลตัวเองเบื้องหลัง</p>
+  <p class="sub anim" style="margin-top:18px;color:var(--accent)">ขอบคุณครับ — มีคำถามไหม? 🙏</p>
+</section>
+
+<div class="speaker" id="speaker"><div class="lbl">Speaker Notes</div><div id="speaker-body"></div></div>
+
+<script>
+const NOTES = [
+  `เปิด (20 วิ): "นี่คือ Production Booking — ระบบจองคิวถ่ายภายในของ THE STANDARD ที่มาแทน Google Form + การกรอก Sheet ด้วยมือ" ชี้ตัวเลข: v1.36, 9 outlets 56 programs, รันจริงที่ probook.xtec9.xyz`,
+  `ปัญหา (35 วิ): เดิมต้องกรอกซ้ำหลายที่ → ก็อปลง Sheet → สร้าง Calendar เอง → เชิญทีมทีละคน. รายชื่อหลุดง่าย และ ID อยู่คนละที่. ปิดด้วย: แอปนี้รวมเป็น workflow เดียว`,
+  `3 ID (40 วิ): จุดที่ทำให้ traceable — Project ID (Producer Dashboard) → Episode ID → Production ID (แอปนี้สร้าง). Producer เลือก Project จาก dropdown ที่ดึงสดจาก Sheet. Production ID immutable ใช้เป็นชื่อโฟลเดอร์เท่านั้น`,
+  `สถาปัตยกรรม (40 วิ): Next.js 14 ตัวเดียวทำทั้ง UI + API + worker. Postgres เป็น source of truth. คุย Google 3 ตัว (Sheets/Calendar/Drive) ผ่าน DWD. Auth จำกัด @thestandard.co. Footage เก็บ 2 ที่ Drive + Wasabi`,
+  `Lifecycle — สำคัญ (55 วิ): เดินทีละขั้น 1-6. เน้นว่า Approve = ไป CONFIRMED + สร้าง Calendar event ทันที. Assign = ซิงก์ guest + ส่งอีเมล. Reconciler คอยแก้ทุก 10 นาที. งานเก่า complete เอง. อธิบาย status enum ด้านล่าง`,
+  `Wizard (40 วิ): /new 5 ขั้น sticky summary. outlet→program กรองอัตโนมัติ. โชว์ตาราง 9 outlet / 56 program ด้านขวา. หน้า success มี Calendar Packet ก็อปวางให้ coordinator`,
+  `Calendar #1 (40 วิ): Approve แล้วสร้าง event + เชิญทีมอัตโนมัติ. ย้ำ 3 จุด: 1 booking=1 event, ใช้ DWD impersonate สร้างในนามองค์กร, assign แล้วซิงก์ทันที+ส่งเมล. มี runbook สลับ impersonate user`,
+  `Reconciler #2 — จุดขาย (40 วิ): "Form ทำแบบนี้ไม่ได้". รายชื่อหลุดออกจากกันได้ → worker แยก process ตรวจทุก 10 นาที แก้ให้ตรง. สถานะ PENDING/OK/FAILED เห็นใน UI. มี dry-run verify. ไล่ flow ขวาบนลงล่าง`,
+  `Admin Console (40 วิ): /admin เหมือนกล่องอีเมล มี tabs ตามสถานะ. bulk approve + re-sync รายตัว. หน้า detail แก้/approve/assign/restore. Main Videographer propagate กลับ Sheet`,
+  `User pages (40 วิ): ไล่เร็วๆ 6 หน้า — overview, calendar เดือน+agenda, my-bookings 6 แท็บ, producer dashboard, dashboard มีกราฟ+CSV, success page`,
+  `Upload #3 (45 วิ): /upload log ฟุตเทจด้วย Production ID + กล้อง. ลงโฟลเดอร์ VIDEO 2026 จริงของทีม (จับ outlet ตามเลขนำหน้า ไม่สร้างซ้ำ). เก็บ Drive + Wasabi. เขียน booking-info.txt ให้ editor. มีหน้า upload-review`,
+  `OT (40 วิ): 2 ประเภท HOLIDAY/OVERTIME. มี state machine DRAFT→SUBMITTED→APPROVED/REJECTED. ลายเซ็นดิจิทัล snapshot เก็บติดเรคคอร์ด. /ot ผู้ใช้กรอก, /ot/admin ผู้จัดการเซ็นอนุมัติ`,
+  `Admin tools (40 วิ): ไล่ 6 การ์ดเร็วๆ — team roster CRUD, permissions (search/sort/OT badge/inline edit), health 4 checks, profile signature, audit log purge/export, manual+changelog ในแอป`,
+  `Email+Deploy (40 วิ): อีเมลส่งผ่าน Gmail HTTPS API ของ admin ที่ล็อกอิน (เลี่ยง SMTP block) + provider สำรอง. Deploy: push→GHA build→GHCR→Portainer redeploy. start.sh ทำ db push/seed/start worker ตอน boot. มี runbooks ครบ`,
+  `Version+Roadmap (25 วิ): โตจาก v1.0→v1.36. Phase 2 เสร็จหมด. Phase 3 ต่อ: migrations จริง, tests, logging, staging, bulk upload, MAM search, delivery tracker`,
+  `ปิด (20 วิ): สรุป pill ทั้งหมด ย้ำประโยคทอง "จองครั้งเดียว ระบบจัดการที่เหลือให้ — อัตโนมัติ ตรวจย้อนได้ ดูแลตัวเอง" เปิดให้ถาม`,
+];
+const slides=[...document.querySelectorAll('.slide')];let cur=0;
+const bar=document.getElementById('bar'),counter=document.getElementById('counter'),tSlot=document.getElementById('t-slot'),speaker=document.getElementById('speaker'),speakerBody=document.getElementById('speaker-body');
+function render(){slides.forEach((s,i)=>s.classList.toggle('active',i===cur));bar.style.width=((cur+1)/slides.length*100)+'%';counter.textContent=`${String(cur+1).padStart(2,'0')} / ${String(slides.length).padStart(2,'0')}`;tSlot.textContent=slides[cur].dataset.time||'—';speakerBody.innerHTML=`<p>${NOTES[cur]||''}</p>`;}
+function go(n){cur=Math.max(0,Math.min(slides.length-1,n));render();}
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key===' '){e.preventDefault();go(cur+1);}else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();go(cur-1);}else if(e.key==='Home'){go(0);}else if(e.key==='End'){go(slides.length-1);}else if(e.key==='s'||e.key==='S'){speaker.classList.toggle('show');}else if(e.key==='f'||e.key==='F'){if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen();}});
+document.addEventListener('click',e=>{if(e.target.closest('.speaker'))return;if(e.clientX>window.innerWidth/2)go(cur+1);else go(cur-1);});
+render();
+</script>
+</body>
+</html>

@@ -123,6 +123,10 @@ services:
       FOOTAGE_LOG_SHEET_ID: ${FOOTAGE_LOG_SHEET_ID:-}
       FOOTAGE_LOG_TAB: ${FOOTAGE_LOG_TAB:-}
       DRIVE_FOOTAGE_ROOT: ${DRIVE_FOOTAGE_ROOT:-}
+      # v1.75 — Drive folder that holds Admin document attachments (quotes,
+      # invoices, receipts). The app auto-creates one subfolder per job inside
+      # it. Set to a My Drive / Shared Drive folder id to enable doc uploads.
+      DRIVE_DOCS_ROOT: ${DRIVE_DOCS_ROOT:-}
       FOOTAGE_WORKER_ENABLED: ${FOOTAGE_WORKER_ENABLED:-0}
       FOOTAGE_WORKER_INTERVAL_MS: ${FOOTAGE_WORKER_INTERVAL_MS:-600000}
       # Secret for the internal /api/internal/footage/sync endpoint; defaults to

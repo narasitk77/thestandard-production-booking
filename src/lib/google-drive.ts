@@ -15,6 +15,7 @@
  * `drive.file` scope so the read path stays minimal.
  */
 
+import { Readable } from 'stream'
 import { google, drive_v3 } from 'googleapis'
 import { getCalendarImpersonateSubject } from './google-calendar'
 
@@ -465,6 +466,29 @@ export async function upsertTextFile(input: {
   })
   if (!created.data.id) throw new Error(`Drive text-file create returned no id for "${input.name}"`)
   return created.data.id
+}
+
+/**
+ * Upload a small file (document: quote/invoice/receipt) straight to a Drive
+ * folder server-side. ponytail: simple one-shot create — caller buffers the
+ * whole file in memory, so cap the size at the API route. For big media use
+ * the resumable browser flow below instead.
+ */
+export async function uploadFileToFolder(input: {
+  parentFolderId: string
+  filename: string
+  mimeType: string
+  body: Readable
+}): Promise<{ id: string; webViewLink: string | null }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const res = await drive.files.create({
+    requestBody: { name: input.filename, parents: [input.parentFolderId] },
+    media: { mimeType: input.mimeType || 'application/octet-stream', body: input.body },
+    fields: 'id, webViewLink',
+    supportsAllDrives: true,
+  })
+  if (!res.data.id) throw new Error(`Drive upload returned no id for "${input.filename}"`)
+  return { id: res.data.id, webViewLink: res.data.webViewLink ?? null }
 }
 
 export interface ResumableSession {

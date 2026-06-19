@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Loader2, AlertCircle, X, RotateCcw } from 'lucide-react'
 import { Badge, LOAN_STATUS } from '../_components/badges'
+import DocsCell, { type DocRef } from '../_components/DocsCell'
 import { todayBangkokStr } from '@/lib/bangkok-day'
 
 const isOverdue = (l: { status: string; dueDate?: string | null }) =>
@@ -16,7 +17,7 @@ const isOverdue = (l: { status: string; dueDate?: string | null }) =>
 type Item = { id: string; nameSnapshot: string; tagSnapshot?: string | null; equipment?: { name: string } | null }
 type Loan = {
   id: string; loanCode: string; photographer: string; email?: string | null; jobName?: string | null
-  dueDate?: string | null; returnedAt?: string | null; status: string; items: Item[]
+  dueDate?: string | null; returnedAt?: string | null; status: string; items: Item[]; documents?: DocRef[]
 }
 
 const ymd = (v: unknown) => (v ? String(v).slice(0, 10) : '—')
@@ -124,7 +125,8 @@ export default function LoansPage() {
                     <Badge map={LOAN_STATUS} value={isOverdue(l) ? 'OVERDUE' : l.status} />
                     {l.status === 'RETURNED' && <span className="text-gray-400 text-xs ml-1">{ymd(l.returnedAt)}</span>}
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <DocsCell ownerType="loan" ownerId={l.id} initial={l.documents} />
                     {l.status === 'ACTIVE' && (
                       <button onClick={() => markReturned(l.id)} disabled={busy === l.id} className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-green-300 text-green-700 rounded hover:bg-green-50 disabled:opacity-50">
                         <RotateCcw className="w-3.5 h-3.5" /> คืนแล้ว

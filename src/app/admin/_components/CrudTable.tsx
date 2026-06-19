@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Loader2, AlertCircle, Pencil, Trash2, X, Search, ChevronUp, ChevronDown, ChevronsUpDown, RotateCcw } from 'lucide-react'
+import DocsCell, { type DocOwner } from './DocsCell'
 
 /* =============================================================================
    CrudTable — config-driven list + create/edit/delete for the workspace admin
@@ -52,6 +53,7 @@ export interface CrudConfig {
   addLabel?: string
   rowKey?: string // default 'id'
   search?: boolean // render a text-search box that sends ?q= (endpoint must support it)
+  docsOwnerType?: DocOwner // show a Drive document-attachment cell per row (uses row.documents for count)
 }
 
 export default function CrudTable({ config }: { config: CrudConfig }) {
@@ -304,7 +306,7 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
                     </th>
                   )
                 })}
-                <th className="px-3 py-2 w-20 bg-gray-50"></th>
+                <th className={`px-3 py-2 bg-gray-50 ${config.docsOwnerType ? 'w-28' : 'w-20'}`}></th>
               </tr>
             </thead>
             <tbody>
@@ -316,6 +318,7 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
                     </td>
                   ))}
                   <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {config.docsOwnerType && <DocsCell ownerType={config.docsOwnerType} ownerId={row[rowKey]} initial={row.documents} />}
                     <button onClick={() => beginEdit(row)} className="text-gray-400 hover:text-[#673ab7] p-1" title="แก้ไข"><Pencil className="w-3.5 h-3.5" /></button>
                     <button onClick={() => remove(row)} className="text-gray-400 hover:text-red-600 p-1" title="ลบ"><Trash2 className="w-3.5 h-3.5" /></button>
                   </td>

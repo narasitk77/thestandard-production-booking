@@ -10,6 +10,7 @@ const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
 const config: CrudConfig = {
   endpoint: '/api/admin/rentals',
   responseKey: 'rentals',
+  docsOwnerType: 'rental',
   title: 'Rentals',
   subtitle: 'งานเช่าอุปกรณ์ — สถานะจ่าย, วันคืน, ผูกกับ vendor (เฉพาะ ADMIN แก้ได้)',
   addLabel: 'เพิ่มงานเช่า',

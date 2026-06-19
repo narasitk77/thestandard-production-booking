@@ -9,6 +9,7 @@ const opt = (vals: string[]) => vals.map((v) => ({ value: v, label: v }))
 const config: CrudConfig = {
   endpoint: '/api/admin/purchases',
   responseKey: 'purchases',
+  docsOwnerType: 'purchase',
   title: 'Purchases',
   subtitle: 'งานซื้ออุปกรณ์ — vendor, ลิงก์สินค้า, ราคา (เฉพาะ ADMIN แก้ได้)',
   addLabel: 'เพิ่มงานซื้อ',

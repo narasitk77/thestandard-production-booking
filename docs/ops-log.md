@@ -5,6 +5,23 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-19 · v1.75.0 — Admin document attachments → Google Drive
+
+**New optional env `DRIVE_DOCS_ROOT`.** A Drive folder id (My Drive or a
+Shared Drive folder) where Admin document attachments land. The app
+auto-creates one subfolder per job inside it
+(`<DRIVE_DOCS_ROOT>/<หมวด>/<ชื่องาน>`). Until it's set, the 📎 upload button
+on Rentals/Purchases/Repairs/Loans returns a clear "ยังไม่ได้ตั้งค่า
+DRIVE_DOCS_ROOT" error — listing/viewing still works.
+
+**To enable:** add `DRIVE_DOCS_ROOT=<folderId>` to the stack env. Passthrough
+is already wired in `docker-compose.portainer.yml`. The service account
+(Drive write auth) must have edit access to that folder. Uses the existing
+Drive credentials — no new secret. Server-side upload, 25MB/file cap; does
+not touch Wasabi.
+
+---
+
 ## 2026-06-18 · v1.71.0 — `AUTH_DISABLED` wired up (was dead config)
 
 **Behavior change, opt-in.** `AUTH_DISABLED=1` now actually bypasses Google
