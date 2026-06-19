@@ -21,6 +21,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added — ฐานราคาผู้ขาย (vendor price database)
 - โมดูล Admin จัดการราคาเช่าต่อวันต่อ vendor/หมวด/รายการ (`/admin/vendor-prices`, CRUD) + API lookup สาธารณะ `GET /api/vendor-prices`. model `VendorPrice` ใหม่.
+- นำเข้าราคาจริง **676 รายการ** (17thanwafilm + Baanfilm; Hiya อยู่ระหว่างนำเข้า) ผ่าน Admin API.
+- ช่อง **Price Lookup** ใน Cost Sheet Tool — ค้นหาชื่ออุปกรณ์แล้วดึงราคาจาก probook API (`/api/vendor-prices`) แบบ real-time.
 
 ---
 
