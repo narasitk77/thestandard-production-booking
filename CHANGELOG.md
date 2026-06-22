@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.87.1] — 2026-06-22
+
+### Fixed — prep-folders worker หางานวันนี้ไม่เจอ (timezone vs @db.Date)
+- `bangkokTodayRange` เดิม offset boundary -7h. แต่ `Booking.shootDate` เป็น `@db.Date` (date-only, Prisma เก็บ/เทียบเป็น midnight-UTC) → การเทียบกับ boundary ที่มีเวลา 17:00Z ถูก truncate ทำให้ `lt` **ตัดงานของวันนี้ทิ้ง** → dry-run ขึ้น today=0 ทั้งที่มีงานถ่ายวันนี้. แก้เป็น midnight-UTC ของวันที่ (Bangkok) ตรง ๆ. พิสูจน์ live: query เดิม inRange=0, query date-boundary เจองาน. test อัปเดตตามจริง.
+
+---
+
 ## [1.87.0] — 2026-06-22
 
 ### Changed — เพิ่ม cap อัปโหลดต่อไฟล์ 100GB → 500GB

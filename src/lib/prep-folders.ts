@@ -18,11 +18,15 @@ import {
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 
-/** Bangkok (UTC+7) midnight..midnight range for "today" as UTC instants.
- *  The container runs UTC, so "today" must be resolved in Bangkok time. */
+/** Half-open range matching bookings whose **Bangkok** shoot-day is today.
+ *  `Booking.shootDate` is `@db.Date` (date-only) — Prisma returns/compares it as
+ *  midnight-UTC of the calendar date. So we resolve TODAY in Bangkok (now+7h),
+ *  then return that date's midnight-UTC boundaries. (An earlier version offset
+ *  the boundaries by -7h; against a date column that truncated `end` and
+ *  excluded today's shoots — the bug this replaces.) */
 export function bangkokTodayRange(now: Date = new Date()): { start: Date; end: Date } {
   const bkk = new Date(now.getTime() + 7 * 3_600_000)
-  const start = new Date(Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate()) - 7 * 3_600_000)
+  const start = new Date(Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate()))
   return { start, end: new Date(start.getTime() + 24 * 3_600_000) }
 }
 
