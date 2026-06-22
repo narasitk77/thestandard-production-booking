@@ -5,6 +5,20 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.88.0 — prep-folders also creates landing folder in Production Team
+
+Deployed `sha-cef02e0`. The hourly prep-folders worker now, for today's confirmed
+shoots, ALSO pre-creates a flat shoot folder in the **Production Team** Shared
+Drive (`0AGendsFHFQYKUk9PVA`, default; override `DRIVE_PRODUCTION_TEAM_ROOT`) —
+`<root>/<Production ID · job>/CAM-A..` — so crew drop NAS footage into an
+already-named folder instead of ad-hoc "date + show" folders. New
+`ensureFlatShootFolders()`; best-effort (a Production Team error doesn't undo the
+VIDEO 2026 prep). **Verified live:** real run → `prodTeam: ok`; Drive shows
+`NWS-NDG-260622-S-01 · …` with `AUDIO, CAM-A` in the Production Team root. No
+Portainer env needed (drive id hardcoded with env override).
+
+---
+
 ## 2026-06-22 · v1.86.0 / v1.87.0 / v1.87.1 — prep-folders worker + 500GB cap
 
 Deployed `sha-24bf78e`. (Deploy note: the API redeploy fetch CDP-times-out at
