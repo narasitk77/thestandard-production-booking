@@ -25,6 +25,7 @@ import {
   upsertTextFile,
 } from '@/lib/google-drive'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
+import { isDriveAccessError } from '@/lib/drive-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -257,43 +258,58 @@ export async function POST(request: NextRequest) {
 
     // 6. Drive — ensure folder path + reserve file slot + resumable session.
     //   Lands in <root>/<existing outlet folder>/<Production ID - job>/<camera>/
-    let driveTarget: { fileId: string; sessionUrl: string } | null = null
-    try {
+    //   v1.84 — act AS the uploader (DWD) so Drive shows the real person as the
+    //   file's creator. If they lack Shared Drive access (403/404 on the first
+    //   folder op), fall back to the default service subject so uploads never
+    //   break — see [[isDriveAccessError]].
+    //
+    // v1.80.1 — the browser PUTs chunks cross-origin to googleapis.com; Drive
+    // only returns Access-Control-Allow-Origin on those PUT responses when the
+    // origin was registered at session init. Header is authoritative; env is the
+    // fallback if a proxy strips it.
+    const browserOrigin = request.headers.get('origin')
+      || process.env.NEXTAUTH_URL
+      || process.env.NEXT_PUBLIC_APP_URL
+      || undefined
+
+    const setupDrive = async (subject?: string) => {
       const { bookingFolderId, cameraFolderId } = await ensureUploadFolderPath({
         rootFolderId: process.env.DRIVE_FOOTAGE_ROOT!.trim(),
         outletCanonicalName: outletDriveFolderName(booking.outlet.code),
         programFolderName: driveProgramFolder,
         bookingFolderName,
         camera,
+        subject,
       })
-
-      // Drop / refresh _SHOOT.txt at the shoot-folder level so editors who open
-      // the folder have the shoot's context. Best-effort: never let an info-file
-      // hiccup block the actual footage upload.
+      // Best-effort _SHOOT.txt — never let an info-file hiccup block the upload.
       try {
         await upsertTextFile({
           parentFolderId: bookingFolderId,
           name: '_SHOOT.txt',
           content: renderBookingInfo(bookingInfoInput(booking)),
+          subject,
         })
       } catch (infoErr: any) {
         console.error('_SHOOT.txt write failed (non-fatal):', infoErr?.message || infoErr)
       }
-
-      const driveSession = await createResumableUploadSession({
-        parentFolderId: cameraFolderId,
-        filename,
-        mimeType,
-        size,
-        // v1.80.1 — the browser PUTs chunks cross-origin to googleapis.com;
-        // Drive only returns Access-Control-Allow-Origin on those PUT responses
-        // when the origin was registered HERE. Header is authoritative (matches
-        // the browser exactly); env is the fallback if a proxy strips it.
-        origin: request.headers.get('origin')
-          || process.env.NEXTAUTH_URL
-          || process.env.NEXT_PUBLIC_APP_URL
-          || undefined,
+      return createResumableUploadSession({
+        parentFolderId: cameraFolderId, filename, mimeType, size, origin: browserOrigin, subject,
       })
+    }
+
+    let driveTarget: { fileId: string; sessionUrl: string } | null = null
+    try {
+      let driveSession
+      try {
+        driveSession = await setupDrive(session.email)  // act as the uploader
+      } catch (e: any) {
+        if (isDriveAccessError(e)) {
+          console.warn(`[upload/init] uploader ${session.email} lacks Shared Drive access — using default Drive subject (${e?.message || e})`)
+          driveSession = await setupDrive(undefined)     // fall back to service subject
+        } else {
+          throw e
+        }
+      }
       driveTarget = driveSession
       // Tie the reserved Drive file id to the Upload row so /complete can verify it
       await prisma.upload.update({

@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.84.0] — 2026-06-22
+
+### Changed — footage ขึ้นชื่อ "คนที่อัปจริง" บน Drive (ไม่ใช่ narasit.k ทุกอัน)
+- เดิม service account impersonate `narasit.k` คนเดียว → Drive activity ขึ้นชื่อ narasit.k ทุกการอัป. ตอนนี้ **impersonate เมลล์ของคนที่ล็อกอินอัปจริง** (domain-wide delegation) → Drive โชว์คนนั้นเป็นผู้สร้างไฟล์/โฟลเดอร์.
+- **Fallback ปลอดภัย:** ถ้าคนอัปไม่มีสิทธิ์ใน Shared Drive (VIDEO 2026) → Drive ตอบ 403/404 → ระบบ fallback ไปใช้ subject เดิม (narasit.k) อัตโนมัติ → **การอัปไม่มีวันพังเพราะเรื่องสิทธิ์** (แค่ขึ้นชื่อ narasit.k แทน). ตัวเช็ค `isDriveAccessError` มีเทสต์ครอบ (`drive-access.test.ts`).
+- ไฟล์: `src/lib/google-drive.ts` (`getDriveWriteAuth(subject?)` + thread `subject` เข้า ensureUploadFolderPath/upsertTextFile/createResumableUploadSession), `src/app/api/upload/init/route.ts` (impersonate `session.email` + fallback), `src/lib/drive-access.ts` (ใหม่).
+
+> หมายเหตุการเข้าถึง: การ **บล็อกเมลล์** ทำได้อยู่แล้วผ่านการปิด `active` ของ user ใน /admin/permissions (ล็อกอินไม่ได้). การคุมสิทธิ์เข้าถึงโฟลเดอร์ footage บน Google Drive โดยตรง เป็นงานใน Google Workspace/Shared Drive (แอปทำให้ไม่ได้) — แต่ตอนนี้ "ใครอัปเป็นชื่อตัวเองได้" ผูกกับสมาชิก Shared Drive แล้ว.
+
+---
+
 ## [1.83.0] — 2026-06-22
 
 ### Fixed — upload เสร็จแล้วแต่ขึ้น "Failed" ตอนขั้นปิดงาน (network blip / deploy)

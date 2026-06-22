@@ -67,14 +67,17 @@ export function hasDriveCredentials(): boolean {
  * Same DWD model as read, but with full `drive` scope so the upload
  * path can create folders + initiate resumable upload sessions.
  */
-export function getDriveWriteAuth() {
+export function getDriveWriteAuth(subjectOverride?: string) {
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {
         client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
         private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       }
-  const subject = getCalendarImpersonateSubject()
+  // v1.84 — domain-wide delegation lets us act AS the uploader so Drive shows
+  // the real person (not the fixed service subject) as creator. Falls back to
+  // the default subject when no override is given.
+  const subject = subjectOverride?.trim() || getCalendarImpersonateSubject()
   return new google.auth.JWT({
     email: credentials.client_email,
     key: credentials.private_key,
@@ -404,8 +407,10 @@ async function resolveShootFolder(
  */
 export async function ensureUploadFolderPath(input: ShootFolderInput & {
   camera: string
+  /** v1.84 — impersonate this user so the folders show them as creator. */
+  subject?: string
 }): Promise<UploadFolderTarget> {
-  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
   const { bookingFolderId } = await resolveShootFolder(drive, input)
   const cameraFolderId = await ensureChildFolder(drive, bookingFolderId, input.camera)
   return { bookingFolderId, cameraFolderId }
@@ -441,8 +446,10 @@ export async function upsertTextFile(input: {
   parentFolderId: string
   name: string
   content: string
+  /** v1.84 — impersonate this user so the info file shows them as author. */
+  subject?: string
 }): Promise<string> {
-  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
   const safeName = input.name.replace(/'/g, "\\'")
   const found = await drive.files.list({
     q: `'${input.parentFolderId}' in parents and trashed = false and name = '${safeName}'`,
@@ -533,8 +540,10 @@ export async function createResumableUploadSession(input: {
    * Verified empirically: no-Origin init → response ACAO null; with-Origin → ACAO set.
    */
   origin?: string
+  /** v1.84 — impersonate this user so Drive shows them as the file's creator. */
+  subject?: string
 }): Promise<ResumableSession> {
-  const auth = getDriveWriteAuth()
+  const auth = getDriveWriteAuth(input.subject)
   // Get a fresh OAuth access token to hit the raw resumable endpoint.
   await auth.authorize()
   const accessToken = auth.credentials.access_token
