@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.85.0 — upload-status badges + free-text Event producer
+
+Deployed `sha-b277c16`. Two ops-requested tweaks:
+- /upload job list now shows a per-booking badge (🔴 ยังไม่อัป / 🟡 อัปบางกล้อง
+  n/cameraCount / 🟢 อัปครบ) from the new `GET /api/upload/status?bookingIds=`
+  (groupBy completed cameras, counts only). Verified live: NWS-NDG-260622-S-01
+  → 🟢 อัปครบ (2); empty bookings → 🔴 ยังไม่อัป.
+- Event shoots (`shootType==='Event'`, non-AGN) use the free-text Producer
+  Name/Phone/Email again instead of the per-outlet dropdown (1-line
+  `useProducerDropdown` change). 119 tests pass.
+
+---
+
 ## 2026-06-22 · v1.84.0 — Drive uploads attributed to the real uploader
 
 Deployed `sha-b5a7f67` via the Portainer API redeploy (same mechanism as below).
