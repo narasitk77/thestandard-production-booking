@@ -54,6 +54,34 @@ interface Props {
   defaultCamera?: string
 }
 
+// v1.81 — folder drag-drop. dataTransfer.files does NOT recurse into a dropped
+// folder; webkitGetAsEntry does. Walk every entry, collect Files, flatten into
+// the existing per-file queue (Drive path stays <camera>/<filename>). Falls back
+// to dt.files when the entries API is unavailable.
+async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
+  const entries = Array.from(dt.items)
+    .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+    .filter(Boolean) as any[]
+  if (entries.length === 0) return Array.from(dt.files)
+  const out: File[] = []
+  const walk = (entry: any): Promise<void> => new Promise(resolve => {
+    if (entry.isFile) {
+      entry.file((f: File) => { out.push(f); resolve() }, () => resolve())
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader()
+      // readEntries returns in batches; call until it yields an empty batch.
+      const readBatch = () => reader.readEntries(async (batch: any[]) => {
+        if (!batch.length) return resolve()
+        await Promise.all(batch.map(walk))
+        readBatch()
+      }, () => resolve())
+      readBatch()
+    } else resolve()
+  })
+  await Promise.all(entries.map(walk))
+  return out
+}
+
 function formatSize(bytes: number | null): string {
   if (!bytes || bytes <= 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -81,6 +109,14 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // (min CAM-A) + AUDIO (if mics) + specials (DRONE/SWITCHER/PHOTO/SCREEN).
   const CAMERAS = cameraUploadOptions(booking.cameraCount, booking.micCount)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  // v1.81 — folder upload. webkitdirectory isn't a typed React prop, so set it
+  // on the DOM node directly; this input's `files` is every file in the picked
+  // folder (recursive).
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    const el = folderInputRef.current
+    if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', '') }
+  }, [])
   const [camera, setCamera] = useState(defaultCamera && CAMERAS.includes(defaultCamera) ? defaultCamera : CAMERAS[0])
   // (no top-level error banner — per-queue-item errors render inline below)
   const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
@@ -105,9 +141,14 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   }
   useEffect(() => { fetchHistory() }, [booking.id])
 
-  const startQueue = (fileList: FileList | null) => {
+  const startQueue = (fileList: FileList | File[] | null) => {
     if (!fileList || fileList.length === 0) return
-    const items: InFlight[] = Array.from(fileList).map(file => ({
+    // v1.81 — folder picks/drops include OS cruft (.DS_Store, ._*, Thumbs.db).
+    // The server's filename validator rejects leading-dot names anyway, so drop
+    // them here instead of surfacing a failed queue row per junk file.
+    const files = Array.from(fileList).filter(f => f.name && !f.name.startsWith('.') && f.name !== 'Thumbs.db')
+    if (files.length === 0) return
+    const items: InFlight[] = files.map(file => ({
       localId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       file,
       camera,
@@ -126,6 +167,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     // big batch doesn't saturate the uplink).
     items.forEach(item => runOne(item).catch(e => updateQueue(item.localId, q => ({ ...q, state: 'failed', error: e?.message || String(e) }))))
     if (fileInputRef.current) fileInputRef.current.value = ''
+    if (folderInputRef.current) folderInputRef.current.value = ''
   }
 
   const updateQueue = (localId: string, fn: (q: InFlight) => InFlight) => {
@@ -277,22 +319,32 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             onDrop={e => {
               e.preventDefault()
               setDragOver(false)
-              startQueue(e.dataTransfer.files)
+              // v1.81 — recurse dropped folders (camera card = nested dirs)
+              filesFromDataTransfer(e.dataTransfer).then(startQueue)
             }}
             className={`rounded border-2 border-dashed p-3 transition-colors ${
               dragOver ? 'border-[#673ab7] bg-purple-100/60' : 'border-gray-300 bg-gray-50/30'
             }`}
           >
-            <input ref={fileInputRef} type="file" multiple
-              onChange={e => startQueue(e.target.files)}
-              className="block w-full text-sm text-gray-600
-                file:mr-3 file:py-2 file:px-4 file:rounded file:border-0
-                file:text-sm file:font-medium
-                file:bg-[#673ab7] file:text-white
-                hover:file:bg-[#5e35b1]
-                file:cursor-pointer cursor-pointer" />
+            <div className="flex items-center gap-2 flex-wrap">
+              <input ref={fileInputRef} type="file" multiple
+                onChange={e => startQueue(e.target.files)}
+                className="block flex-1 min-w-[200px] text-sm text-gray-600
+                  file:mr-3 file:py-2 file:px-4 file:rounded file:border-0
+                  file:text-sm file:font-medium
+                  file:bg-[#673ab7] file:text-white
+                  hover:file:bg-[#5e35b1]
+                  file:cursor-pointer cursor-pointer" />
+              {/* v1.81 — folder picker (webkitdirectory attr set via ref) */}
+              <input ref={folderInputRef} type="file" multiple className="hidden"
+                onChange={e => startQueue(e.target.files)} />
+              <button type="button" onClick={() => folderInputRef.current?.click()}
+                className="py-2 px-4 rounded text-sm font-medium border border-[#673ab7] text-[#673ab7] hover:bg-purple-50 whitespace-nowrap">
+                📁 เลือกทั้งโฟลเดอร์
+              </button>
+            </div>
             <p className="text-[11px] text-gray-500 mt-2 text-center">
-              {dragOver ? '⬇ ปล่อยไฟล์ที่นี่' : 'หรือ drag ไฟล์มาวางที่นี่'}
+              {dragOver ? '⬇ ปล่อยไฟล์/โฟลเดอร์ที่นี่' : 'หรือ drag ไฟล์ — หรือทั้งโฟลเดอร์ — มาวางที่นี่'}
             </p>
           </div>
           <p className="text-[10px] text-gray-500 mt-1">

@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.81.0] — 2026-06-22
+
+### Added — Upload Footage: ลาก/เลือก "ทั้งโฟลเดอร์" ได้
+- เดิมต้องเลือกไฟล์วิดีโอทีละไฟล์. เพิ่ม **ปุ่ม "📁 เลือกทั้งโฟลเดอร์"** (native `webkitdirectory`) — เลือกโฟลเดอร์เดียว ไฟล์ทุกไฟล์ข้างใน (รวม subfolder) เข้าคิว upload เลย.
+- **ลากทั้งโฟลเดอร์มาวาง** ได้ด้วย — drop handler ใช้ `webkitGetAsEntry` ไล่ทุกไฟล์ในโฟลเดอร์ที่ลากมา (เดิม `dataTransfer.files` ไม่ recurse เข้าโฟลเดอร์).
+- กรอง OS cruft อัตโนมัติ (`.DS_Store`, `._*`, `Thumbs.db`) — ไม่ขึ้นแถว error เปล่า ๆ ตอนยัดทั้งโฟลเดอร์.
+- ทุกไฟล์ยัง upload ลง `<camera>/<ชื่อไฟล์>` แบบ flatten (โครงสร้าง subfolder ไม่ถูกเก็บ — ถ้าต้องการค่อยทำเพิ่ม). ไฟล์เดียว: `src/app/_components/booking/UploadSection.tsx`.
+
+⚠️ ต้อง **redeploy** ถึงจะเห็นปุ่ม (แก้ฝั่ง client bundle).
+
+---
+
 ## [1.80.1] — 2026-06-22
 
 ### Fixed — Upload Footage ค้างที่ Drive 0% retry 3/4 (CORS)
