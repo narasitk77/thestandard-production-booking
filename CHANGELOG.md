@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.88.0] — 2026-06-22
+
+### Added — prep-folders สร้างโฟลเดอร์ใน Production Team drive ด้วย (ตั้งชื่อตาม Production ID)
+- worker prep-folders (รายชั่วโมง) เดิมสร้างกล่องใน VIDEO 2026 อย่างเดียว. ตอนนี้สำหรับงาน confirm ของวันนี้ **สร้างโฟลเดอร์ landing ใน "Production Team" Shared Drive ด้วย** — แบบ flat: `<root>/<Production ID · ชื่องาน>/CAM-A·CAM-B·..` → ช่างภาพ/NAS drop footage เข้าโฟลเดอร์ที่ระบุชื่อถูกตั้งแต่ต้น (แก้ปัญหาโฟลเดอร์ "วันที่+ชื่องาน" ที่ไม่มี Production ID).
+- ใหม่: `ensureFlatShootFolders()` ใน `google-drive.ts` (root→bookingFolder→cameras, idempotent). Production Team drive id hardcode default `0AGendsFHFQYKUk9PVA` (override ด้วย `DRIVE_PRODUCTION_TEAM_ROOT`) — ไม่ต้องตั้ง env ใน Portainer. best-effort: ถ้า Production Team error จะไม่ล้มการ prep VIDEO 2026.
+
+---
+
 ## [1.87.1] — 2026-06-22
 
 ### Fixed — prep-folders worker หางานวันนี้ไม่เจอ (timezone vs @db.Date)

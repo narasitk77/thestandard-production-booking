@@ -8,7 +8,7 @@
  * moving, no _SHOOT.txt — approve handles that).
  */
 import { prisma } from '@/lib/db'
-import { ensureShootCameraFolders, hasDriveCredentials } from '@/lib/google-drive'
+import { ensureShootCameraFolders, ensureFlatShootFolders, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
   programFolderName,
@@ -30,6 +30,11 @@ export function bangkokTodayRange(now: Date = new Date()): { start: Date; end: D
   return { start, end: new Date(start.getTime() + 24 * 3_600_000) }
 }
 
+// v1.88 — "Production Team" landing Shared Drive (where the NAS syncs footage).
+// Hardcoded default so it works without a Portainer env change; override with
+// DRIVE_PRODUCTION_TEAM_ROOT if the drive ever changes.
+const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
+
 export interface PrepResult {
   skipped: boolean
   reason?: string
@@ -37,7 +42,7 @@ export interface PrepResult {
   total: number
   prepared: number
   errors: number
-  results: Array<{ bookingCode: string | null; created?: string[]; wouldCreate?: string[]; skipped?: string; error?: string }>
+  results: Array<{ bookingCode: string | null; created?: string[]; prodTeam?: string; wouldCreate?: string[]; skipped?: string; error?: string }>
 }
 
 export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Promise<PrepResult> {
@@ -84,6 +89,8 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     }
     try {
       const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+      const bookingFolderName = buildBookingFolderName(b.bookingCode!, jobName)
+      // 1) destination boxes in VIDEO 2026 (outlet/program/<ID·job>/CAM-..)
       await ensureShootCameraFolders({
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
@@ -92,10 +99,19 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
           showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
           category: b.category,
         }),
-        bookingFolderName: buildBookingFolderName(b.bookingCode!, jobName),
+        bookingFolderName,
         cameras,
       })
-      results.push({ bookingCode: b.bookingCode, created: cameras })
+      // 2) v1.88 — landing folder in Production Team (flat, named by Production ID)
+      //    so crew drop footage into an already-identified folder. Best-effort:
+      //    a Production Team hiccup must not undo the VIDEO 2026 prep.
+      let prodTeam = 'ok'
+      try {
+        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingFolderName, cameras })
+      } catch (ptErr: any) {
+        prodTeam = `error: ${ptErr?.message || ptErr}`
+      }
+      results.push({ bookingCode: b.bookingCode, created: cameras, prodTeam })
       prepared++
     } catch (e: any) {
       results.push({ bookingCode: b.bookingCode, error: e?.message || String(e) })

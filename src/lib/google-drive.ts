@@ -434,6 +434,25 @@ export async function ensureShootCameraFolders(input: ShootFolderInput & {
 }
 
 /**
+ * v1.88 — flat variant: <root>/<bookingFolderName>/<camera>/ with no
+ * outlet/program layer. Used to pre-create the shoot folder in the "Production
+ * Team" landing Shared Drive (where the NAS syncs footage) named by Production
+ * ID, so crew drop footage into an already-identified folder. Idempotent.
+ */
+export async function ensureFlatShootFolders(input: {
+  rootFolderId: string
+  bookingFolderName: string
+  cameras: string[]
+}): Promise<{ bookingFolderId: string }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const bookingFolderId = await ensureChildFolder(drive, input.rootFolderId, input.bookingFolderName)
+  for (const cam of input.cameras) {
+    await ensureChildFolder(drive, bookingFolderId, cam)
+  }
+  return { bookingFolderId }
+}
+
+/**
  * v1.36.0 — write (or refresh) a small UTF-8 text file inside a folder.
  * Used to drop a `booking-info.txt` next to the footage so editors who open
  * the folder see the shoot's context without leaving Drive. Idempotent:
