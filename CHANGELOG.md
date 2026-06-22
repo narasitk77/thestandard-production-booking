@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.85.0] — 2026-06-22
+
+### Added — ป้ายสถานะอัป + กรอกชื่อ Producer เองสำหรับงาน Event
+- **ป้ายสถานะอัปต่อ booking** ในหน้า /upload (รายการงานของช่างภาพ): `🔴 ยังไม่อัป` / `🟡 อัปบางกล้อง {n}/{cameraCount}` / `🟢 อัปครบ ({ไฟล์})` — ช่างภาพดูปราดเดียวรู้ว่างานไหนยังต้องอัป. ข้อมูลจาก endpoint ใหม่ `GET /api/upload/status?bookingIds=` (groupBy กล้องที่ COMPLETE — counts only, เบา).
+- **Producer แบบกรอกชื่อเอง สำหรับงาน Event** — `shootType === 'Event'` (non-AGN) กลับมาใช้ช่องกรอก Name/Phone/Email เอง แทน dropdown โปรดิวเซอร์ประจำ outlet (โปรดิวเซอร์งานอีเวนต์มักเป็นคนนอก roster). คืนพฤติกรรมก่อน v1.59.
+- ไฟล์: `src/app/upload/page.tsx` (badge + fetch), `src/app/api/upload/status/route.ts` (ใหม่), `src/app/_components/booking/BookingWizard.tsx` (1 บรรทัด — `useProducerDropdown` ตัด Event ออก).
+
+---
+
 ## [1.84.0] — 2026-06-22
 
 ### Changed — footage ขึ้นชื่อ "คนที่อัปจริง" บน Drive (ไม่ใช่ narasit.k ทุกอัน)

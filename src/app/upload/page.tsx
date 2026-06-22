@@ -32,6 +32,18 @@ function fmtDate(d: string): string {
   return `${dt.getDate()} ${THAI_MONTHS[dt.getMonth()]} ${String(dt.getFullYear()).slice(2)}`
 }
 
+// v1.85 — upload-progress badge for a booking in the crew's job list.
+// Compares cameras with COMPLETE uploads against the booking's cameraCount.
+function uploadBadge(b: BookingRow, st?: { cameras: number; files: number }) {
+  const base = 'text-[10px] px-1.5 py-0.5 rounded border'
+  const cameras = st?.cameras ?? 0
+  const files = st?.files ?? 0
+  const expected = Math.max(1, b.cameraCount || 1)
+  if (files === 0) return <span className={`${base} bg-red-50 text-red-700 border-red-200`}>🔴 ยังไม่อัป</span>
+  if (cameras >= expected) return <span className={`${base} bg-green-50 text-green-700 border-green-200`}>🟢 อัปครบ ({files})</span>
+  return <span className={`${base} bg-yellow-50 text-yellow-700 border-yellow-200`}>🟡 อัปบางกล้อง {cameras}/{expected}</span>
+}
+
 /**
  * /upload — v1.35.3 rewrite.
  *
@@ -55,6 +67,8 @@ function UploadPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  // v1.85 — per-booking upload status for the "ยังไม่อัป / อัปบางกล้อง / ครบ" badge
+  const [uploadStatus, setUploadStatus] = useState<Record<string, { cameras: number; files: number }>>({})
 
   useEffect(() => {
     fetch('/api/me')
@@ -112,6 +126,13 @@ function UploadPage() {
         // Sort newest shoot date first so the most-relevant rows are on top
         merged.sort((a, b) => (b.shootDate || '').localeCompare(a.shootDate || ''))
         setBookings(merged)
+        // v1.85 — upload status for the badges (best-effort; non-blocking)
+        if (merged.length) {
+          fetch(`/api/upload/status?bookingIds=${merged.map(b => b.id).join(',')}`)
+            .then(r => (r.ok ? r.json() : { status: {} }))
+            .then(d => setUploadStatus(d.status || {}))
+            .catch(() => {})
+        }
       })
       .catch(e => setError(String(e?.message || e)))
       .finally(() => setLoading(false))
@@ -247,6 +268,8 @@ function UploadPage() {
                         DUAL
                       </span>
                     )}
+                    {/* v1.85 — upload status badge: which shoots still need footage */}
+                    <span className="ml-auto">{uploadBadge(b, uploadStatus[b.id])}</span>
                   </div>
                   <div className="text-xs text-gray-600 mt-1">
                     {b.program.name} · {fmtDate(b.shootDate)} {b.callTime}
