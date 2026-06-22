@@ -30,6 +30,18 @@ header on the resumable-init PATCH. No env/schema change required.
 stack so the fallback matches the browser's real origin exactly (a mismatch
 re-breaks CORS).
 
+**✅ DEPLOYED + VERIFIED LIVE 2026-06-22 ~11:30** — pushed `edf23f4`→main, GHCR
+built `sha-edf23f4` (green), redeployed Portainer stack 125 via the API
+(`PUT /api/stacks/125/git/redeploy?endpointId=2`, `IMAGE_TAG`→`sha-edf23f4`,
+`pullImage:true`; CSRF token read from a GET's `X-CSRF-Token` response header
+since the cookie is httpOnly). Container `production-booking-app` now runs
+`sha-edf23f4`, version endpoint reports 1.80.1. `NEXTAUTH_URL` confirmed
+`=https://probook.xtec9.xyz` in the stack env (fallback safe). **End-to-end
+verified in the real browser:** init'd a real upload on booking
+NWS-NDG-260622-S-01 and did the exact cross-origin chunk PUT to googleapis.com
+that used to fail → **HTTP 200** with `drive#file` metadata (no CORS error);
+reserved test slot cleaned up via the cancel endpoint (200).
+
 ---
 
 ## 2026-06-19 · v1.77.0 — ops reliability (backup + dead-man + version)
