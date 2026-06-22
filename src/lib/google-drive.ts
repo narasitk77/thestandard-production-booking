@@ -585,6 +585,17 @@ export async function createResumableUploadSession(input: {
 }
 
 /**
+ * v1.82 — the Drive folder a file lives in (its first parent). Used to turn an
+ * uploaded footage file into a "open the camera folder" link without storing
+ * the folder id separately — works for files uploaded before we tracked it.
+ */
+export async function getDriveParentFolderId(fileId: string): Promise<string | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const res = await drive.files.get({ fileId, fields: 'parents', supportsAllDrives: true })
+  return res.data.parents?.[0] ?? null
+}
+
+/**
  * Best-effort cleanup after a failed/cancelled upload. Removes the
  * reserved Drive file slot so an aborted session doesn't leave an
  * empty/partial file in the Shared Drive.

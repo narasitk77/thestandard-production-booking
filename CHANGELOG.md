@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.82.0] — 2026-06-22
+
+### Added — ลิงก์โฟลเดอร์ footage บน Drive ต่อกล้อง ในหน้า task booking
+- ในหน้า upload ของแต่ละงาน เพิ่มกล่อง **"📁 โฟลเดอร์ footage บน Drive"** — กล้องไหนที่ upload เสร็จแล้ว (CAM-A, CAM-B, …) แสดงปุ่มลิงก์เปิดโฟลเดอร์กล้องนั้นบน Google Drive ตรง ๆ + จำนวนไฟล์.
+- ลิงก์โฟลเดอร์หาได้จาก parent ของไฟล์ที่ upload เสร็จ → **ใช้ได้กับไฟล์ที่ upload ไปแล้วก่อนหน้าด้วย** (ไม่ต้องแก้ schema / ไม่ต้อง backfill).
+- ใหม่: `GET /api/upload/folders?bookingId=` (auth เท่ากับ /api/upload/list) + `getDriveParentFolderId()` ใน `src/lib/google-drive.ts`; UI ใน `UploadSection.tsx` รีเฟรชพร้อมตารางประวัติ.
+
+---
+
 ## [1.81.0] — 2026-06-22
 
 ### Added — Upload Footage: ลาก/เลือก "ทั้งโฟลเดอร์" ได้

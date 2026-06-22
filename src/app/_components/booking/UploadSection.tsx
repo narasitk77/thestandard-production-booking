@@ -122,6 +122,8 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
   const [history, setHistory] = useState<UploadItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  // v1.82 — per-camera Drive folder links for cameras with completed uploads.
+  const [folders, setFolders] = useState<Array<{ camera: string; count: number; folderUrl: string | null }>>([])
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
@@ -135,6 +137,11 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       const res = await fetch(`/api/upload/list?bookingId=${booking.id}`)
       const data = await res.json()
       if (res.ok) setHistory(data.uploads || [])
+      // v1.82 — refresh per-camera Drive folder links (best-effort)
+      fetch(`/api/upload/folders?bookingId=${booking.id}`)
+        .then(r => (r.ok ? r.json() : { folders: [] }))
+        .then(d => setFolders(d.folders || []))
+        .catch(() => {})
     } finally {
       setHistoryLoading(false)
     }
@@ -394,6 +401,26 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* v1.82 — per-camera Drive folder links (cameras with completed uploads) */}
+      {folders.length > 0 && (
+        <div className="gf-card p-4">
+          <div className="text-sm font-medium text-gray-700 mb-2">📁 โฟลเดอร์ footage บน Drive</div>
+          <div className="flex flex-wrap gap-2">
+            {folders.map(f => f.folderUrl ? (
+              <a key={f.camera} href={f.folderUrl} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-[#673ab7] text-[#673ab7] hover:bg-purple-50">
+                📁 {f.camera} <span className="text-gray-400">({f.count})</span> <ExternalLink className="w-3 h-3" />
+              </a>
+            ) : (
+              <span key={f.camera} className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-gray-200 text-gray-400">
+                {f.camera} ({f.count})
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-400 mt-1.5">เปิดโฟลเดอร์กล้องบน Google Drive ของงานนี้</p>
         </div>
       )}
 
