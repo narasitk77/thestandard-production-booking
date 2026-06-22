@@ -5,6 +5,33 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.80.1 — fix Upload Footage CORS (Drive stuck at 0% retry 3/4)
+
+**Symptom (operator-reported):** every footage upload to Drive stalled at 0%,
+auto-retried 4× (amber "retry 3/4"), then failed. All files, all sizes.
+
+**Root cause:** the browser PUTs each Drive chunk cross-origin to
+`googleapis.com`. We created the resumable session **without an `Origin`
+header**, so Drive accepted the bytes (HTTP 200) but omitted
+`Access-Control-Allow-Origin` on the chunk-PUT *response* → the browser blocked
+it as a CORS violation → `xhr.onerror` → retries exhausted → 0%. The CORS
+*preflight* returned ACAO, which masked the problem; only the real PUT response
+lacked it. Reproduced directly against live Drive: no-Origin init → response
+ACAO `null`; with-Origin init → ACAO set. Drive accepted the bytes either way.
+
+**Fix (code, needs redeploy):** send the browser `Origin` on session init.
+`src/app/api/upload/init/route.ts` reads `request.headers.get('origin')`
+(fallback `NEXTAUTH_URL` / `NEXT_PUBLIC_APP_URL`) and passes it to
+`createResumableUploadSession`, which now sets it as the `Origin` request
+header on the resumable-init PATCH. No env/schema change required.
+
+**Operator action:** redeploy with the new image. If the front proxy strips the
+`Origin` header, ensure `NEXTAUTH_URL=https://probook.xtec9.xyz` is set in the
+stack so the fallback matches the browser's real origin exactly (a mismatch
+re-breaks CORS).
+
+---
+
 ## 2026-06-19 · v1.77.0 — ops reliability (backup + dead-man + version)
 
 **New DB model `SystemHeartbeat`** — auto-applied by `prisma db push` on

@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.80.1] — 2026-06-22
+
+### Fixed — Upload Footage ค้างที่ Drive 0% retry 3/4 (CORS)
+- **อาการ:** อัปโหลด footage เข้า Drive ค้างที่ 0% แล้ว retry จนครบ 4 ครั้งแล้ว fail (แถบสีส้ม "retry 3/4"). ทุกไฟล์ ทุกขนาด.
+- **ต้นเหตุ:** เบราว์เซอร์ PUT แต่ละ chunk ตรงเข้า `googleapis.com` (cross-origin). ตอนเปิด resumable session เราไม่ได้ส่ง header `Origin` ไป → Drive **รับ bytes สำเร็จ (HTTP 200)** แต่ response ของ chunk PUT **ไม่มี `Access-Control-Allow-Origin`** → เบราว์เซอร์ block ผลลัพธ์เป็น CORS error → `xhr.onerror` → retry จนหมดแล้ว fail. (preflight มี ACAO แต่ response จริงไม่มี — พิสูจน์ด้วยการ reproduce จริง: init แบบไม่ส่ง Origin → response ACAO = null; ส่ง Origin → ACAO = ตั้งค่าถูก.)
+- **แก้:** ส่ง `Origin` ของเบราว์เซอร์เข้าไปตอนเปิด session (`createResumableUploadSession`) จาก `Origin` header ของ request `/api/upload/init` (fallback `NEXTAUTH_URL` / `NEXT_PUBLIC_APP_URL` เผื่อ proxy ตัด header ทิ้ง). Drive จึงใส่ ACAO กลับมาในทุก chunk PUT.
+- **ไฟล์:** `src/lib/google-drive.ts`, `src/app/api/upload/init/route.ts`.
+
+⚠️ ต้อง **redeploy** ถึงจะมีผล (แก้ฝั่ง server). ถ้า proxy หน้าเว็บตัด `Origin` header ออก ต้องตั้ง `NEXTAUTH_URL=https://probook.xtec9.xyz` ใน stack ให้ตรงกับ origin จริงของเบราว์เซอร์.
+
+---
+
 ## [1.80.0] — 2026-06-20
 
 ### Added/Changed — ตาราง Rentals ดูง่ายขึ้น + migrate ข้อมูลที่ขาด

@@ -522,6 +522,17 @@ export async function createResumableUploadSession(input: {
   filename: string
   mimeType: string
   size: number
+  /**
+   * v1.80.1 — the browser's Origin (e.g. https://probook.xtec9.xyz). MUST be
+   * registered here at session-init time or every chunk PUT fails in the
+   * browser. Drive's CORS preflight always returns Access-Control-Allow-Origin,
+   * but the ACTUAL chunk-PUT *response* only carries that header when the
+   * origin was sent on THIS init request. Without it Drive still accepts the
+   * bytes (HTTP 200) but the browser blocks the response as a CORS violation →
+   * xhr.onerror → "network error" → retries exhaust → upload stuck at 0%.
+   * Verified empirically: no-Origin init → response ACAO null; with-Origin → ACAO set.
+   */
+  origin?: string
 }): Promise<ResumableSession> {
   const auth = getDriveWriteAuth()
   // Get a fresh OAuth access token to hit the raw resumable endpoint.
@@ -556,6 +567,9 @@ export async function createResumableUploadSession(input: {
         'X-Upload-Content-Type': input.mimeType || 'application/octet-stream',
         'X-Upload-Content-Length': String(input.size),
         'Content-Type': 'application/json',
+        // v1.80.1 — register the browser origin so chunk-PUT responses carry
+        // Access-Control-Allow-Origin (see the input.origin doc above).
+        ...(input.origin ? { Origin: input.origin } : {}),
       },
       body: JSON.stringify({}),
     },

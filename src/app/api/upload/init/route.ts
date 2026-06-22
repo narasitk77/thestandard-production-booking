@@ -285,6 +285,14 @@ export async function POST(request: NextRequest) {
         filename,
         mimeType,
         size,
+        // v1.80.1 — the browser PUTs chunks cross-origin to googleapis.com;
+        // Drive only returns Access-Control-Allow-Origin on those PUT responses
+        // when the origin was registered HERE. Header is authoritative (matches
+        // the browser exactly); env is the fallback if a proxy strips it.
+        origin: request.headers.get('origin')
+          || process.env.NEXTAUTH_URL
+          || process.env.NEXT_PUBLIC_APP_URL
+          || undefined,
       })
       driveTarget = driveSession
       // Tie the reserved Drive file id to the Upload row so /complete can verify it
