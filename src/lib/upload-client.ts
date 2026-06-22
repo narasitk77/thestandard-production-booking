@@ -33,6 +33,54 @@ export interface UploadCallbacks {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Finalize — POST /api/upload/complete, surviving transient failures
+// ──────────────────────────────────────────────────────────────────────────────
+
+// v1.83 — by the time we call /complete the footage bytes are already in
+// Drive/Wasabi, so a momentary blip here (a deploy restart → 502, a non-JSON
+// error page, a network drop) must NOT mark a finished upload as failed.
+// /complete is idempotent (a re-call on an already-COMPLETE row returns ok), so
+// retrying is safe. A 4xx is a real, permanent error (auth/validation) →
+// surfaced immediately, not retried.
+export const COMPLETE_MAX_ATTEMPTS = 10
+
+export async function completeWithRetry(
+  payload: any,
+  opts: { fetchImpl?: typeof fetch; sleepMs?: (ms: number) => Promise<void> } = {},
+): Promise<any> {
+  const doFetch = opts.fetchImpl ?? fetch
+  const sleepFor = opts.sleepMs ?? sleep
+  let lastErr = 'complete failed'
+  for (let attempt = 1; attempt <= COMPLETE_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await doFetch('/api/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (res.status >= 400 && res.status < 500) {
+        const d = await res.json().catch(() => ({}))
+        const err: any = new Error(d.error || d.errors?.join(' · ') || `complete failed (${res.status})`)
+        err.permanent = true // auth/validation — retrying won't help
+        throw err
+      }
+      if (res.ok) {
+        const d = await res.json().catch(() => null)
+        if (d?.ok) return d
+        lastErr = d?.error || d?.errors?.join(' · ') || 'complete returned not-ok'
+      } else {
+        lastErr = `complete HTTP ${res.status}` // 5xx → transient, retry
+      }
+    } catch (e: any) {
+      if (e?.permanent) throw e // permanent 4xx — surface immediately
+      lastErr = e?.message || String(e) // fetch threw (network/JSON parse) → transient
+    }
+    if (attempt < COMPLETE_MAX_ATTEMPTS) await sleepFor(Math.min(20_000, 2000 * 2 ** (attempt - 1)))
+  }
+  throw new Error(`ปิดงานไม่สำเร็จหลังลองใหม่ ${COMPLETE_MAX_ATTEMPTS} ครั้ง: ${lastErr} — ไฟล์อาจขึ้น Drive แล้ว กด Refresh เพื่อตรวจสอบ`)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Drive — chunked resumable upload
 // ──────────────────────────────────────────────────────────────────────────────
 

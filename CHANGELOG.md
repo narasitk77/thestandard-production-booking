@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.83.0] — 2026-06-22
+
+### Fixed — upload เสร็จแล้วแต่ขึ้น "Failed" ตอนขั้นปิดงาน (network blip / deploy)
+- **อาการ:** ไฟล์ใหญ่ (เช่น 5.7GB) อัปขึ้น Drive ครบแล้ว (เปิดเล่นได้) แต่ status ขึ้น **Failed** + error `Unexpected token '<', "<!DOCTYPE"...` — เพราะ step สุดท้าย `POST /api/upload/complete` ไปโดน 502 พอดี (เช่นตอน container restart/deploy หรือเน็ตสะดุดวินาทีนั้น) แล้ว client ไม่ retry เลยทิ้งงานทั้งที่ไฟล์ปลอดภัยบน Drive แล้ว.
+- **แก้:** `completeWithRetry` (ใน `src/lib/upload-client.ts`) — ลอง `/complete` ใหม่สูงสุด 10 ครั้ง (exponential backoff) เมื่อเจอ 5xx / non-JSON / network error. `/complete` เป็น idempotent อยู่แล้ว (เรียกซ้ำบนแถวที่ COMPLETE → ok) จึงปลอดภัย. 4xx (auth/validation) ถือเป็น error ถาวร → ไม่ retry. ครอบด้วยเทสต์ `src/lib/__tests__/upload-complete-retry.test.ts` (4 เคส รวมเคส 502-deploy).
+- งานที่ค้าง UPLOADING อยู่แล้วเพราะอาการนี้: ไฟล์อยู่บน Drive ครบ — re-complete ได้โดยไม่ต้องอัปใหม่.
+
+---
+
 ## [1.82.0] — 2026-06-22
 
 ### Added — ลิงก์โฟลเดอร์ footage บน Drive ต่อกล้อง ในหน้า task booking

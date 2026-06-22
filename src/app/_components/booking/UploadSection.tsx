@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { Upload, X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
-import { uploadToDrive as driveUpload, uploadToWasabi as wasabiUpload, type RetryStatus } from '@/lib/upload-client'
+import { uploadToDrive as driveUpload, uploadToWasabi as wasabiUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
 import { cameraUploadOptions } from '@/lib/outlet-folders'
 
 interface BookingContext {
@@ -234,21 +234,17 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
 
     await Promise.all(tasks)
 
-    // 3. COMPLETE — server finalizes both clouds + writes sheet row
+    // 3. COMPLETE — server finalizes both clouds + writes sheet row.
+    //    v1.83 — retried: the bytes are already in the cloud, so a transient
+    //    blip here (server restart/deploy → 502, momentary network drop) must
+    //    NOT mark a finished upload as failed. /complete is idempotent so
+    //    re-calling is safe.
     updateQueue(item.localId, q => ({ ...q, state: 'completing' }))
-    const completeRes = await fetch('/api/upload/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uploadId,
-        drive: initData.targets?.drive ? { fileId: initData.targets.drive.fileId } : undefined,
-        wasabi: initData.targets?.wasabi ? { parts: wasabiParts } : undefined,
-      }),
+    await completeWithRetry({
+      uploadId,
+      drive: initData.targets?.drive ? { fileId: initData.targets.drive.fileId } : undefined,
+      wasabi: initData.targets?.wasabi ? { parts: wasabiParts } : undefined,
     })
-    const completeData = await completeRes.json()
-    if (!completeRes.ok || !completeData.ok) {
-      throw new Error(completeData.error || completeData.errors?.join(' · ') || 'complete failed')
-    }
     updateQueue(item.localId, q => ({ ...q, state: 'done' }))
     fetchHistory()  // refresh the bottom list
   }
