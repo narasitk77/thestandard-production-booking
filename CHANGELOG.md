@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.87.0] — 2026-06-22
+
+### Changed — เพิ่ม cap อัปโหลดต่อไฟล์ 100GB → 500GB
+- `MAX_FILE_SIZE_BYTES` ใน `/api/upload/init` 100GB → **500GB** ต่อไฟล์ (Drive รองรับถึง 5TB; ไฟล์วิ่งเบราว์เซอร์→Google ตรง ๆ ไม่ผ่าน server).
+- ⚠️ ข้อจำกัดที่ยังเหมือนเดิม: client ยัง **resume ข้าม refresh/ปิดแท็บไม่ได้** — ไฟล์ยักษ์ที่ขาดตอนกลางคันเริ่มใหม่จาก 0 (auto-retry กันได้แค่เน็ตหลุดสั้น ๆ ระหว่างแท็บเปิด). ไฟล์ใหญ่มากแนะนำ path NAS→Drive sync.
+
+---
+
 ## [1.86.0] — 2026-06-22
 
 ### Added — Auto เตรียมกล่อง (โฟลเดอร์ Drive) สำหรับงานของวันนี้ ทุกชั่วโมง

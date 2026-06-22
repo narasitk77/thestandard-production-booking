@@ -52,7 +52,7 @@ export const dynamic = 'force-dynamic'
  * Response: { uploadId, targets: { drive?, wasabi? }, chunkSize? }
  */
 
-const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024 * 1024 // 100GB hard cap
+const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024 * 1024 // 500GB hard cap (v1.87; Drive itself allows 5TB)
 const SAFE_FILENAME_RE = /^[A-Za-z0-9._\-()[\] ฀-๿]+$/  // ASCII + Thai
 
 /**
