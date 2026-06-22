@@ -5,6 +5,27 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.84.0 — Drive uploads attributed to the real uploader
+
+Deployed `sha-b5a7f67` via the Portainer API redeploy (same mechanism as below).
+The footage upload path now impersonates `session.email` (domain-wide delegation)
+so Drive shows the actual person as the file/folder creator instead of the fixed
+`GOOGLE_IMPERSONATE_SUBJECT` (narasit.k). If the uploader isn't a Shared Drive
+(VIDEO 2026) member, the first folder op returns 403/404 → `isDriveAccessError`
+→ fall back to the default subject so uploads never break (just attributed to
+narasit.k). `getDriveWriteAuth(subject?)` + `subject` threaded through
+ensureUploadFolderPath / upsertTextFile / createResumableUploadSession; new
+`src/lib/drive-access.ts` (+ unit test). Verified live: init as narasit.k → 200
++ Drive session (impersonation works); 119 tests pass.
+
+Access-control note for the operator: **blocking an email** already works today —
+deactivate the user (`active=false`) in /admin/permissions and they can't log in
+(`auth.ts` returns `/login?error=disabled`). Controlling who can open the footage
+folders on Google Drive is a Workspace/Shared-Drive membership task (the app can't
+change Drive ACLs) — but v1.84 ties "upload as yourself" to Shared Drive membership.
+
+---
+
 ## 2026-06-22 · v1.81.0 / v1.82.0 / v1.83.0 — footage upload UX + completion robustness
 
 All three built via GHCR push→main and deployed via the Portainer API redeploy
