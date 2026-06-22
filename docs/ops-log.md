@@ -5,6 +5,35 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.86.0 / v1.87.0 / v1.87.1 — prep-folders worker + 500GB cap
+
+Deployed `sha-24bf78e`. (Deploy note: the API redeploy fetch CDP-times-out at
+45s while Portainer pulls; if the stack IMAGE_TAG env doesn't change afterward,
+the redeploy didn't apply — re-fire and verify the tag flips. Hit this once here.)
+
+- **v1.86.0** — new `prep-folders` worker (supervised in start.sh, **ON by
+  default** — set `PREP_FOLDERS_WORKER_ENABLED=0` to disable). Hourly hits
+  `GET /api/internal/prep-folders/run`, which pre-creates the VIDEO 2026
+  destination boxes (CAM-A.. folders) for bookings shooting TODAY (Bangkok TZ,
+  CONFIRMED/COMPLETED). Idempotent, no file moving. `src/lib/prep-folders.ts`,
+  `scripts/prep-folders-worker.js`. (The "detect + move from Production Team
+  drive" half is deferred — landing folders are named "date + show", no
+  Production ID, and there's often no matching booking; cross-Shared-Drive move
+  itself was tested working = instant metadata move, no re-upload.)
+- **v1.87.0** — per-file upload cap 100GB → **500GB** (`MAX_FILE_SIZE_BYTES`).
+  Drive allows 5TB; chunks go browser→Google direct. Verified: init a 200GB file
+  → accepted. Caveat unchanged: no resume across tab reload → huge interrupted
+  uploads restart from 0 (NAS→Drive sync stays the path for the very largest).
+- **v1.87.1** — fixed prep-folders missing today's shoots. `Booking.shootDate`
+  is `@db.Date` (date-only); `bangkokTodayRange` had offset the bounds by -7h and
+  the date-truncated 17:00Z `end` made `lt` exclude today → dry-run returned
+  today=0. Fixed to midnight-UTC of the Bangkok calendar date. **Verified
+  end-to-end:** dry-run finds NWS-NDG-260622-S-01 (CAM-A, AUDIO); real run created
+  them; Drive shows `AUDIO · CAM-A` in the booking folder. Diagnosed via the
+  exec-API DB probe.
+
+---
+
 ## 2026-06-22 · v1.85.0 — upload-status badges + free-text Event producer
 
 Deployed `sha-b277c16`. Two ops-requested tweaks:
