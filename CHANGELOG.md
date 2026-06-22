@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.86.0] — 2026-06-22
+
+### Added — Auto เตรียมกล่อง (โฟลเดอร์ Drive) สำหรับงานของวันนี้ ทุกชั่วโมง
+- Worker ใหม่ `prep-folders` รันทุกชั่วโมง: หางาน (booking) ที่ **ถ่ายวันนี้** (Bangkok TZ, CONFIRMED/COMPLETED) แล้ว **pre-create โฟลเดอร์ปลายทางใน VIDEO 2026** (outlet/program/Production ID/CAM-A..) ให้ "รอไว้" — กล้องไหนยังไม่อัป = โฟลเดอร์ว่าง. Idempotent (โฟลเดอร์เดิมไม่สร้างซ้ำ), **ยังไม่ย้ายไฟล์** (ตามที่สั่ง).
+- เดิม approve route สร้างโฟลเดอร์ตอน confirm อยู่แล้ว — อันนี้คือ sweep กันงานที่ confirm ก่อน v1.70 / สร้างพลาด ให้ครบทุกงานของวันนี้.
+- **ON by default** (สร้างโฟลเดอร์ว่างปลอดภัย) — ไม่ต้องตั้ง env ใน Portainer แค่ deploy; ปิดได้ด้วย `PREP_FOLDERS_WORKER_ENABLED=0`. ทดสอบเองได้: `GET /api/internal/prep-folders/run?dryRun=1` (ADMIN หรือ x-prep-folders-secret=NEXTAUTH_SECRET).
+- ไฟล์: `src/lib/prep-folders.ts` (+ test สำหรับ Bangkok TZ), `src/app/api/internal/prep-folders/run/route.ts`, `scripts/prep-folders-worker.js`, `start.sh` (supervised). reuse `ensureShootCameraFolders` + `camerasToPreCreate` เดิม.
+
+> ส่วน "detect + ย้ายไฟล์จาก Production Team drive เข้ากล่อง" deferred (โฟลเดอร์ NAS ตั้งชื่อ "วันที่+ชื่องาน" ไม่มี Production ID → ต้องเลือกวิธี route ก่อน). ย้ายข้าม Shared Drive เทสต์แล้วทำได้ (instant ไม่ต้อง re-upload).
+
+---
+
 ## [1.85.0] — 2026-06-22
 
 ### Added — ป้ายสถานะอัป + กรอกชื่อ Producer เองสำหรับงาน Event

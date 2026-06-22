@@ -345,5 +345,16 @@ echo "==> Starting DB backup worker (supervised)..."
   done
 ) &
 
+# v1.86 — prep-folders worker. ON BY DEFAULT (safe + idempotent: pre-creates the
+# Drive boxes for today's shoots). Set PREP_FOLDERS_WORKER_ENABLED=0 to disable.
+echo "==> Starting prep-folders worker (supervised)..."
+(
+  while true; do
+    node scripts/prep-folders-worker.js
+    echo "[prep-folders] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start
