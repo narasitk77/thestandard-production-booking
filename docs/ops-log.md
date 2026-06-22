@@ -5,6 +5,43 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.81.0 / v1.82.0 / v1.83.0 — footage upload UX + completion robustness
+
+All three built via GHCR push→main and deployed via the Portainer API redeploy
+(`PUT /api/stacks/125/git/redeploy?endpointId=2`, `IMAGE_TAG`→sha, `pullImage:true`;
+CSRF from a GET's `X-CSRF-Token` response header). Running image now
+`sha-885a605` (v1.83.0); `/api/version` reports 1.83.0.
+
+- **v1.81.0** — folder upload: `webkitdirectory` button + folder-aware drag-drop
+  (`webkitGetAsEntry` recursion); OS cruft filtered. Verified live: button +
+  `webkitdirectory` input present.
+- **v1.82.0** — per-camera Drive folder links on the upload/task page. New
+  `GET /api/upload/folders` + `getDriveParentFolderId()`. Verified: CAM-A →
+  real Drive folder `1v6CiYJ…`.
+- **v1.83.0** — `completeWithRetry`: `/api/upload/complete` now retries 10×
+  through transient 5xx / non-JSON / network errors (idempotent server-side).
+
+**Incident (self-inflicted) + recovery:** the v1.82.0 redeploy's container
+recreate window (≈12:22–12:23) coincided with a real 5.7GB upload's final
+`/complete` call → 502 → the (then) non-retrying client showed
+`Unexpected token '<', "<!DOCTYPE"` and marked the finished upload FAILED even
+though all bytes were already in Drive. **Recovery:** re-called `/complete`
+(idempotent) for that upload → COMPLETE + Drive link + sheet row. **Root-cause
+fix = v1.83.0** so a deploy/blip during `/complete` can't fail a finished
+upload again. **Lesson:** redeploys are safe vs in-flight chunk PUTs (those go
+browser→Google directly) but NOT vs an upload's `/complete` landing in the
+recreate window — check for active uploads before redeploying, or rely on the
+new retry.
+
+**Cleanup:** removed the assistant's test-upload rows (`claude-*-test.bin`,
+`xhr-verify.bin`, `multichunk-test.bin`, `cors-verify.bin`) + their FootageLog
+via a scoped `prisma deleteMany` run through the Portainer Docker **exec API**
+(`POST …/containers/{id}/exec` + `…/exec/{id}/start`, `Tty:true`, `WorkingDir:/app`)
+— a clean alternative to driving the console xterm. Left the user's own FAILED
+attempts (SUB/CLIP/New Digest) untouched.
+
+---
+
 ## 2026-06-22 · v1.80.1 — fix Upload Footage CORS (Drive stuck at 0% retry 3/4)
 
 **Symptom (operator-reported):** every footage upload to Drive stalled at 0%,
