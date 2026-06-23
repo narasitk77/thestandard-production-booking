@@ -67,6 +67,15 @@ export async function completeWithRetry(
       if (res.ok) {
         const d = await res.json().catch(() => null)
         if (d?.ok) return d
+        // v1.92.2 — server flagged a deterministic FAILED (size mismatch / wrong
+        // target): re-calling can't change it, so surface now instead of looping
+        // ~2.5 min. Transient FAILED (metadata/propagation lag) has permanent=false
+        // and still retries.
+        if (d?.permanent) {
+          const err: any = new Error(d.error || d.errors?.join(' · ') || 'complete failed (permanent)')
+          err.permanent = true
+          throw err
+        }
         lastErr = d?.error || d?.errors?.join(' · ') || 'complete returned not-ok'
       } else {
         lastErr = `complete HTTP ${res.status}` // 5xx → transient, retry

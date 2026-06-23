@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.92.2] — 2026-06-22
+
+### Fixed — บั๊คตัวสุดท้าย (#4): completeWithRetry ไม่ retry FAILED ถาวรอีกต่อไป
+- `/api/upload/complete` ส่ง flag **`permanent`** = true เมื่อ FAILED แบบ deterministic (size mismatch / target ผิด — re-call ก็ได้ผลเดิม). `completeWithRetry` เจอ `permanent` → throw ทันที (ไม่วน ~2.5 นาที). ส่วน FAILED ชั่วคราว (Drive metadata lag / Wasabi propagation lag) `permanent=false` → **ยัง retry เหมือนเดิม** (retry ช่วยจริง). เทสต์ครอบทั้ง 2 เคส.
+- → ตอนนี้ **บั๊คทั้ง 5 จาก bug review แก้ครบ** (4 จาก v1.92.1 + อันนี้). 133 tests pass.
+
+---
+
 ## [1.92.1] — 2026-06-22
 
 ### Fixed — บั๊คจาก multi-agent bug review (5 ยืนยัน)

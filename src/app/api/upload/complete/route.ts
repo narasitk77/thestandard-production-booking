@@ -57,6 +57,10 @@ export async function POST(request: NextRequest) {
 
     const expectedSize = upload.fileSize != null ? Number(upload.fileSize) : 0
     const errors: string[] = []
+    // v1.92.2 — flips true for failures that re-calling /complete could still fix
+    // (metadata/propagation lag). When it stays false on a FAILED result, the
+    // failure is deterministic (size mismatch, wrong target) → client stops retrying.
+    let hasTransient = false
 
     // 1. Drive verify (if the upload targeted Drive)
     let driveOk = false
@@ -68,7 +72,10 @@ export async function POST(request: NextRequest) {
       } else {
         const info = await getDriveFile(fileId)
         if (!info) {
+          // v1.92.2 — TRANSIENT: Drive metadata can lag right after a large
+          // upload; retrying /complete often resolves it (don't fail permanently).
           errors.push(`Drive file ${fileId} not readable (upload may have failed)`)
+          hasTransient = true
         } else if (expectedSize > 0 && info.size != null && info.size !== expectedSize) {
           errors.push(`Drive size mismatch: expected ${expectedSize}, got ${info.size}`)
         } else {
@@ -98,6 +105,7 @@ export async function POST(request: NextRequest) {
             const verify = await verifyUpload(upload.wasabiKey, expectedSize)
             if (!verify.ok) {
               errors.push(`Wasabi verify: ${verify.reason}`)
+              hasTransient = true // object propagation can lag — retry may resolve
             } else {
               verifyEtag = verify.etag ?? verifyEtag
               wasabiOk = true
@@ -113,6 +121,7 @@ export async function POST(request: NextRequest) {
           }
         } catch (e: any) {
           errors.push(`Wasabi CompleteMultipartUpload: ${e?.message || e}`)
+          hasTransient = true // S3 5xx / network — safe to retry
         }
       }
     }
@@ -174,6 +183,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: finalStatus === 'COMPLETE',
       status: finalStatus,
+      // v1.92.2 — a FAILED result with no transient error is deterministic
+      // (wrong size/target) → the client should stop retrying immediately.
+      permanent: finalStatus === 'FAILED' && errors.length > 0 && !hasTransient,
       upload: serialize(updated),
       errors: errors.length > 0 ? errors : undefined,
     })

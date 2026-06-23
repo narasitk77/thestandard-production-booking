@@ -48,6 +48,25 @@ test('a 4xx is permanent — surfaced immediately, no retry', async () => {
   assert.equal(calls, 1, 'must not retry a 4xx')
 })
 
+test('v1.92.2 — a 200 {ok:false, permanent:true} (size mismatch) stops immediately', async () => {
+  let calls = 0
+  const f = (async () => { calls++; return res(200, { ok: false, permanent: true, status: 'FAILED', errors: ['Drive size mismatch: expected 100, got 50'] }) }) as any
+  await assert.rejects(
+    () => completeWithRetry({ uploadId: 'x' }, { fetchImpl: f, sleepMs: noSleep }),
+    /size mismatch/,
+  )
+  assert.equal(calls, 1, 'permanent FAILED must not retry')
+})
+
+test('v1.92.2 — a 200 {ok:false} WITHOUT permanent (transient lag) still retries then succeeds', async () => {
+  const f = scriptedFetch([
+    res(200, { ok: false, status: 'FAILED', errors: ['Drive file not readable'] }), // metadata lag
+    res(200, { ok: true, upload: { status: 'COMPLETE' } }),
+  ])
+  const out = await completeWithRetry({ uploadId: 'x' }, { fetchImpl: f, sleepMs: noSleep })
+  assert.equal(out.ok, true)
+})
+
 test('gives up after MAX attempts when the server never recovers', async () => {
   let calls = 0
   const f = (async () => { calls++; return res(503, null, false) }) as any
