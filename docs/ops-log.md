@@ -5,6 +5,27 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.90.0 — role×position UI tiers (per-tier menus + page access)
+
+Deployed `sha-0d25849`. Five tiers from (role × position): admin / coordinator /
+sound-mgmt (position "Senior Sound Engineer") / producer (position ~"producer") /
+crew (everyone else). `src/lib/tiers.ts` (`resolveTier`/`tierAllows`/`tierHome`,
+7 unit tests) is the single source used by BOTH the Nav (hide items) and
+`middleware.ts` (block pages → redirect to the tier's home; never `/api`).
+`position` added to the JWT; pre-v1.90 tokens (no position) keep the role-based
+gating until they refresh — **no false lockouts**. `getUserTier()` feeds the Nav
+server-side.
+
+**Verified live:** admin (narasit.k) lands on `/`, full menu, `/admin` + `/upload`
+→ 200 (no redirect), `/api` works. Tier distribution across all 50 users is
+correct: admin 4, producer 13, crew 31, coordinator 1, sound-mgmt 1 — none
+mis-bucketed.
+
+**Remaining follow-up:** sound-mgmt sees the FULL queue; the "filter to sound/mic
+jobs only" view is not built yet.
+
+---
+
 ## 2026-06-22 · v1.89.0 — footage file report + "ส่งงาน" deliver email
 
 Deployed `sha-9a88506`. Schema add (`Booking.deliveredAt`/`deliveredBy`,
