@@ -6,9 +6,11 @@ import { usePathname } from 'next/navigation'
 import { Menu, X, Plus, ChevronDown } from 'lucide-react'
 import { signOut } from 'next-auth/react'
 import { hasConsoleAccess } from '@/lib/roles'
+import { tierAllows, type Tier } from '@/lib/tiers'
 
 interface NavProps {
   session: { email: string; role: string } | null
+  tier?: Tier
   canSeeOT?: boolean
   canSeeProducer?: boolean
   canApproveOT?: boolean
@@ -22,7 +24,7 @@ interface NavProps {
  * Pages a user touches daily live in `primary`; docs/dev utilities live
  * in `secondary` behind a divider.
  */
-export default function Nav({ session, canSeeOT = false, canSeeProducer = false, canApproveOT = false, canUpload = false }: NavProps) {
+export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeeProducer = false, canApproveOT = false, canUpload = false }: NavProps) {
   const [open, setOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const pathname = usePathname() || '/'
@@ -31,6 +33,8 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
   // Production Admin Space (equipment/loans/etc.) is ADMIN-only — its own
   // working menu, kept separate from the booking-queue console.
   const isAdmin = session?.role === 'ADMIN'
+  // v1.90 — only tiers that book (admin/coordinator/producer) get the + New CTA.
+  const canCreate = !!session && tierAllows(tier, '/new')
   const close = () => { setOpen(false); setMoreOpen(false) }
 
   const isActive = (href: string) =>
@@ -61,7 +65,9 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     { href: '/producer', label: 'Producer', show: !!canSeeProducer },
     { href: '/admin', label: 'คิวงาน', show: isConsole, match: () => queueActive },
     { href: '/admin/production-space', label: 'Admin', show: isAdmin, match: (p) => ADMIN_HUB.test(p) },
-  ] as Item[]).filter(i => i.show)
+    // v1.90 — tier narrows the role/flag-based visibility (crew/producer don't
+    // see console; sound-mgmt doesn't see the full-console tools).
+  ] as Item[]).filter(i => i.show && tierAllows(tier, i.href))
 
   const secondary: Item[] = [
     { href: '/ot', label: 'OT', show: !!canSeeOT },
@@ -79,7 +85,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
     { href: '/upload', label: 'Upload', show: !!canUpload },
     // v1.35.5 — Admin-only review queue for Mark-as-Done
     { href: '/admin/upload-review', label: 'Upload Review', show: isConsole },
-  ].filter(i => i.show)
+  ].filter(i => i.show && tierAllows(tier, i.href))
 
   // Active state: primary hubs (คิวงาน / Admin) use their own match fn so the
   // split /admin/* routes highlight the right hub; everything else by href.
@@ -145,7 +151,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
 
         {/* Right cluster: CTA + identity (desktop) */}
         <div className="hidden md:flex items-center gap-2 ml-auto">
-          {session && (
+          {canCreate && (
             <Link
               href="/new"
               className="ops-btn-primary ops-btn-sm"
@@ -170,7 +176,7 @@ export default function Nav({ session, canSeeOT = false, canSeeProducer = false,
 
         {/* Mobile right cluster: CTA + hamburger */}
         <div className="md:hidden flex items-center gap-2 ml-auto">
-          {session && (
+          {canCreate && (
             <Link
               href="/new"
               className="ops-btn-primary ops-btn-sm"

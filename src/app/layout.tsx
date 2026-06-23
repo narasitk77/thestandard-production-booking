@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
-import { getSession, getProducerAccess, getOTApproverAccess, getUploadAccess } from '@/lib/session'
+import { getSession, getProducerAccess, getOTApproverAccess, getUploadAccess, getUserTier } from '@/lib/session'
 import { isTeamMember } from '@/lib/team-profiles'
 import Nav from './_components/Nav'
 
@@ -32,6 +32,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // /upload link in the nav so crew can find their assigned bookings to
   // upload footage to.
   const canUpload = await getUploadAccess(session?.email)
+  // v1.90 — UI tier (admin/coordinator/sound-mgmt/producer/crew): the nav hides
+  // items a tier shouldn't see; middleware blocks the pages to match.
+  const tier = await getUserTier(session?.email)
 
   return (
     <html lang="th">
@@ -43,6 +46,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <Nav
           session={session ? { email: session.email, role: session.role } : null}
+          tier={tier}
           canSeeOT={canSeeOT}
           canSeeProducer={canSeeProducer}
           canApproveOT={canApproveOT}

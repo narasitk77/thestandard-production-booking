@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.90.0] — 2026-06-22
+
+### Added — เมนู/สิทธิ์ตาม tier (role × position)
+- รวม role × position เป็น **5 tier**: **admin** (Admin/Manager/Support) · **coordinator** · **sound-mgmt** (ตำแหน่ง Senior Sound Engineer) · **producer** (ตำแหน่งมี "producer") · **crew** (ที่เหลือ — Videographer/Sound/Switcher/Director/Editor/…).
+- แต่ละ tier **เห็นเมนูต่างกัน + บล็อกหน้า**: crew → Upload(+My Bookings); producer → My Bookings/Producer; sound-mgmt → คิวงาน (ไม่เห็น รายงาน/Routine/Upload Review); coordinator → console เต็ม; admin → ทุกอย่าง. ปุ่ม "+ New Booking" เฉพาะ admin/coordinator/producer.
+- บล็อกระดับหน้าใน `middleware.ts` (พิมพ์ URL ตรง → redirect ไปหน้าหลักของ tier); ไม่แตะ `/api` (route auth เอง). Token เก่า (ก่อน v1.90, ไม่มี position) → ใช้ gate แบบ role เดิมไปก่อน จน token refresh → **ไม่มีใครโดนล็อกเอาท์ผิด**.
+- core: `src/lib/tiers.ts` (`resolveTier`/`tierAllows`/`tierHome`, +test 7 เคส) ใช้ร่วมกันทั้ง Nav (ซ่อน) + middleware (บล็อก) → เมนูกับสิทธิ์ไม่มีทางหลุดกัน. `getUserTier()` + position ใน JWT.
+
+> ⏳ ยังเหลือ: sound-mgmt เห็น **คิวงานกรองเฉพาะงานเสียง/ไมค์** (ตอนนี้เห็นคิวเต็ม) — เป็น follow-up (ต้องเพิ่ม filter ในหน้าคิว).
+
+---
+
 ## [1.89.0] — 2026-06-22
 
 ### Added — รายงานไฟล์ footage + ปุ่ม "ส่งงาน" แจ้ง Producer

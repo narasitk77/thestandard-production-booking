@@ -50,6 +50,23 @@ export async function requireConsole() {
   return s
 }
 
+// v1.90 — resolve the signed-in user's UI tier (admin/coordinator/sound-mgmt/
+// producer/crew) from role + position, for the role-aware nav. Defaults to 'crew'
+// (least-privileged) when the user can't be read.
+export async function getUserTier(email: string | null | undefined): Promise<import('./tiers').Tier> {
+  const { resolveTier } = await import('./tiers')
+  if (!email) return 'crew'
+  try {
+    const u = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+      select: { role: true, position: true },
+    })
+    return resolveTier(u?.role, u?.position)
+  } catch {
+    return 'crew'
+  }
+}
+
 // Producer Dashboard access: admins, or users whose `position` is a Producer
 // role (Producer / Co-Producer — set by an admin on the permissions page).
 // Matches any position containing "producer" so variants are covered.

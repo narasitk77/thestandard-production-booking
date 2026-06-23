@@ -124,6 +124,10 @@ export const authOptions: AuthOptions = {
           nextToken.active = u.active
           nextToken.email = u.email
           nextToken.name = u.name
+          // v1.90 — carry position so middleware can resolve the UI tier. `?? null`
+          // (never undefined) lets the middleware tell a populated token apart from
+          // a pre-v1.90 one and skip tier-gating until it refreshes.
+          nextToken.position = u.position ?? null
         }
       }
       return nextToken
