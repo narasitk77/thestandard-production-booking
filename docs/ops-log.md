@@ -5,6 +5,26 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.89.0 — footage file report + "ส่งงาน" deliver email
+
+Deployed `sha-9a88506`. Schema add (`Booking.deliveredAt`/`deliveredBy`,
+nullable) applied by `start.sh` `prisma db push` on boot. Build pipeline runs
+`prisma generate` before `next build` so the new fields type-check in CI.
+
+- **Footage report** — `GET /api/upload/report` + `buildFootageReport()` /
+  `listFolderFiles()` (Drive `videoMediaMetadata` → duration + resolution).
+  Shown per-camera on the upload page (name · size · duration · resolution).
+- **"ส่งงาน"** — `POST /api/bookings/[id]/deliver`: emails the Producer + CCs the
+  sender the file report + links, records `deliveredAt`/`deliveredBy` + audit.
+  Re-send allowed. Producer-less booking → self + warn.
+
+**Verified live:** report endpoint + UI render CAM-A's two B011R003 files with
+size + **duration 5:28** + resolution (2160×3840 / 1080×1920); ส่งงาน button
+present. Deliver NOT test-fired — the booking's producer is a real person
+(`sarut.a@thestandard.co`); left the first real send to the operator.
+
+---
+
 ## 2026-06-22 · v1.88.0 — prep-folders also creates landing folder in Production Team
 
 Deployed `sha-cef02e0`. The hourly prep-folders worker now, for today's confirmed
