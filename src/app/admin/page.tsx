@@ -3,6 +3,7 @@
 import { bookingShowName } from '@/lib/display'
 import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
 import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
@@ -50,12 +51,22 @@ export default function AdminPage() {
   // v1.51 — soft delete (hide test queues) is an ADMIN power; the Deleted tab
   // and the trash buttons only render for ADMIN.
   const [isAdmin, setIsAdmin] = useState(false)
+  // v1.91 — sound-mgmt tier (Senior Sound Engineer) sees the queue filtered to
+  // jobs that need sound/mics; everyone else can toggle it.
+  const [tier, setTier] = useState<Tier>('crew')
+  const [soundOnly, setSoundOnly] = useState(false)
   useEffect(() => {
     fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.user?.canUpload) setCanUpload(true)
       if (d?.user?.role === 'ADMIN') setIsAdmin(true)
+      const t = resolveTier(d?.user?.role, d?.user?.position)
+      setTier(t)
+      if (t === 'sound-mgmt') setSoundOnly(true) // auto-on + locked below
     }).catch(() => {})
   }, [])
+
+  // A job "needs sound" when it requests mics. sound-mgmt is locked to this view.
+  const visibleBookings = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
 
   const showingDeleted = filter === 'DELETED'
   const showingRoutine = filter === 'ROUTINE'
@@ -100,14 +111,19 @@ export default function AdminPage() {
           <h1 className="text-xl sm:text-2xl font-normal text-gray-800">คิวงาน</h1>
           {/* v1.73 — queue-only tools. Back-office + system (Reminders/Team/
               Health/Permissions) moved to the Admin hub (/admin/production-space). */}
+          {/* v1.91 — hide console-tool links for sound-mgmt (they're blocked by middleware too) */}
           <div className="flex gap-2">
-            <Link href="/admin/workspace" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
-              รายงาน
-            </Link>
-            <Link href="/admin/routine" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
-              Routine
-            </Link>
-            <Link href="/new" className="gf-submit text-xs sm:text-sm">+ New</Link>
+            {tierAllows(tier, '/admin/workspace') && (
+              <Link href="/admin/workspace" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
+                รายงาน
+              </Link>
+            )}
+            {tierAllows(tier, '/admin/routine') && (
+              <Link href="/admin/routine" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
+                Routine
+              </Link>
+            )}
+            {tierAllows(tier, '/new') && <Link href="/new" className="gf-submit text-xs sm:text-sm">+ New</Link>}
           </div>
         </div>
         <p className="text-xs sm:text-sm text-gray-500 mt-1">
@@ -167,21 +183,31 @@ export default function AdminPage() {
         )}
       </div>
 
+      {/* v1.91 — sound/mic filter. Locked on for sound-mgmt (ทีมเสียง); a toggle for the rest. */}
+      <label className="flex items-center gap-2 mb-4 text-sm text-gray-600 w-fit cursor-pointer">
+        <input type="checkbox" checked={soundOnly} disabled={tier === 'sound-mgmt'}
+          onChange={e => setSoundOnly(e.target.checked)} className="accent-[#673ab7]" />
+        🎙️ เฉพาะงานที่ต้องการเสียง/ไมค์
+        {tier === 'sound-mgmt' && <span className="text-[10px] text-amber-700">(ล็อกสำหรับทีมเสียง)</span>}
+      </label>
+
       {loading ? (
         <div className="py-16 text-center text-gray-400 text-sm">Loading…</div>
-      ) : bookings.length === 0 ? (
+      ) : visibleBookings.length === 0 ? (
         <div className="py-16 text-center text-gray-400 text-sm">
-          No {filter || ''} bookings.
+          {soundOnly ? 'ไม่มีงานที่ต้องการเสียง/ไมค์ในแท็บนี้' : `No ${filter || ''} bookings.`}
         </div>
       ) : (
         <>
-        {total > bookings.length && (
+        {soundOnly ? (
+          <p className="text-xs text-gray-400 mb-2">🎙️ เฉพาะงานที่ต้องการเสียง/ไมค์ — {visibleBookings.length} จาก {bookings.length} ในแท็บนี้</p>
+        ) : total > bookings.length ? (
           <p className="text-xs text-gray-400 mb-2">
             แสดง {bookings.length} จาก {total} รายการ (เรียงตามวันถ่ายล่าสุด)
           </p>
-        )}
+        ) : null}
         <div className="space-y-3">
-          {bookings.map(b => (
+          {visibleBookings.map(b => (
             <div key={b.id} className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
                 <div className="flex-1 min-w-0 w-full">

@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.91.0] — 2026-06-22
+
+### Added — คิวงานกรอง "เฉพาะงานเสียง/ไมค์" (เติมเต็ม tier sound-mgmt)
+- หน้า /admin (คิวงาน) เพิ่ม toggle **"🎙️ เฉพาะงานที่ต้องการเสียง/ไมค์"** (งานที่ `micCount > 0`). **ล็อกเปิดไว้สำหรับ tier sound-mgmt** (Senior Sound Engineer) — เห็นเฉพาะงานเสียง; tier อื่นกดเปิด/ปิดเองได้ (ช่วย coordinator กรองงานเสียงได้ด้วย).
+- ซ่อนลิงก์ console (รายงาน/Routine/+New) ในหัวหน้าคิวสำหรับ sound-mgmt (สอดคล้องกับ middleware ที่บล็อกอยู่แล้ว). client-only (`src/app/admin/page.tsx`), reuse `resolveTier`/`tierAllows`.
+
+---
+
 ## [1.90.0] — 2026-06-22
 
 ### Added — เมนู/สิทธิ์ตาม tier (role × position)
