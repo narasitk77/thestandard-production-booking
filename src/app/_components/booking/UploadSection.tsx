@@ -90,6 +90,24 @@ function formatSize(bytes: number | null): string {
   return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
 }
 
+// v1.89 — footage report shape (client view) + duration formatter.
+interface FootageReportView {
+  cameras: Array<{
+    camera: string; folderUrl: string | null
+    files: Array<{ name: string; sizeBytes: number | null; durationMillis: number | null; width: number | null; height: number | null }>
+  }>
+  totalFiles: number
+  totalBytes: number
+  deliveredAt: string | null
+  deliveredBy: string | null
+}
+function formatDur(ms: number | null): string {
+  if (ms == null) return '—'
+  const t = Math.round(ms / 1000), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60
+  const p = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${p(m)}:${p(s)}` : `${m}:${p(s)}`
+}
+
 function statusChip(status: string) {
   const base = 'text-[10px] px-1.5 py-0.5 rounded-full border'
   switch (status) {
@@ -124,6 +142,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [historyLoading, setHistoryLoading] = useState(false)
   // v1.82 — per-camera Drive folder links for cameras with completed uploads.
   const [folders, setFolders] = useState<Array<{ camera: string; count: number; folderUrl: string | null }>>([])
+  // v1.89 — footage report (files + size + duration) + "ส่งงาน" delivery state.
+  const [report, setReport] = useState<FootageReportView | null>(null)
+  const [delivering, setDelivering] = useState(false)
+  const [deliverMsg, setDeliverMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
@@ -142,8 +164,36 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
         .then(r => (r.ok ? r.json() : { folders: [] }))
         .then(d => setFolders(d.folders || []))
         .catch(() => {})
+      // v1.89 — footage report (files + size + duration) + delivery state
+      fetch(`/api/upload/report?bookingId=${booking.id}`)
+        .then(r => (r.ok ? r.json() : { report: null }))
+        .then(d => setReport(d.report || null))
+        .catch(() => {})
     } finally {
       setHistoryLoading(false)
+    }
+  }
+
+  // v1.89 — "ส่งงาน": email the Producer (+ CC self) the file report, record delivery.
+  const deliver = async () => {
+    setDelivering(true)
+    setDeliverMsg(null)
+    try {
+      const res = await fetch(`/api/bookings/${booking.id}/deliver`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setDeliverMsg({ ok: false, text: data.error || 'ส่งงานไม่สำเร็จ' })
+      } else {
+        const who = (data.recipients || []).join(', ')
+        const warn = data.producerMissing ? ' ⚠️ งานนี้ไม่มีอีเมล Producer — ส่งถึงตัวเองอย่างเดียว' : ''
+        const noMail = !data.emailConfigured ? ' (ระบบอีเมลยังไม่ตั้งค่า — บันทึกการส่งงานแล้วแต่ยังไม่ได้ส่งเมล)' : ''
+        setDeliverMsg({ ok: true, text: `ส่งงานแล้ว — เมลถึง ${data.emailed} คน${who ? ` (${who})` : ''}${warn}${noMail}` })
+        fetchHistory() // refresh deliveredAt
+      }
+    } catch (e: any) {
+      setDeliverMsg({ ok: false, text: e?.message || 'ส่งงานไม่สำเร็จ' })
+    } finally {
+      setDelivering(false)
     }
   }
   useEffect(() => { fetchHistory() }, [booking.id])
@@ -417,6 +467,64 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             ))}
           </div>
           <p className="text-[10px] text-gray-400 mt-1.5">เปิดโฟลเดอร์กล้องบน Google Drive ของงานนี้</p>
+        </div>
+      )}
+
+      {/* v1.89 — footage report + ส่งงาน (email Producer + CC self) */}
+      {report && report.totalFiles > 0 && (
+        <div className="gf-card p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="text-sm font-medium text-gray-700">
+              📋 รายงานไฟล์ footage
+              <span className="text-gray-400 font-normal"> ({report.totalFiles} ไฟล์ · {formatSize(report.totalBytes)})</span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {report.deliveredAt && (
+                <span className="text-[11px] text-green-700">
+                  ✅ ส่งงานแล้ว {new Date(report.deliveredAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+                </span>
+              )}
+              <button onClick={deliver} disabled={delivering}
+                className="text-xs px-3 py-1.5 rounded font-medium bg-[#673ab7] text-white hover:bg-[#5e35b1] disabled:opacity-50 inline-flex items-center gap-1">
+                {delivering && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {report.deliveredAt ? 'ส่งงานอีกครั้ง' : 'ส่งงาน'}
+              </button>
+            </div>
+          </div>
+          {deliverMsg && (
+            <div className={`text-[11px] rounded p-2 ${deliverMsg.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+              {deliverMsg.text}
+            </div>
+          )}
+          <div className="space-y-2">
+            {report.cameras.map(cam => (
+              <div key={cam.camera} className="border border-gray-200 rounded p-2">
+                <div className="text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
+                  {cam.camera} <span className="text-gray-400">({cam.files.length})</span>
+                  {cam.folderUrl && (
+                    <a href={cam.folderUrl} target="_blank" rel="noreferrer"
+                      className="text-[#673ab7] hover:underline inline-flex items-center gap-0.5 ml-1">📁<ExternalLink className="w-3 h-3" /></a>
+                  )}
+                </div>
+                {cam.files.length === 0 ? (
+                  <div className="text-[11px] text-gray-400">ยังไม่มีไฟล์</div>
+                ) : (
+                  <table className="w-full text-[11px]">
+                    <tbody>
+                      {cam.files.map((f, i) => (
+                        <tr key={i} className="border-t border-gray-100">
+                          <td className="py-1 pr-2 font-mono text-gray-800 truncate max-w-[220px]">{f.name}</td>
+                          <td className="py-1 pr-2 text-right text-gray-600 whitespace-nowrap">{formatSize(f.sizeBytes)}</td>
+                          <td className="py-1 pr-2 text-right text-gray-600 whitespace-nowrap tabular-nums">{formatDur(f.durationMillis)}</td>
+                          <td className="py-1 text-right text-gray-400 whitespace-nowrap">{f.width ? `${f.width}×${f.height}` : ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -612,6 +612,52 @@ export async function createResumableUploadSession(input: {
   return { fileId, sessionUrl }
 }
 
+export interface DriveFolderFile {
+  id: string
+  name: string
+  sizeBytes: number | null
+  mimeType: string
+  durationMillis: number | null
+  width: number | null
+  height: number | null
+}
+
+/**
+ * v1.89 — list the (non-folder) files directly in a folder, with size + video
+ * metadata (duration/resolution Drive auto-extracts). Drives the footage report.
+ */
+export async function listFolderFiles(folderId: string): Promise<DriveFolderFile[]> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const out: DriveFolderFile[] = []
+  let pageToken: string | undefined
+  do {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+      fields: 'nextPageToken, files(id, name, size, mimeType, videoMediaMetadata(durationMillis, width, height))',
+      pageSize: 200,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      corpora: 'allDrives',
+      orderBy: 'name',
+      pageToken,
+    })
+    for (const f of res.data.files ?? []) {
+      const vm = f.videoMediaMetadata
+      out.push({
+        id: f.id!,
+        name: f.name ?? '(unnamed)',
+        sizeBytes: f.size != null ? Number(f.size) : null,
+        mimeType: f.mimeType ?? '',
+        durationMillis: vm?.durationMillis != null ? Number(vm.durationMillis) : null,
+        width: vm?.width ?? null,
+        height: vm?.height ?? null,
+      })
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return out
+}
+
 /**
  * v1.82 — the Drive folder a file lives in (its first parent). Used to turn an
  * uploaded footage file into a "open the camera folder" link without storing

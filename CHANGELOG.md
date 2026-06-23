@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.89.0] — 2026-06-22
+
+### Added — รายงานไฟล์ footage + ปุ่ม "ส่งงาน" แจ้ง Producer
+- **รายงานไฟล์** ในหน้า upload: ต่อกล้อง แสดงไฟล์จริงในโฟลเดอร์ Drive — **ชื่อ · ขนาด · ความยาว · ความละเอียด** (ดึง `videoMediaMetadata` ที่ Drive สกัดให้). ใหม่: `GET /api/upload/report` + `listFolderFiles()`/`buildFootageReport()`.
+- **ปุ่ม "ส่งงาน"** (เมื่ออัปแล้ว) → `POST /api/bookings/[id]/deliver`: email **Producer + CC ช่างภาพเอง** พร้อมรายงานไฟล์ + ลิงก์ + บันทึก `Booking.deliveredAt`/`deliveredBy` (schema, db push) + audit. **ส่งซ้ำได้** หลังอัปเพิ่ม; แสดง "✅ ส่งงานแล้วเมื่อ...". ถ้าไม่มีอีเมล Producer → ส่งถึงตัวเอง + เตือน.
+- ช่างภาพเห็น task ตัวเองอยู่แล้วผ่าน `/my-bookings` (tab สถานะ) + `/upload` (badge ยังไม่อัป/ครบ จาก v1.85) — รอบนี้เพิ่มรายงาน+ส่งงานเข้าไป.
+- ไฟล์: `src/lib/footage-report.ts` (+test), `google-drive.ts` (listFolderFiles), `/api/upload/report`, `/api/bookings/[id]/deliver`, `UploadSection.tsx`, `prisma/schema.prisma`.
+
+---
+
 ## [1.88.0] — 2026-06-22
 
 ### Added — prep-folders สร้างโฟลเดอร์ใน Production Team drive ด้วย (ตั้งชื่อตาม Production ID)
