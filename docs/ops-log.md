@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.92.0 — inline edit episode title (any status, ID locked)
+
+Deployed `sha-97f7f15`. /admin/[id] Episode IDs card gets a "✎ แก้ชื่อตอน" button
+→ edit titles inline at any status incl. after approval (CONFIRMED). IDs stay
+locked (reuses PATCH /api/bookings/[id], which only touches titles). Admin could
+already do this via the Booking Details edit mode, but it was on a different card
+and non-obvious. **Verified live** on a CONFIRMED booking: edited TBC →
+"ทดสอบ v1.92" → saved, episodeId unchanged (TSS-GEB-261211-L-01), reverted clean.
+Producer self-edit stays REQUESTED-only (a follow-up if producers should edit
+titles post-approval too).
+
+---
+
 ## 2026-06-22 · v1.91.0 — sound/mic queue filter (completes the sound-mgmt tier)
 
 Deployed `sha-43a8cc7`. /admin queue gains a "🎙️ เฉพาะงานที่ต้องการเสียง/ไมค์"
