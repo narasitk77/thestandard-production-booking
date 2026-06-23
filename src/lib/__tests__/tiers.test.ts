@@ -41,6 +41,15 @@ test('tierAllows: producer = bookings/producer, not console/upload', () => {
   assert.equal(tierAllows('producer', '/ot'), false)
 })
 
+test('tierAllows: every tier can open its OWN booking detail + self-edit (v1.92.1 lockout fix)', () => {
+  // /dashboard/[id] and /bookings/[id]/edit are linked from /my-bookings and
+  // authorize by owner server-side — the tier gate must NOT bounce them.
+  for (const tier of ['producer', 'crew', 'coordinator', 'sound-mgmt'] as const) {
+    assert.equal(tierAllows(tier, '/dashboard/cmq123'), true, `${tier} → /dashboard/[id]`)
+    assert.equal(tierAllows(tier, '/bookings/cmq123/edit'), true, `${tier} → /bookings/[id]/edit`)
+  }
+})
+
 test('tierAllows: crew = upload job task, not console/producer', () => {
   assert.equal(tierAllows('crew', '/upload'), true)
   assert.equal(tierAllows('crew', '/upload?bookingId=x'.split('?')[0]), true)

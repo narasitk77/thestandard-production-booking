@@ -42,13 +42,14 @@ export interface PrepResult {
   total: number
   prepared: number
   errors: number
+  prodTeamErrors: number
   results: Array<{ bookingCode: string | null; created?: string[]; prodTeam?: string; wouldCreate?: string[]; skipped?: string; error?: string }>
 }
 
 export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Promise<PrepResult> {
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) {
-    return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', dryRun: !!opts.dryRun, total: 0, prepared: 0, errors: 0, results: [] }
+    return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', dryRun: !!opts.dryRun, total: 0, prepared: 0, errors: 0, prodTeamErrors: 0, results: [] }
   }
 
   const { start, end } = bangkokTodayRange()
@@ -71,6 +72,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
   const results: PrepResult['results'] = []
   let prepared = 0
   let errors = 0
+  let prodTeamErrors = 0
 
   for (const b of bookings) {
     if (!hasOutletFolderMapping(b.outlet.code)) {
@@ -110,6 +112,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
         await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingFolderName, cameras })
       } catch (ptErr: any) {
         prodTeam = `error: ${ptErr?.message || ptErr}`
+        prodTeamErrors++ // v1.92.1 — count it so a total Production Team outage shows in the headline log
       }
       results.push({ bookingCode: b.bookingCode, created: cameras, prodTeam })
       prepared++
@@ -119,5 +122,5 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     }
   }
 
-  return { skipped: false, dryRun: !!opts.dryRun, total: bookings.length, prepared, errors, results }
+  return { skipped: false, dryRun: !!opts.dryRun, total: bookings.length, prepared, errors, prodTeamErrors, results }
 }

@@ -28,12 +28,15 @@ export async function GET(request: NextRequest) {
       _count: { _all: true },
     })
 
+    // v1.92.1 — `cameras` counts only CAM-* sources (a physical camera), so the
+    // "อัปครบ" completeness check isn't falsely satisfied by AUDIO / DRONE /
+    // SWITCHER / PHOTO / SCREEN. `files` stays the total across all sources.
     const status: Record<string, { cameras: number; files: number }> = {}
     for (const id of ids) status[id] = { cameras: 0, files: 0 }
     for (const r of rows) {
       const s = status[r.bookingId]
       if (!s) continue
-      s.cameras += 1
+      if (/^CAM-/i.test(r.camera)) s.cameras += 1
       s.files += r._count._all
     }
 

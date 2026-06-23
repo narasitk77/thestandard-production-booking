@@ -34,8 +34,12 @@ export function tierHome(tier: Tier): string {
   }
 }
 
-// Allowed everywhere (own bookings, profile, docs, calendar) for any signed-in tier.
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog']
+// Allowed everywhere for any signed-in tier. /dashboard/[id] (booking detail) and
+// /bookings/[id]/edit (producer self-edit) are linked from /my-bookings and already
+// authorize by OWNER at the data/API layer (canViewBooking / isOwner+REQUESTED), so
+// the tier gate must not block them — doing so locked producers/crew out of their own
+// bookings (v1.92.1 fix).
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],

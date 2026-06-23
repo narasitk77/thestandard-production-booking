@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.92.1] — 2026-06-22
+
+### Fixed — บั๊คจาก multi-agent bug review (5 ยืนยัน)
+- **🔴 LOCKOUT (regression v1.90):** producer/crew/coordinator เปิด **booking detail (`/dashboard/[id]`)** + **producer self-edit (`/bookings/[id]/edit`)** ของตัวเองไม่ได้ — tier gate ใน middleware เด้งกลับ (tierAllows ไม่มี `/dashboard`,`/bookings`). หน้าพวกนี้ authorize by owner ที่ data layer อยู่แล้ว → เพิ่มเข้า ALWAYS ใน `src/lib/tiers.ts` (+ regression test). กระทบผู้ใช้ส่วนใหญ่ (producer 13 + crew 31).
+- **🟠 badge อัปครบ หลอก:** `/api/upload/status` นับ AUDIO/DRONE/SWITCHER/… เป็น "กล้อง" → ขึ้น 🟢 อัปครบ ทั้งที่ CAM ขาด. แก้: นับเฉพาะ `CAM-*` เทียบ cameraCount; งานไม่มีกล้อง (audio-only/block) → เขียวเมื่อมีไฟล์.
+- **🟡 prep-folders:** Production Team folder error ไม่ถูกนับใน `errors` → log หัวขึ้น errors=0 ทั้งที่ landing folder ล่มหมด. เพิ่ม `prodTeamErrors` ใน result + log.
+- รับทราบ (ไม่แก้): `completeWithRetry` retry กรณี FAILED ถาวร ~2.5 นาที — แต่ retry ช่วยกรณี Drive metadata lag หลังอัปไฟล์ใหญ่ (ตั้งใจ); refuted 1 finding (orphaned Drive file — trigger ไม่เกิดจริงตาม Drive ACL).
+- baseline: tsc 0 · 132 tests pass.
+
+---
+
 ## [1.92.0] — 2026-06-22
 
 ### Added — แก้ชื่อตอน (episode title) ตรงการ์ด Episode IDs ได้ทุกสถานะ (รวมหลัง approve)

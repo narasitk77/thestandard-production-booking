@@ -48,7 +48,7 @@ async function runOnce() {
     if (json.skipped) {
       console.log(`[prep-folders] skipped: ${json.reason}`)
     } else {
-      console.log(`[prep-folders] today=${json.total} prepared=${json.prepared} errors=${json.errors}`)
+      console.log(`[prep-folders] today=${json.total} prepared=${json.prepared} errors=${json.errors} prodTeamErrors=${json.prodTeamErrors}`)
     }
   } catch (err) {
     console.error('[prep-folders] run failed:', err?.message || err)
