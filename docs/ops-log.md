@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-22 · v1.91.0 — sound/mic queue filter (completes the sound-mgmt tier)
+
+Deployed `sha-43a8cc7`. /admin queue gains a "🎙️ เฉพาะงานที่ต้องการเสียง/ไมค์"
+toggle (jobs with `micCount > 0`). Locked ON for the sound-mgmt tier; a free
+toggle for the rest. Console-tool header links (รายงาน/Routine/+New) hidden for
+sound-mgmt. Client-only, reuses `resolveTier`/`tierAllows`. **Verified:** toggle
+renders, admin not redirected. NOTE: 27/28 CONFIRMED jobs have micCount>0, so the
+filter barely narrows (most shoots use mics) — correct per "needs mics", but if a
+stricter "dedicated sound team" cut is wanted, key it off `crewRequired` (a sound
+role) instead of micCount (would need that field added to the queue fetch).
+
+---
+
 ## 2026-06-22 · v1.90.0 — role×position UI tiers (per-tier menus + page access)
 
 Deployed `sha-0d25849`. Five tiers from (role × position): admin / coordinator /
