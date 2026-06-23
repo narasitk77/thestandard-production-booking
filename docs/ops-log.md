@@ -5,6 +5,34 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.92.2 (+v1.92.1) — multi-agent bug-review fixes, DEPLOYED + VERIFIED LIVE
+
+Deployed `sha-59ea209` (bundles v1.92.1 + v1.92.2 — all 5 confirmed bug-review
+findings). Fixes: 🔴 **tier lockout regression** (producer/crew/coordinator
+couldn't open their own `/dashboard/[id]` or `/bookings/[id]/edit` — added to
+ALWAYS in `src/lib/tiers.ts`, owner-auth already enforced at data layer);
+🟠 upload badge over-counted non-CAM folders as cameras (`/api/upload/status`
+now counts only `CAM-*`); 🟡 prep-folders Production-Team errors uncounted
+(`prodTeamErrors`); 🟡 `completeWithRetry` retried permanent FAILED ~2.5 min
+(`/complete` now returns `permanent` flag → client stops; transient lag still
+retries). 133 tests pass, tsc clean.
+
+**Verified live:** polled `/api/version` → flips `1.92.0` → **`1.92.2`** through
+the container-recreate window (≈12×502 for ~70s — the exact gap bug #4's retry
+now survives). Post-deploy smoke: `/admin /my-bookings /upload /dashboard` all
+200; `/api/upload/status` deployed + responds. Tier-lockout fix verified at unit
+level (regression test in the shipped commit) — can't forge a producer JWT as
+admin to exercise the middleware redirect live.
+
+**Deploy gotcha observed:** Portainer stack-125 `Env.IMAGE_TAG` read
+`sha-43a8cc7` (v1.91.0) even though the running container reported `1.92.0` —
+the v1.92.0 git/redeploy's tag override hadn't persisted back to the stack Env.
+Setting `IMAGE_TAG=sha-59ea209` explicitly + `pullImage:true` deployed cleanly;
+`/api/version` confirms 1.92.2. (Redeploy fetch CDP-aborted at ~28s while
+pulling, as usual — the redeploy still completed server-side.)
+
+---
+
 ## 2026-06-22 · v1.92.0 — inline edit episode title (any status, ID locked)
 
 Deployed `sha-97f7f15`. /admin/[id] Episode IDs card gets a "✎ แก้ชื่อตอน" button
