@@ -118,6 +118,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   // Edit Booking Details mode
   const [editMode, setEditMode] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
+  // v1.92 — inline "edit episode title" right in the Episode IDs card, available
+  // at any status (incl. after approval). IDs stay locked; only titles change.
+  const [titleEdit, setTitleEdit] = useState(false)
+  const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({})
+  const [titleSaving, setTitleSaving] = useState(false)
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot
   const [cameraOverload, setCameraOverload] = useState('')
   const [editForm, setEditForm] = useState({
@@ -423,6 +428,34 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   if (loading) return <div className="flex items-center justify-center min-h-96"><Loader2 className="w-8 h-8 animate-spin text-gray-400" /></div>
   if (!booking) return <div className="max-w-2xl mx-auto px-4 py-20 text-center text-gray-500">Booking not found.</div>
 
+  // v1.92 — inline episode-title edit (Episode IDs card). Any status; IDs locked.
+  const startTitleEdit = () => {
+    const d: Record<string, string> = {}
+    booking.episodes.forEach(e => { d[e.id] = e.title })
+    setTitleDrafts(d)
+    setTitleEdit(true)
+  }
+  const handleSaveTitles = async () => {
+    setError('')
+    setTitleSaving(true)
+    try {
+      const episodeTitles = booking.episodes.map(e => ({ id: e.id, title: (titleDrafts[e.id] ?? e.title).trim() }))
+      const res = await fetch(`/api/bookings/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ episodeTitles }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setBooking(data.booking)
+      setTitleEdit(false)
+      showSaved()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setTitleSaving(false)
+    }
+  }
+
   const isConfirmed = booking.status === 'CONFIRMED' || approved
   const isCancelled = booking.status === 'CANCELLED'
   const totalAssigned = assignEmails.length + freelancers.length
@@ -539,14 +572,29 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {/* Episode IDs (always visible — IDs locked, titles editable in edit mode) */}
+      {/* Episode IDs — IDs locked; titles editable inline at any status (incl. after approve) */}
       <div className="gf-card p-5">
         <div className="flex items-center justify-between mb-2">
           <div className="text-xs text-gray-500 font-medium uppercase tracking-wide flex items-center gap-1">
             Episode IDs
             <Lock className="w-3 h-3 text-gray-400" />
           </div>
-          <span className="text-[10px] text-gray-400">ID ห้ามแก้ · แก้ชื่อตอนได้ในโหมด Edit</span>
+          {/* v1.92 — direct title edit (hidden while the full Booking Details edit is open) */}
+          {!editMode && (titleEdit ? (
+            <div className="flex gap-2">
+              <button onClick={() => setTitleEdit(false)} disabled={titleSaving}
+                className="text-xs px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">ยกเลิก</button>
+              <button onClick={handleSaveTitles} disabled={titleSaving}
+                className="text-xs px-2.5 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1 disabled:opacity-50">
+                {titleSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} บันทึก
+              </button>
+            </div>
+          ) : (
+            <button onClick={startTitleEdit}
+              className="text-[11px] px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+              <Pencil className="w-3 h-3" /> แก้ชื่อตอน
+            </button>
+          ))}
         </div>
         {(editMode ? editForm.episodeTitles : booking.episodes).map((ep, i) => (
           <div key={ep.id} className="flex items-center gap-3 py-1.5">
@@ -558,11 +606,16 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                   next[i] = { ...next[i], title: e.target.value }
                   setEditForm({ ...editForm, episodeTitles: next })
                 }} />
+            ) : titleEdit ? (
+              <input className="gf-input flex-1" placeholder="ชื่อตอน"
+                value={titleDrafts[ep.id] ?? (ep as Episode).title}
+                onChange={e => setTitleDrafts({ ...titleDrafts, [ep.id]: e.target.value })} />
             ) : (
-              <span className="text-sm text-gray-700">{(ep as Episode).title}</span>
+              <span className="text-sm text-gray-700">{(ep as Episode).title || '—'}</span>
             )}
           </div>
         ))}
+        <p className="text-[10px] text-gray-400 mt-1">ID ห้ามแก้ · ชื่อตอนแก้ได้ทุกสถานะ (รวมหลัง approve)</p>
       </div>
 
       {/* Booking details — view or edit mode */}

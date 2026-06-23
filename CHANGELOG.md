@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.92.0] — 2026-06-22
+
+### Added — แก้ชื่อตอน (episode title) ตรงการ์ด Episode IDs ได้ทุกสถานะ (รวมหลัง approve)
+- หน้า /admin/[id] เพิ่มปุ่ม **"✎ แก้ชื่อตอน"** ตรงการ์ด Episode IDs → แก้ title แบบ inline → บันทึก. **ใช้ได้ทุกสถานะรวมถึงหลัง approve** (CONFIRMED). **ID ยังล็อก** (badge อ่านอย่างเดียว, PATCH แก้แค่ title ไม่แตะ episodeId).
+- เดิม admin แก้ title หลัง approve ได้อยู่แล้วผ่านโหมด Edit ของการ์ด Booking Details — แต่ไม่ obvious (ปุ่มอยู่คนละการ์ด). รอบนี้ทำให้แก้ได้ตรงจุด. reuse `PATCH /api/bookings/[id]` (episodeTitles, ID-safe). ไฟล์เดียว: `src/app/admin/[id]/page.tsx`.
+
+> หมายเหตุ: ฝั่ง producer (self-edit /bookings/[id]/edit) ยังล็อกเฉพาะ REQUESTED — ถ้าอยากให้ producer แก้ชื่อตอนหลัง approve ด้วย เป็น follow-up.
+
+---
+
 ## [1.91.0] — 2026-06-22
 
 ### Added — คิวงานกรอง "เฉพาะงานเสียง/ไมค์" (เติมเต็ม tier sound-mgmt)
