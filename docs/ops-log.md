@@ -5,7 +5,7 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-06-24 · v1.94.0 — Content Agency footage by Project → EP (replaces category/Production-ID layers)
+## 2026-06-24 · v1.94.0 — Content Agency footage by Project → EP, DEPLOYED + VERIFIED LIVE
 
 Content Agency (AGN) gets its own Drive layout: the **Project box**
 `<Project ID · name>` (e.g. `PP-26-008 · ชื่อโปรเจค`) sits directly under
@@ -32,8 +32,23 @@ project's name snapshot changes between bookings a duplicate box could appear
 (names are normally stable). AGN footage uploaded before v1.94 stays in the old
 category/Production-ID layout (not migrated).
 
-NOTE (pending at write time): NOT yet deployed/verified live — build + adversarial
-review in flight (see below once confirmed).
+Deployed `sha-d6876ac` (prev `sha-cd83312`). `/api/version` flipped `1.93.0` →
+**`1.94.0`** through the recreate window (~3×502). **Verified live** on the real
+AGN booking `AGN-260706-STD-01` (project `PP-26-016 · LIFE Beauty Demo Short
+Clip`, 3 EPs): the /upload EP picker shows the **project EP IDs**
+`PP-26-016-S02 · 2 / -S03 · 3 / -S04 · 4` (not EP01/02/03), and the path hint
+reads `[outlet]/[Project ID · โปรเจค]/PP-26-016-S02 · 2/CAM-A/` — i.e. the
+Project box with **no Production-ID layer**, exactly the spec.
+
+**Pre-deploy adversarial review** (workflow, 10 agents) raised 2 — both checked
+by hand and dismissed: (1) "AGN with missing projectId silently falls back" —
+`projectId` is immutable + required for AGN at creation, so it can't be cleared;
+the fallback only covers hypothetical legacy rows, where the per-booking layout
+is correct graceful behavior, not a crash. (2) "approve route doesn't select
+episodeId → folder-name mismatch" — FALSE: the approve query uses Prisma
+`include` (returns ALL scalars incl. episodeId), proven by the existing
+`episodes[0].title` read on the same query; approve-time and upload-time produce
+identical AGN folder names. No code change needed.
 
 ---
 
