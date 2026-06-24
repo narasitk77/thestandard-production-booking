@@ -5,6 +5,34 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-25 · v1.98.0 — list-view (full date + EP title + sort) + Category removal (non-AGN)
+
+Ops request: list rows show full date + first-EP title; sort Producer & My Bookings by
+date; drop the redundant booking-level Category radio for non-AGN (derive from per-EP).
+
+**Verified on a LOCAL container** (docker compose, AUTH_DISABLED, localhost:3003) — the
+first time these changes ran in a real runtime, not just unit tests:
+- Home list rendered full dates ("Fri 10 Jul 2026"…), first-EP titles ("— ดีล X ตอนสปอนเซอร์"),
+  and chronological order (Jul10→…→Aug12).
+- `POST /api/bookings` (non-AGN, EP contentType ADVERTORIAL, payload category ORIGINAL_CONTENT)
+  → persisted **ADVERTORIAL** (derived); all-OC → ORIGINAL_CONTENT. AGN path unchanged.
+- Producer feature (v1.96/1.97) also re-verified: import-producers → /api/producers?outlet=NWS
+  returns the 3 new News producers (ข้าวฟ่าง/หนามเตย/พีช).
+
+Adversarial review (4-agent workflow) found only 1 low nit (dead `format` import in page.tsx) — fixed.
+
+**LOCAL-DEPLOY GOTCHA hit:** `docker compose up -d --build app` returned before the
+container actually recreated (a bg poll loop broke early) → tested old code once; and a
+BuildKit cache error ("lease does not exist") needed `docker builder prune -af` +
+`docker pull node:20-alpine` before the rebuild succeeded. Lesson: after a local rebuild,
+confirm the container actually recreated (and the behavior changed) before trusting a test.
+
+Bundles with still-undeployed v1.95.0–v1.97.1. tsc 0 · 145 tests. Merge → image `sha-<merge>`.
+**PROD deploy still pending** (Portainer unreachable from assistant): stack 125
+`IMAGE_TAG=sha-<merge>` + redeploy pullImage → `/api/version`=1.98.0 → run import-producers.
+
+---
+
 ## 2026-06-24 · v1.97.1 — add-episodes review fixes (pre-deploy)
 
 Adversarial review (11-agent workflow) of the still-undeployed v1.95–1.97 changes

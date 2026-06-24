@@ -836,6 +836,11 @@ export default function BookingWizard() {
                   <FieldError message={fieldErrors.programCode} />
                 </div>
 
+                {/* v1.98.0 — Category radio shown ONLY for Content Agency (it drives
+                    AGN Drive folder routing). Non-AGN outlets tag content per-episode
+                    (Original Content / AD on each EP), so the booking-level category is
+                    derived server-side from the episodes — the radio is redundant there. */}
+                {isContentAgency && (
                 <div>
                   <Label required>Category</Label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -858,6 +863,7 @@ export default function BookingWizard() {
                   </FieldHelp>
                   <FieldError message={fieldErrors.category} />
                 </div>
+                )}
 
                 <div>
                   <Label required>Video Type</Label>
@@ -1547,7 +1553,7 @@ export default function BookingWizard() {
                 <ReviewBlock title="Project" onEdit={() => jumpTo(1)}>
                   <ReviewRow label="Outlet" value={summary.outlet} />
                   <ReviewRow label="Episode Type" value={summary.episodeType} />
-                  <ReviewRow label="Category" value={summary.category} />
+                  {isContentAgency && <ReviewRow label="Category" value={summary.category} />}
                   <ReviewRow label="Video Type" value={summary.videoType} />
                 </ReviewBlock>
                 <ReviewBlock title="Schedule" onEdit={() => jumpTo(2)}>
@@ -1614,7 +1620,7 @@ export default function BookingWizard() {
               <SummaryBlock title="Project" filled={!!selectedOutlet}>
                 <KV k="Outlet" v={summary.outlet} />
                 <KV k="Episode Type" v={summary.episodeType} />
-                <KV k="Category" v={summary.category} />
+                {isContentAgency && <KV k="Category" v={summary.category} />}
                 <KV k="Video Type" v={summary.videoType} />
               </SummaryBlock>
               <SummaryBlock title="Schedule" filled={!!shootDate}>

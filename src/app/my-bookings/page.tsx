@@ -4,7 +4,8 @@ import { bookingShowName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, Plus, Search, Inbox } from 'lucide-react'
-import { format, parseISO, startOfToday, isAfter, isToday } from 'date-fns'
+import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
+import { formatDisplayDate } from '@/lib/utils'
 import StatusPill from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -99,6 +100,11 @@ export default function MyBookingsPage() {
       list = [...list].sort((a, b) => a.shootDate.localeCompare(b.shootDate))
     } else {
       list = b.filter(x => x.status === tab)
+      // Sort by shoot date: forward-looking tabs ascending (soonest first),
+      // historical tabs (done/cancelled) descending (most recent first).
+      const desc = tab === 'COMPLETED' || tab === 'CANCELLED'
+      list = [...list].sort((a, b) =>
+        desc ? b.shootDate.localeCompare(a.shootDate) : a.shootDate.localeCompare(b.shootDate))
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase()
@@ -204,15 +210,15 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
         href={`/dashboard/${b.id}`}
         className="flex items-center gap-3 flex-1 min-w-0"
       >
-        <div className="flex-shrink-0 w-14 text-center">
-          <div className="text-[10px] text-gray-400 uppercase">{valid ? format(d, 'EEE') : '—'}</div>
-          <div className="text-base font-semibold text-gray-800 tabular-nums leading-none">{valid ? format(d, 'd') : '--'}</div>
+        <div className="flex-shrink-0 w-28">
+          <div className="text-xs font-medium text-gray-700 leading-tight">{valid ? formatDisplayDate(b.shootDate) : '—'}</div>
           <div className="text-[10px] text-gray-400 tabular-nums mt-0.5">{b.callTime}</div>
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm text-gray-900 font-medium truncate">
             <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
             {bookingShowName(b)}
+            {b.episodes[0]?.title ? <span className="text-gray-500 font-normal"> — {b.episodes[0].title}</span> : null}
           </div>
           <div className="text-xs text-gray-500 truncate mt-0.5">
             {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}
