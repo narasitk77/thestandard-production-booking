@@ -13,6 +13,8 @@ interface BookingContext {
   cameraCount?: number | null
   micCount?: number | null
   outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
+  // v1.93 — episodes drive the EP picker; footage lands in <booking>/<EP>/<camera>/.
+  episodes?: Array<{ id: string; episodeId: string; title: string; sequence: number }>
 }
 
 interface UploadItem {
@@ -37,6 +39,7 @@ interface InFlight {
   uploadId?: string       // server-side Upload.id, set after /init
   file: File
   camera: string
+  episodeRowId: string    // v1.93 — Episode.id this file is filed under ('' = none)
   driveProgress: number   // 0..1
   wasabiProgress: number  // 0..1
   driveActive: boolean
@@ -136,6 +139,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', '') }
   }, [])
   const [camera, setCamera] = useState(defaultCamera && CAMERAS.includes(defaultCamera) ? defaultCamera : CAMERAS[0])
+  // v1.93 — which episode footage is filed under. Default to the first; only
+  // shown as a picker when the shoot records more than one EP.
+  const episodes = booking.episodes ?? []
+  const [episodeRowId, setEpisodeRowId] = useState(episodes[0]?.id ?? '')
   // (no top-level error banner — per-queue-item errors render inline below)
   const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
   const [history, setHistory] = useState<UploadItem[]>([])
@@ -209,6 +216,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       localId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       file,
       camera,
+      episodeRowId,
       driveProgress: 0,
       wasabiProgress: 0,
       driveActive: false,
@@ -240,6 +248,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       body: JSON.stringify({
         bookingId: booking.id,
         camera: item.camera,
+        episodeRowId: item.episodeRowId || undefined, // v1.93 — per-EP folder
         filename: item.file.name,
         size: item.file.size,
         mimeType: item.file.type || 'application/octet-stream',
@@ -340,6 +349,22 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
           </span>
         </div>
 
+        {/* v1.93 — pick which EP the footage belongs to (multi-EP shoots only).
+            Single-EP / no-EP bookings file everything automatically. */}
+        {episodes.length > 1 && (
+          <div>
+            <label className="text-[10px] text-gray-500 uppercase mb-1 block">ตอน / Episode</label>
+            <select className="gf-input" value={episodeRowId} onChange={e => setEpisodeRowId(e.target.value)}>
+              {episodes.map(ep => (
+                <option key={ep.id} value={ep.id}>
+                  EP{String(ep.sequence).padStart(2, '0')}{ep.title ? ` · ${ep.title}` : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-0.5">ไฟล์จะเข้าโฟลเดอร์แยกตามตอนที่เลือก</p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div>
             <label className="text-[10px] text-gray-500 uppercase mb-1 block">Camera / Source</label>
@@ -405,7 +430,11 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             {/* v1.70 — hint reflects the new "VIDEO 2026 [JUL–DEC]" layout:
                 <NN · Outlet>/<program|category>/<Production ID · ชื่องาน>/<camera>/.
                 Exact outlet/program/job are resolved server-side (placeholders). */}
-            {' '}<code className="text-gray-700">{`[outlet]/[program]/${booking.bookingCode} · [ชื่องาน]/${camera}/`}</code>
+            {' '}<code className="text-gray-700">{(() => {
+              const ep = episodes.find(e => e.id === episodeRowId)
+              const epSeg = ep ? `/EP${String(ep.sequence).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}` : ''
+              return `[outlet]/[program]/${booking.bookingCode} · [ชื่องาน]${epSeg}/${camera}/`
+            })()}</code>
             {' · '}
             <span className="text-gray-400">chunked + auto-retry (network drop ปลอดภัย)</span>
           </p>

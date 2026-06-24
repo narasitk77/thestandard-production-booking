@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession, canUploadToBooking } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { getDriveParentFolderId } from '@/lib/google-drive'
+import { buildEpisodeFolderName } from '@/lib/outlet-folders'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,24 +35,28 @@ export async function GET(request: NextRequest) {
     const rows = await prisma.upload.findMany({
       where: { bookingId, status: 'COMPLETE', driveFileId: { not: null } },
       orderBy: { completedAt: 'desc' },
-      select: { camera: true, driveFileId: true },
+      select: { camera: true, driveFileId: true, episodeId: true, episode: { select: { sequence: true, title: true } } },
     })
 
-    // One representative file per camera (+ count). Newest first so the
-    // representative is a fresh, still-existing file.
-    const byCamera = new Map<string, { fileId: string; count: number }>()
+    // v1.93 — one representative file per (episode, camera) so multi-EP shoots
+    // surface each EP's camera folder, not just one. Label = "EP01 · ตอน /
+    // CAM-A" when the upload is EP-tagged, else just the camera (old uploads /
+    // no-episode bookings).
+    const byGroup = new Map<string, { label: string; fileId: string; count: number }>()
     for (const r of rows) {
-      const e = byCamera.get(r.camera)
+      const label = r.episode ? `${buildEpisodeFolderName(r.episode)} / ${r.camera}` : r.camera
+      const key = `${r.episodeId ?? ''}|${r.camera}`
+      const e = byGroup.get(key)
       if (e) e.count++
-      else byCamera.set(r.camera, { fileId: r.driveFileId!, count: 1 })
+      else byGroup.set(key, { label, fileId: r.driveFileId!, count: 1 })
     }
 
     const folders = await Promise.all(
-      Array.from(byCamera.entries()).map(async ([camera, { fileId, count }]) => {
+      Array.from(byGroup.values()).map(async ({ label, fileId, count }) => {
         let folderId: string | null = null
         try { folderId = await getDriveParentFolderId(fileId) } catch { /* file gone / API hiccup → no link */ }
         return {
-          camera,
+          camera: label,
           count,
           folderId,
           folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,

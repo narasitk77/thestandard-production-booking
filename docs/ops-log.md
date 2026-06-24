@@ -5,6 +5,30 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.93.0 — per-EP footage folders (multi-EP shoots no longer mixed)
+
+Multi-episode bookings now get a per-episode folder layer between the booking
+folder and the camera folders: `<Production ID · job>/EP01 · title/CAM-A/`.
+Applies to **all** bookings (single-EP gets `EP01` too, for consistency); a
+booking with no episodes keeps the old flat `<booking>/<camera>/` layout. New
+`buildEpisodeFolderName({sequence,title})` → `"EP01 · title"`. Wired into all
+three folder-creation paths — approve (CONFIRMED pre-create, EP×camera for every
+episode), the hourly prep-folders worker (incl. the Production Team landing
+drive), and upload-time (`ensureUploadFolderPath` takes `episodeFolderName`).
+The /upload page gains a **"ตอน / Episode"** picker (shown only for ≥2-EP
+shoots) and tags `Upload.episodeId` on every file. Read-side followed: the
+per-camera folder links + the "ส่งงาน" footage report group by **(EP × camera)**,
+and the "อัปครบ" badge counts `cameraCount × episodeCount` slots so it isn't
+falsely green when some EPs are still missing (extends the v1.92.1 bug-#3 fix
+along the EP axis). tsc 0 · 134 tests pass.
+
+Ceiling (no migration): files uploaded before v1.93 (`episodeId=null`) stay in
+their old flat folders — old footage isn't moved, only new uploads use the EP
+layer. A pre-v1.93 booking that was fully uploaded flat may show 🟡 briefly
+because the badge now counts per-EP slots.
+
+---
+
 ## 2026-06-24 · v1.92.2 (+v1.92.1) — multi-agent bug-review fixes, DEPLOYED + VERIFIED LIVE
 
 Deployed `sha-59ea209` (bundles v1.92.1 + v1.92.2 — all 5 confirmed bug-review

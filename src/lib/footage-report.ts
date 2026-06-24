@@ -7,6 +7,7 @@
  */
 import { prisma } from '@/lib/db'
 import { listFolderFiles, getDriveParentFolderId, type DriveFolderFile } from '@/lib/google-drive'
+import { buildEpisodeFolderName } from '@/lib/outlet-folders'
 
 export interface CameraReport {
   camera: string
@@ -31,16 +32,23 @@ export async function buildFootageReport(bookingId: string): Promise<FootageRepo
   const uploads = await prisma.upload.findMany({
     where: { bookingId, status: 'COMPLETE', driveFileId: { not: null } },
     orderBy: { completedAt: 'desc' },
-    select: { camera: true, driveFileId: true },
+    select: { camera: true, driveFileId: true, episodeId: true, episode: { select: { sequence: true, title: true } } },
   })
-  // One representative completed file per camera → derive its folder → list it.
-  const byCamera = new Map<string, string>()
-  for (const u of uploads) if (!byCamera.has(u.camera)) byCamera.set(u.camera, u.driveFileId!)
+  // v1.93 — one representative file per (episode, camera) → derive its folder →
+  // list it. Multi-EP shoots report each EP's camera folder separately; the
+  // label carries the EP ("EP01 · ตอน / CAM-A") so the report isn't ambiguous.
+  const byGroup = new Map<string, { label: string; fileId: string }>()
+  for (const u of uploads) {
+    const key = `${u.episodeId ?? ''}|${u.camera}`
+    if (!byGroup.has(key)) {
+      byGroup.set(key, { label: u.episode ? `${buildEpisodeFolderName(u.episode)} / ${u.camera}` : u.camera, fileId: u.driveFileId! })
+    }
+  }
 
   const cameras: CameraReport[] = []
   let totalFiles = 0
   let totalBytes = 0
-  for (const [camera, fileId] of Array.from(byCamera.entries())) {
+  for (const { label: camera, fileId } of Array.from(byGroup.values())) {
     let folderId: string | null = null
     try { folderId = await getDriveParentFolderId(fileId) } catch { /* file gone */ }
     let files: DriveFolderFile[] = []

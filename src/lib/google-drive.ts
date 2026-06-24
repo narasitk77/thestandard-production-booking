@@ -407,12 +407,18 @@ async function resolveShootFolder(
  */
 export async function ensureUploadFolderPath(input: ShootFolderInput & {
   camera: string
+  /** v1.93 — when set, nest the camera under this per-episode folder
+   *  (<booking>/<EP>/<camera>/). Omitted for bookings with no episodes. */
+  episodeFolderName?: string
   /** v1.84 — impersonate this user so the folders show them as creator. */
   subject?: string
 }): Promise<UploadFolderTarget> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
   const { bookingFolderId } = await resolveShootFolder(drive, input)
-  const cameraFolderId = await ensureChildFolder(drive, bookingFolderId, input.camera)
+  const cameraParent = input.episodeFolderName
+    ? await ensureChildFolder(drive, bookingFolderId, input.episodeFolderName)
+    : bookingFolderId
+  const cameraFolderId = await ensureChildFolder(drive, cameraParent, input.camera)
   return { bookingFolderId, cameraFolderId }
 }
 
@@ -424,11 +430,18 @@ export async function ensureUploadFolderPath(input: ShootFolderInput & {
  */
 export async function ensureShootCameraFolders(input: ShootFolderInput & {
   cameras: string[]
+  /** v1.93 — when set, the camera folders are created under EACH per-episode
+   *  folder (<booking>/<EP>/<camera>/), one EP folder per name. Omitted →
+   *  cameras sit directly under the booking folder (no-episode bookings). */
+  episodeFolderNames?: string[]
 }): Promise<{ bookingFolderId: string }> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
   const { bookingFolderId } = await resolveShootFolder(drive, input)
-  for (const cam of input.cameras) {
-    await ensureChildFolder(drive, bookingFolderId, cam)
+  const parents = input.episodeFolderNames?.length
+    ? await Promise.all(input.episodeFolderNames.map(ep => ensureChildFolder(drive, bookingFolderId, ep)))
+    : [bookingFolderId]
+  for (const parent of parents) {
+    for (const cam of input.cameras) await ensureChildFolder(drive, parent, cam)
   }
   return { bookingFolderId }
 }
@@ -443,11 +456,16 @@ export async function ensureFlatShootFolders(input: {
   rootFolderId: string
   bookingFolderName: string
   cameras: string[]
+  /** v1.93 — same per-episode nesting as ensureShootCameraFolders. */
+  episodeFolderNames?: string[]
 }): Promise<{ bookingFolderId: string }> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
   const bookingFolderId = await ensureChildFolder(drive, input.rootFolderId, input.bookingFolderName)
-  for (const cam of input.cameras) {
-    await ensureChildFolder(drive, bookingFolderId, cam)
+  const parents = input.episodeFolderNames?.length
+    ? await Promise.all(input.episodeFolderNames.map(ep => ensureChildFolder(drive, bookingFolderId, ep)))
+    : [bookingFolderId]
+  for (const parent of parents) {
+    for (const cam of input.cameras) await ensureChildFolder(drive, parent, cam)
   }
   return { bookingFolderId }
 }

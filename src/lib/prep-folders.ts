@@ -13,6 +13,7 @@ import {
   outletDriveFolderName,
   programFolderName,
   buildBookingFolderName,
+  buildEpisodeFolderName,
   camerasToPreCreate,
   hasOutletFolderMapping,
 } from '@/lib/outlet-folders'
@@ -65,7 +66,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { name: true } } } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { sequence: true, title: true, program: { select: { name: true } } } },
     },
   })
 
@@ -92,7 +93,10 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     try {
       const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
       const bookingFolderName = buildBookingFolderName(b.bookingCode!, jobName)
-      // 1) destination boxes in VIDEO 2026 (outlet/program/<ID·job>/CAM-..)
+      // v1.93 — one folder per episode (<booking>/<EP>/<camera>/). Empty for
+      // bookings with no episodes → cameras stay directly under the booking.
+      const episodeFolderNames = b.episodes.length ? b.episodes.map(buildEpisodeFolderName) : undefined
+      // 1) destination boxes in VIDEO 2026 (outlet/program/<ID·job>/<EP>/CAM-..)
       await ensureShootCameraFolders({
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
@@ -103,13 +107,14 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
         }),
         bookingFolderName,
         cameras,
+        episodeFolderNames,
       })
       // 2) v1.88 — landing folder in Production Team (flat, named by Production ID)
       //    so crew drop footage into an already-identified folder. Best-effort:
       //    a Production Team hiccup must not undo the VIDEO 2026 prep.
       let prodTeam = 'ok'
       try {
-        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingFolderName, cameras })
+        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingFolderName, cameras, episodeFolderNames })
       } catch (ptErr: any) {
         prodTeam = `error: ${ptErr?.message || ptErr}`
         prodTeamErrors++ // v1.92.1 — count it so a total Production Team outage shows in the headline log

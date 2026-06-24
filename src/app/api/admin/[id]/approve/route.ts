@@ -7,7 +7,7 @@ import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
 import { ensureShootCameraFolders, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
-import { outletDriveFolderName, programFolderName, buildBookingFolderName, camerasToPreCreate } from '@/lib/outlet-folders'
+import { outletDriveFolderName, programFolderName, buildBookingFolderName, buildEpisodeFolderName, camerasToPreCreate } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 
@@ -104,6 +104,8 @@ export async function POST(
           }),
           bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName),
           cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
+          // v1.93 — one folder per episode; empty for no-episode bookings.
+          episodeFolderNames: updated.episodes.length ? updated.episodes.map(buildEpisodeFolderName) : undefined,
         })
         await upsertTextFile({
           parentFolderId: bookingFolderId,

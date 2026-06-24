@@ -181,6 +181,22 @@ export function buildBookingFolderName(bookingCode: string, jobName?: string | n
 }
 
 /**
+ * v1.93 — Drive folder name for ONE episode inside a booking folder:
+ *   "EP01 · ชื่อตอน"   (when the episode has a title)
+ *   "EP02"             (when it doesn't)
+ *
+ * `sequence` is 1-based (create-booking assigns idx+1). Shoots that record
+ * several episodes get one such folder per EP — so footage is split per
+ * episode (<booking>/<EP>/<camera>/) instead of all mixed in one camera
+ * folder. Bookings with no episodes skip this layer entirely.
+ */
+export function buildEpisodeFolderName(ep: { sequence: number; title?: string | null }): string {
+  const num = `EP${String(ep.sequence).padStart(2, '0')}`
+  const title = sanitizeNameSegment(ep.title || '', 80)
+  return title ? `${num} ${MIDDLE_DOT} ${title}` : num
+}
+
+/**
  * Build the per-file Wasabi key components. Wasabi has no renumbering
  * problem and we want keys to stay stable + ASCII-clean, so it uses the
  * canonical outlet name and the bare bookingCode for the booking segment

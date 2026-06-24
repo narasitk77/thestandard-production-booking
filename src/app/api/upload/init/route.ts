@@ -7,6 +7,7 @@ import {
   outletDriveFolderName,
   programFolderName,
   buildBookingFolderName,
+  buildEpisodeFolderName,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import {
@@ -91,6 +92,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}))
     const bookingId = String(body.bookingId || '').trim()
     const camera = String(body.camera || '').trim()
+    // v1.93 — which episode this file belongs to (Episode.id / CUID). Picks the
+    // per-EP destination folder + tags Upload.episodeId. Optional: defaults to
+    // the first episode; absent for bookings that have no episodes.
+    const episodeRowId = body.episodeRowId ? String(body.episodeRowId).trim() : ''
     const filename = String(body.filename || '').trim()
     const size = Number(body.size)
     const mimeType = String(body.mimeType || 'application/octet-stream').trim()
@@ -150,7 +155,7 @@ export async function POST(request: NextRequest) {
         program: { select: { name: true } },
         episodes: {
           orderBy: { sequence: 'asc' },
-          select: { episodeId: true, title: true, sequence: true, program: { select: { name: true } } },
+          select: { id: true, episodeId: true, title: true, sequence: true, program: { select: { name: true } } },
         },
       },
     })
@@ -231,6 +236,24 @@ export async function POST(request: NextRequest) {
       null
     const bookingFolderName = buildBookingFolderName(booking.bookingCode, jobName)
 
+    // v1.93 — multi-EP: the file lands in a per-episode subfolder so episodes
+    // aren't all mixed in one camera folder. The uploader picks which EP;
+    // default to the first. Bookings with no episodes keep the flat
+    // <booking>/<camera>/ layout (episodeFolderName stays undefined).
+    let selectedEp: { id: string; sequence: number; title: string } | null = null
+    if (booking.episodes.length > 0) {
+      selectedEp = episodeRowId
+        ? booking.episodes.find(e => e.id === episodeRowId) ?? null
+        : booking.episodes[0]
+      if (!selectedEp) {
+        return NextResponse.json(
+          { error: 'episodeRowId does not match any episode on this booking', code: 'BAD_EPISODE' },
+          { status: 400 },
+        )
+      }
+    }
+    const episodeFolderName = selectedEp ? buildEpisodeFolderName(selectedEp) : undefined
+
     // v1.70 (issue #5) — the new Drive "program / รายการ" layer. Outlet shows →
     // real show name (bookingShowName); Content Agency → category box.
     const driveProgramFolder = programFolderName({
@@ -243,6 +266,7 @@ export async function POST(request: NextRequest) {
     const upload = await prisma.upload.create({
       data: {
         bookingId: booking.id,
+        episodeId: selectedEp?.id ?? null, // v1.93 — per-EP attribution
         camera,
         fileName: filename,
         fileSize: BigInt(size),
@@ -278,6 +302,7 @@ export async function POST(request: NextRequest) {
         outletCanonicalName: outletDriveFolderName(booking.outlet.code),
         programFolderName: driveProgramFolder,
         bookingFolderName,
+        episodeFolderName,
         camera,
         subject,
       })

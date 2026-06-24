@@ -4,6 +4,7 @@ import {
   outletDriveFolderName,
   programFolderName,
   buildBookingFolderName,
+  buildEpisodeFolderName,
   camerasToPreCreate,
   cameraUploadOptions,
 } from '../outlet-folders'
@@ -33,6 +34,15 @@ test('buildBookingFolderName uses the U+00B7 middle-dot separator', () => {
   assert.equal(buildBookingFolderName('TSS-EXE-260826-L-01', null), 'TSS-EXE-260826-L-01') // no job → bare code
   // explicitly NOT a hyphen
   assert.ok(!buildBookingFolderName('X-01', 'job').includes(' - '))
+})
+
+test('buildEpisodeFolderName: "EPnn · title" (1-based, zero-padded), bare "EPnn" without a title', () => {
+  assert.equal(buildEpisodeFolderName({ sequence: 1, title: 'ตอนแรก' }), `EP01 ${DOT} ตอนแรก`)
+  assert.equal(buildEpisodeFolderName({ sequence: 12, title: 'Finale' }), `EP12 ${DOT} Finale`)
+  assert.equal(buildEpisodeFolderName({ sequence: 2, title: '' }), 'EP02') // no title → just the EP number
+  assert.equal(buildEpisodeFolderName({ sequence: 3, title: null }), 'EP03')
+  // path separators in a title can't break out of the single folder segment
+  assert.ok(!buildEpisodeFolderName({ sequence: 1, title: 'a/b\\c' }).includes('/'))
 })
 
 test('camerasToPreCreate: CAM-A..CAM-{n} (cap D) + AUDIO if mics; empty for block shot', () => {

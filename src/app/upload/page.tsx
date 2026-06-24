@@ -17,7 +17,7 @@ interface BookingRow {
   outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
   program: { code: string; name: string }
   assignedEmails: string[]
-  episodes: Array<{ episodeId: string; title: string }>
+  episodes: Array<{ id: string; episodeId: string; title: string; sequence: number }>
 }
 
 interface Me {
@@ -36,11 +36,14 @@ function fmtDate(d: string): string {
 // Compares cameras with COMPLETE uploads against the booking's cameraCount.
 function uploadBadge(b: BookingRow, st?: { cameras: number; files: number }) {
   const base = 'text-[10px] px-1.5 py-0.5 rounded border'
-  const cameras = st?.cameras ?? 0   // v1.92.1 — CAM-* sources only (AUDIO/specials excluded)
+  const cameras = st?.cameras ?? 0   // v1.92.1 — CAM-* sources only; v1.93 — distinct EP×CAM slots
   const files = st?.files ?? 0
-  const expectedCams = b.cameraCount ?? 0  // 0/null = no specific camera requirement
+  // v1.93 — footage is split per episode, so "ครบ" needs every camera for every
+  // EP: expected slots = cameraCount × episodeCount (≥1 EP). 0 cameras = no
+  // specific requirement (audio-only / block shot → any file is done).
+  const epCount = Math.max(1, b.episodes?.length ?? 0)
+  const expectedCams = (b.cameraCount ?? 0) * epCount
   if (files === 0) return <span className={`${base} bg-red-50 text-red-700 border-red-200`}>🔴 ยังไม่อัป</span>
-  // Audio-only / block shot (no cameras expected): any completed upload = done.
   if (expectedCams <= 0) return <span className={`${base} bg-green-50 text-green-700 border-green-200`}>🟢 อัปครบ ({files})</span>
   if (cameras >= expectedCams) return <span className={`${base} bg-green-50 text-green-700 border-green-200`}>🟢 อัปครบ ({files})</span>
   return <span className={`${base} bg-yellow-50 text-yellow-700 border-yellow-200`}>🟡 อัปบางกล้อง {cameras}/{expectedCams}</span>
@@ -199,6 +202,7 @@ function UploadPage() {
                 cameraCount: single.cameraCount,
                 micCount: single.micCount,
                 outlet: single.outlet,
+                episodes: single.episodes ?? [],
               }} />
             ) : (
               <div className="gf-card p-6 text-center space-y-2 border-l-4 border-amber-400 bg-amber-50/40">

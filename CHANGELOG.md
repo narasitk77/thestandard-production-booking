@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.93.0] — 2026-06-24
+
+### Added — footage แยกโฟลเดอร์ตาม EP (multi-EP shoots ไม่กองรวมกันแล้ว)
+เดิมคิวที่ถ่ายหลาย EP เก็บ footage รวมในชุดโฟลเดอร์กล้องเดียว (`<Production ID · job>/CAM-A`). ตอนนี้เพิ่มชั้น **EP** คั่นไว้ — **ทุกคิว** (single-EP ก็มี EP01 เพื่อความสม่ำเสมอ):
+
+```
+<Production ID · job>/EP01 · ชื่อตอน/CAM-A, CAM-B, AUDIO/
+                     /EP02 · ชื่อตอน/CAM-A, AUDIO/
+```
+
+- **โครงสร้างใหม่:** `buildEpisodeFolderName({sequence,title})` → `"EP01 · ชื่อตอน"` (sequence 1-based zero-pad, ไม่มี title → `"EP01"`). ใส่ชั้นนี้เมื่อ booking มี episodes; ไม่มี episodes → คงโครงเดิม flat. ใช้ทั้ง 3 ทางสร้างโฟลเดอร์: ตอน **approve** (CONFIRMED pre-create EP×camera ทุก EP), **prep-folders worker** (รายชั่วโมง, รวมถึง landing folder ใน Production Team drive), และตอน **upload** (`ensureUploadFolderPath` รับ `episodeFolderName`).
+- **UI:** หน้า /upload มี dropdown **"ตอน / Episode"** (โผล่เฉพาะคิว ≥2 EP) เลือกก่อนอัป; ไฟล์เข้าโฟลเดอร์ EP ที่เลือก. คิว single-EP เลือกอัตโนมัติ. `Upload.episodeId` ถูก tag ทุกไฟล์.
+- **read-side ตามไปด้วย:** `/api/upload/folders` + footage report (`ส่งงาน`) group ตาม **(EP × camera)** → แสดง "EP01 · ตอน / CAM-A" แยกกล่อง (เดิม group ตาม camera อย่างเดียว เลยเห็นแค่ EP เดียว). badge "อัปครบ" บน /upload นับ slot = **cameraCount × จำนวน EP** (กันการขึ้น 🟢 ทั้งที่บาง EP ยังไม่อัป — รักษา fix bug #3 ตามแกน EP).
+- baseline: tsc 0 · 134 tests pass (+`buildEpisodeFolderName`).
+
+> ceiling (ponytail): ไฟล์ที่อัปไว้ก่อน v1.93 (`episodeId=null`) ยังอยู่โฟลเดอร์ flat เดิม — ไม่ย้ายของเก่า, ของใหม่เข้าโครง EP. คิวเก่าที่อัปครบแบบ flat อาจขึ้น 🟡 ชั่วคราวเพราะ badge นับตามแกน EP แล้ว.
+
+---
+
 ## [1.92.2] — 2026-06-22
 
 ### Fixed — บั๊คตัวสุดท้าย (#4): completeWithRetry ไม่ retry FAILED ถาวรอีกต่อไป
