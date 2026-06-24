@@ -5,6 +5,22 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.95.0 — link existing project episodes onto a confirmed AGN booking
+
+Feature (not infra): `/admin/[id]` gains a **"เพิ่ม EP จาก project"** button (AGN +
+projectId only) to attach more episodes to a booking at any status, incl.
+CONFIRMED — for directors adding shoots (Highlight, interview) after approval.
+Picks from the project Sheet (source of truth); **never mints EP IDs** (that
+foot-gun was removed in v1.35.17). New endpoint `POST /api/admin/[id]/add-episodes`
++ pure planner `src/lib/link-episodes.ts` (4 tests). tsc 0 · 141 tests pass.
+
+Merged to main as `254d52a` → image `ghcr.io/narasitk77/thestandard-production-booking:sha-254d52a`.
+Deploy: Portainer stack 125 — set `IMAGE_TAG=sha-254d52a` + redeploy (pullImage).
+First real use: add `Highlight` + `สัมภาษณ์ ผอ.ชาอูริติ` EPs onto AGN-260625-LOC-01
+(PP-26-025) after the producer adds them to the project in Producer Dashboard.
+
+---
+
 ## 2026-06-24 · v1.94.1 — Content Agency: restore the category layer above the Project box, DEPLOYED + VERIFIED LIVE
 
 Ops correction to v1.94.0: that cut dropped the AGN category layer entirely
