@@ -35,6 +35,7 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   // v1.96.0 — News Program producers added from the ops outlet-DB sheet (2026-06-24).
   { employeeId: 'TSD00133', thaiName: 'นางสาวสุธามาส ทวินันท์',     nickname: 'ข้าวฟ่าง', email: 'suthamat.t@thestandard.co', outlet: 'NWS', role: 'Producer',    position: 'Content Creator' },
   { employeeId: 'TSD00216', thaiName: 'นางสาวตรีนุช อิงคุทานนท์',   nickname: 'หนามเตย',  email: 'trinuch.i@thestandard.co',  outlet: 'NWS', role: 'Producer',    position: 'Content Creator' },
+  { employeeId: 'TSD00256', thaiName: 'นางสาวปภัสรา เพ็ชร์ณรงค์',   nickname: 'พีช',    email: 'papassara.p@thestandard.co', outlet: 'NWS', role: 'Producer',    position: 'Content Creator' },
   { employeeId: 'TSD00037', thaiName: 'นางสาวอ้อมเทียน ทาระมัด',   nickname: 'อ้อม',  email: 'aomtian.t@thestandard.co',   outlet: 'AGN', role: 'Producer',    position: 'Producer' },
   { employeeId: 'TSD00131', thaiName: 'นางสาวอรทิชา ตั้งวรรณสิทธิ์', nickname: 'ซัง',   email: 'onticha.t@thestandard.co',   outlet: 'AGN', role: 'Producer',    position: 'Producer' },
   { employeeId: 'TSD00271', thaiName: 'นางสาวณัฐชยา กาฬสิงห์',     nickname: 'ไนซ์',  email: 'natchaya.k@thestandard.co',  outlet: 'AGN', role: 'Producer',    position: 'Producer' },
