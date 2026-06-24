@@ -60,14 +60,21 @@ test('buildEpisodeFolderName: useEpisodeId leads with the project EP ID (Content
   assert.equal(buildEpisodeFolderName({ sequence: 3, title: 'Y', episodeId: 'PP-26-008-L09' }), `EP03 ${DOT} Y`)
 })
 
-test('shootFolderLayers: AGN groups by Project (no per-booking folder); others use show + Production ID', () => {
-  // Content Agency → "<Project ID · name>" as the program box, and NO booking folder
-  const agn = shootFolderLayers({
+test('shootFolderLayers: AGN nests Project under the category box; others use show + Production ID', () => {
+  // Content Agency Advertorial → category box "Advertorial" then "<Project ID · name>"
+  const agnAd = shootFolderLayers({
     outletCode: 'AGN', showName: 'ignored', category: 'ADVERTORIAL',
     projectId: 'PP-26-008', projectName: 'พีพี โปรเจค', bookingCode: 'AGN-260529-STD-01', jobName: 'job',
   })
-  assert.equal(agn.programFolderName, `PP-26-008 ${DOT} พีพี โปรเจค`)
-  assert.equal(agn.bookingFolderName, '') // '' = skip the per-booking layer
+  assert.equal(agnAd.programFolderName, 'Advertorial')
+  assert.equal(agnAd.bookingFolderName, `PP-26-008 ${DOT} พีพี โปรเจค`)
+  // Content Agency Event → category box "Event / Forum" (matches PMC's pre-created folder)
+  const agnEv = shootFolderLayers({
+    outletCode: 'AGN', showName: 'ignored', category: 'EVENT',
+    projectId: 'PP-26-020', projectName: 'อีเวนต์', bookingCode: 'AGN-260529-EVT-01', jobName: null,
+  })
+  assert.equal(agnEv.programFolderName, 'Event / Forum')
+  assert.equal(agnEv.bookingFolderName, `PP-26-020 ${DOT} อีเวนต์`)
   // Other outlets → show name + "<Production ID · job>"
   const nws = shootFolderLayers({
     outletCode: 'NWS', showName: 'Key Message', category: null,

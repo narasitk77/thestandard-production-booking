@@ -209,13 +209,14 @@ export function buildEpisodeFolderName(
 /**
  * v1.94 — the two folder layers between `<NN · Outlet>` and the EP folders.
  * They differ by outlet kind:
- *   Content Agency (AGN): footage is organised by PROJECT. The Project box
- *     "<Project ID> · <name>" plays the role other outlets' show name does, and
- *     there is NO per-booking folder — EP folders sit directly under the Project
- *     (so every booking of a project drops its EPs in one place).
+ *   Content Agency (AGN): footage is organised by category → PROJECT. The
+ *     category box ("Advertorial" / "Event / Forum", pre-created by PMC under
+ *     "09 · Content Agency") is the program layer, then a Project box
+ *     "<Project ID> · <name>" replaces the per-booking folder — so every booking
+ *     of a project drops its EPs in one place, grouped under the right category.
+ *     (v1.94.1 — restored the category layer that the first cut dropped: ops
+ *     wants Event shoots under "Event / Forum" and Advertorial under "Advertorial".)
  *   Every other outlet: "<show name>" then a per-booking "<Production ID · job>".
- * `bookingFolderName === ''` means "skip the per-booking layer" — resolveShootFolder
- * then nests the EP folders directly under the program (Project) box.
  */
 export function shootFolderLayers(input: {
   outletCode: string
@@ -228,8 +229,11 @@ export function shootFolderLayers(input: {
 }): { programFolderName: string; bookingFolderName: string } {
   if (input.outletCode.toUpperCase() === 'AGN' && input.projectId) {
     return {
-      programFolderName: buildBookingFolderName(input.projectId, input.projectName),
-      bookingFolderName: '',
+      // category box (Advertorial / Event · Forum) — pass category ONLY so the
+      // fallback lands on "Advertorial", never the show/project name.
+      programFolderName: programFolderName({ outletCode: input.outletCode, category: input.category }),
+      // Project box, nested under the category box.
+      bookingFolderName: buildBookingFolderName(input.projectId, input.projectName),
     }
   }
   return {

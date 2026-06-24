@@ -5,6 +5,25 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.94.1 — Content Agency: restore the category layer above the Project box
+
+Ops correction to v1.94.0: that cut dropped the AGN category layer entirely
+(Project box directly under `09 · Content Agency`). But PMC pre-created
+**Advertorial** and **Event / Forum** boxes under Content Agency (confirmed live
+at drive folder 1gXPrIBV7WoNQ3cmRIFVMUqhGQsw76WPv — both empty, Jun 18). So
+restore the category layer: an AGN booking now lands in
+`09 · Content Agency/<Advertorial | Event / Forum>/<Project ID · name>/<EP id · title>/<camera>/`,
+routed by `booking.category` (Event → "Event / Forum", Advertorial →
+"Advertorial"). Only `shootFolderLayers()`'s AGN branch changed: program layer =
+`programFolderName({category})` (the pre-v1.94 byte-exact category strings),
+booking layer = the Project box (now nested in the category instead of replacing
+it). EP folders + everything else unchanged. The upload path hint updated to show
+the category layer. tsc 0 · 137 tests pass.
+
+NOTE (pending at write time): build + deploy + live-verify in flight.
+
+---
+
 ## 2026-06-24 · v1.94.0 — Content Agency footage by Project → EP, DEPLOYED + VERIFIED LIVE
 
 Content Agency (AGN) gets its own Drive layout: the **Project box**

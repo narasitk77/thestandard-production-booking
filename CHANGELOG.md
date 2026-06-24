@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.94.1] — 2026-06-24
+
+### Fixed — Content Agency: คืนชั้น category (Advertorial / Event · Forum) เหนือ Project box
+v1.94.0 ตัดชั้น category ของ AGN ทิ้งไป (เอา Project box ขึ้นใต้ "09 · Content Agency" เลย) — แต่ PMC สร้างกล่อง **Advertorial** กับ **Event / Forum** รอไว้แล้วใต้ Content Agency. รอบนี้คืนชั้นนั้น: booking **Event → กล่อง "Event / Forum"**, **Advertorial → กล่อง "Advertorial"** แล้วค่อยลง Project box ข้างใน:
+
+```
+09 · Content Agency/
+├── Advertorial/                    ← booking.category = Advertorial
+│   └── PP-26-016 · ชื่อโปรเจค/
+│       └── PP-26-016-S02 · ตอน/CAM-A/
+└── Event / Forum/                   ← booking.category = Event
+    └── PP-26-020 · โปรเจคอีเวนต์/
+        └── ...
+```
+
+- `shootFolderLayers()` AGN: program layer = `programFolderName({category})` (Advertorial / Event / Forum, ใช้ของเดิมที่ byte-match กล่อง PMC), booking layer = Project box (ลงใต้ category). EP folder + ทุกอย่างอื่นคงเดิม.
+- path hint ฝั่ง upload อัปเดตเป็น `[outlet]/[Advertorial·Event]/[Project ID · โปรเจค]/<EP>/<camera>/`.
+- baseline: tsc 0 · 137 tests pass (shootFolderLayers test ครอบ Advertorial + Event).
+
+---
+
 ## [1.94.0] — 2026-06-24
 
 ### Added — Content Agency footage จัดตาม Project → EP (แทน category/Production ID)

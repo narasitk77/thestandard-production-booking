@@ -395,9 +395,8 @@ async function resolveShootFolder(
 ): Promise<{ bookingFolderId: string }> {
   const outletId = await ensureChildFolderByCanonicalName(drive, input.rootFolderId, input.outletCanonicalName)
   const programFolderId = await ensureChildFolderByCanonicalName(drive, outletId, input.programFolderName)
-  // v1.94 — Content Agency has no per-booking folder (footage is grouped by
-  // Project → EP), so an empty bookingFolderName means the EP/camera folders sit
-  // directly under the program (Project) box.
+  // Defensive: an empty bookingFolderName nests the EP/camera folders directly
+  // under the program box (rather than creating a folder literally named "").
   const bookingFolderId = input.bookingFolderName
     ? await ensureChildFolder(drive, programFolderId, input.bookingFolderName)
     : programFolderId
