@@ -5,7 +5,7 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-06-24 · v1.94.1 — Content Agency: restore the category layer above the Project box
+## 2026-06-24 · v1.94.1 — Content Agency: restore the category layer above the Project box, DEPLOYED + VERIFIED LIVE
 
 Ops correction to v1.94.0: that cut dropped the AGN category layer entirely
 (Project box directly under `09 · Content Agency`). But PMC pre-created
@@ -20,7 +20,24 @@ booking layer = the Project box (now nested in the category instead of replacing
 it). EP folders + everything else unchanged. The upload path hint updated to show
 the category layer. tsc 0 · 137 tests pass.
 
-NOTE (pending at write time): build + deploy + live-verify in flight.
+Deployed `sha-1cf26d3` (prev `sha-d6876ac`); `/api/version` `1.94.0` → **`1.94.1`**.
+**Verified live**: the AGN booking PP-26-016 upload path hint now reads
+`[outlet]/[Advertorial·Event]/[Project ID · โปรเจค]/PP-26-016-S02 · 2/CAM-A/` —
+category layer back above the Project box. Confirmed against the live Drive where
+PMC pre-created `Advertorial` + `Event / Forum` under `09 · Content Agency`.
+
+### Migration: CEA กรุงเทพ calendar event → REQUESTED booking
+Separately, migrated one Google Calendar event (`aqodjpcndf5erptaa9rqfb41lo` on
+the production calendar) into Probook as **REQUESTED** per the operator's ask
+("ตั้งเป็น Requested ไว้ รอผมแก้"). It's a Content Agency Advertorial for client
+CEA (producer ไนซ์). "CEA กรุงเทพ" isn't a project name, so confirmed the link
+with the operator → **PP-26-025 (Awesome Skills, CEA)**; auto-picked episodes
+`L01` (Wrap-up Long-form) + `S15` (Voxpop - BKK) to match the event scope (1 Long
++ 1 Voxpop short). Created via `POST /api/bookings` with a full payload mirroring
+the wizard (the prior July-migration 500 was bad/missing data, not a code bug —
+a valid payload returns 201). Result: **AGN-260625-LOC-01**, REQUESTED, 25 Jun
+2026 08:00–17:00, ม.กรุงเทพ, 2 cam / 1 mic / van, all calendar detail in notes.
+NOT approved (no calendar event or folders created). Operator edits/approves.
 
 ---
 
