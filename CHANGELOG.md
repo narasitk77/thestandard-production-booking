@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.97.1] — 2026-06-24
+
+### Fixed — add-episodes review fixes (adversarial code review, 5 bugs)
+- **Duplicate Episode rows on retry/concurrency** — `add-episodes` re-reads the
+  booking's episodes INSIDE the `$transaction` and skips ones already present,
+  recomputing sequence from the true max (was: check-then-insert against a stale
+  snapshot → a retried/double request could double-insert an episodeId, inflating
+  the upload-badge denominator). (@@unique([bookingId,episodeId]) is the durable
+  fix but needs a monitored db-push window — deferred.)
+- **No audit trail** — `add-episodes` now writes a `booking.episodes_added`
+  AuditLog row (fire-and-forget), matching every other admin booking mutation.
+- **Stale Google Calendar after adding EPs to a CONFIRMED booking** — now calls
+  `updateCalendarEventDetails` (fire-and-forget) so the event title + EP list
+  re-sync, same as the booking PATCH path.
+- **Producer free-text mode stuck across edit sessions** — `producerCustom`
+  resets to false on Edit open / Cancel / Save, so the producer field reopens in
+  dropdown mode each time.
+
+tsc 0 · 141 tests pass.
+
+---
+
 ## [1.97.0] — 2026-06-24
 
 ### Added
