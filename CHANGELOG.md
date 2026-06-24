@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.97.0] — 2026-06-24
+
+### Added
+- **News producer พีช** (ปภัสรา เพ็ชร์ณรงค์, papassara.p@, TSD00256) เพิ่มเข้า outlet roster
+  (NWS, Producer) — ครบ 3 คนที่ขอ (ข้าวฟ่าง · หนามเตย · พีช). รัน `import-producers` หลัง deploy.
+- **Agenda view โชว์จำนวนกล้อง** — แต่ละแถวใน `/calendar` (agenda + selected-day) แสดง `🎥 N`
+  (+ `🎙 N` ถ้ามีไมค์) ต่อท้าย episode/producer; งาน Block Shot แสดง `🎥 TBC`. `/api/bookings`
+  ส่ง cameraCount/micCount อยู่แล้ว (include) — เพิ่มแค่ใน interface + BookingRow.
+
+tsc 0 · 141 tests pass.
+
+---
+
 ## [1.96.0] — 2026-06-24
 
 ### Added — News producers + admin can change a booking's Producer at any status

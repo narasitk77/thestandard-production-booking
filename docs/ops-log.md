@@ -5,6 +5,21 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.97.0 — News producer พีช + agenda camera count
+
+1. Added the 3rd News producer **พีช** (papassara.p@, TSD00256) to `OUTLET_PRODUCERS`
+   — email was finally filled in the outlet-DB sheet. All 3 requested (ข้าวฟ่าง,
+   หนามเตย, พีช) now in. **Post-deploy:** run `POST /api/admin/import-producers`.
+2. `/calendar` agenda + selected-day rows now show `🎥 N` (+ `🎙 N`) camera count
+   (Block Shot → `🎥 TBC`). Display-only; `/api/bookings` already returns the counts.
+
+Bundles with still-undeployed v1.95.0 + v1.96.0. tsc 0 · 141 tests. Merge → image
+`sha-<merge>`. **DEPLOY (pending — Portainer unreachable from assistant browser):**
+stack 125 `IMAGE_TAG=sha-<merge>` + redeploy pullImage → `/api/version` = 1.97.0 →
+run import-producers.
+
+---
+
 ## 2026-06-24 · v1.96.0 — News producers + admin producer-reassign at any status
 
 Two ops-requested changes (bundled with the still-pending v1.95.0 deploy):

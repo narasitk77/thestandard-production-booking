@@ -21,6 +21,9 @@ interface Booking {
   locationName?: string
   producer: string
   needsVan?: boolean
+  cameraCount?: number | null
+  micCount?: number | null
+  isBlockShot?: boolean
   projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -455,6 +458,12 @@ function BookingRow({ b, onOpen }: { b: Booking; onOpen: () => void }) {
             {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}
             {b.episodes.length > 2 && ` +${b.episodes.length - 2}`}
             {b.producer && ` · ${b.producer}`}
+            {/* v1.97.0 — show camera (+mic) count in the agenda row */}
+            {b.isBlockShot
+              ? <span className="text-gray-400"> · 🎥 TBC</span>
+              : (typeof b.cameraCount === 'number' && b.cameraCount > 0) && (
+                  <span className="text-gray-600"> · 🎥 {b.cameraCount}{typeof b.micCount === 'number' && b.micCount > 0 ? ` · 🎙 ${b.micCount}` : ''}</span>
+                )}
           </div>
         </div>
       </button>
