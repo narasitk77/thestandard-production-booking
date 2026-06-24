@@ -5,6 +5,24 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.97.1 — add-episodes review fixes (pre-deploy)
+
+Adversarial review (11-agent workflow) of the still-undeployed v1.95–1.97 changes
+found 5 real bugs, all in the new add-episodes feature; fixed before deploy:
+1. dup Episode rows on retry/concurrency → transactional re-read + skip + seq from max
+2. missing AuditLog → log `booking.episodes_added`
+3. stale Google Calendar after adding EPs to CONFIRMED booking → `updateCalendarEventDetails`
+4. (= #1, durable angle) @@unique([bookingId,episodeId]) DEFERRED — needs monitored db-push
+5. producer free-text mode sticky across edit sessions → reset `producerCustom`
+
+tsc 0 · 141 tests. Image will be `sha-<merge>`. **Deploy still pending** (Portainer
+unreachable from assistant: both browser-extension and Mac `curl` get connection
+refused to `thestandard.fortiddns.com:9000`; user must deploy from their network).
+Deploy = stack 125 `IMAGE_TAG=sha-<merge>` + redeploy pullImage → `/api/version`=1.97.1
+→ run `POST /api/admin/import-producers`.
+
+---
+
 ## 2026-06-24 · v1.97.0 — News producer พีช + agenda camera count
 
 1. Added the 3rd News producer **พีช** (papassara.p@, TSD00256) to `OUTLET_PRODUCERS`

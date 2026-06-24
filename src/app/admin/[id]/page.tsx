@@ -425,6 +425,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       if (!res.ok) throw new Error(data.error)
       setBooking(data.booking)
       hydrateEditForm(data.booking)
+      setProducerCustom(false)
       setEditMode(false)
       showSaved()
     } catch (e: any) {
@@ -740,13 +741,13 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-medium text-gray-700">Booking Details</div>
           {!editMode ? (
-            <button onClick={() => setEditMode(true)}
+            <button onClick={() => { setProducerCustom(false); setEditMode(true) }}
               className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
               <Pencil className="w-3 h-3" /> Edit
             </button>
           ) : (
             <div className="flex gap-2">
-              <button onClick={() => { hydrateEditForm(booking); setEditMode(false) }}
+              <button onClick={() => { hydrateEditForm(booking); setProducerCustom(false); setEditMode(false) }}
                 disabled={editSaving}
                 className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">
                 Cancel

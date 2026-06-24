@@ -18,6 +18,8 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { planEpisodesToLink, type ProjectEp } from '@/lib/link-episodes'
+import { logAudit } from '@/lib/audit'
+import { updateCalendarEventDetails } from '@/lib/google-calendar'
 
 export async function POST(
   request: NextRequest,
@@ -72,17 +74,38 @@ export async function POST(
       )
     }
 
-    await prisma.$transaction(
-      toAdd.map(ep => prisma.episode.create({
-        data: {
-          bookingId: booking.id,
-          episodeId: ep.episodeId,
-          sequence: ep.sequence,
-          title: ep.title,
-          programId: booking.programId!,
-        },
-      }))
-    )
+    // Insert inside an interactive transaction that RE-READS the booking's
+    // episodes first — so a retried/duplicate request (or one fired before the
+    // client refreshed) can't double-insert the same episodeId, and the
+    // sequence always continues from the true current max. (The model has no
+    // @@unique on (bookingId, episodeId) — adding one needs a monitored
+    // db-push window since it builds an index; the re-read covers the realistic
+    // retry case without that risk.)
+    const created = await prisma.$transaction(async (tx) => {
+      const fresh = await tx.episode.findMany({
+        where: { bookingId: booking.id },
+        select: { episodeId: true, sequence: true },
+      })
+      const have = new Set(fresh.map(e => e.episodeId))
+      let seq = fresh.reduce((m, e) => Math.max(m, e.sequence), 0)
+      const rows: { episodeId: string }[] = []
+      for (const ep of toAdd) {
+        if (have.has(ep.episodeId)) continue // already added (concurrent/retry) — skip
+        seq += 1
+        await tx.episode.create({
+          data: {
+            bookingId: booking.id,
+            episodeId: ep.episodeId,
+            sequence: seq,
+            title: ep.title,
+            programId: booking.programId!,
+          },
+        })
+        have.add(ep.episodeId)
+        rows.push({ episodeId: ep.episodeId })
+      }
+      return rows
+    })
 
     const updated = await prisma.booking.findUnique({
       where: { id: booking.id },
@@ -93,7 +116,25 @@ export async function POST(
       },
     })
 
-    return NextResponse.json({ ok: true, added: toAdd.length, skipped, booking: updated })
+    // Audit trail (fire-and-forget) — matches the convention of every other
+    // admin booking mutation (PATCH, approve, etc.).
+    logAudit({
+      actorEmail: session.email,
+      action: 'booking.episodes_added',
+      entityType: 'Booking',
+      entityId: booking.id,
+      bookingCode: booking.bookingCode,
+      changes: { episodeIds: created.map(e => e.episodeId), count: created.length },
+    })
+
+    // Re-sync the live Google Calendar event so its title + episode list reflect
+    // the added EPs (same fire-and-forget patch the booking PATCH path uses).
+    if (updated?.calendarEventId) {
+      updateCalendarEventDetails(updated.calendarEventId, updated as Parameters<typeof updateCalendarEventDetails>[1])
+        .catch(e => console.error('updateCalendarEventDetails error:', e?.message || e))
+    }
+
+    return NextResponse.json({ ok: true, added: created.length, skipped, booking: updated })
   } catch (e) {
     console.error('POST /api/admin/[id]/add-episodes error:', e)
     return NextResponse.json({ error: 'เพิ่ม episode ไม่สำเร็จ' }, { status: 500 })
