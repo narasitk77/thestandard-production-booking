@@ -10,6 +10,7 @@ import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
+import { deriveBookingCategory } from '@/lib/booking-category'
 
 // Production ID middle segment, derived from the shoot type (e.g. AGN-260423-EVT-01).
 const SHOOT_TYPE_CODE: Record<string, string> = {
@@ -241,6 +242,10 @@ export async function createBookingFromPayload(
     bookingCode = episodeRecords[0].episodeId
   }
 
+  // booking.category — v1.98.0: derived from per-episode contentType for non-AGN
+  // (radio removed), explicit for AGN (drives folder routing). See booking-category.ts.
+  const bookingCategory = deriveBookingCategory(isAgency, category, episodeInputs)
+
   // Create booking + its episodes. A nested create is atomic on its own.
   const booking = await prisma.booking.create({
     data: {
@@ -249,7 +254,7 @@ export async function createBookingFromPayload(
       bookingCode,
       shootDate: parsedDate,
       shootEndDate: shootEndDate ? new Date(shootEndDate) : null,
-      category,
+      category: bookingCategory,
       videoType: videoType || null,
       shootType,
       locationName: locationName || null,

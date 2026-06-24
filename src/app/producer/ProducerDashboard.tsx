@@ -127,7 +127,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
         <p className="text-sm text-gray-400">ยังไม่มีงานที่คุณเป็น Producer</p>
       ) : (
         <div className="space-y-3">
-          {bookings.map(b => {
+          {[...bookings].sort((a, b) => a.shootDate.localeCompare(b.shootDate)).map(b => {
             const assigned = (b.assignedEmails || []).length > 0
             const open = openId === b.id
             return (
@@ -141,6 +141,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
                   </div>
                   <div className="text-sm text-gray-600 mt-1">
                     {b.outlet.name} · {bookingShowName(b)}
+                    {b.episodes[0]?.title ? ` — ${b.episodes[0].title}` : ''}
                     {b.projectId ? ` · ${b.projectId}` : ''}
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">

@@ -40,3 +40,6 @@ yarn-error.log*
 next-env.d.ts
 
 # prisma
+
+# local-only test override (AUTH_DISABLED) — never commit
+docker-compose.override.yml

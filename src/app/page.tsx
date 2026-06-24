@@ -3,7 +3,8 @@
 import { bookingShowName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { format, isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
+import { isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
+import { formatDisplayDate } from '@/lib/utils'
 import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react'
 import StatusPill from './_components/StatusPill'
 
@@ -351,15 +352,15 @@ function BookingList({ items }: { items: Booking[] }) {
             href={`/dashboard/${b.id}`}
             className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors"
           >
-            <div className="flex-shrink-0 w-14 text-center">
-              <div className="text-[10px] text-gray-400 uppercase">{format(parseISO(b.shootDate), 'EEE')}</div>
-              <div className="text-base font-semibold text-gray-800 tabular-nums leading-none">{format(parseISO(b.shootDate), 'd')}</div>
+            <div className="flex-shrink-0 w-28">
+              <div className="text-xs font-medium text-gray-700 leading-tight">{formatDisplayDate(b.shootDate)}</div>
               <div className="text-[10px] text-gray-400 tabular-nums mt-0.5">{b.callTime}</div>
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm text-gray-900 font-medium truncate">
                 <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
                 {bookingShowName(b)}
+                {b.episodes[0]?.title ? <span className="text-gray-500 font-normal"> — {b.episodes[0].title}</span> : null}
               </div>
               <div className="text-xs text-gray-500 truncate">
                 {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}

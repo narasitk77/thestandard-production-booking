@@ -5,6 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.98.0] — 2026-06-25
+
+### Changed — list views + Category (ops request)
+- **Full date in list rows** — the home overview ("Booking Upcoming") and My Bookings
+  rows showed only a compact `EEE d` stack (month+year dropped). Now show the full
+  date via `formatDisplayDate` (e.g. `Wed 05 Aug 2026`). Producer/Admin/console already
+  showed the full date.
+- **Episode title in the title** — list rows now append the first episode's title after
+  the show name: `[NWS] Long-form — ดีล X ตอนสปอนเซอร์` (home, my-bookings, producer).
+- **Sort by date** — My Bookings status tabs now sort by shoot date (active tabs
+  ascending/soonest-first; Completed/Cancelled descending/recent-first); Producer page
+  sorts ascending. Home "upcoming" was already chronological.
+
+### Removed — booking-level Category radio for non-AGN
+- The Category radio (Original Content / Advertorial / Event / Internal) was **removed
+  from the booking form for non-AGN outlets** — it duplicated the per-episode contentType.
+  `booking.category` is now **derived** from the episodes (any Advertorial EP →
+  ADVERTORIAL, else ORIGINAL_CONTENT) in `create-booking` (new `deriveBookingCategory`,
+  unit-tested). **Content Agency keeps the radio** — AGN has no per-EP contentType and the
+  value drives AGN Drive folder routing (Advertorial / Event · Forum). Summary rows also
+  hide Category for non-AGN.
+  - Note: EVENT/INTERNAL are no longer selectable for non-AGN (per-EP only expresses
+    OC/AD); Event shoots remain identifiable via shootType=EVENT.
+
+Verified on a local container: list shows full date + EP title + chronological order;
+create derives ADVERTORIAL vs ORIGINAL_CONTENT correctly. tsc 0 · 145 tests pass.
+
+---
+
 ## [1.97.1] — 2026-06-24
 
 ### Fixed — add-episodes review fixes (adversarial code review, 5 bugs)
