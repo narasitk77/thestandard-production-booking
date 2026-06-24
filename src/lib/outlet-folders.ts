@@ -204,7 +204,12 @@ export function buildEpisodeFolderName(ep: { sequence: number; title?: string | 
  *
  *   buildStoragePath('AGN', 'AGN-260423-EVT-01', 'Cam1', '001.mp4')
  *     → ['ADVERTORIAL', 'AGN-260423-EVT-01', 'Cam1', '001.mp4']
+ *   buildStoragePath('AGN', 'AGN-...-01', 'Cam1', '001.mp4', 'EP02')
+ *     → ['ADVERTORIAL', 'AGN-...-01', 'EP02', 'Cam1', '001.mp4']
  *
+ * v1.93 — `episodeSegment` (e.g. "EP01") mirrors the Drive per-episode folder
+ * so footage from different EPs with the same camera + filename can't collide
+ * on a single Wasabi key. ASCII-only by contract (no Thai episode title).
  * Caller joins with '/' for the Wasabi key.
  */
 export function buildStoragePath(
@@ -212,10 +217,12 @@ export function buildStoragePath(
   bookingCode: string,
   camera: string,
   filename: string,
+  episodeSegment?: string | null,
 ): string[] {
   return [
     outletFolderName(outletCode),
     bookingCode,
+    ...(episodeSegment ? [episodeSegment] : []),
     camera,
     filename,
   ]

@@ -221,25 +221,11 @@ export async function POST(request: NextRequest) {
       }, { status: 503 })
     }
 
-    // 4. Compute paths.
-    //   Wasabi: stable ASCII key — <prefix>/<OUTLET>/<bookingCode>/<camera>/<file>
-    //   Drive : reuse the team's existing outlet folder + a human booking
-    //           folder "<Production ID> - <job name>" (resolved in step 6).
-    const segments = buildStoragePath(booking.outlet.code, booking.bookingCode, camera, filename)
-    const wasabiKey = buildKey(getWasabiKeyPrefix(), segments)
-
-    // "job name" the producer set — projectName for Content Agency, else the
-    // lead episode's title, else nothing (folder is just the Production ID).
-    const jobName =
-      (booking.projectName && booking.projectName.trim()) ||
-      (booking.episodes[0]?.title && booking.episodes[0].title.trim()) ||
-      null
-    const bookingFolderName = buildBookingFolderName(booking.bookingCode, jobName)
-
     // v1.93 — multi-EP: the file lands in a per-episode subfolder so episodes
     // aren't all mixed in one camera folder. The uploader picks which EP;
-    // default to the first. Bookings with no episodes keep the flat
-    // <booking>/<camera>/ layout (episodeFolderName stays undefined).
+    // default to the first. Resolved up here because it also feeds the Wasabi
+    // key (below) so EP files don't collide. Bookings with no episodes keep the
+    // flat <booking>/<camera>/ layout (episodeFolderName stays undefined).
     let selectedEp: { id: string; sequence: number; title: string } | null = null
     if (booking.episodes.length > 0) {
       selectedEp = episodeRowId
@@ -251,8 +237,34 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         )
       }
+    } else if (episodeRowId) {
+      // Booking has no episodes but the client named one — surface it rather
+      // than silently dropping the file into the flat (no-EP) folder.
+      return NextResponse.json(
+        { error: 'episodeRowId provided but this booking has no episodes', code: 'BAD_EPISODE' },
+        { status: 400 },
+      )
     }
     const episodeFolderName = selectedEp ? buildEpisodeFolderName(selectedEp) : undefined
+    // ASCII-clean EP segment for the Wasabi key (no Thai title — keys stay
+    // stable + ASCII). Mirrors the Drive EP folder so the two storages don't
+    // drift and same-named files in different EPs can't overwrite each other.
+    const episodeKeySegment = selectedEp ? `EP${String(selectedEp.sequence).padStart(2, '0')}` : undefined
+
+    // 4. Compute paths.
+    //   Wasabi: stable ASCII key — <prefix>/<OUTLET>/<bookingCode>/[EP01/]<camera>/<file>
+    //   Drive : reuse the team's existing outlet folder + a human booking
+    //           folder "<Production ID> - <job name>" (resolved in step 6).
+    const segments = buildStoragePath(booking.outlet.code, booking.bookingCode, camera, filename, episodeKeySegment)
+    const wasabiKey = buildKey(getWasabiKeyPrefix(), segments)
+
+    // "job name" the producer set — projectName for Content Agency, else the
+    // lead episode's title, else nothing (folder is just the Production ID).
+    const jobName =
+      (booking.projectName && booking.projectName.trim()) ||
+      (booking.episodes[0]?.title && booking.episodes[0].title.trim()) ||
+      null
+    const bookingFolderName = buildBookingFolderName(booking.bookingCode, jobName)
 
     // v1.70 (issue #5) — the new Drive "program / รายการ" layer. Outlet shows →
     // real show name (bookingShowName); Content Agency → category box.

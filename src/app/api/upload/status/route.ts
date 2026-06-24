@@ -23,25 +23,32 @@ export async function GET(request: NextRequest) {
     if (ids.length === 0) return NextResponse.json({ status: {} })
 
     const rows = await prisma.upload.groupBy({
-      // v1.93 — also group by episodeId so `cameras` counts distinct
-      // (episode × camera) slots: a 2-EP / 2-cam shoot needs 4 slots filled to
-      // be "ครบ", not 2. Keeps the badge honest once footage is split per EP.
+      // v1.93 — group by episodeId too so `epSlots` can count distinct
+      // (episode × camera) slots: a 2-EP / 2-cam shoot needs 4 filled to be
+      // "ครบ", not 2. Keeps the badge honest once footage is split per EP.
       by: ['bookingId', 'camera', 'episodeId'],
       where: { bookingId: { in: ids }, status: 'COMPLETE' },
       _count: { _all: true },
     })
 
-    // v1.92.1 — `cameras` counts only CAM-* sources (a physical camera), so the
-    // "อัปครบ" completeness check isn't falsely satisfied by AUDIO / DRONE /
-    // SWITCHER / PHOTO / SCREEN. v1.93 — each row is now one (episode, camera)
-    // pair, so `cameras` = distinct EP×CAM slots delivered. `files` stays the
-    // total across all sources.
-    const status: Record<string, { cameras: number; files: number }> = {}
-    for (const id of ids) status[id] = { cameras: 0, files: 0 }
+    // v1.92.1 — count only CAM-* sources (a physical camera), so "อัปครบ" isn't
+    // falsely satisfied by AUDIO / DRONE / SWITCHER / PHOTO / SCREEN.
+    // v1.93 — two SEPARATE buckets so legacy (episodeId=null) and EP-tagged
+    // uploads never collide in the count:
+    //   epSlots  = distinct (EP × CAM-*) pairs that are EP-tagged → used for
+    //              bookings that have episodes (expected = cameraCount × #EP)
+    //   flatCams = distinct CAM-* with no episode → used for no-episode bookings
+    //              (and legacy flat footage, which the UI ignores once a booking
+    //              has episodes). `files` = total across all sources.
+    const status: Record<string, { epSlots: number; flatCams: number; files: number }> = {}
+    for (const id of ids) status[id] = { epSlots: 0, flatCams: 0, files: 0 }
     for (const r of rows) {
       const s = status[r.bookingId]
       if (!s) continue
-      if (/^CAM-/i.test(r.camera)) s.cameras += 1
+      if (/^CAM-/i.test(r.camera)) {
+        if (r.episodeId) s.epSlots += 1
+        else s.flatCams += 1
+      }
       s.files += r._count._all
     }
 
