@@ -5,6 +5,24 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.96.0 — News producers + admin producer-reassign at any status
+
+Two ops-requested changes (bundled with the still-pending v1.95.0 deploy):
+1. Added 2 News Program producers to `OUTLET_PRODUCERS` (ข้าวฟ่าง suthamat.t@,
+   หนามเตย trinuch.i@). **Post-deploy step:** run `POST /api/admin/import-producers`
+   (admin) so they upsert into the User table and appear in the News Producer
+   dropdown. (3rd person พีช/ปภัสรา held — email cell blank in the outlet-DB sheet.)
+2. Admin can now reassign a booking's Producer at ANY status via `/admin/[id]` Edit
+   — producer field became a per-outlet dropdown (`/api/producers?outlet=`) + free-text
+   fallback; PATCH `/api/bookings/[id]` now also accepts `producerEmail`.
+
+tsc 0 · 141 tests pass. Merge to main → image `sha-<merge>`. **DEPLOY (still pending,
+same blocker as v1.95.0 — Portainer unreachable from assistant browser):** stack 125
+`IMAGE_TAG=sha-<merge>` + redeploy pullImage → verify `/api/version` = 1.96.0 → then
+run import-producers.
+
+---
+
 ## 2026-06-24 · v1.95.0 — link existing project episodes onto a confirmed AGN booking
 
 Feature (not infra): `/admin/[id]` gains a **"เพิ่ม EP จาก project"** button (AGN +
