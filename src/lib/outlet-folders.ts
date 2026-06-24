@@ -190,10 +190,52 @@ export function buildBookingFolderName(bookingCode: string, jobName?: string | n
  * episode (<booking>/<EP>/<camera>/) instead of all mixed in one camera
  * folder. Bookings with no episodes skip this layer entirely.
  */
-export function buildEpisodeFolderName(ep: { sequence: number; title?: string | null }): string {
-  const num = `EP${String(ep.sequence).padStart(2, '0')}`
+export function buildEpisodeFolderName(
+  ep: { sequence: number; title?: string | null; episodeId?: string | null },
+  opts: { useEpisodeId?: boolean } = {},
+): string {
+  // v1.94 — Content Agency leads with the project EP ID (e.g. PP-26-008-L04),
+  // which is unique within the project, so EP folders from different bookings of
+  // the SAME project don't collide as siblings under the Project box. Every other
+  // outlet uses the per-booking running number EP01/EP02 (safe under their own
+  // per-booking <Production ID> folder).
+  const lead = opts.useEpisodeId && ep.episodeId
+    ? sanitizeNameSegment(ep.episodeId, 60)
+    : `EP${String(ep.sequence).padStart(2, '0')}`
   const title = sanitizeNameSegment(ep.title || '', 80)
-  return title ? `${num} ${MIDDLE_DOT} ${title}` : num
+  return title ? `${lead} ${MIDDLE_DOT} ${title}` : lead
+}
+
+/**
+ * v1.94 — the two folder layers between `<NN · Outlet>` and the EP folders.
+ * They differ by outlet kind:
+ *   Content Agency (AGN): footage is organised by PROJECT. The Project box
+ *     "<Project ID> · <name>" plays the role other outlets' show name does, and
+ *     there is NO per-booking folder — EP folders sit directly under the Project
+ *     (so every booking of a project drops its EPs in one place).
+ *   Every other outlet: "<show name>" then a per-booking "<Production ID · job>".
+ * `bookingFolderName === ''` means "skip the per-booking layer" — resolveShootFolder
+ * then nests the EP folders directly under the program (Project) box.
+ */
+export function shootFolderLayers(input: {
+  outletCode: string
+  showName: string
+  category?: string | null
+  projectId?: string | null
+  projectName?: string | null
+  bookingCode: string
+  jobName?: string | null
+}): { programFolderName: string; bookingFolderName: string } {
+  if (input.outletCode.toUpperCase() === 'AGN' && input.projectId) {
+    return {
+      programFolderName: buildBookingFolderName(input.projectId, input.projectName),
+      bookingFolderName: '',
+    }
+  }
+  return {
+    programFolderName: programFolderName({ outletCode: input.outletCode, showName: input.showName, category: input.category }),
+    bookingFolderName: buildBookingFolderName(input.bookingCode, input.jobName),
+  }
 }
 
 /**

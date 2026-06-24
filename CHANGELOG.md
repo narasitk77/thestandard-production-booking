@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.94.0] — 2026-06-24
+
+### Added — Content Agency footage จัดตาม Project → EP (แทน category/Production ID)
+สำหรับ outlet **Content Agency (AGN)** เปลี่ยนโครง Drive ให้ "กล่อง Project" เป็นชั้นบนสุด (แทน "ชื่อรายการ" ของ outlet อื่น) แล้วแตกเป็น EP → กล้อง:
+
+```
+09 · Content Agency/
+└── PP-26-008 · ชื่อโปรเจค/         ← Project box (Project ID · ชื่อ) — แทน category + Production ID
+    ├── PP-26-008-L04 · ชื่อตอน/    ← EP folder = project EP ID (unique ในโปรเจค)
+    │   ├── CAM-A/ CAM-B/ CAM-C/
+    └── PP-26-008-L05 · ชื่อตอน/
+        └── CAM-A/
+```
+
+- **ต่างจาก outlet อื่น:** AGN ไม่มีชั้น `<Production ID · job>` — footage ของทุกใบจองใน project เดียวกันมารวมใต้กล่อง Project เดียว, EP เป็น sub-folder. EP folder ใช้ **project EP ID** (`PP-26-008-L04`) ไม่ใช่ `EP01` — เพราะ sequence เริ่มที่ 1 ใหม่ทุกใบจอง จะชนกันถ้าใช้ EP01 ใต้ Project เดียว. outlet อื่นคงเดิม (`<show>/<Production ID · job>/EP01 · title/CAM-A`).
+- **โค้ด:** `shootFolderLayers()` คืน program+booking layer แบบ AGN-aware (AGN → Project box + booking layer ว่าง = ข้าม); `buildEpisodeFolderName(ep, {useEpisodeId})` AGN ใช้ episodeId นำ. `resolveShootFolder` ข้ามชั้น booking เมื่อ `bookingFolderName===''`. wired เข้า approve / prep-worker / upload-init. read-side (folder links + footage report) + UI picker + path hint แสดง EP ID สำหรับ AGN. `_SHOOT.txt` ของ AGN ตั้งชื่อ `_SHOOT-<Production ID>.txt` (กล่อง Project ใช้ร่วมหลายใบจอง เลยไม่ทับกัน).
+- Production Team landing drive (NAS drop zone) ยัง key ด้วย Production ID เหมือนเดิม (identity = ตัวงาน ไม่ใช่ project) — เฉพาะ box VIDEO 2026 ที่จัดตาม Project.
+- baseline: tsc 0 · 137 tests pass (+`buildEpisodeFolderName` useEpisodeId, +`shootFolderLayers`).
+
+> ceiling: กล่อง Project match ด้วยชื่อ `<Project ID · name>` — ถ้า projectName snapshot เปลี่ยนระหว่างใบจอง อาจเกิดกล่องซ้ำ (projectName นิ่งเป็นปกติ). ไฟล์ AGN ที่อัปก่อน v1.94 ยังอยู่โครงเดิม (category/Production ID) — ไม่ย้าย.
+
+---
+
 ## [1.93.0] — 2026-06-24
 
 ### Added — footage แยกโฟลเดอร์ตาม EP (multi-EP shoots ไม่กองรวมกันแล้ว)

@@ -143,6 +143,13 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // shown as a picker when the shoot records more than one EP.
   const episodes = booking.episodes ?? []
   const [episodeRowId, setEpisodeRowId] = useState(episodes[0]?.id ?? '')
+  // v1.94 — Content Agency labels EPs by their project EP ID (matches the Drive
+  // folder, e.g. "PP-26-008-L04"); every other outlet uses the running EP01.
+  const isAgency = booking.outlet.code === 'AGN'
+  const epLabel = (ep: { episodeId: string; title: string; sequence: number }) => {
+    const lead = isAgency && ep.episodeId ? ep.episodeId : `EP${String(ep.sequence).padStart(2, '0')}`
+    return ep.title ? `${lead} · ${ep.title}` : lead
+  }
   // (no top-level error banner — per-queue-item errors render inline below)
   const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
   const [history, setHistory] = useState<UploadItem[]>([])
@@ -356,9 +363,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             <label className="text-[10px] text-gray-500 uppercase mb-1 block">ตอน / Episode</label>
             <select className="gf-input" value={episodeRowId} onChange={e => setEpisodeRowId(e.target.value)}>
               {episodes.map(ep => (
-                <option key={ep.id} value={ep.id}>
-                  EP{String(ep.sequence).padStart(2, '0')}{ep.title ? ` · ${ep.title}` : ''}
-                </option>
+                <option key={ep.id} value={ep.id}>{epLabel(ep)}</option>
               ))}
             </select>
             <p className="text-[10px] text-gray-400 mt-0.5">ไฟล์จะเข้าโฟลเดอร์แยกตามตอนที่เลือก</p>
@@ -432,8 +437,11 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
                 Exact outlet/program/job are resolved server-side (placeholders). */}
             {' '}<code className="text-gray-700">{(() => {
               const ep = episodes.find(e => e.id === episodeRowId)
-              const epSeg = ep ? `/EP${String(ep.sequence).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}` : ''
-              return `[outlet]/[program]/${booking.bookingCode} · [ชื่องาน]${epSeg}/${camera}/`
+              const epSeg = ep ? `/${epLabel(ep)}` : ''
+              // v1.94 — AGN groups by Project (no Production-ID folder); others keep it.
+              return isAgency
+                ? `[outlet]/[Project ID · โปรเจค]${epSeg}/${camera}/`
+                : `[outlet]/[program]/${booking.bookingCode} · [ชื่องาน]${epSeg}/${camera}/`
             })()}</code>
             {' · '}
             <span className="text-gray-400">chunked + auto-retry (network drop ปลอดภัย)</span>

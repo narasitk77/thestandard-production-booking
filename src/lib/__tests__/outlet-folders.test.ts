@@ -6,6 +6,7 @@ import {
   buildBookingFolderName,
   buildEpisodeFolderName,
   buildStoragePath,
+  shootFolderLayers,
   camerasToPreCreate,
   cameraUploadOptions,
 } from '../outlet-folders'
@@ -44,6 +45,43 @@ test('buildEpisodeFolderName: "EPnn · title" (1-based, zero-padded), bare "EPnn
   assert.equal(buildEpisodeFolderName({ sequence: 3, title: null }), 'EP03')
   // path separators in a title can't break out of the single folder segment
   assert.ok(!buildEpisodeFolderName({ sequence: 1, title: 'a/b\\c' }).includes('/'))
+})
+
+test('buildEpisodeFolderName: useEpisodeId leads with the project EP ID (Content Agency)', () => {
+  // AGN: lead with the unique project EP ID instead of EP01 (collision-safe
+  // across bookings of the same project)
+  assert.equal(
+    buildEpisodeFolderName({ sequence: 1, title: 'ตอนA', episodeId: 'PP-26-008-L04' }, { useEpisodeId: true }),
+    `PP-26-008-L04 ${DOT} ตอนA`,
+  )
+  // useEpisodeId but no episodeId → falls back to the running number
+  assert.equal(buildEpisodeFolderName({ sequence: 2, title: 'X', episodeId: null }, { useEpisodeId: true }), `EP02 ${DOT} X`)
+  // default (others) ignores episodeId
+  assert.equal(buildEpisodeFolderName({ sequence: 3, title: 'Y', episodeId: 'PP-26-008-L09' }), `EP03 ${DOT} Y`)
+})
+
+test('shootFolderLayers: AGN groups by Project (no per-booking folder); others use show + Production ID', () => {
+  // Content Agency → "<Project ID · name>" as the program box, and NO booking folder
+  const agn = shootFolderLayers({
+    outletCode: 'AGN', showName: 'ignored', category: 'ADVERTORIAL',
+    projectId: 'PP-26-008', projectName: 'พีพี โปรเจค', bookingCode: 'AGN-260529-STD-01', jobName: 'job',
+  })
+  assert.equal(agn.programFolderName, `PP-26-008 ${DOT} พีพี โปรเจค`)
+  assert.equal(agn.bookingFolderName, '') // '' = skip the per-booking layer
+  // Other outlets → show name + "<Production ID · job>"
+  const nws = shootFolderLayers({
+    outletCode: 'NWS', showName: 'Key Message', category: null,
+    projectId: null, projectName: null, bookingCode: 'NWS-KYM-260616-L-01', jobName: 'Morning',
+  })
+  assert.equal(nws.programFolderName, 'Key Message')
+  assert.equal(nws.bookingFolderName, `NWS-KYM-260616-L-01 ${DOT} Morning`)
+  // AGN with no projectId (shouldn't happen) → falls back to the normal layout
+  const agnNoProj = shootFolderLayers({
+    outletCode: 'AGN', showName: '', category: 'ADVERTORIAL',
+    projectId: null, projectName: null, bookingCode: 'AGN-260529-STD-01', jobName: null,
+  })
+  assert.equal(agnNoProj.programFolderName, 'Advertorial')
+  assert.equal(agnNoProj.bookingFolderName, 'AGN-260529-STD-01')
 })
 
 test('buildStoragePath: EP segment is inserted between bookingCode and camera (Wasabi collision guard)', () => {

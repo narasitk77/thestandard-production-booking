@@ -7,7 +7,7 @@ import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
 import { ensureShootCameraFolders, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
-import { outletDriveFolderName, programFolderName, buildBookingFolderName, buildEpisodeFolderName, camerasToPreCreate } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, camerasToPreCreate } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 
@@ -94,22 +94,31 @@ export async function POST(
       if (!root || !updated.bookingCode || !hasDriveCredentials()) return
       try {
         const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
+        // v1.94 — AGN groups footage by Project (no per-booking folder; EP folders
+        // keyed by project EP ID); every other outlet keeps <show>/<Production ID>.
+        const isAgency = updated.outlet.code === 'AGN'
+        const { programFolderName, bookingFolderName } = shootFolderLayers({
+          outletCode: updated.outlet.code,
+          showName: bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
+          category: updated.category,
+          projectId: updated.projectId,
+          projectName: updated.projectName,
+          bookingCode: updated.bookingCode,
+          jobName,
+        })
         const { bookingFolderId } = await ensureShootCameraFolders({
           rootFolderId: root,
           outletCanonicalName: outletDriveFolderName(updated.outlet.code),
-          programFolderName: programFolderName({
-            outletCode: updated.outlet.code,
-            showName: bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
-            category: updated.category,
-          }),
-          bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName),
+          programFolderName,
+          bookingFolderName,
           cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
           // v1.93 — one folder per episode; empty for no-episode bookings.
-          episodeFolderNames: updated.episodes.length ? updated.episodes.map(buildEpisodeFolderName) : undefined,
+          episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,
         })
         await upsertTextFile({
           parentFolderId: bookingFolderId,
-          name: '_SHOOT.txt',
+          // v1.94 — AGN shares the Project box across bookings → name per-booking.
+          name: isAgency ? `_SHOOT-${updated.bookingCode}.txt` : '_SHOOT.txt',
           content: renderBookingInfo(bookingInfoInput(updated)),
         })
       } catch (e: any) {

@@ -11,7 +11,7 @@ import { prisma } from '@/lib/db'
 import { ensureShootCameraFolders, ensureFlatShootFolders, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
-  programFolderName,
+  shootFolderLayers,
   buildBookingFolderName,
   buildEpisodeFolderName,
   camerasToPreCreate,
@@ -63,10 +63,10 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     },
     select: {
       id: true, bookingCode: true, cameraCount: true, micCount: true,
-      projectName: true, category: true,
+      projectId: true, projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { sequence: true, title: true, program: { select: { name: true } } } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
     },
   })
 
@@ -91,30 +91,37 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       continue
     }
     try {
+      const isAgency = b.outlet.code === 'AGN'
       const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
-      const bookingFolderName = buildBookingFolderName(b.bookingCode!, jobName)
-      // v1.93 — one folder per episode (<booking>/<EP>/<camera>/). Empty for
-      // bookings with no episodes → cameras stay directly under the booking.
-      const episodeFolderNames = b.episodes.length ? b.episodes.map(buildEpisodeFolderName) : undefined
-      // 1) destination boxes in VIDEO 2026 (outlet/program/<ID·job>/<EP>/CAM-..)
+      // v1.93 — one folder per episode (<…>/<EP>/<camera>/). v1.94 — AGN keys EP
+      // folders by project EP ID; empty for bookings with no episodes.
+      const episodeFolderNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined
+      // v1.94 — AGN groups by Project (no per-booking folder); others by show + ID.
+      const { programFolderName, bookingFolderName } = shootFolderLayers({
+        outletCode: b.outlet.code,
+        showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
+        category: b.category,
+        projectId: b.projectId,
+        projectName: b.projectName,
+        bookingCode: b.bookingCode!,
+        jobName,
+      })
+      // 1) destination boxes in VIDEO 2026 (AGN: outlet/<Project>/…; others: outlet/program/<ID·job>/<EP>/CAM-..)
       await ensureShootCameraFolders({
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
-        programFolderName: programFolderName({
-          outletCode: b.outlet.code,
-          showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
-          category: b.category,
-        }),
+        programFolderName,
         bookingFolderName,
         cameras,
         episodeFolderNames,
       })
-      // 2) v1.88 — landing folder in Production Team (flat, named by Production ID)
-      //    so crew drop footage into an already-identified folder. Best-effort:
-      //    a Production Team hiccup must not undo the VIDEO 2026 prep.
+      // 2) v1.88 — landing folder in Production Team (flat, ALWAYS named by
+      //    Production ID — it's a NAS drop zone, identity = the shoot, not the
+      //    project). Best-effort: a Production Team hiccup must not undo the box prep.
+      const landingFolderName = buildBookingFolderName(b.bookingCode!, jobName)
       let prodTeam = 'ok'
       try {
-        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingFolderName, cameras, episodeFolderNames })
+        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingFolderName: landingFolderName, cameras, episodeFolderNames })
       } catch (ptErr: any) {
         prodTeam = `error: ${ptErr?.message || ptErr}`
         prodTeamErrors++ // v1.92.1 — count it so a total Production Team outage shows in the headline log

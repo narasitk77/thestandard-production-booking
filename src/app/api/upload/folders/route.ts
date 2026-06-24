@@ -32,10 +32,14 @@ export async function GET(request: NextRequest) {
       if (!check.ok) return NextResponse.json({ error: 'Forbidden', code: check.reason }, { status: 403 })
     }
 
+    // v1.94 — AGN labels EP folders by project EP ID (matches the Drive folder).
+    const bk = await prisma.booking.findUnique({ where: { id: bookingId }, select: { outlet: { select: { code: true } } } })
+    const isAgency = bk?.outlet.code === 'AGN'
+
     const rows = await prisma.upload.findMany({
       where: { bookingId, status: 'COMPLETE', driveFileId: { not: null } },
       orderBy: { completedAt: 'desc' },
-      select: { camera: true, driveFileId: true, episodeId: true, episode: { select: { sequence: true, title: true } } },
+      select: { camera: true, driveFileId: true, episodeId: true, episode: { select: { sequence: true, title: true, episodeId: true } } },
     })
 
     // v1.93 — one representative file per (episode, camera) so multi-EP shoots
@@ -44,7 +48,7 @@ export async function GET(request: NextRequest) {
     // no-episode bookings).
     const byGroup = new Map<string, { label: string; fileId: string; count: number }>()
     for (const r of rows) {
-      const label = r.episode ? `${buildEpisodeFolderName(r.episode)} / ${r.camera}` : r.camera
+      const label = r.episode ? `${buildEpisodeFolderName(r.episode, { useEpisodeId: isAgency })} / ${r.camera}` : r.camera
       const key = `${r.episodeId ?? ''}|${r.camera}`
       const e = byGroup.get(key)
       if (e) e.count++

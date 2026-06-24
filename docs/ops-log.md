@@ -5,6 +5,38 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-24 · v1.94.0 — Content Agency footage by Project → EP (replaces category/Production-ID layers)
+
+Content Agency (AGN) gets its own Drive layout: the **Project box**
+`<Project ID · name>` (e.g. `PP-26-008 · ชื่อโปรเจค`) sits directly under
+`09 · Content Agency` and plays the role other outlets' show name does, then EP
+folders keyed by the **project EP ID** (`PP-26-008-L04 · title`), then cameras.
+There is **no per-booking `<Production ID>` folder** for AGN — every booking of a
+project drops its EPs under the one Project box. EP folders use the project EP ID
+(not `EP01`) because AGN `sequence` restarts at 1 per booking and would collide as
+siblings. Every other outlet is unchanged
+(`<show>/<Production ID · job>/EP01 · title/CAM-A`).
+
+Implementation: `shootFolderLayers()` returns the program + per-booking layer
+AGN-aware (AGN → Project box + empty booking layer); `resolveShootFolder` skips
+the booking level when `bookingFolderName===''`; `buildEpisodeFolderName(ep,
+{useEpisodeId})` leads with the episodeId for AGN. Wired into approve / the
+prep-folders worker / upload-init, plus the read-side (folder links + footage
+report labels), the /upload EP picker + path hint, and the `_SHOOT.txt` name
+(`_SHOOT-<Production ID>.txt` for AGN since the Project box is shared). The
+Production Team landing drive stays keyed by Production ID (it's a NAS drop zone,
+identity = the shoot). tsc 0 · 137 tests pass.
+
+Ceiling: the Project box is matched by its `<Project ID · name>` string, so if a
+project's name snapshot changes between bookings a duplicate box could appear
+(names are normally stable). AGN footage uploaded before v1.94 stays in the old
+category/Production-ID layout (not migrated).
+
+NOTE (pending at write time): NOT yet deployed/verified live — build + adversarial
+review in flight (see below once confirmed).
+
+---
+
 ## 2026-06-24 · v1.93.0 — per-EP footage folders (multi-EP shoots no longer mixed), DEPLOYED + VERIFIED LIVE
 
 Deployed `sha-cd83312` (prev `sha-59ea209`). `/api/version` flipped

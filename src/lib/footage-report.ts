@@ -27,12 +27,13 @@ export interface FootageReport {
 export async function buildFootageReport(bookingId: string): Promise<FootageReport> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    select: { bookingCode: true, deliveredAt: true, deliveredBy: true },
+    select: { bookingCode: true, deliveredAt: true, deliveredBy: true, outlet: { select: { code: true } } },
   })
+  const isAgency = booking?.outlet.code === 'AGN' // v1.94 — AGN EP labels use project EP ID
   const uploads = await prisma.upload.findMany({
     where: { bookingId, status: 'COMPLETE', driveFileId: { not: null } },
     orderBy: { completedAt: 'desc' },
-    select: { camera: true, driveFileId: true, episodeId: true, episode: { select: { sequence: true, title: true } } },
+    select: { camera: true, driveFileId: true, episodeId: true, episode: { select: { sequence: true, title: true, episodeId: true } } },
   })
   // v1.93 — one representative file per (episode, camera) → derive its folder →
   // list it. Multi-EP shoots report each EP's camera folder separately; the
@@ -41,7 +42,7 @@ export async function buildFootageReport(bookingId: string): Promise<FootageRepo
   for (const u of uploads) {
     const key = `${u.episodeId ?? ''}|${u.camera}`
     if (!byGroup.has(key)) {
-      byGroup.set(key, { label: u.episode ? `${buildEpisodeFolderName(u.episode)} / ${u.camera}` : u.camera, fileId: u.driveFileId! })
+      byGroup.set(key, { label: u.episode ? `${buildEpisodeFolderName(u.episode, { useEpisodeId: isAgency })} / ${u.camera}` : u.camera, fileId: u.driveFileId! })
     }
   }
 

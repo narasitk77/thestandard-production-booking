@@ -5,8 +5,7 @@ import {
   buildStoragePath,
   hasOutletFolderMapping,
   outletDriveFolderName,
-  programFolderName,
-  buildBookingFolderName,
+  shootFolderLayers,
   buildEpisodeFolderName,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
@@ -245,33 +244,36 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       )
     }
-    const episodeFolderName = selectedEp ? buildEpisodeFolderName(selectedEp) : undefined
+    // v1.94 — Content Agency files EP folders by project EP ID; others by EP01.
+    const isAgency = booking.outlet.code === 'AGN'
+    const episodeFolderName = selectedEp ? buildEpisodeFolderName(selectedEp, { useEpisodeId: isAgency }) : undefined
     // ASCII-clean EP segment for the Wasabi key (no Thai title — keys stay
     // stable + ASCII). Mirrors the Drive EP folder so the two storages don't
     // drift and same-named files in different EPs can't overwrite each other.
+    // (Wasabi is keyed by the per-booking bookingCode, so EP01 is enough here.)
     const episodeKeySegment = selectedEp ? `EP${String(selectedEp.sequence).padStart(2, '0')}` : undefined
 
     // 4. Compute paths.
     //   Wasabi: stable ASCII key — <prefix>/<OUTLET>/<bookingCode>/[EP01/]<camera>/<file>
-    //   Drive : reuse the team's existing outlet folder + a human booking
-    //           folder "<Production ID> - <job name>" (resolved in step 6).
+    //   Drive : AGN → <outlet>/<Project ID · name>/<EP ID · title>/<camera>/;
+    //           others → <outlet>/<show>/<Production ID · job>/<EP01 · title>/<camera>/.
     const segments = buildStoragePath(booking.outlet.code, booking.bookingCode, camera, filename, episodeKeySegment)
     const wasabiKey = buildKey(getWasabiKeyPrefix(), segments)
 
-    // "job name" the producer set — projectName for Content Agency, else the
-    // lead episode's title, else nothing (folder is just the Production ID).
     const jobName =
       (booking.projectName && booking.projectName.trim()) ||
       (booking.episodes[0]?.title && booking.episodes[0].title.trim()) ||
       null
-    const bookingFolderName = buildBookingFolderName(booking.bookingCode, jobName)
-
-    // v1.70 (issue #5) — the new Drive "program / รายการ" layer. Outlet shows →
-    // real show name (bookingShowName); Content Agency → category box.
-    const driveProgramFolder = programFolderName({
+    // v1.94 — the program + per-booking layers, AGN-aware. AGN groups by Project
+    // (no per-booking folder → bookingFolderName === '').
+    const { programFolderName: driveProgramFolder, bookingFolderName } = shootFolderLayers({
       outletCode: booking.outlet.code,
       showName: bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes }),
       category: booking.category,
+      projectId: booking.projectId,
+      projectName: booking.projectName,
+      bookingCode: booking.bookingCode,
+      jobName,
     })
 
     // 5. Create Upload row first (lets us reference its id below)
@@ -319,10 +321,12 @@ export async function POST(request: NextRequest) {
         subject,
       })
       // Best-effort _SHOOT.txt — never let an info-file hiccup block the upload.
+      // v1.94 — for AGN, bookingFolderId is the shared Project box, so name the
+      // info file per-booking to avoid one booking overwriting another's.
       try {
         await upsertTextFile({
           parentFolderId: bookingFolderId,
-          name: '_SHOOT.txt',
+          name: isAgency ? `_SHOOT-${booking.bookingCode}.txt` : '_SHOOT.txt',
           content: renderBookingInfo(bookingInfoInput(booking)),
           subject,
         })
