@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.95.0] — 2026-06-24
+
+### Added — Content Agency: ลิงก์ EP ของ project เข้า booking ที่ approve แล้ว
+หน้า Admin (`/admin/[id]`) เพิ่มปุ่ม **"เพิ่ม EP จาก project"** (เฉพาะ AGN ที่มี projectId) — แทรก episode เพิ่มเข้า booking ได้**ทุกสถานะ รวม CONFIRMED** (เดิมฟอร์ม edit เต็มล็อกหลัง approve). ใช้กรณี Director ขอถ่ายชิ้นงานเพิ่มหลังยืนยันคิว เช่น Highlight / สัมภาษณ์ เพิ่มจาก Wrap-up + Voxpop เดิม.
+
+**ปลอดภัย ไม่พัง sync (สำคัญ):**
+- เลือกจาก **episode ที่มีอยู่ใน project Sheet** (source of truth) เท่านั้น — **ไม่ mint EP ID เอง** (การ mint ในแอปถูกถอดไปแล้ว v1.35.17 เพราะ bypass onEdit automation ของ Dashboard = foot-gun). อยากได้ ID ใหม่ → สร้างที่ Producer Dashboard ก่อน
+- **Add-only** — ไม่แตะ/ลบ episode เดิม · sequence ต่อจากตัวสูงสุด · title ใช้กฎเดียวกับ create-booking (ep label → projectName fallback)
+- Admin เท่านั้น (`requireConsole`) · รองรับเฉพาะ AGN (outlet อื่น mint ID ตอนสร้าง booking อยู่แล้ว)
+
+**โค้ด:** `POST /api/admin/[id]/add-episodes` (validate กับ `listProjectEpisodes`, mirror logic AGN ของ create-booking) + `src/lib/link-episodes.ts` (pure planner, 4 unit tests) + UI picker ใน `admin/[id]/page.tsx`. 141 tests pass · tsc 0.
+
+> หมายเหตุ: หลังเพิ่ม EP — calendar event ไม่ auto-update (ใช้ปุ่ม Re-sync ถ้าต้องการ) · โฟลเดอร์ EP ใหม่สร้างตอน prep-worker/upload รอบถัดไป
+
+---
+
 ## [1.94.1] — 2026-06-24
 
 ### Fixed — Content Agency: คืนชั้น category (Advertorial / Event · Forum) เหนือ Project box

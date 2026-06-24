@@ -4,7 +4,7 @@ import { bookingShowName } from '@/lib/display'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
-import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
 import { normalizeFreelancers, splitLegacyFreelancers } from '@/lib/freelancers'
@@ -123,6 +123,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [titleEdit, setTitleEdit] = useState(false)
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({})
   const [titleSaving, setTitleSaving] = useState(false)
+  // v1.95.0 — link EXISTING project episodes onto a (possibly confirmed) AGN
+  // booking. Episodes are picked from the project Sheet (source of truth); the
+  // app never mints IDs (see dashboard-episodes.ts).
+  type ProjEp = { episodeId: string; ep: string; type?: string; status?: string }
+  const [epPickerOpen, setEpPickerOpen] = useState(false)
+  const [epPickerLoading, setEpPickerLoading] = useState(false)
+  const [projEps, setProjEps] = useState<ProjEp[]>([])
+  const [epSel, setEpSel] = useState<Record<string, boolean>>({})
+  const [epAdding, setEpAdding] = useState(false)
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot
   const [cameraOverload, setCameraOverload] = useState('')
   const [editForm, setEditForm] = useState({
@@ -456,6 +465,50 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // v1.95.0 — open the "link project episode" picker: fetch the project's
+  // episodes (Sheet) and hide ones already on this booking.
+  const openEpPicker = async () => {
+    if (!booking.projectId) return
+    setError('')
+    setEpSel({})
+    setEpPickerOpen(true)
+    setEpPickerLoading(true)
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(booking.projectId)}/episodes`, { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'โหลด episode ไม่ได้')
+      const onBooking = new Set(booking.episodes.map(e => e.episodeId))
+      setProjEps((data.episodes || []).filter((e: ProjEp) => !onBooking.has(e.episodeId)))
+    } catch (e: any) {
+      setError(e.message)
+      setProjEps([])
+    } finally {
+      setEpPickerLoading(false)
+    }
+  }
+  const addEpisodes = async () => {
+    const episodeIds = Object.keys(epSel).filter(k => epSel[k])
+    if (episodeIds.length === 0) return
+    setError('')
+    setEpAdding(true)
+    try {
+      const res = await fetch(`/api/admin/${id}/add-episodes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ episodeIds }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'เพิ่ม episode ไม่สำเร็จ')
+      if (data.booking) setBooking(data.booking)
+      setEpPickerOpen(false)
+      setEpSel({})
+      showSaved()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setEpAdding(false)
+    }
+  }
+
   const isConfirmed = booking.status === 'CONFIRMED' || approved
   const isCancelled = booking.status === 'CANCELLED'
   const totalAssigned = assignEmails.length + freelancers.length
@@ -590,10 +643,19 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               </button>
             </div>
           ) : (
-            <button onClick={startTitleEdit}
-              className="text-[11px] px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
-              <Pencil className="w-3 h-3" /> แก้ชื่อตอน
-            </button>
+            <div className="flex gap-2">
+              {/* v1.95.0 — AGN only: link more episodes from the project Sheet (incl. after approve) */}
+              {booking.outlet?.code === 'AGN' && booking.projectId && (
+                <button onClick={openEpPicker}
+                  className="text-[11px] px-2.5 py-1 border border-[#0b8043] text-[#0b8043] rounded hover:bg-[#0b8043] hover:text-white inline-flex items-center gap-1">
+                  <Plus className="w-3 h-3" /> เพิ่ม EP จาก project
+                </button>
+              )}
+              <button onClick={startTitleEdit}
+                className="text-[11px] px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+                <Pencil className="w-3 h-3" /> แก้ชื่อตอน
+              </button>
+            </div>
           ))}
         </div>
         {(editMode ? editForm.episodeTitles : booking.episodes).map((ep, i) => (
@@ -616,6 +678,43 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           </div>
         ))}
         <p className="text-[10px] text-gray-400 mt-1">ID ห้ามแก้ · ชื่อตอนแก้ได้ทุกสถานะ (รวมหลัง approve)</p>
+
+        {/* v1.95.0 — picker: link existing project episodes (Sheet) onto this booking */}
+        {epPickerOpen && (
+          <div className="mt-3 border-t border-gray-200 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-medium text-gray-700">เพิ่ม EP จาก project <span className="font-mono text-gray-500">{booking.projectId}</span></div>
+              <button onClick={() => setEpPickerOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+            </div>
+            {epPickerLoading ? (
+              <div className="text-xs text-gray-500 flex items-center gap-2 py-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังโหลด episode ของ project…</div>
+            ) : projEps.length === 0 ? (
+              <p className="text-xs text-gray-500 py-2">ไม่มี episode ใหม่ให้เพิ่ม — สร้าง episode ในโปรเจกต์ที่ Producer Dashboard ก่อน แล้วกดอีกครั้ง</p>
+            ) : (
+              <>
+                <div className="max-h-56 overflow-y-auto border border-gray-200 rounded divide-y divide-gray-100">
+                  {projEps.map(ep => (
+                    <label key={ep.episodeId} className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-gray-50 cursor-pointer">
+                      <input type="checkbox" checked={!!epSel[ep.episodeId]}
+                        onChange={e => setEpSel({ ...epSel, [ep.episodeId]: e.target.checked })} />
+                      <span className="episode-badge">{ep.episodeId}</span>
+                      <span className="text-sm text-gray-700 flex-1">{ep.ep && ep.ep !== '-' ? ep.ep : '—'}</span>
+                      {ep.status && <span className="text-[10px] text-gray-400">{ep.status}</span>}
+                    </label>
+                  ))}
+                </div>
+                <div className="flex justify-end gap-2 mt-2">
+                  <button onClick={() => setEpPickerOpen(false)} disabled={epAdding}
+                    className="text-xs px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">ยกเลิก</button>
+                  <button onClick={addEpisodes} disabled={epAdding || Object.values(epSel).every(v => !v)}
+                    className="text-xs px-2.5 py-1 border border-[#0b8043] text-[#0b8043] rounded hover:bg-[#0b8043] hover:text-white inline-flex items-center gap-1 disabled:opacity-50">
+                    {epAdding ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} เพิ่มเข้า booking
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Booking details — view or edit mode */}
