@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.96.0] — 2026-06-24
+
+### Added — News producers + admin can change a booking's Producer at any status
+1. **News Program producers** — added 2 to the outlet roster (`src/lib/outlet-producers.ts`,
+   synced from the ops outlet-DB sheet): **ข้าวฟ่าง** (สุธามาส ทวินันท์, suthamat.t@) และ
+   **หนามเตย** (ตรีนุช อิงคุทานนท์, trinuch.i@) — NWS, role Producer. หลัง deploy รัน
+   `POST /api/admin/import-producers` เพื่อ upsert เข้า User table → โผล่ใน Producer dropdown ของ News.
+   _(พีช · ปภัสรา เพ็ชร์ณรงค์ ยังไม่เพิ่ม — ช่องอีเมลในชีตว่าง; รออีเมลก่อน)_
+2. **เปลี่ยน Producer ได้ทุกสถานะ (admin)** — หน้า `/admin/[id]` ในโหมด Edit เปลี่ยนช่อง Producer
+   จาก free-text เป็น **dropdown รายชื่อ producer ตาม outlet** (`GET /api/producers?outlet=`) +
+   พิมพ์เองได้ (fallback). เลือกแล้วตั้งทั้ง `producer` + `producerEmail`. ใช้ได้**ทุกสถานะ รวม CONFIRMED**
+   (backend PATCH `/api/bookings/[id]` ไม่ gate สถานะอยู่แล้ว — รอบนี้เพิ่มรับ `producerEmail`).
+
+tsc 0 · 141 tests pass.
+
+---
+
 ## [1.95.0] — 2026-06-24
 
 ### Added — Content Agency: ลิงก์ EP ของ project เข้า booking ที่ approve แล้ว

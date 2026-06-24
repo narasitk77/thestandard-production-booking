@@ -16,7 +16,7 @@ interface Episode { id: string; episodeId: string; title: string; program?: { co
 interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
-  producer: string; creative: string[]; crewRequired: string[]; videographerCount?: number
+  producer: string; producerEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean; needsVan?: boolean; specialEquipment?: string[]
   equipmentNote?: string | null; rentalGearNote?: string | null; itinerary?: string | null; assignedEquipmentIds?: string[]
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
@@ -132,6 +132,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [projEps, setProjEps] = useState<ProjEp[]>([])
   const [epSel, setEpSel] = useState<Record<string, boolean>>({})
   const [epAdding, setEpAdding] = useState(false)
+  // v1.96.0 — per-outlet producer dropdown for the admin edit (reassign producer
+  // at any status). Free-text fallback preserved for custom/legacy names.
+  const [producerOpts, setProducerOpts] = useState<{ email: string; name: string; nickname: string }[]>([])
+  const [producerCustom, setProducerCustom] = useState(false)
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot
   const [cameraOverload, setCameraOverload] = useState('')
   const [editForm, setEditForm] = useState({
@@ -140,6 +144,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     shootType: '',
     locationName: '',
     producer: '',
+    producerEmail: '',
     creative: '',
     crewRequired: '',
     cameraCount: '',
@@ -162,6 +167,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       shootType: b.shootType,
       locationName: b.locationName || '',
       producer: b.producer || '',
+      producerEmail: b.producerEmail || '',
       creative: (b.creative || []).join(', '),
       crewRequired: (b.crewRequired || []).join(', '),
       cameraCount: b.cameraCount === null || b.cameraCount === undefined ? '' : String(b.cameraCount),
@@ -176,6 +182,17 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       episodeTitles: b.episodes.map(e => ({ id: e.id, episodeId: e.episodeId, title: e.title })),
     })
   }
+
+  // v1.96.0 — load the booking's outlet producer list when the edit form opens,
+  // so admin can reassign the producer from a dropdown at any status.
+  useEffect(() => {
+    if (!editMode || !booking?.outlet?.code) return
+    fetch(`/api/producers?outlet=${encodeURIComponent(booking.outlet.code)}`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+      .then(d => setProducerOpts(Array.isArray(d.producers) ? d.producers : []))
+      .catch(() => setProducerOpts([]))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode])
 
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot.
   // Excludes this booking's own row (excludeBookingId) and re-adds its own
@@ -385,6 +402,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         shootType: editForm.shootType,
         locationName: editForm.locationName || null,
         producer: editForm.producer,
+        producerEmail: editForm.producerEmail || null,
         creative: editForm.creative ? editForm.creative.split(',').map(s => s.trim()).filter(Boolean) : [],
         crewRequired: editForm.crewRequired ? editForm.crewRequired.split(',').map(s => s.trim()).filter(Boolean) : [],
         cameraCount: editForm.cameraCount.trim() === '' ? null : Math.max(0, parseInt(editForm.cameraCount, 10) || 0),
@@ -827,8 +845,34 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
 
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Producer</label>
-              <input className="gf-input" value={editForm.producer}
-                onChange={e => setEditForm({ ...editForm, producer: e.target.value })} />
+              {/* v1.96.0 — reassign producer from the per-outlet roster at ANY status (admin). */}
+              {producerCustom || producerOpts.length === 0 ? (
+                <div className="flex gap-2">
+                  <input className="gf-input flex-1" value={editForm.producer} placeholder="ชื่อ Producer"
+                    onChange={e => setEditForm({ ...editForm, producer: e.target.value, producerEmail: '' })} />
+                  {producerOpts.length > 0 && (
+                    <button type="button" onClick={() => setProducerCustom(false)}
+                      className="text-xs px-2 border border-gray-300 rounded hover:bg-gray-50 whitespace-nowrap">เลือกจากรายชื่อ</button>
+                  )}
+                </div>
+              ) : (
+                <select className="gf-input"
+                  value={editForm.producerEmail && producerOpts.some(o => o.email === editForm.producerEmail) ? editForm.producerEmail : '__current__'}
+                  onChange={e => {
+                    const v = e.target.value
+                    if (v === '__custom__') { setProducerCustom(true); return }
+                    if (v === '__current__') return
+                    const p = producerOpts.find(o => o.email === v)
+                    if (p) setEditForm({ ...editForm, producer: p.nickname || p.name, producerEmail: p.email })
+                  }}>
+                  <option value="__current__">{editForm.producer || '— เลือก Producer —'}{editForm.producer && !editForm.producerEmail ? ' (พิมพ์เอง)' : ' (ปัจจุบัน)'}</option>
+                  {producerOpts.map(o => (
+                    <option key={o.email} value={o.email}>{o.nickname}{o.name && o.name !== o.nickname ? ` · ${o.name}` : ''}</option>
+                  ))}
+                  <option value="__custom__">— พิมพ์เอง (custom) —</option>
+                </select>
+              )}
+              <p className="text-[10px] text-gray-400 mt-1">เปลี่ยน Producer ได้ทุกสถานะ · เลือกจากรายชื่อทีม {booking.outlet?.code} หรือพิมพ์เอง</p>
             </div>
 
             <div>
