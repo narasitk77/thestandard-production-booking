@@ -5,7 +5,28 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-06-24 · v1.93.0 — per-EP footage folders (multi-EP shoots no longer mixed)
+## 2026-06-24 · v1.93.0 — per-EP footage folders (multi-EP shoots no longer mixed), DEPLOYED + VERIFIED LIVE
+
+Deployed `sha-cd83312` (prev `sha-59ea209`). `/api/version` flipped
+`1.92.2` → **`1.93.0`** through the recreate window (~11×502 for ~65s — the
+exact gap the v1.92.2 retry survives). **Verified live:** of 28 CONFIRMED
+bookings, **9 are multi-EP** so the feature bites real data; `/api/upload/status`
+returns the new `{epSlots, flatCams, files}` shape; opened
+`/upload?bookingId=…` for multi-EP `TSS-EXE-261204-L-01` (2 EPs) → the
+**"ตอน / Episode"** picker renders with `EP01 · TBC` / `EP02 · TBC`, episodes
+carry `id`+`sequence` for the FK, and the path hint reads
+`…/TSS-EXE-261204-L-01 · [ชื่องาน]/EP01 · TBC/CAM-A/`. tsc 0 · 135 tests pass.
+
+**Pre-deploy adversarial review** (workflow, 13 agents) caught 3 real issues,
+all fixed in `cd83312` before the deploy: (1) 🔴 the Wasabi key was
+episode-agnostic → same camera+filename across EPs would overwrite on Wasabi —
+added an ASCII `EP01` segment to `buildStoragePath` mirroring the Drive path
+(Wasabi is off by default but the collision is now closed); (2) the "อัปครบ"
+badge mixed legacy (`episodeId=null`) and EP-tagged uploads in one count →
+split `/api/upload/status` into `epSlots`/`flatCams` buckets, the UI picks by
+whether the booking has episodes (no null/non-null collision); (3) `/upload/init`
+now rejects an `episodeRowId` sent for a booking with no episodes instead of
+silently dropping it.
 
 Multi-episode bookings now get a per-episode folder layer between the booking
 folder and the camera folders: `<Production ID · job>/EP01 · title/CAM-A/`.
@@ -20,7 +41,7 @@ shoots) and tags `Upload.episodeId` on every file. Read-side followed: the
 per-camera folder links + the "ส่งงาน" footage report group by **(EP × camera)**,
 and the "อัปครบ" badge counts `cameraCount × episodeCount` slots so it isn't
 falsely green when some EPs are still missing (extends the v1.92.1 bug-#3 fix
-along the EP axis). tsc 0 · 134 tests pass.
+along the EP axis). tsc 0 · 135 tests pass.
 
 Ceiling (no migration): files uploaded before v1.93 (`episodeId=null`) stay in
 their old flat folders — old footage isn't moved, only new uploads use the EP
