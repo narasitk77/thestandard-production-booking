@@ -9,8 +9,12 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 One-line CSS fix: `/dashboard/[id]` rendered booking Notes in a plain `<p>`, so
 the newlines the operator typed collapsed to spaces (run-on paragraph). Added
-`whitespace-pre-line` to match the admin page (which already had it). Ships with
-v1.99.0's Event/PM outlets in the same deploy (still pending Portainer login).
+`whitespace-pre-line` to match the admin page (which already had it).
+
+**✅ DEPLOYED + VERIFIED LIVE** as `sha-85d2398` (bundles v1.99.0 + v1.99.1).
+`/api/version` `1.98.0` → **`1.99.1`**. Notes verified on the CEA booking's
+`/dashboard/[id]`: computed `white-space: pre-line`, 14 newlines preserved,
+rendered multi-line (320px) instead of one run-on line.
 
 ---
 
@@ -25,12 +29,21 @@ dropdown via /api/producers, folders via outletDriveFolderName → `10 · Event`
 `11 · PM`) so no wiring needed. tsc 0 · 149 tests pass (+invariant test: all seed
 outlet codes resolve, EVT/PM have a selectable program, 7+10 members, unique emails).
 
-**POST-DEPLOY STEP REQUIRED:** run `POST /api/admin/import-producers` (ADMIN) once
-after deploy to upsert the 17 people into the User table — until then the Event/PM
-producer dropdowns are empty (the seed only takes effect via the import).
+**POST-DEPLOY STEP (DONE):** ran `POST /api/admin/import-producers` (ADMIN) after
+deploy → `{ total: 35, created: 17, updated: 18 }`. The 17 Event/PM people are
+now in the User table.
 
-NOTE (pending at write time): build + deploy + import + verify in flight. (Two
-sessions still share this repo — committing fast to avoid clobber.)
+**✅ DEPLOYED + VERIFIED LIVE** in `sha-85d2398` (with v1.99.1). Adversarial
+review (5 agents) caught one real bug pre-deploy — PM "Project Coordinator"
+position didn't match the `/co.?produc/i` co-producer regex, so coordinators
+would land in the Producer column; fixed by extracting `isCoProducer`
+(`/co.?produc|coordinator/i`) to `src/lib/producer-role.ts`, shared by the route
++ a new invariant test. Verified live via `GET /api/producers`: **EVT** →
+producers [มุก, ลูกหมู, อาร์ม], coProducers [นาเดียร์, พลอยดี, มิกซ์, แอม];
+**PM** → producers [6 Managers], coProducers [ต้นอ้อ, มะเหมี่ยว, เพิรล, ใยไหม]
+(the 4 Coordinators correctly in Co-Producer). Ponytail review flagged ~10
+trimmable lines (low-value test asserts + one invented program) — left as-is,
+cosmetic.
 
 ---
 
