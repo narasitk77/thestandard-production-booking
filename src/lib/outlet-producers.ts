@@ -11,6 +11,7 @@
 // the sheet maps to our outlet codes:
 //   The Secret Sauce→TSS · Pop→POP · LIFE→LIF · Wealth→WLT · News Program→NWS
 //   Podcast→POD · Video Production (Production/Platform)→AGN
+//   Event→EVT · Project Management Office→PM   (v1.99.0)
 
 export interface OutletProducerSeed {
   employeeId: string
@@ -42,4 +43,23 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   { employeeId: 'TSD00095', thaiName: 'นางสาวกมลวรรณ ลาภบุญอุดม',  nickname: 'ดรีม',  email: 'kamonwan.l@thestandard.co',  outlet: 'AGN', role: 'Other',       position: 'Switcher' },
   { employeeId: 'TSD00318', thaiName: 'นายอธิษฐาน กาญจนะพงศ์',     nickname: 'ฝัน',   email: 'atisthan.k@thestandard.co',  outlet: 'POD', role: 'Producer',    position: 'Producer' },
   { employeeId: 'TSD00123', thaiName: 'นายพันธวัฒน์ เศรษฐวิไล',    nickname: 'ใหญ่',  email: 'phantawat.s@thestandard.co', outlet: 'POD', role: 'Producer',    position: 'Producer' },
+  // v1.99.0 — Event team (outlet EVT) from the ops outlet-DB sheet (2026-06-25).
+  { employeeId: 'TSD00190', thaiName: 'นายรัชชานนท์ คงเนตร',     nickname: 'ลูกหมู',  email: 'ratchanon.k@thestandard.co',     outlet: 'EVT', role: 'Producer',    position: 'Event Producer' },
+  { employeeId: 'TSD00199', thaiName: 'นางสาวภัทรวดี อ่อนสำลี',   nickname: 'มุก',     email: 'phattarawadee.o@thestandard.co', outlet: 'EVT', role: 'Producer',    position: 'Event Producer' },
+  { employeeId: 'TSD00309', thaiName: 'นายภคิน อออิปก',          nickname: 'อาร์ม',   email: 'pakin.o@thestandard.co',         outlet: 'EVT', role: 'Producer',    position: 'Event Producer' },
+  { employeeId: 'TSD00237', thaiName: 'นางสาวฐิตาพร ด่านวันดี',   nickname: 'พลอยดี',  email: 'thitaporn.d@thestandard.co',     outlet: 'EVT', role: 'Co-Producer', position: 'Co-Producer' },
+  { employeeId: 'TSD00241', thaiName: 'นางสาวธนัชพร นาสา',       nickname: 'นาเดียร์', email: 'thanutchaporn.n@thestandard.co', outlet: 'EVT', role: 'Co-Producer', position: 'Co-Producer' },
+  { employeeId: 'TSD00285', thaiName: 'นางสาวอารียา นิระภัย',     nickname: 'แอม',     email: 'areeya.n@thestandard.co',        outlet: 'EVT', role: 'Co-Producer', position: 'Co-Producer' },
+  { employeeId: 'TSD00305', thaiName: 'นายพีรพัฒน์ หมอเก่ง',     nickname: 'มิกซ์',   email: 'peeraphat.m@thestandard.co',     outlet: 'EVT', role: 'Co-Producer', position: 'Co-Producer' },
+  // v1.99.0 — Project Management Office (outlet PM). Managers→Producer, Coordinators→Co-Producer.
+  { employeeId: 'TSD00112', thaiName: 'นางสาวศุภวษา ศรีหนองโคตร', nickname: 'วิว',     email: 'supawasa.s@thestandard.co',      outlet: 'PM', role: 'Producer',    position: 'Project Manager' },
+  { employeeId: 'TSD00205', thaiName: 'นางสาวนนทกร ธุวะชาวสวน',   nickname: 'ใบเฟิร์น', email: 'nonthakorn.t@thestandard.co',    outlet: 'PM', role: 'Producer',    position: 'Project Manager' },
+  { employeeId: 'TSD00230', thaiName: 'นางสาวภัทรธิดา สุวรรณประทีป', nickname: 'รวงข้าว', email: 'phattharatida.s@thestandard.co', outlet: 'PM', role: 'Producer',    position: 'Project Manager' },
+  { employeeId: 'TSD00266', thaiName: 'นายบริพัฒน์ เยาวพันธ์',    nickname: 'บอริ',    email: 'boriphat.y@thestandard.co',      outlet: 'PM', role: 'Producer',    position: 'Project Manager' },
+  { employeeId: 'TSD00278', thaiName: 'นายธีรพงษ์ ศิริวิทย์ภักดีกุล', nickname: 'เอ',    email: 'theeraphong.s@thestandard.co',   outlet: 'PM', role: 'Producer',    position: 'Project Manager' },
+  { employeeId: 'TSD00322', thaiName: 'นายโอฬาร อุ่ยพัฒน์',      nickname: 'ขิม',     email: 'olan.a@thestandard.co',          outlet: 'PM', role: 'Producer',    position: 'Project Manager' },
+  { employeeId: 'TSD00117', thaiName: 'นางสาวอาทิตยา อิสสรานุสรณ์', nickname: 'ต้นอ้อ', email: 'artitaya.i@thestandard.co',      outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
+  { employeeId: 'TSD00284', thaiName: 'นางสาวพัชร์ณิษา เอกหิรัญวรพงษ์', nickname: 'เพิรล', email: 'phatnisa.a@thestandard.co',  outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
+  { employeeId: 'TSD00296', thaiName: 'นางสาวธนัชพร ใจหวัง',     nickname: 'ใยไหม',   email: 'tanatchaporn.j@thestandard.co',  outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
+  { employeeId: 'TSD00298', thaiName: 'นางสาววรปรีย์ คร้ามสมอ',  nickname: 'มะเหมี่ยว', email: 'worrapree.k@thestandard.co',   outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
 ]

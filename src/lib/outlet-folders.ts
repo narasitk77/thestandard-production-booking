@@ -55,6 +55,8 @@ const OUTLET_FOLDER_BY_CODE: Record<string, string> = {
   POD: 'PODCAST',
   KND: 'KND',
   LIF: 'LIFE',
+  EVT: 'EVENT',   // v1.99.0 — Event team
+  PM: 'PM',       // v1.99.0 — Project Management Office
 }
 
 /**

@@ -5,6 +5,26 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-25 · v1.99.0 — add Outlet Event (EVT) + PM + their teams (17 producers)
+
+Ops request: add two outlets — **Event** (`EVT`, sort 10) and **PM** / Project
+Management Office (`PM`, sort 11) — plus their team members from the outlet-DB
+sheet (tab User: 7 Event, 10 PMO). Data-only change: `OUTLETS` (data.ts) +
+`OUTLET_PRODUCERS` seed (outlet-producers.ts, 17 entries) + `OUTLET_FOLDER_BY_CODE`
+(EVT→EVENT, PM→PM). Everything downstream is data-driven (outlet picker, producer
+dropdown via /api/producers, folders via outletDriveFolderName → `10 · Event` /
+`11 · PM`) so no wiring needed. tsc 0 · 149 tests pass (+invariant test: all seed
+outlet codes resolve, EVT/PM have a selectable program, 7+10 members, unique emails).
+
+**POST-DEPLOY STEP REQUIRED:** run `POST /api/admin/import-producers` (ADMIN) once
+after deploy to upsert the 17 people into the User table — until then the Event/PM
+producer dropdowns are empty (the seed only takes effect via the import).
+
+NOTE (pending at write time): build + deploy + import + verify in flight. (Two
+sessions still share this repo — committing fast to avoid clobber.)
+
+---
+
 ## 2026-06-25 · v1.98.0 — list-view (full date + EP title + sort) + Category removal (non-AGN)
 
 **✅ DEPLOYED + VERIFIED LIVE** (by a second concurrent session that had Portainer

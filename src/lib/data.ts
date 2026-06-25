@@ -182,6 +182,33 @@ export const OUTLETS: Outlet[] = [
       { code: 'T', name: 'Spot / Teaser (project)', category: 'Short-form' },
     ],
   },
+  // v1.99.0 — Event team (Production / Platform · "Event" department).
+  {
+    code: 'EVT',
+    name: 'Event',
+    description: 'ทีม Event / Forum',
+    color: 'text-orange-700',
+    bgColor: 'bg-orange-50',
+    borderColor: 'border-orange-200',
+    sort: 10,
+    programs: [
+      { code: 'EVF', name: 'Event / Forum', category: 'One-off/Event' },
+      { code: 'EVS', name: 'Event Recap / Short Clip', category: 'Short-form' },
+    ],
+  },
+  // v1.99.0 — Project Management Office ("PM").
+  {
+    code: 'PM',
+    name: 'PM',
+    description: 'Project Management Office',
+    color: 'text-teal-700',
+    bgColor: 'bg-teal-50',
+    borderColor: 'border-teal-200',
+    sort: 11,
+    programs: [
+      { code: 'PMG', name: 'Project / Production', category: 'One-off/Event' },
+    ],
+  },
 ]
 
 // Universal Episode Type options (L / S / A / T) — injected into every outlet
