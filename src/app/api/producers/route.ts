@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { OUTLET_MAP } from '@/lib/data'
+import { isCoProducer } from '@/lib/producer-role'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,15 +17,12 @@ export const dynamic = 'force-dynamic'
  *   (no param)  → { byOutlet: { NWS: { producers, coProducers }, ... } }
  *
  * Each entry is { email, name, nickname }. Producer vs Co-Producer is decided
- * by User.position (anything matching /co.?produc/i is a Co-Producer). v1.59.
+ * by User.position via isCoProducer (shared with the seed invariant test). v1.59;
+ * v1.99 — coordinators (e.g. PM "Project Coordinator") count as Co-Producers.
  *
  * Any logged-in user may read — the booking form is open to everyone.
  */
 type Entry = { email: string; name: string; nickname: string }
-
-function isCoProducer(position: string | null): boolean {
-  return /co.?produc/i.test(position || '')
-}
 
 export async function GET(request: NextRequest) {
   try {

@@ -13,7 +13,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **PM** (code `PM`, sort 11) — Project Management Office. โปรแกรม: Project / Production.
 - **17 ทีมงาน** เพิ่มใน `OUTLET_PRODUCERS` (Event 7 · PM 10) → import เข้า User table ผ่าน `POST /api/admin/import-producers` (idempotent). Event Producer/Project Manager → Producer dropdown; Co-Producer/Project Coordinator → Co-Producer (split ตาม `position` ใน /api/producers).
 - folder mapping: `EVT`→`EVENT`, `PM`→`PM` ใน `OUTLET_FOLDER_BY_CODE` (กัน hasOutletFolderMapping บล็อก upload). Drive folder = `10 · Event` / `11 · PM` (auto-create ตอน upload/approve).
-- ทุกอย่าง data-driven — outlet picker + producer dropdown โผล่อัตโนมัติ (ไม่มี hardcoded outlet list). +invariant test (ทุก producer outlet code ต้อง resolve, EVT/PM มี program, 7+10 คน, email ไม่ซ้ำ). tsc 0 · 149 tests pass.
+- ทุกอย่าง data-driven — outlet picker + producer dropdown โผล่อัตโนมัติ (ไม่มี hardcoded outlet list). +invariant test (ทุก producer outlet code ต้อง resolve, EVT/PM มี program, 7+10 คน, email ไม่ซ้ำ).
+- **pre-deploy review fix (adversarial review):** PM "Project Coordinator" (4 คน) มี position ที่ regex `/co.?produc/i` ใน /api/producers ไม่ match → จะตกไปคอลัมน์ Producer แทน Co-Producer. ย้าย predicate ไป `src/lib/producer-role.ts` (`isCoProducer` = `/co.?produc|coordinator/i`, share กับ route + test) → coordinator นับเป็น Co-Producer. +invariant test: ทุก seed entry `isCoProducer(position) === (role==='Co-Producer')`. tsc 0 · 150 tests pass.
 
 > ⚠️ ต้องรัน `POST /api/admin/import-producers` หลัง deploy เพื่อ import 17 คนเข้า User table (ก่อน import dropdown ของ Event/PM จะว่าง).
 
