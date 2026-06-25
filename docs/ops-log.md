@@ -7,6 +7,17 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ## 2026-06-25 · v1.98.0 — list-view (full date + EP title + sort) + Category removal (non-AGN)
 
+**✅ DEPLOYED + VERIFIED LIVE** (by a second concurrent session that had Portainer
+browser access — the original session left this "deploy pending: Portainer
+unreachable"). Set stack-125 `IMAGE_TAG=sha-4d5c3d0` (prev `sha-b249931`/v1.97.0)
++ pullImage → redeploy; `/api/version` `1.97.0` → **`1.98.0`** through the recreate
+window. Verified live on /my-bookings: rows show full date `Thu 25 Jun 2026`, the
+first-EP title appended (`[AGN]Awesome Skills Project — Wrap-up Long-form`,
+`[TSS]…on Location — บริษัท โบทานิก้า…`), and chronological order (25 Jun before
+30 Jul). ⚠️ Two sessions were live on this repo+stack simultaneously — work was
+preserved (v1.94.1 ancestor intact, v1.95–98 built cleanly on top) but this is
+the clobber-risk scenario; consolidate to one session.
+
 Ops request: list rows show full date + first-EP title; sort Producer & My Bookings by
 date; drop the redundant booking-level Category radio for non-AGN (derive from per-EP).
 
