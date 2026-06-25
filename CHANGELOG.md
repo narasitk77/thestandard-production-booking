@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.99.1] — 2026-06-25
+
+### Fixed — Notes แสดงผลตามที่พิมพ์ (ขึ้นบรรทัดใหม่ไม่หาย)
+- หน้า booking detail ของ **producer** (`/dashboard/[id]`) แสดง Notes ใน `<p>` ธรรมดา → CSS `white-space: normal` ยุบ newline ที่ผู้ใช้เคาะบรรทัดให้กลายเป็นช่องว่าง (ข้อความยาวพรืดบรรทัดเดียว). เพิ่ม `whitespace-pre-line` → ขึ้นบรรทัดตามที่พิมพ์. (หน้า /admin/[id] มี `whitespace-pre-line` อยู่แล้ว — แก้เฉพาะ dashboard ให้ตรงกัน.)
+
+---
+
 ## [1.99.0] — 2026-06-25
 
 ### Added — Outlet **Event** + **PM** (Project Management Office) + ทีมงาน

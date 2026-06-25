@@ -5,6 +5,15 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-25 · v1.99.1 — Notes preserve line breaks on the producer dashboard
+
+One-line CSS fix: `/dashboard/[id]` rendered booking Notes in a plain `<p>`, so
+the newlines the operator typed collapsed to spaces (run-on paragraph). Added
+`whitespace-pre-line` to match the admin page (which already had it). Ships with
+v1.99.0's Event/PM outlets in the same deploy (still pending Portainer login).
+
+---
+
 ## 2026-06-25 · v1.99.0 — add Outlet Event (EVT) + PM + their teams (17 producers)
 
 Ops request: add two outlets — **Event** (`EVT`, sort 10) and **PM** / Project

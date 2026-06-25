@@ -296,7 +296,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       {booking.notes && (
         <div className="gf-card p-4">
           <div className="text-xs text-gray-400 mb-1">Notes</div>
-          <p className="text-sm text-gray-700">{booking.notes}</p>
+          <p className="text-sm text-gray-700 whitespace-pre-line">{booking.notes}</p>
         </div>
       )}
     </div>
