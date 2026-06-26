@@ -12,8 +12,16 @@ in data.ts → it shows in the Episode Type picker for Event-team bookings (the
 picker = outlet's single-char programs; EVT now has L/S/A/T + E). Scoped to EVT
 (not the universal EPISODE_TYPE_PROGRAMS), so other outlets don't see it.
 episodeId handles it (type slot is `[A-Z0-9]{1,4}`). This deploy also carries the
-dead-code cleanup from the chore entry below. tsc 0 · 150 tests. NOTE (pending):
-deploy + verify the EVT Episode Type picker shows "Event".
+dead-code cleanup from the chore entry below. tsc 0 · 150 tests.
+
+**✅ DEPLOYED + VERIFIED LIVE** (sha-6928b9f; `/api/version` 1.100.2→1.100.3
+through a longer-than-usual 502 recreate window). Verified on /new: the Outlet
+dropdown lists Event + PM, and with EVT selected the Episode Type picker shows
+**`E · Event · งานอีเวนต์ / Staff`** alongside L/S/A/T. Scoping is code-guaranteed
+(E lives only in EVT.programs, not the universal EPISODE_TYPE_PROGRAMS) so other
+outlets don't get it. (Deploy hit a transient Chrome-extension disconnect on the
+first redeploy fetch — retried, clean; prevTag sha-1282866, no session collision
+this round.)
 
 ---
 
