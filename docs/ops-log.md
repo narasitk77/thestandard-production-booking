@@ -5,6 +5,29 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.102.4 — "📣 แจ้งทุกคนว่าไฟล์พร้อม" footage-ready email, DEPLOYED + VERIFIED LIVE
+
+New green button on the Detect card emails EVERYONE on the booking (producer +
+assigned crew + creator, CC sender) the footage folder links once files are in
+place. `POST /api/bookings/[id]/notify-ready` (gate = canUploadToBooking || ADMIN,
+same as "ส่งงาน"); UI does a `?preview=1` fetch → `confirm()` the recipient list →
+send. `resolveFootageFolders()` extracted to `src/lib/footage-folders.ts` and shared
+by Detect + notify (server-resolved links, not client-supplied).
+
+**Pre-deploy adversarial review (19 agents, 1 confirmed medium):** the first cut put
+all recipients in one flat `To:` header → external freelancers (admin free-text in
+`assignedEmails`, often personal gmail) would see each other's + staff addresses.
+Fixed: **send one email per recipient** (`Promise.allSettled`, `to:[one]`) like the
+admin assign route — `sendEmail` has no BCC.
+
+**✅ DEPLOYED + VERIFIED LIVE** (`sha-3bccb04`, `/api/version` → 1.102.4). Verified via
+the PREVIEW path (no real email sent): button renders in the auto-loaded Detect card;
+preview on `AGN-260625-LOC-01` → 6 recipients (all @thestandard.co: sender/creator +
+video@ + sound@ + 3 crew), 6 folders / 1334 files, emailConfigured true. Real send
+left to the user (the confirm step shows the list).
+
+---
+
 ## 2026-06-26 · v1.102.3 — Detect auto-loads + Back → previous page, DEPLOYED + VERIFIED LIVE
 
 Ops feedback (sharp): the footage links should "อยู่ตลอดไป" — not require pressing
