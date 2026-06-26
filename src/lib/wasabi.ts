@@ -80,7 +80,6 @@ export function buildKey(prefix: string, segments: string[]): string {
 
 // Wasabi (S3) limits — fixed by the API spec, not configurable.
 export const PART_SIZE_MIN_BYTES = 5 * 1024 * 1024        // 5MB (except last part)
-export const PART_SIZE_MAX_BYTES = 5 * 1024 * 1024 * 1024 // 5GB
 export const PARTS_MAX = 10_000
 export const PRESIGN_TTL_SECONDS = 60 * 60 // 1 hour per part URL
 

@@ -5,6 +5,31 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · chore — dead-code cleanup (no version bump, no deploy)
+
+Ops asked to remove anything unused/broken to reduce confusion. Ran a dead-code
+audit (21-agent find→adversarially-verify workflow; refuted 4 false positives).
+Removed only **zero-runtime-risk** dead code — nothing the running app executes,
+so live behavior is unchanged (still 1.100.2; the cleanup ships with the next
+real deploy):
+- `findBookingByProductionId` (booking-lookup.ts) — unused single-lookup; only
+  the batched `findBookingsByProductionIds` is used.
+- `PART_SIZE_MAX_BYTES` (wasabi.ts) — unused constant.
+- `clearFootageSheetCache` (footage-sheet.ts) — only the deleted diagnostic used it.
+- 4 one-off scripts: `scripts/{inspect-drive-outlets,inspect-footage-sheet,test-ot-pdf,verify-booking-rule}.ts`
+  — run-once diagnostics/tests, unreferenced by start.sh / package.json / CI.
+
+**Kept on purpose** (flagged needs-confirm — real capabilities that are merely
+off/idle, NOT dead): the whole footage matcher subsystem (runFootageSync + worker
++ /api/internal/footage/sync + the scan button) — idle because FOOTAGE_LOG_SHEET_ID
+is unset, but works if configured; Wasabi (off by default); the email
+RESEND_FROM/SENDGRID_FROM fallbacks (email is sensitive, can't verify the prod
+env doesn't set them). **Flagged but NOT touched (infra config, not code):**
+`UPLOAD_DIR` + `POSTGRES_*` in .env.production/docker-compose (app never reads
+them, but they're docker-level — clean up separately if wanted). tsc 0 · tests pass.
+
+---
+
 ## 2026-06-26 · v1.100.1 — "สแกนหา footage" button (trigger the matcher on-demand)
 
 Admin-only button in UploadSection (/upload) next to Refresh → calls

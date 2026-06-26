@@ -39,15 +39,6 @@ const LOOKUP_SELECT = {
 // for a soft-deleted (hidden) booking should still attribute correctly
 // instead of degrading to parsed_no_booking. Soft delete hides web surfaces
 // only; ID slots and footage attribution stay live.
-export async function findBookingByProductionId(code: string): Promise<ProductionIdLookup> {
-  if (!code) return null
-  const booking = await prisma.booking.findUnique({
-    where: { bookingCode: code },
-    select: LOOKUP_SELECT,
-  })
-  return booking
-}
-
 /**
  * Batched lookup — single DB roundtrip for N codes. Used by the sync
  * worker so a tick with 1000 newly-detected files doesn't fire 1000

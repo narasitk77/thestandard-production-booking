@@ -212,8 +212,3 @@ export async function appendFootageRows(rows: FootageInput[]): Promise<number> {
   }
   return written
 }
-
-/** For the inspect-footage-sheet diagnostic script. Forces a cache flush. */
-export function clearFootageSheetCache() {
-  _cache = null
-}
