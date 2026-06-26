@@ -62,4 +62,6 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   { employeeId: 'TSD00284', thaiName: 'นางสาวพัชร์ณิษา เอกหิรัญวรพงษ์', nickname: 'เพิรล', email: 'phatnisa.a@thestandard.co',  outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
   { employeeId: 'TSD00296', thaiName: 'นางสาวธนัชพร ใจหวัง',     nickname: 'ใยไหม',   email: 'tanatchaporn.j@thestandard.co',  outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
   { employeeId: 'TSD00298', thaiName: 'นางสาววรปรีย์ คร้ามสมอ',  nickname: 'มะเหมี่ยว', email: 'worrapree.k@thestandard.co',   outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
+  // v1.99.2 — News producer แพท (sheet title "Project Coordinator"; added as Producer per ops request 2026-06-26).
+  { employeeId: 'TSD00056', thaiName: 'นางสาวภาวิกา ขันติศรีสกุล', nickname: 'แพท',    email: 'phawika.k@thestandard.co',    outlet: 'NWS', role: 'Producer',    position: 'Producer' },
 ]

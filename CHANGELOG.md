@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.99.2] — 2026-06-26
+
+### Added — News producer แพท
+- เพิ่ม **แพท** (ภาวิกา ขันติศรีสกุล · phawika.k@thestandard.co · TSD00056) เป็น **Producer** ของ outlet **NWS** ใน `OUTLET_PRODUCERS`. หมายเหตุ: title ใน sheet = "Project Coordinator" แต่เพิ่มเป็น Producer ตามที่ ops ขอ (`position: 'Producer'` ให้ลงคอลัมน์ Producer; ปรับเป็น Co-Producer ได้ถ้าต้องการ). ต้องรัน `POST /api/admin/import-producers` หลัง deploy.
+
+---
+
 ## [1.99.1] — 2026-06-25
 
 ### Fixed — Notes แสดงผลตามที่พิมพ์ (ขึ้นบรรทัดใหม่ไม่หาย)

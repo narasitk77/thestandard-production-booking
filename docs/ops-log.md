@@ -5,6 +5,16 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.99.2 — News producer แพท
+
+Added แพท (ภาวิกา ขันติศรีสกุล, phawika.k@, TSD00056) to `OUTLET_PRODUCERS` as a
+**Producer** for outlet NWS. Sheet title is "Project Coordinator" but ops asked
+for Producer, so `position: 'Producer'` (lands in the Producer column; the
+invariant test still passes). Needs `POST /api/admin/import-producers` after deploy.
+tsc 0 · tests pass. NOTE (pending): deploy + import (Portainer was logged out).
+
+---
+
 ## 2026-06-25 · v1.99.1 — Notes preserve line breaks on the producer dashboard
 
 One-line CSS fix: `/dashboard/[id]` rendered booking Notes in a plain `<p>`, so
