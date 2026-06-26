@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.101.2] — 2026-06-26
+
+### Fixed — Detect: label EP/camera by real folder depth + ซ่อน _SHOOT.txt
+- พบจาก verify live: booking ที่มี episodes แต่ footage อยู่แบบ flat `<ID>/CAM-A/file` (legacy ก่อน per-EP) → เดิม label `CAM-A` เป็น EP ผิด (heuristic `booking.episodes.length`). แก้: อ่าน **depth จริงของ folderPath** — parent ตัวสุดท้าย = กล้อง, ตัวก่อนหน้า (ถ้ามี) = EP → ถูกทั้ง `<ID>/<EP>/<cam>/` และ flat `<ID>/<cam>/`.
+- กรอง `_SHOOT.txt` / `_SHOOT-<id>.txt` (ไฟล์ข้อมูล booking ไม่ใช่ footage) ออกจากผล Detect.
+- baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.101.1] — 2026-06-26
 
 ### Added — Event: option "สถานที่ภายนอก" (อีเวนต์นอกบริษัท)

@@ -74,6 +74,9 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       url: f.webViewLink,
     })
 
+    // `_SHOOT.txt` / `_SHOOT-<id>.txt` are booking-info files, not footage.
+    const isFootage = (f: DriveFile) => !/^_SHOOT\b.*\.txt$/i.test(f.name)
+
     let files: ReturnType<typeof mapFile>[] = []
     if (isAgency) {
       // shared Project box → scan ONLY this booking's EP folders (never the whole
@@ -81,18 +84,19 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       const epFolders = resolved.episodes.filter(e => e.folderId)
       const perEp = await Promise.all(epFolders.map(async e => {
         const raw = await listFilesRecursive(e.folderId!, { maxFiles: 1000 })
-        return raw.map(f => mapFile(f, e.episodeFolderName, f.folderPath[0] ?? ''))
+        return raw.filter(isFootage).map(f => mapFile(f, e.episodeFolderName, f.folderPath[0] ?? ''))
       }))
       files = perEp.flat()
     } else if (resolved.bookingFolderId) {
-      // unique Production-ID folder → scan it whole. With episodes the layout is
-      // <ID>/<EP>/<camera>/file (folderPath=[EP,camera]); without episodes it's
-      // flat <ID>/<camera>/file (folderPath=[camera]) — map accordingly.
+      // unique Production-ID folder → scan it whole. Read the REAL depth: the file's
+      // immediate parent (last path element) is the camera folder, the one above it
+      // (if any) is the EP. Handles both <ID>/<EP>/<cam>/file and the legacy flat
+      // <ID>/<cam>/file without guessing from booking.episodes.
       const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 1500 })
-      const hasEps = booking.episodes.length > 0
-      files = raw.map(f => hasEps
-        ? mapFile(f, f.folderPath[0] ?? '', f.folderPath[1] ?? '')
-        : mapFile(f, '', f.folderPath[0] ?? ''))
+      files = raw.filter(isFootage).map(f => {
+        const p = f.folderPath
+        return mapFile(f, p.length >= 2 ? (p[p.length - 2] ?? '') : '', p[p.length - 1] ?? '')
+      })
     }
 
     return NextResponse.json({ found: files.length, files, bookingFolderUrl: resolved.bookingFolderUrl })
