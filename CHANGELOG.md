@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.3] — 2026-06-26
+
+### Changed — Detect แสดงเอง + ปุ่ม Back กลับหน้าก่อนหน้า
+- **Detect auto-load**: หน้า /upload (และทุกที่ที่ใช้ UploadSection) รัน Detect ให้อัตโนมัติตอนเปิด → ลิสต์โฟลเดอร์ + ลิงก์ footage โผล่เองทุกครั้ง ไม่ต้องกด Detect เอง. ปุ่มเปลี่ยนเป็น "🔄 ตรวจใหม่" (manual refresh) + มีบรรทัด "กำลังตรวจหา…" ตอนโหลด.
+- **ปุ่ม Back**: /upload เดิม hardcode ไป `/my-bookings` → เปลี่ยนเป็น `router.back()` (กลับหน้าก่อนหน้าจริง) fallback ไป /my-bookings เฉพาะตอนไม่มี history (เปิดตรงๆ). label "กลับ".
+- baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.102.2] — 2026-06-26
 
 ### Changed — Detect: รวมเป็นโฟลเดอร์กล้อง/กลุ่มเดียว (ไม่แตกตาม card structure)

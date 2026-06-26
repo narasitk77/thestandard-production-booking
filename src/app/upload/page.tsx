@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Search } from 'lucide-react'
 import UploadSection from '@/app/_components/booking/UploadSection'
@@ -63,6 +63,13 @@ function uploadBadge(b: BookingRow, st?: { epSlots: number; flatCams: number; fi
  */
 function UploadPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  // Back = the actual previous page (not a hardcoded route); fall back to
+  // My Bookings only when there's no history (page opened directly).
+  const goBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) router.back()
+    else router.push('/my-bookings')
+  }
   const requestedBookingId = searchParams.get('bookingId') || ''
 
   const [me, setMe] = useState<Me | null>(null)
@@ -157,9 +164,9 @@ function UploadPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
-      <Link href="/my-bookings" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
-        <ArrowLeft className="w-4 h-4" /> กลับ My Bookings
-      </Link>
+      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+        <ArrowLeft className="w-4 h-4" /> กลับ
+      </button>
 
       <div className="gf-header p-4 sm:p-6">
         <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Upload Footage</h1>

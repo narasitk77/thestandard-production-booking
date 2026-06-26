@@ -261,6 +261,11 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     }
   }
 
+  // v1.102.3 — auto-detect on open so the footage folder list + links are ALWAYS
+  // there; ops shouldn't have to press Detect every visit. Button = manual refresh.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { detectFootage() }, [booking.id])
+
   const startQueue = (fileList: FileList | File[] | null) => {
     if (!fileList || fileList.length === 0) return
     // v1.81 — folder picks/drops include OS cruft (.DS_Store, ._*, Thumbs.db).
@@ -507,9 +512,14 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
           </div>
           <button onClick={detectFootage} disabled={detecting}
             className="text-xs px-3 py-1.5 rounded font-medium bg-[#673ab7] text-white hover:bg-[#5e35b1] disabled:opacity-50 inline-flex items-center gap-1">
-            {detecting && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Detect
+            {detecting && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {detecting ? 'กำลังตรวจ…' : '🔄 ตรวจใหม่'}
           </button>
         </div>
+        {detecting && !detected && (
+          <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังตรวจหาโฟลเดอร์ footage บน Drive…
+          </div>
+        )}
         {detected && (
           detected.error ? (
             <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-2">{detected.error}</div>
