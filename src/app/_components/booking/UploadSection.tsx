@@ -166,6 +166,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [scanMsg, setScanMsg] = useState<string | null>(null)
+  // v1.101 — "Detect": scan THIS booking's Drive folders for footage (incl. files
+  // moved from NAS into the boxes, which have no Upload row).
+  const [detecting, setDetecting] = useState(false)
+  const [detected, setDetected] = useState<{ found: number; files: Array<{ name: string; sizeBytes: number | null; ep: string; camera: string; url: string | null }>; bookingFolderUrl: string | null; error?: string } | null>(null)
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
@@ -237,6 +241,23 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       setScanMsg(e?.message || 'สแกนไม่สำเร็จ')
     } finally {
       setScanning(false)
+    }
+  }
+
+  // v1.101 — Detect footage in THIS booking's Drive folders (path-resolved, so it
+  // sees NAS-moved files too — not just app uploads).
+  const detectFootage = async () => {
+    setDetecting(true)
+    setDetected(null)
+    try {
+      const r = await fetch(`/api/bookings/${booking.id}/detect-footage`)
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) setDetected({ found: 0, files: [], bookingFolderUrl: null, error: d.error || `HTTP ${r.status}` })
+      else setDetected(d)
+    } catch (e: any) {
+      setDetected({ found: 0, files: [], bookingFolderUrl: null, error: e?.message || 'ตรวจหาไม่สำเร็จ' })
+    } finally {
+      setDetecting(false)
     }
   }
 
@@ -476,6 +497,56 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             <span className="text-gray-400">chunked + auto-retry (network drop ปลอดภัย)</span>
           </p>
         </div>
+      </div>
+
+      {/* v1.101 — Detect footage already in this booking's Drive folders (incl. NAS-moved) */}
+      <div className="gf-card p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-sm font-medium text-gray-700">
+            🔍 ตรวจหา footage บน Drive <span className="text-[11px] text-gray-400 font-normal">(รวมไฟล์ที่ย้ายมาจาก NAS — ไม่ต้องอัปผ่านระบบ)</span>
+          </div>
+          <button onClick={detectFootage} disabled={detecting}
+            className="text-xs px-3 py-1.5 rounded font-medium bg-[#673ab7] text-white hover:bg-[#5e35b1] disabled:opacity-50 inline-flex items-center gap-1">
+            {detecting && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Detect
+          </button>
+        </div>
+        {detected && (
+          detected.error ? (
+            <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-2">{detected.error}</div>
+          ) : detected.found === 0 ? (
+            <div className="text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded p-2">
+              ยังไม่เจอไฟล์ในโฟลเดอร์ Drive ของงานนี้
+              {detected.bookingFolderUrl && (
+                <> · <a href={detected.bookingFolderUrl} target="_blank" rel="noreferrer" className="text-[#673ab7] hover:underline">เปิดโฟลเดอร์</a></>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-[11px] text-green-700">🟢 เจอ {detected.found} ไฟล์{detected.found >= 1000 ? '+' : ''}</div>
+              {Object.entries(detected.files.reduce<Record<string, typeof detected.files>>((acc, f) => {
+                (acc[f.ep || '(booking)'] ||= []).push(f); return acc
+              }, {})).map(([ep, files]) => (
+                <div key={ep} className="border border-gray-200 rounded p-2">
+                  <div className="text-xs font-medium text-gray-700 mb-1">{ep} <span className="text-gray-400">({files.length})</span></div>
+                  <table className="w-full text-[11px]">
+                    <tbody>
+                      {files.slice(0, 50).map((f, i) => (
+                        <tr key={i} className="border-t border-gray-100">
+                          <td className="py-1 pr-2 font-mono text-gray-800 truncate max-w-[220px]">
+                            {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline text-gray-800">{f.name}</a> : f.name}
+                          </td>
+                          <td className="py-1 pr-2 text-gray-500 whitespace-nowrap">{f.camera}</td>
+                          <td className="py-1 text-right text-gray-600 whitespace-nowrap">{formatSize(f.sizeBytes)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {files.length > 50 && <div className="text-[10px] text-gray-400 mt-1">… อีก {files.length - 50} ไฟล์</div>}
+                </div>
+              ))}
+            </div>
+          )
+        )}
       </div>
 
       {/* In-flight queue */}

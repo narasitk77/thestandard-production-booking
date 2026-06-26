@@ -5,6 +5,22 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.101.0 — "Detect" footage on the Upload page (NAS-moved files)
+
+Ops workflow: crew drops files in the NAS (Production Team Shared Drive) → syncs
+to Drive → they move the folder into VIDEO 2026 → want the Upload page to detect
+the footage (no Upload row, so the upload history/report can't see it). Added a
+**Detect** button + results card on /upload (UploadSection): new endpoint
+`GET /api/bookings/[id]/detect-footage` resolves the booking's Drive folder by
+path (read-only) and `listFilesRecursive`-lists the actual files (name · camera ·
+size · open-link), grouped by EP. Scope is correct: non-AGN scans the whole
+unique `<Production ID>` folder; AGN scans only this booking's EP folders (the
+Project box is shared across the project's bookings). Extended `findEpisodeFolderUrls`
+to also return `bookingFolderId` + per-episode `folderId`. tsc 0 · 150 tests.
+NOTE (pending): build + adversarial review + deploy + verify.
+
+---
+
 ## 2026-06-26 · v1.100.3 — Episode Type "Event" for the EVT outlet
 
 Added a single-char `E` program (`Event · งานอีเวนต์ / Staff`) to the EVT outlet

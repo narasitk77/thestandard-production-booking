@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.101.0] — 2026-06-26
+
+### Added — ปุ่ม "Detect" บนหน้า Upload (ตรวจหา footage ที่ย้ายจาก NAS เข้ากล่อง)
+flow: ช่างภาพลงไฟล์ใน NAS (Production Team Shared Drive) → sync เข้า Drive → ย้ายโฟลเดอร์เข้า VIDEO 2026 → อยากให้หน้า Upload ตรวจเจอไฟล์ (ที่ไม่ได้อัปผ่านระบบ = ไม่มี Upload row).
+- หน้า /upload (UploadSection) เพิ่มการ์ด **"🔍 ตรวจหา footage บน Drive"** + ปุ่ม **Detect** → resolve โฟลเดอร์ของ booking จาก path (read-only) แล้ว `listFilesRecursive` ลิสต์ไฟล์จริงในกล่อง (ชื่อ·กล้อง·ขนาด·ลิงก์เปิด) group ตาม EP. เห็นไฟล์ที่ย้ายจาก NAS ได้เลย ไม่ต้องรอ matcher / ไม่ต้องมี Upload row.
+- endpoint `GET /api/bookings/[id]/detect-footage` (read-scope canViewBooking). **scope ถูกต้อง:** non-AGN scan ทั้งกล่อง `<Production ID>` (unique ต่อ booking); **AGN scan เฉพาะ EP folders ของ booking นี้** (เพราะ Project box ใช้ร่วมหลาย booking — ไม่ปนงานอื่น). reuse `findEpisodeFolderUrls` (เพิ่ม return `bookingFolderId` + episode `folderId`) + `listFilesRecursive` (มี folderPath บอก EP/กล้อง).
+- baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.100.3] — 2026-06-26
 
 ### Added — Episode Type "Event" สำหรับ outlet Event (EVT)

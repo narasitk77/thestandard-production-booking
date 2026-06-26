@@ -414,7 +414,7 @@ async function resolveShootFolder(
  */
 export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   episodeFolderNames: string[]
-}): Promise<{ bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; url: string | null }> }> {
+}): Promise<{ bookingFolderId: string | null; bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; folderId: string | null; url: string | null }> }> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() }) // read-only: never creates
   const folderUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`
   const listFolders = async (parentId: string): Promise<Array<{ id: string; name: string }>> => {
@@ -439,7 +439,7 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   const findExact = async (parentId: string, name: string) =>
     (await listFolders(parentId)).find(f => f.name === name)?.id ?? null
 
-  const empty = { bookingFolderUrl: null, episodes: input.episodeFolderNames.map(n => ({ episodeFolderName: n, url: null })) }
+  const empty = { bookingFolderId: null, bookingFolderUrl: null, episodes: input.episodeFolderNames.map(n => ({ episodeFolderName: n, folderId: null, url: null })) }
   const outletId = await findFuzzy(input.rootFolderId, input.outletCanonicalName)
   if (!outletId) return empty
   const programId = await findFuzzy(outletId, input.programFolderName)
@@ -449,9 +449,9 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
 
   const episodes = await Promise.all(input.episodeFolderNames.map(async n => {
     const epId = await findExact(bookingId, n)
-    return { episodeFolderName: n, url: epId ? folderUrl(epId) : null }
+    return { episodeFolderName: n, folderId: epId, url: epId ? folderUrl(epId) : null }
   }))
-  return { bookingFolderUrl: folderUrl(bookingId), episodes }
+  return { bookingFolderId: bookingId, bookingFolderUrl: folderUrl(bookingId), episodes }
 }
 
 /**
