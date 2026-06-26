@@ -230,7 +230,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       const r = await fetch('/api/internal/footage/sync', { credentials: 'include' })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) setScanMsg(d.error || `สแกนไม่สำเร็จ (HTTP ${r.status})`)
-      else if (d.skipped) setScanMsg(`สแกนข้าม: ${d.reason || 'DRIVE_FOOTAGE_ROOT ไม่ได้ตั้ง'}`)
+      else if (d.skipped || d.ok === false) setScanMsg(`สแกนยังไม่ทำงาน: ${d.reason || 'ตั้งค่ายังไม่ครบ (DRIVE_FOOTAGE_ROOT / FOOTAGE_LOG_SHEET_ID)'}`)
       else setScanMsg(`สแกน ${d.scanned ?? 0} ไฟล์ · match ใหม่ ${d.matched ?? 0} · รอ booking ${d.parsedNoBooking ?? 0} · อ่าน ID ไม่ออก ${d.unparsed ?? 0}`)
       fetchHistory()
     } catch (e: any) {

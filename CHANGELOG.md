@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.100.2] — 2026-06-26
+
+### Fixed — ปุ่มสแกน: แสดงเหตุผลตอน worker idle
+- ตอนกดสแกนแล้ว footage matcher idle (เช่น `FOOTAGE_LOG_SHEET_ID` ไม่ได้ตั้ง) endpoint คืน `ok:false` + `reason` (ไม่มี field `skipped`) → ปุ่มเดิมตกไป branch แสดง "สแกน 0 ไฟล์ · match 0" ซึ่งกำกวม. แก้ให้เช็ค `d.ok === false` ด้วย → แสดง **"สแกนยังไม่ทำงาน: <reason>"** ตรงๆ.
+- พบจากการ verify live: prod **matcher idle** เพราะ `FOOTAGE_LOG_SHEET_ID` ไม่ได้ตั้ง (auto-match-to-sheet ไม่ทำงาน). per-EP footage links (v1.100.0) ไม่ขึ้นกับ matcher — resolve จาก path สด ทำงานอยู่แล้ว.
+
+---
+
 ## [1.100.1] — 2026-06-26
 
 ### Added — ปุ่ม "สแกนหา footage" (trigger footage matcher on-demand)
