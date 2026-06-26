@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import {
   hasConsoleAccess,
   canApproveOTByRole,
+  positionGrantsOT,
   canManageRoles,
   canEditUser,
   assignableRoles,
@@ -31,6 +32,21 @@ test('OT approval: Admin + Manager only', () => {
   assert.equal(canApproveOTByRole('SUPPORT'), false)
   assert.equal(canApproveOTByRole('COORDINATOR'), false)
   assert.equal(canApproveOTByRole('USER'), false)
+})
+
+test('OT approval by position: production managers yes, Project Manager no', () => {
+  assert.equal(positionGrantsOT('Video Production Manager'), true)
+  assert.equal(positionGrantsOT('Production Manager'), true)
+  assert.equal(positionGrantsOT('Manager'), true)
+  // PM office — must NOT approve crew OT
+  assert.equal(positionGrantsOT('Project Manager'), false)
+  assert.equal(positionGrantsOT('Senior Project Manager'), false)
+  assert.equal(positionGrantsOT('project manager'), false)
+  // non-managers
+  assert.equal(positionGrantsOT('Project Coordinator'), false)
+  assert.equal(positionGrantsOT('Videographer'), false)
+  assert.equal(positionGrantsOT(''), false)
+  assert.equal(positionGrantsOT(null), false)
 })
 
 test('role management: Support cannot, Coordinator can (Users only)', () => {

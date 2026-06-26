@@ -49,6 +49,16 @@ export function canApproveOTByRole(role?: string | null): boolean {
   return role === 'ADMIN' || role === 'MANAGER'
 }
 
+/**
+ * Position-based OT approval (legacy path for managers tagged by position before
+ * the MANAGER role existed, e.g. "Video Production Manager"). EXCLUDES "Project
+ * Manager" (PM office) — they run projects, they don't approve crew overtime.
+ */
+export function positionGrantsOT(position?: string | null): boolean {
+  const pos = (position || '').toLowerCase()
+  return pos.includes('manager') && !pos.includes('project manager')
+}
+
 /** Can this actor manage roles at all (i.e. see edit controls on the Permissions page)? */
 export function canManageRoles(actorRole?: string | null): boolean {
   return actorRole === 'ADMIN' || actorRole === 'MANAGER' || actorRole === 'COORDINATOR'

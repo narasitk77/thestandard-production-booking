@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.6] — 2026-06-26
+
+### Fixed — Project Manager ไม่ควรมีสิทธิ์ OT Approval
+- `getOTApproverAccess` ให้สิทธิ์ approve OT กับ position ที่มีคำว่า "manager" (legacy path สำหรับ production manager) → **"Project Manager" (PM office) ติดไปด้วย**. PM run โปรเจค ไม่ได้อนุมัติ OT ของกอง.
+- แก้: แยก predicate `positionGrantsOT(position)` (src/lib/roles.ts) = `includes('manager') && !includes('project manager')` + unit test. role MANAGER/ADMIN ยัง approve ได้เหมือนเดิม. PM users ใน DB เป็น role=USER + position="Project Manager" → ตอนนี้ไม่ได้สิทธิ์ OT แล้ว.
+- baseline: tsc 0 · 151 tests pass.
+
+---
+
 ## [1.102.5] — 2026-06-26
 
 ### Fixed — Home "New Booking" ส่ง crew ไปหน้า upload

@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth'
 import { authOptions } from './auth'
 import { prisma } from './db'
-import { hasConsoleAccess, type Role } from './roles'
+import { hasConsoleAccess, positionGrantsOT, type Role } from './roles'
 
 // AUTH_DISABLED=1 — bypass Google OAuth and run every request as a seeded
 // ADMIN. For trusted-LAN deploys and local/dev testing without OAuth set up.
@@ -206,9 +206,10 @@ export async function getOTApproverAccess(email: string | null | undefined): Pro
     if (!u || !u.active) return false
     // v1.38 — OT approval is an Admin/Manager duty. The MANAGER role grants it
     // directly; the legacy position-contains-"manager" path stays for users who
-    // were tagged by position before the role tier existed.
+    // were tagged by position before the role tier existed — but NOT "Project
+    // Manager" (PM office), who don't approve crew OT (v1.102.6).
     if (u.role === 'ADMIN' || u.role === 'MANAGER') return true
-    return (u.position || '').toLowerCase().includes('manager')
+    return positionGrantsOT(u.position)
   } catch {
     return false
   }
