@@ -11,7 +11,18 @@ Admin-only button in UploadSection (/upload) next to Refresh → calls
 `GET /api/internal/footage/sync` immediately (instead of waiting for the ~10-min
 worker), shows scanned/matched/parsed_no_booking/unparsed counts. For use right
 after moving NAS files into the boxes. Gated to admin (the endpoint 401s
-otherwise). tsc 0 · tests pass. NOTE (pending): deploy + verify.
+otherwise). tsc 0 · tests pass.
+
+**✅ DEPLOYED + VERIFIED LIVE** (sha-555b432 → then sha-1282866 with the v1.100.2
+message fix). Clicking the button returns 200 in ~3s — but it surfaced that the
+prod footage matcher is **IDLE**: `runFootageSync` returns
+`{ ok:false, reason:"FOOTAGE_LOG_SHEET_ID env var not set — worker idle" }`. So
+the auto-match-to-inventory-sheet routine has never been running on prod (the
+sheet env was never set). **Ops decided to leave the matcher OFF** — the per-EP
+folder links (v1.100.0) already give the producer footage per EP, resolved live
+from the path, so the inventory-sheet matcher isn't needed. The scan button stays
+(harmless; reports "idle" honestly after v1.100.2; works if the matcher is ever
+enabled by setting FOOTAGE_LOG_SHEET_ID + a log sheet).
 
 ---
 
