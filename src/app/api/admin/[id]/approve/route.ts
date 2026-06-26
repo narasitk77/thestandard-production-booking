@@ -6,8 +6,8 @@ import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
-import { ensureShootCameraFolders, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, camerasToPreCreate } from '@/lib/outlet-folders'
+import { ensureShootCameraFolders, ensurePhotoAlbumFolder, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 
@@ -90,10 +90,19 @@ export async function POST(
     //     waiting (empty slot = that camera hasn't delivered). Own try/catch IIFE
     //     — never blocks approval, runs only when Drive is configured.
     ;(async () => {
-      const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
-      if (!root || !updated.bookingCode || !hasDriveCredentials()) return
+      if (!updated.bookingCode || !hasDriveCredentials()) return
       try {
         const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
+        // v1.102.8 — Photo album jobs (Episode Type A) → ONE flat folder in the
+        // Photographer Shared Drive (not the VIDEO 2026 tree). Photographers drop
+        // the photos inside; no camera/EP layers.
+        if (isPhotoAlbumBooking(updated.episodes)) {
+          const { bookingFolderId } = await ensurePhotoAlbumFolder({ bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName) })
+          await upsertTextFile({ parentFolderId: bookingFolderId, name: '_SHOOT.txt', content: renderBookingInfo(bookingInfoInput(updated)) })
+          return
+        }
+        const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+        if (!root) return
         // v1.94 — AGN groups footage by Project (no per-booking folder; EP folders
         // keyed by project EP ID); every other outlet keeps <show>/<Production ID>.
         const isAgency = updated.outlet.code === 'AGN'

@@ -208,6 +208,19 @@ export function buildEpisodeFolderName(
   return title ? `${lead} ${MIDDLE_DOT} ${title}` : lead
 }
 
+/** Episode Type code for a Photo Album shoot (the "A" picker option). */
+export const PHOTO_ALBUM_EPISODE_CODE = 'A'
+
+/**
+ * v1.102.8 — a "Photo album" job: its output is photos, not video, so it's filed
+ * in the Photographer team's Shared Drive (a flat job folder) instead of the
+ * VIDEO 2026 tree. True when the booking has episodes and they're ALL the Photo
+ * Album type (a pure photo job — mixed video+photo bookings stay in VIDEO 2026).
+ */
+export function isPhotoAlbumBooking(episodes: Array<{ program?: { code?: string | null } | null }>): boolean {
+  return episodes.length > 0 && episodes.every(e => (e.program?.code || '').toUpperCase() === PHOTO_ALBUM_EPISODE_CODE)
+}
+
 /**
  * v1.94 — the two folder layers between `<NN · Outlet>` and the EP folders.
  * They differ by outlet kind:

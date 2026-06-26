@@ -536,6 +536,21 @@ export async function ensureShootCameraFolders(input: ShootFolderInput & {
 }
 
 /**
+ * v1.102.8 — Photo album jobs (Episode Type A) are filed in the Photographer
+ * team's Shared Drive (a flat archive), NOT the VIDEO 2026 tree. One folder per
+ * job named "<Production ID · job>" at the Shared Drive root — photographers drop
+ * the photos inside. Overridable via DRIVE_PHOTO_ROOT (defaults to the
+ * Photographer Shared Drive). Idempotent; returns the job-folder id.
+ */
+export const DRIVE_PHOTO_ROOT = process.env.DRIVE_PHOTO_ROOT?.trim() || '0ALBpF3fzYT-SUk9PVA'
+
+export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string; subject?: string }): Promise<{ bookingFolderId: string }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
+  const bookingFolderId = await ensureChildFolder(drive, DRIVE_PHOTO_ROOT, input.bookingFolderName)
+  return { bookingFolderId }
+}
+
+/**
  * v1.88 — flat variant: <root>/<bookingFolderName>/<camera>/ with no
  * outlet/program layer. Used to pre-create the shoot folder in the "Production
  * Team" landing Shared Drive (where the NAS syncs footage) named by Production

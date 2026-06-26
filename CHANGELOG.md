@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.8] — 2026-06-26
+
+### Added — งาน Photo album → โฟลเดอร์ใน Photographer Shared Drive
+- booking ที่ทุกตอนเป็น **Episode Type = Photo Album (code A)** = "งาน Photo album" → สร้าง **โฟลเดอร์เดียว** ชื่อ `<Production ID · ชื่องาน>` ที่ root ของ **Photographer Shared Drive** (`0ALBpF3fzYT-SUk9PVA`, override ด้วย env `DRIVE_PHOTO_ROOT`) แทนโครง VIDEO 2026 — ช่างภาพวางรูปข้างในได้เลย (ไม่มีชั้นกล้อง/EP).
+- `isPhotoAlbumBooking(episodes)` (outlet-folders.ts, = ทุกตอน code A) + `ensurePhotoAlbumFolder()` (google-drive.ts). Branch ทั้งตอน approve (CONFIRMED) และ prep-folders worker (รายวัน) — photo job ไม่สร้างโฟลเดอร์วิดีโอ/CAM ใน VIDEO 2026 อีก. งานผสม (วิดีโอ+รูป) ยังอยู่ VIDEO 2026 ตามเดิม.
+- สร้างผ่าน Drive impersonation (subject เดิมที่เขียน Shared Drive อื่นได้) — ถ้า subject ไม่มีสิทธิ์ใน Photo Drive จะ fail แบบ best-effort (log) ไม่ block approve. **CEILING**: Detect/upload ในแอปยังเป็นฝั่งวิดีโอ — รูปใน Photo Drive ยังไม่ขึ้นใน Detect (follow-up ถ้าต้องการ).
+- baseline: tsc 0 · 153 tests pass.
+
+---
+
 ## [1.102.7] — 2026-06-26
 
 ### Fixed — Outlet PM ใช้ dropdown Project Manager เสมอ (รวม Event)

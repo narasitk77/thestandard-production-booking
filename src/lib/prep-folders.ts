@@ -8,7 +8,7 @@
  * moving, no _SHOOT.txt — approve handles that).
  */
 import { prisma } from '@/lib/db'
-import { ensureShootCameraFolders, ensureFlatShootFolders, hasDriveCredentials } from '@/lib/google-drive'
+import { ensureShootCameraFolders, ensureFlatShootFolders, ensurePhotoAlbumFolder, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
   shootFolderLayers,
@@ -16,6 +16,7 @@ import {
   buildEpisodeFolderName,
   camerasToPreCreate,
   hasOutletFolderMapping,
+  isPhotoAlbumBooking,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 
@@ -66,7 +67,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       projectId: true, projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
     },
   })
 
@@ -76,6 +77,23 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
   let prodTeamErrors = 0
 
   for (const b of bookings) {
+    const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+    // v1.102.8 — Photo album jobs → one flat folder in the Photographer Shared
+    // Drive (not VIDEO 2026). Handled before the outlet-mapping / camera checks
+    // (those are video-only). Idempotent with the approve route's pre-create.
+    if (isPhotoAlbumBooking(b.episodes)) {
+      const photoName = buildBookingFolderName(b.bookingCode!, jobName)
+      if (opts.dryRun) { results.push({ bookingCode: b.bookingCode, wouldCreate: [`(photo) ${photoName}`] }); prepared++; continue }
+      try {
+        await ensurePhotoAlbumFolder({ bookingFolderName: photoName })
+        results.push({ bookingCode: b.bookingCode, created: [`(photo) ${photoName}`] })
+        prepared++
+      } catch (e: any) {
+        results.push({ bookingCode: b.bookingCode, error: `photo folder: ${e?.message || e}` })
+        errors++
+      }
+      continue
+    }
     if (!hasOutletFolderMapping(b.outlet.code)) {
       results.push({ bookingCode: b.bookingCode, skipped: `outlet ${b.outlet.code} has no folder mapping` })
       continue
@@ -92,7 +110,6 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     }
     try {
       const isAgency = b.outlet.code === 'AGN'
-      const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
       // v1.93 — one folder per episode (<…>/<EP>/<camera>/). v1.94 — AGN keys EP
       // folders by project EP ID; empty for bookings with no episodes.
       const episodeFolderNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined
