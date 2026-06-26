@@ -5,6 +5,16 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.100.1 — "สแกนหา footage" button (trigger the matcher on-demand)
+
+Admin-only button in UploadSection (/upload) next to Refresh → calls
+`GET /api/internal/footage/sync` immediately (instead of waiting for the ~10-min
+worker), shows scanned/matched/parsed_no_booking/unparsed counts. For use right
+after moving NAS files into the boxes. Gated to admin (the endpoint 401s
+otherwise). tsc 0 · tests pass. NOTE (pending): deploy + verify.
+
+---
+
 ## 2026-06-26 · v1.100.0 — per-EP footage links on the producer page (NAS-moved footage)
 
 Ops moved footage off the NAS into the Drive boxes (same structured tree the app
@@ -21,9 +31,19 @@ worker, ~10 min) already walks `DRIVE_FOOTAGE_ROOT` and matches by Production ID
 faster than the requested hourly. The per-EP link resolves the path live each
 view, so NAS footage shows the instant it's in the box. tsc 0 · 150 tests pass.
 
-NOTE (pending): deploy (Portainer was logged out) + then verify the link resolves
-on a real booking with footage. Bundles the v1.99.2 แพท producer add (run
-import-producers after deploy).
+**✅ DEPLOYED + VERIFIED LIVE** as `sha-4c48cb8` (after a pre-deploy review fixed
+the episodeId→Episode.id keying + read-only auth). `/api/version` → 1.100.0.
+Verified: `GET /api/bookings/<CEA booking>/ep-folders` resolved all 4 EP folders
+to real Drive folder ids; `import-producers` → created 1 (แพท), and
+`/api/producers?outlet=NWS` lists แพท in the Producer column.
+
+⚠️ DEPLOY-COLLISION (2 sessions again): right after my 1.100.0 deploy stuck, the
+OTHER session redeployed `sha-90ac7d4` (v1.99.1) over it — live flipped back to
+1.99.1 and my first re-deploy 500'd (stack busy mid-deploy). Re-fired the
+redeploy once the stack freed → 1.100.0 held. Reiterated: do not run two sessions
+on the same Portainer stack.
+
+The v1.100.0 entry above bundled the v1.99.2 แพท producer add.
 
 ---
 

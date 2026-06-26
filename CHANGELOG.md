@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.100.1] — 2026-06-26
+
+### Added — ปุ่ม "สแกนหา footage" (trigger footage matcher on-demand)
+- หน้า /upload (UploadSection) เพิ่มปุ่ม **🔄 สแกนหา footage** (เฉพาะ admin) ข้างปุ่ม Refresh → เรียก `GET /api/internal/footage/sync` ทันที (ไม่ต้องรอ worker ~10 นาที). โชว์ผล: สแกนกี่ไฟล์ · match ใหม่ · รอ booking · อ่าน ID ไม่ออก. ใช้ตอนเพิ่งย้ายไฟล์ NAS เข้ากล่องแล้วอยากให้ match เลย. ปุ่มโชว์เฉพาะ admin (endpoint 401 ถ้าไม่ใช่). tsc 0 · tests pass.
+
+---
+
 ## [1.100.0] — 2026-06-26
 
 ### Added — ลิงก์ footage รายตอนบนหน้า producer (รองรับไฟล์ที่ย้ายจาก NAS)

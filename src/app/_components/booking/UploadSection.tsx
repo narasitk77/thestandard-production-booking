@@ -160,6 +160,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [report, setReport] = useState<FootageReportView | null>(null)
   const [delivering, setDelivering] = useState(false)
   const [deliverMsg, setDeliverMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  // v1.100.1 — admin-only "scan Drive for footage now" (triggers runFootageSync
+  // on-demand instead of waiting for the ~10-min worker; useful right after
+  // moving NAS files into the boxes).
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [scanMsg, setScanMsg] = useState<string | null>(null)
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
@@ -211,6 +217,28 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     }
   }
   useEffect(() => { fetchHistory() }, [booking.id])
+  useEffect(() => {
+    fetch('/api/me').then(r => r.json()).then(d => setIsAdmin(d?.user?.role === 'ADMIN')).catch(() => {})
+  }, [])
+
+  // v1.100.1 — kick the footage matcher now (walks DRIVE_FOOTAGE_ROOT, matches by
+  // Production ID, logs matched footage). Admin-only; the endpoint 401s otherwise.
+  const triggerScan = async () => {
+    setScanning(true)
+    setScanMsg(null)
+    try {
+      const r = await fetch('/api/internal/footage/sync', { credentials: 'include' })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) setScanMsg(d.error || `สแกนไม่สำเร็จ (HTTP ${r.status})`)
+      else if (d.skipped) setScanMsg(`สแกนข้าม: ${d.reason || 'DRIVE_FOOTAGE_ROOT ไม่ได้ตั้ง'}`)
+      else setScanMsg(`สแกน ${d.scanned ?? 0} ไฟล์ · match ใหม่ ${d.matched ?? 0} · รอ booking ${d.parsedNoBooking ?? 0} · อ่าน ID ไม่ออก ${d.unparsed ?? 0}`)
+      fetchHistory()
+    } catch (e: any) {
+      setScanMsg(e?.message || 'สแกนไม่สำเร็จ')
+    } finally {
+      setScanning(false)
+    }
+  }
 
   const startQueue = (fileList: FileList | File[] | null) => {
     if (!fileList || fileList.length === 0) return
@@ -568,15 +596,25 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
 
       {/* History */}
       <div className="gf-card p-4">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <div className="text-sm font-medium text-gray-700">
             ไฟล์ที่ upload แล้ว ({history.length})
           </div>
-          <button onClick={fetchHistory} disabled={historyLoading}
-            className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
-            <RefreshCw className={`w-3 h-3 ${historyLoading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {/* v1.100.1 — admin: trigger the Drive footage scan now (matches NAS-moved files by Production ID) */}
+            {isAdmin && (
+              <button onClick={triggerScan} disabled={scanning} title="สแกน Drive หา footage แล้ว match กับ booking ตาม Production ID (ทั้งระบบ)"
+                className="text-xs px-2 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-purple-50 inline-flex items-center gap-1 disabled:opacity-50">
+                {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} สแกนหา footage
+              </button>
+            )}
+            <button onClick={fetchHistory} disabled={historyLoading}
+              className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+              <RefreshCw className={`w-3 h-3 ${historyLoading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
         </div>
+        {scanMsg && <div className="text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded p-2 mb-2">{scanMsg}</div>}
         {historyLoading ? (
           <div className="py-6 text-center"><Loader2 className="w-4 h-4 animate-spin text-gray-400 mx-auto" /></div>
         ) : history.length === 0 ? (
