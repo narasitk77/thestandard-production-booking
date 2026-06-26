@@ -5,6 +5,28 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.100.0 — per-EP footage links on the producer page (NAS-moved footage)
+
+Ops moved footage off the NAS into the Drive boxes (same structured tree the app
+creates — Production ID in the path, the "green" case) and wants the producer to
+open each EP's footage folder from inside the app. Added a per-EP **"📁 footage"**
+link on `/dashboard/[id]` (Episode IDs card). It resolves each EP's folder by its
+DETERMINISTIC path **read-only** (`findEpisodeFolderUrls` in google-drive.ts —
+fuzzy outlet/program, exact booking/EP, never creates), so it works for NAS-moved
+footage too (no Upload row needed). New endpoint `GET /api/bookings/[id]/ep-folders`
+(read-scope = canViewBooking), fetched non-blocking after page load.
+
+No new routine needed: the existing footage matcher (`runFootageSync`, supervised
+worker, ~10 min) already walks `DRIVE_FOOTAGE_ROOT` and matches by Production ID —
+faster than the requested hourly. The per-EP link resolves the path live each
+view, so NAS footage shows the instant it's in the box. tsc 0 · 150 tests pass.
+
+NOTE (pending): deploy (Portainer was logged out) + then verify the link resolves
+on a real booking with footage. Bundles the v1.99.2 แพท producer add (run
+import-producers after deploy).
+
+---
+
 ## 2026-06-26 · v1.99.2 — News producer แพท
 
 Added แพท (ภาวิกา ขันติศรีสกุล, phawika.k@, TSD00056) to `OUTLET_PRODUCERS` as a

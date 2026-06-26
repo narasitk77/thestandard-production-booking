@@ -60,6 +60,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   // v1.50.2 — the page is reachable by anyone on the booking (the API scopes
   // reads); status actions stay console-only, so hide them for plain users.
   const [isStaff, setIsStaff] = useState(false)
+  // v1.100 — per-EP "open footage on Drive" links, resolved from the EP's folder
+  // path (works for footage moved from NAS into the boxes, not just uploads).
+  const [epFolders, setEpFolders] = useState<Record<string, string | null>>({})
 
   useEffect(() => {
     fetch(`/api/bookings/${id}`)
@@ -76,6 +79,15 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     fetch('/api/me')
       .then(r => r.json())
       .then(d => setIsStaff(hasConsoleAccess(d?.user?.role)))
+      .catch(() => {})
+    // best-effort, non-blocking — Drive folder links per EP (incl. NAS-moved footage)
+    fetch(`/api/bookings/${id}/ep-folders`)
+      .then(r => (r.ok ? r.json() : { episodes: [] }))
+      .then(d => {
+        const m: Record<string, string | null> = {}
+        for (const e of d.episodes || []) m[e.episodeId] = e.url
+        setEpFolders(m)
+      })
       .catch(() => {})
   }, [id])
 
@@ -228,6 +240,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             <div key={ep.id} className="flex items-center gap-3 py-1">
               <span className="episode-badge">{ep.episodeId}</span>
               <span className="text-sm text-gray-700 flex-1">{ep.title}</span>
+              {epFolders[ep.episodeId] && (
+                <a href={epFolders[ep.episodeId]!} target="_blank" rel="noreferrer"
+                  className="text-xs text-[#673ab7] hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">
+                  <Folder className="w-3.5 h-3.5" /> footage
+                </a>
+              )}
             </div>
           ))}
         </div>

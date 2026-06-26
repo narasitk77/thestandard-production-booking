@@ -404,6 +404,57 @@ async function resolveShootFolder(
 }
 
 /**
+ * v1.100 — READ-ONLY resolve of a booking's footage folder URLs (booking-level +
+ * per episode), for surfacing "open footage on Drive" links — including footage
+ * MOVED from the NAS into the boxes (which has no Upload row). Mirrors
+ * resolveShootFolder's matching (fuzzy outlet/program, exact booking/EP) but
+ * NEVER creates: returns null where a level is missing, so merely VIEWING a
+ * booking can't spawn empty folders. Resolves the shared outlet/program/booking
+ * path once, then each EP under it (cheap — a handful of list calls per booking).
+ */
+export async function findEpisodeFolderUrls(input: ShootFolderInput & {
+  episodeFolderNames: string[]
+}): Promise<{ bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; url: string | null }> }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const folderUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`
+  const listFolders = async (parentId: string): Promise<Array<{ id: string; name: string }>> => {
+    const out: Array<{ id: string; name: string }> = []
+    let pageToken: string | undefined
+    do {
+      const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+        q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`,
+        fields: 'nextPageToken, files(id, name)',
+        pageSize: 100, pageToken,
+        supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+      })
+      for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name })
+      pageToken = res.data.nextPageToken ?? undefined
+    } while (pageToken)
+    return out
+  }
+  const findFuzzy = async (parentId: string, canonical: string) => {
+    const want = stripOrderingPrefix(canonical).trim().toLowerCase()
+    return (await listFolders(parentId)).find(f => stripOrderingPrefix(f.name).toLowerCase() === want)?.id ?? null
+  }
+  const findExact = async (parentId: string, name: string) =>
+    (await listFolders(parentId)).find(f => f.name === name)?.id ?? null
+
+  const empty = { bookingFolderUrl: null, episodes: input.episodeFolderNames.map(n => ({ episodeFolderName: n, url: null })) }
+  const outletId = await findFuzzy(input.rootFolderId, input.outletCanonicalName)
+  if (!outletId) return empty
+  const programId = await findFuzzy(outletId, input.programFolderName)
+  if (!programId) return empty
+  const bookingId = input.bookingFolderName ? await findExact(programId, input.bookingFolderName) : programId
+  if (!bookingId) return empty
+
+  const episodes = await Promise.all(input.episodeFolderNames.map(async n => {
+    const epId = await findExact(bookingId, n)
+    return { episodeFolderName: n, url: epId ? folderUrl(epId) : null }
+  }))
+  return { bookingFolderUrl: folderUrl(bookingId), episodes }
+}
+
+/**
  * v1.70 (issue #5) — resolve the Drive folder path for an upload under the new
  * "VIDEO 2026 [JUL–DEC]" tree:
  *

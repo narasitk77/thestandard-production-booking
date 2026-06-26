@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.100.0] — 2026-06-26
+
+### Added — ลิงก์ footage รายตอนบนหน้า producer (รองรับไฟล์ที่ย้ายจาก NAS)
+ops ย้ายไฟล์จาก NAS เข้ากล่อง Drive (โครงเดียวกับที่ระบบสร้าง — มี Production ID ใน path) อยากให้ producer เปิดลิงก์ footage รายตอนได้ในระบบ.
+- หน้า producer `/dashboard/[id]` การ์ด Episode IDs เพิ่มลิงก์ **"📁 footage"** ต่อตอน — เปิดโฟลเดอร์ EP บน Drive
+- `findEpisodeFolderUrls()` (google-drive.ts) — resolve โฟลเดอร์ EP จาก path แบบ **read-only** (ไม่สร้างโฟลเดอร์ใหม่ตอนแค่เปิดดู), AGN-aware (ใช้ buildEpisodeFolderName + shootFolderLayers ชุดเดียวกับตอนสร้าง/อัป). คืน null ถ้าโฟลเดอร์ยังไม่มี
+- endpoint `GET /api/bookings/[id]/ep-folders` (read-scope = canViewBooking) → `[{episodeId, url}]` + bookingFolderUrl. fetch แบบ non-blocking หลังโหลดหน้า
+- **ไม่ต้องตั้ง routine ใหม่:** footage matcher เดิม (`runFootageSync`) เดิน Drive + match ตาม Production ID ทุก ~10 นาที (เร็วกว่ารายชั่วโมงที่ขอ) อยู่แล้ว; ลิงก์รายตอนนี้ resolve จาก path สดทุกครั้ง → ใช้ได้ทันทีกับไฟล์ NAS ที่ย้ายเข้ากล่อง โดยไม่ต้องรอ matcher. tsc 0 · 150 tests pass.
+
+---
+
 ## [1.99.2] — 2026-06-26
 
 ### Added — News producer แพท
