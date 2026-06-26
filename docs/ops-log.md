@@ -5,6 +5,39 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.102.0 — AGN Detect finds OB/event footage + Production-ID box, DEPLOYED + VERIFIED LIVE
+
+Ops reported "แก้ มันอยู่ใน EVENT" pointing at the `AGN-260625-LOC-01 · Awesome
+Skills Project` box. Diagnosis (via Drive MCP + live API): the migrated CEA booking
+is an **OB/event** shoot mis-filed three ways the app didn't expect:
+
+1. `booking.category = ADVERTORIAL` → app resolved the box under *Advertorial*
+   (the empty app-created `PP-26-025 · …` box, `1Vs_…`). The footage is under
+   **Content Agency → Event / Forum**.
+2. ops named the box by **Production ID** (`AGN-260625-LOC-01 · …`), but the AGN
+   resolver computes the **Project ID** name (`PP-26-025 · …`).
+3. the footage is OB-style — `OB / PGM OB` (4× HyperDeck, 13–23 GB) + `OB /
+   Rec.Stream/{PGM,Session}` — **not under the per-EP folders** that AGN Detect scans.
+
+So Detect = 0. Fix (no files moved, no Drive renamed):
+- **data**: PATCH `category` ADVERTORIAL → EVENT on the booking (admin API, live).
+- **code (v1.102.0, sha-35d6484)**: `findEpisodeFolderUrls` accepts
+  `bookingFolderNameAlts` — AGN passes the Production-ID box name and falls back to
+  it when the Project-ID box isn't found (read-side: detect-footage + ep-folders).
+  AGN Detect ALSO scans the box recursively for loose footage via a new
+  `listFilesRecursive({skipFolder})`, skipping project-EP folders (`<projectId>-…`)
+  so sibling bookings aren't mixed in. Labels by real folder depth.
+
+**✅ DEPLOYED + VERIFIED LIVE** (`/api/version` → 1.102.0, through the recreate 502
+window). Detect on `AGN-260625-LOC-01`: **found 1287 files / 402 GB** — per-EP
+(L01 1000*, S15 202, S02 65, S18 4) **plus the OB footage** (`OB/PGM OB` 4 HyperDeck
+files labelled `ep:OB camera:"PGM OB"`, `OB/Rec.Stream` 12). All 4 per-EP folder
+links resolve. *L01 hit the per-EP 1000-file display cap (footage IS present;
+raise `maxFiles` in detect-footage if the full list is needed). The empty
+`PP-26-025 · …` box under *Advertorial* is now orphaned (harmless).
+
+---
+
 ## 2026-06-26 · v1.101.2 — Detect: label by real folder depth + hide _SHOOT.txt, DEPLOYED + VERIFIED LIVE
 
 Live-verify of v1.101.1 caught a Detect labeling bug: a booking with episodes but
