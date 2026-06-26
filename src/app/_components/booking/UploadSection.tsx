@@ -169,7 +169,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // v1.101 — "Detect": scan THIS booking's Drive folders for footage (incl. files
   // moved from NAS into the boxes, which have no Upload row).
   const [detecting, setDetecting] = useState(false)
-  const [detected, setDetected] = useState<{ found: number; files: Array<{ id: string; name: string; sizeBytes: number | null; ep: string; camera: string; url: string | null }>; bookingFolderUrl: string | null; error?: string } | null>(null)
+  const [detected, setDetected] = useState<{ found: number; fileCount?: number; folders: Array<{ label: string; url: string; fileCount: number; totalBytes: number }>; bookingFolderUrl: string | null; error?: string } | null>(null)
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
@@ -252,10 +252,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     try {
       const r = await fetch(`/api/bookings/${booking.id}/detect-footage`)
       const d = await r.json().catch(() => ({}))
-      if (!r.ok) setDetected({ found: 0, files: [], bookingFolderUrl: null, error: d.error || `HTTP ${r.status}` })
+      if (!r.ok) setDetected({ found: 0, folders: [], bookingFolderUrl: null, error: d.error || `HTTP ${r.status}` })
       else setDetected(d)
     } catch (e: any) {
-      setDetected({ found: 0, files: [], bookingFolderUrl: null, error: e?.message || 'ตรวจหาไม่สำเร็จ' })
+      setDetected({ found: 0, folders: [], bookingFolderUrl: null, error: e?.message || 'ตรวจหาไม่สำเร็จ' })
     } finally {
       setDetecting(false)
     }
@@ -522,28 +522,23 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-[11px] text-green-700">🟢 เจอ {detected.found} ไฟล์{detected.found >= 1000 ? '+' : ''}</div>
-              {Object.entries(detected.files.reduce<Record<string, typeof detected.files>>((acc, f) => {
-                (acc[f.ep || '(booking)'] ||= []).push(f); return acc
-              }, {})).map(([ep, files]) => (
-                <div key={ep} className="border border-gray-200 rounded p-2">
-                  <div className="text-xs font-medium text-gray-700 mb-1">{ep} <span className="text-gray-400">({files.length})</span></div>
-                  <table className="w-full text-[11px]">
-                    <tbody>
-                      {files.slice(0, 50).map(f => (
-                        <tr key={f.id} className="border-t border-gray-100">
-                          <td className="py-1 pr-2 font-mono text-gray-800 truncate max-w-[220px]">
-                            {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline text-gray-800">{f.name}</a> : f.name}
-                          </td>
-                          <td className="py-1 pr-2 text-gray-500 whitespace-nowrap">{f.camera}</td>
-                          <td className="py-1 text-right text-gray-600 whitespace-nowrap">{formatSize(f.sizeBytes)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {files.length > 50 && <div className="text-[10px] text-gray-400 mt-1">… อีก {files.length - 50} ไฟล์</div>}
-                </div>
-              ))}
+              <div className="text-[11px] text-green-700">
+                🟢 เจอ {detected.found} โฟลเดอร์{detected.fileCount ? ` · ${detected.fileCount} ไฟล์` : ''}
+              </div>
+              <div className="border border-gray-200 rounded divide-y divide-gray-100">
+                {detected.folders.map(fo => (
+                  <div key={fo.url} className="flex items-center justify-between gap-2 px-2 py-1.5">
+                    <a href={fo.url} target="_blank" rel="noreferrer"
+                      className="text-[11px] text-[#673ab7] hover:underline truncate flex-1 min-w-0">
+                      📁 {fo.label}
+                    </a>
+                    <span className="text-[10px] text-gray-500 whitespace-nowrap">{fo.fileCount} ไฟล์ · {formatSize(fo.totalBytes)}</span>
+                  </div>
+                ))}
+              </div>
+              {detected.bookingFolderUrl && (
+                <a href={detected.bookingFolderUrl} target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:underline">เปิดกล่องงานทั้งหมด ↗</a>
+              )}
             </div>
           )
         )}

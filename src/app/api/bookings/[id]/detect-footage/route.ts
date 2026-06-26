@@ -67,28 +67,31 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       episodeFolderNames: epNames,
     })
 
-    const mapFile = (f: DriveFile, ep: string, camera: string) => ({
-      id: f.id, // stable React key on the client
-      name: f.name,
-      sizeBytes: f.size,
-      ep,
-      camera,
-      url: f.webViewLink,
-    })
-
     // `_SHOOT.txt` / `_SHOOT-<id>.txt` are booking-info files, not footage.
     const isFootage = (f: DriveFile) => !/^_SHOOT\b.*\.txt$/i.test(f.name)
 
-    let files: ReturnType<typeof mapFile>[] = []
+    // Aggregate footage into the FOLDERS that contain it (label + Drive link +
+    // file count + size). Ops just want a clickable folder list, not 1000+ files —
+    // so this also keeps the payload tiny and sidesteps the per-file display cap.
+    const folderMap = new Map<string, { label: string; url: string; fileCount: number; totalBytes: number }>()
+    const label = (...parts: string[]) => parts.filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / ')
+    const add = (f: DriveFile, lbl: string) => {
+      const parentId = f.parents[0]
+      if (!parentId) return
+      const cur = folderMap.get(parentId) ?? { label: lbl || '(box)', url: `https://drive.google.com/drive/folders/${parentId}`, fileCount: 0, totalBytes: 0 }
+      cur.fileCount++
+      cur.totalBytes += f.size ?? 0
+      folderMap.set(parentId, cur)
+    }
+
     if (isAgency) {
       // shared Project box. Scan THIS booking's EP folders (folderPath[0] = camera,
       // root = the EP folder)…
       const epFolders = resolved.episodes.filter(e => e.folderId)
-      const perEp = await Promise.all(epFolders.map(async e => {
-        const raw = await listFilesRecursive(e.folderId!, { maxFiles: 1000 })
-        return raw.filter(isFootage).map(f => mapFile(f, e.episodeFolderName, f.folderPath[0] ?? ''))
+      await Promise.all(epFolders.map(async e => {
+        const raw = await listFilesRecursive(e.folderId!, { maxFiles: 5000 })
+        raw.filter(isFootage).forEach(f => add(f, label(e.episodeFolderName, f.folderPath[0] ?? '')))
       }))
-      files = perEp.flat()
       // …PLUS "loose" footage filed directly in the box but NOT under an EP folder
       // (e.g. an event's OB / PGM / Rec.Stream recordings, which aren't per-episode).
       // Skip any project-EP folder ("<projectId>-…") so other bookings' EP footage
@@ -96,27 +99,29 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       if (resolved.bookingFolderId) {
         const epPrefix = `${(booking.projectId || '').toLowerCase()}-`
         const loose = await listFilesRecursive(resolved.bookingFolderId, {
-          maxFiles: 1500,
+          maxFiles: 5000,
           skipFolder: name => !!epPrefix && name.toLowerCase().startsWith(epPrefix),
         })
-        files = files.concat(loose.filter(isFootage).map(f => {
+        loose.filter(isFootage).forEach(f => {
           const p = f.folderPath
-          return mapFile(f, p.length >= 2 ? (p[p.length - 2] ?? '') : (p[0] ?? ''), p[p.length - 1] ?? '')
-        }))
+          add(f, label(p.length >= 2 ? (p[p.length - 2] ?? '') : '', p[p.length - 1] ?? ''))
+        })
       }
     } else if (resolved.bookingFolderId) {
       // unique Production-ID folder → scan it whole. Read the REAL depth: the file's
       // immediate parent (last path element) is the camera folder, the one above it
       // (if any) is the EP. Handles both <ID>/<EP>/<cam>/file and the legacy flat
       // <ID>/<cam>/file without guessing from booking.episodes.
-      const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 1500 })
-      files = raw.filter(isFootage).map(f => {
+      const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 5000 })
+      raw.filter(isFootage).forEach(f => {
         const p = f.folderPath
-        return mapFile(f, p.length >= 2 ? (p[p.length - 2] ?? '') : '', p[p.length - 1] ?? '')
+        add(f, label(p.length >= 2 ? (p[p.length - 2] ?? '') : '', p[p.length - 1] ?? ''))
       })
     }
 
-    return NextResponse.json({ found: files.length, files, bookingFolderUrl: resolved.bookingFolderUrl })
+    const folders = Array.from(folderMap.values()).sort((a, b) => a.label.localeCompare(b.label))
+    const fileCount = folders.reduce((n, f) => n + f.fileCount, 0)
+    return NextResponse.json({ found: folders.length, fileCount, folders, bookingFolderUrl: resolved.bookingFolderUrl })
   } catch (e: any) {
     console.error('GET /api/bookings/[id]/detect-footage error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
