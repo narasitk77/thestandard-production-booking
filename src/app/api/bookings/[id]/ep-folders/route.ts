@@ -30,7 +30,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
         program: { select: { name: true } },
         episodes: {
           orderBy: { sequence: 'asc' },
-          select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } },
+          select: { id: true, episodeId: true, sequence: true, title: true, program: { select: { name: true } } },
         },
       },
     })
@@ -64,7 +64,8 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     })
 
     const byName = new Map(resolved.episodes.map(e => [e.episodeFolderName, e.url]))
-    const episodes = booking.episodes.map((e, i) => ({ episodeId: e.episodeId, url: byName.get(epNames[i]) ?? null }))
+    // key by Episode.id (CUID, always unique) — episodeId is NOT unique per booking.
+    const episodes = booking.episodes.map((e, i) => ({ id: e.id, url: byName.get(epNames[i]) ?? null }))
     return NextResponse.json({ bookingFolderUrl: resolved.bookingFolderUrl, episodes })
   } catch (e: any) {
     console.error('GET /api/bookings/[id]/ep-folders error:', e)

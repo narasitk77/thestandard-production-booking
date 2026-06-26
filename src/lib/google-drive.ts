@@ -415,7 +415,7 @@ async function resolveShootFolder(
 export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   episodeFolderNames: string[]
 }): Promise<{ bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; url: string | null }> }> {
-  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() }) // read-only: never creates
   const folderUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`
   const listFolders = async (parentId: string): Promise<Array<{ id: string; name: string }>> => {
     const out: Array<{ id: string; name: string }> = []

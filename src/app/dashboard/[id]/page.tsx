@@ -85,7 +85,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       .then(r => (r.ok ? r.json() : { episodes: [] }))
       .then(d => {
         const m: Record<string, string | null> = {}
-        for (const e of d.episodes || []) m[e.episodeId] = e.url
+        for (const e of d.episodes || []) m[e.id] = e.url // keyed by Episode.id (unique)
         setEpFolders(m)
       })
       .catch(() => {})
@@ -240,8 +240,8 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             <div key={ep.id} className="flex items-center gap-3 py-1">
               <span className="episode-badge">{ep.episodeId}</span>
               <span className="text-sm text-gray-700 flex-1">{ep.title}</span>
-              {epFolders[ep.episodeId] && (
-                <a href={epFolders[ep.episodeId]!} target="_blank" rel="noreferrer"
+              {epFolders[ep.id] && (
+                <a href={epFolders[ep.id]!} target="_blank" rel="noreferrer"
                   className="text-xs text-[#673ab7] hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">
                   <Folder className="w-3.5 h-3.5" /> footage
                 </a>
