@@ -169,7 +169,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // v1.101 — "Detect": scan THIS booking's Drive folders for footage (incl. files
   // moved from NAS into the boxes, which have no Upload row).
   const [detecting, setDetecting] = useState(false)
-  const [detected, setDetected] = useState<{ found: number; files: Array<{ name: string; sizeBytes: number | null; ep: string; camera: string; url: string | null }>; bookingFolderUrl: string | null; error?: string } | null>(null)
+  const [detected, setDetected] = useState<{ found: number; files: Array<{ id: string; name: string; sizeBytes: number | null; ep: string; camera: string; url: string | null }>; bookingFolderUrl: string | null; error?: string } | null>(null)
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
@@ -530,8 +530,8 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
                   <div className="text-xs font-medium text-gray-700 mb-1">{ep} <span className="text-gray-400">({files.length})</span></div>
                   <table className="w-full text-[11px]">
                     <tbody>
-                      {files.slice(0, 50).map((f, i) => (
-                        <tr key={i} className="border-t border-gray-100">
+                      {files.slice(0, 50).map(f => (
+                        <tr key={f.id} className="border-t border-gray-100">
                           <td className="py-1 pr-2 font-mono text-gray-800 truncate max-w-[220px]">
                             {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline text-gray-800">{f.name}</a> : f.name}
                           </td>

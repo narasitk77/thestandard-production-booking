@@ -7,6 +7,7 @@ import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls, listFilesRecursive, type DriveFile } from '@/lib/google-drive'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 120 // recursive Drive walks can be slow for big bookings
 
 /**
  * GET /api/bookings/[id]/detect-footage — DETECT footage actually sitting in the
@@ -65,17 +66,18 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     })
 
     const mapFile = (f: DriveFile, ep: string, camera: string) => ({
+      id: f.id, // stable React key on the client
       name: f.name,
       sizeBytes: f.size,
       ep,
       camera,
       url: f.webViewLink,
-      modifiedTime: f.modifiedTime,
     })
 
     let files: ReturnType<typeof mapFile>[] = []
-    if (isAgency && booking.episodes.length) {
-      // shared Project box → scan only this booking's EP folders (folderPath[0] = camera)
+    if (isAgency) {
+      // shared Project box → scan ONLY this booking's EP folders (never the whole
+      // box). folderPath[0] = camera (root = the EP folder). No episodes → empty.
       const epFolders = resolved.episodes.filter(e => e.folderId)
       const perEp = await Promise.all(epFolders.map(async e => {
         const raw = await listFilesRecursive(e.folderId!, { maxFiles: 1000 })
@@ -83,9 +85,14 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       }))
       files = perEp.flat()
     } else if (resolved.bookingFolderId) {
-      // unique Production-ID folder → scan it whole (folderPath = [EP, camera])
+      // unique Production-ID folder → scan it whole. With episodes the layout is
+      // <ID>/<EP>/<camera>/file (folderPath=[EP,camera]); without episodes it's
+      // flat <ID>/<camera>/file (folderPath=[camera]) — map accordingly.
       const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 1500 })
-      files = raw.map(f => mapFile(f, f.folderPath[0] ?? '', f.folderPath[1] ?? ''))
+      const hasEps = booking.episodes.length > 0
+      files = raw.map(f => hasEps
+        ? mapFile(f, f.folderPath[0] ?? '', f.folderPath[1] ?? '')
+        : mapFile(f, '', f.folderPath[0] ?? ''))
     }
 
     return NextResponse.json({ found: files.length, files, bookingFolderUrl: resolved.bookingFolderUrl })
