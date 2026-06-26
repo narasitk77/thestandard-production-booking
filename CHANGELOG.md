@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.2] — 2026-06-26
+
+### Changed — Detect: รวมเป็นโฟลเดอร์กล้อง/กลุ่มเดียว (ไม่แตกตาม card structure)
+- ของจริงพบว่า footage ในกล้องนึงกระจายในโครง card ลึก (`CAM-A/PRIVATE/M4ROOT/CLIP/…`) → เดิม Detect โชว์หลายแถว label ซ้ำ "…/ CAM-A" คนละลิงก์. แก้: `listFilesRecursive` ติด `topFolderId` (โฟลเดอร์ระดับบนสุดใต้ scan root) ให้ทุกไฟล์ → รวบไฟล์ทั้งใต้กล้องเป็น **1 แถวต่อกล้อง/กลุ่ม** (CAM-A, CAM-B, AUDIO, OB) ลิงก์ไปโฟลเดอร์กล้องนั้นตรงๆ พร้อมจำนวนไฟล์+ขนาดรวม.
+- baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.102.1] — 2026-06-26
 
 ### Changed — Detect: แสดงเป็นลิสต์โฟลเดอร์ + ลิงก์ (ไม่ใช่ทุกไฟล์)

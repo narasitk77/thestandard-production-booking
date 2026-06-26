@@ -76,12 +76,15 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     const folderMap = new Map<string, { label: string; url: string; fileCount: number; totalBytes: number }>()
     const label = (...parts: string[]) => parts.filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / ')
     const add = (f: DriveFile, lbl: string) => {
-      const parentId = f.parents[0]
-      if (!parentId) return
-      const cur = folderMap.get(parentId) ?? { label: lbl || '(box)', url: `https://drive.google.com/drive/folders/${parentId}`, fileCount: 0, totalBytes: 0 }
+      // Roll up to the TOP-level folder under the scan root (the camera / OB group)
+      // so a deep camera-card tree collapses to one row; null topId = file sitting
+      // directly in the scan root → fall back to its immediate parent.
+      const fid = f.topFolderId ?? f.parents[0]
+      if (!fid) return
+      const cur = folderMap.get(fid) ?? { label: lbl || '(box)', url: `https://drive.google.com/drive/folders/${fid}`, fileCount: 0, totalBytes: 0 }
       cur.fileCount++
       cur.totalBytes += f.size ?? 0
-      folderMap.set(parentId, cur)
+      folderMap.set(fid, cur)
     }
 
     if (isAgency) {
@@ -95,28 +98,20 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       // …PLUS "loose" footage filed directly in the box but NOT under an EP folder
       // (e.g. an event's OB / PGM / Rec.Stream recordings, which aren't per-episode).
       // Skip any project-EP folder ("<projectId>-…") so other bookings' EP footage
-      // isn't mixed in; label by real folder depth (last = camera/group).
+      // isn't mixed in; each top-level group folder (e.g. "OB") becomes one row.
       if (resolved.bookingFolderId) {
         const epPrefix = `${(booking.projectId || '').toLowerCase()}-`
         const loose = await listFilesRecursive(resolved.bookingFolderId, {
           maxFiles: 5000,
           skipFolder: name => !!epPrefix && name.toLowerCase().startsWith(epPrefix),
         })
-        loose.filter(isFootage).forEach(f => {
-          const p = f.folderPath
-          add(f, label(p.length >= 2 ? (p[p.length - 2] ?? '') : '', p[p.length - 1] ?? ''))
-        })
+        loose.filter(isFootage).forEach(f => add(f, label(f.folderPath[0] ?? '')))
       }
     } else if (resolved.bookingFolderId) {
-      // unique Production-ID folder → scan it whole. Read the REAL depth: the file's
-      // immediate parent (last path element) is the camera folder, the one above it
-      // (if any) is the EP. Handles both <ID>/<EP>/<cam>/file and the legacy flat
-      // <ID>/<cam>/file without guessing from booking.episodes.
+      // unique Production-ID folder → scan it whole; each top-level folder under it
+      // (the EP folder, or the camera for legacy flat layouts) becomes one row.
       const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 5000 })
-      raw.filter(isFootage).forEach(f => {
-        const p = f.folderPath
-        add(f, label(p.length >= 2 ? (p[p.length - 2] ?? '') : '', p[p.length - 1] ?? ''))
-      })
+      raw.filter(isFootage).forEach(f => add(f, label(f.folderPath[0] ?? '')))
     }
 
     const folders = Array.from(folderMap.values()).sort((a, b) => a.label.localeCompare(b.label))

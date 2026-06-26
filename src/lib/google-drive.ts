@@ -109,6 +109,14 @@ export interface DriveFile {
    * a folder name that parses as a Production ID.
    */
   folderPath: string[]
+  /**
+   * v1.102.1 — id of this file's TOP-level ancestor folder under the scan root
+   * (i.e. the folder named `folderPath[0]`). Lets a caller group footage by its
+   * camera/group folder regardless of how deep the camera-card structure nests
+   * (CAM-A/PRIVATE/M4ROOT/CLIP/… all roll up to CAM-A). Null for a file sitting
+   * directly in the scan root.
+   */
+  topFolderId: string | null
 }
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
@@ -170,12 +178,12 @@ export async function listFilesRecursive(
   const out: DriveFile[] = []
   // Walk queue carries the parent folder ID + the path of ancestor names
   // accumulated from the root downward (excluding the root itself).
-  type WalkEntry = { folderId: string; path: string[] }
-  const queue: WalkEntry[] = [{ folderId: rootFolderId, path: [] }]
+  type WalkEntry = { folderId: string; path: string[]; topId: string | null }
+  const queue: WalkEntry[] = [{ folderId: rootFolderId, path: [], topId: null }]
   const visited = new Set<string>()
 
   while (queue.length > 0 && out.length < maxFiles) {
-    const { folderId: parentId, path } = queue.shift()!
+    const { folderId: parentId, path, topId } = queue.shift()!
     if (visited.has(parentId)) continue
     visited.add(parentId)
 
@@ -201,7 +209,10 @@ export async function listFilesRecursive(
           // accumulated path. We enqueue ONCE per folder (visited guard
           // catches the rare case where Drive returns a folder twice).
           if (opts.skipFolder?.(f.name)) continue
-          queue.push({ folderId: f.id, path: [...path, f.name] })
+          // top-level folder under the scan root = a direct child of the root
+          // (path is still empty when we're listing the root); deeper folders
+          // inherit their ancestor's topId.
+          queue.push({ folderId: f.id, path: [...path, f.name], topId: path.length === 0 ? f.id : topId })
         } else if (SKIP_FILE_MIME.has(f.mimeType)) {
           // Shortcuts + Google-native docs aren't real footage — skip.
           continue
@@ -216,6 +227,7 @@ export async function listFilesRecursive(
             createdTime: f.createdTime ?? null,
             modifiedTime: f.modifiedTime ?? null,
             folderPath: path,
+            topFolderId: topId,
           })
           if (out.length >= maxFiles) break
         }
