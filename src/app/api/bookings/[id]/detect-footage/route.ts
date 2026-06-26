@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls, listFilesRecursive, type DriveFile } from '@/lib/google-drive'
 
@@ -62,6 +62,8 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       outletCanonicalName: outletDriveFolderName(booking.outlet.code),
       programFolderName,
       bookingFolderName,
+      // AGN: also accept a box named after the Production ID (what ops sometimes use).
+      bookingFolderNameAlts: isAgency ? [buildBookingFolderName(booking.bookingCode, jobName)] : undefined,
       episodeFolderNames: epNames,
     })
 
@@ -79,14 +81,29 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
     let files: ReturnType<typeof mapFile>[] = []
     if (isAgency) {
-      // shared Project box → scan ONLY this booking's EP folders (never the whole
-      // box). folderPath[0] = camera (root = the EP folder). No episodes → empty.
+      // shared Project box. Scan THIS booking's EP folders (folderPath[0] = camera,
+      // root = the EP folder)…
       const epFolders = resolved.episodes.filter(e => e.folderId)
       const perEp = await Promise.all(epFolders.map(async e => {
         const raw = await listFilesRecursive(e.folderId!, { maxFiles: 1000 })
         return raw.filter(isFootage).map(f => mapFile(f, e.episodeFolderName, f.folderPath[0] ?? ''))
       }))
       files = perEp.flat()
+      // …PLUS "loose" footage filed directly in the box but NOT under an EP folder
+      // (e.g. an event's OB / PGM / Rec.Stream recordings, which aren't per-episode).
+      // Skip any project-EP folder ("<projectId>-…") so other bookings' EP footage
+      // isn't mixed in; label by real folder depth (last = camera/group).
+      if (resolved.bookingFolderId) {
+        const epPrefix = `${(booking.projectId || '').toLowerCase()}-`
+        const loose = await listFilesRecursive(resolved.bookingFolderId, {
+          maxFiles: 1500,
+          skipFolder: name => !!epPrefix && name.toLowerCase().startsWith(epPrefix),
+        })
+        files = files.concat(loose.filter(isFootage).map(f => {
+          const p = f.folderPath
+          return mapFile(f, p.length >= 2 ? (p[p.length - 2] ?? '') : (p[0] ?? ''), p[p.length - 1] ?? '')
+        }))
+      }
     } else if (resolved.bookingFolderId) {
       // unique Production-ID folder → scan it whole. Read the REAL depth: the file's
       // immediate parent (last path element) is the camera folder, the one above it

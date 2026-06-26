@@ -154,6 +154,13 @@ export async function listFilesRecursive(
      * incremental scans after the first full pass.
      */
     modifiedAfter?: string
+    /**
+     * Optional: don't descend into a child folder whose name matches. Used by
+     * Detect to scan a shared AGN Project box for "loose" footage while skipping
+     * the per-EP folders (which are scanned separately / belong to other bookings).
+     * The root folder itself is always walked.
+     */
+    skipFolder?: (name: string) => boolean
   } = {},
 ): Promise<DriveFile[]> {
   const maxFiles = opts.maxFiles ?? 5000
@@ -193,6 +200,7 @@ export async function listFilesRecursive(
           // Push child folder onto the queue with its name appended to the
           // accumulated path. We enqueue ONCE per folder (visited guard
           // catches the rare case where Drive returns a folder twice).
+          if (opts.skipFolder?.(f.name)) continue
           queue.push({ folderId: f.id, path: [...path, f.name] })
         } else if (SKIP_FILE_MIME.has(f.mimeType)) {
           // Shortcuts + Google-native docs aren't real footage — skip.
@@ -414,6 +422,13 @@ async function resolveShootFolder(
  */
 export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   episodeFolderNames: string[]
+  /**
+   * v1.102 — extra acceptable booking-box names, tried (in order) when the
+   * primary `bookingFolderName` isn't found. AGN passes the Production-ID box
+   * "<bookingCode> · <project>" here because ops sometimes name the box after
+   * the booking they see rather than the canonical "<projectId> · <project>".
+   */
+  bookingFolderNameAlts?: string[]
 }): Promise<{ bookingFolderId: string | null; bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; folderId: string | null; url: string | null }> }> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() }) // read-only: never creates
   const folderUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`
@@ -444,7 +459,14 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   if (!outletId) return empty
   const programId = await findFuzzy(outletId, input.programFolderName)
   if (!programId) return empty
-  const bookingId = input.bookingFolderName ? await findExact(programId, input.bookingFolderName) : programId
+  let bookingId: string | null = programId
+  if (input.bookingFolderName) {
+    bookingId = await findExact(programId, input.bookingFolderName)
+    for (const alt of input.bookingFolderNameAlts ?? []) {
+      if (bookingId) break
+      if (alt && alt !== input.bookingFolderName) bookingId = await findExact(programId, alt)
+    }
+  }
   if (!bookingId) return empty
 
   const episodes = await Promise.all(input.episodeFolderNames.map(async n => {

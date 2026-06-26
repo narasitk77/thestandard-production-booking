@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls } from '@/lib/google-drive'
 
@@ -60,6 +60,8 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       outletCanonicalName: outletDriveFolderName(booking.outlet.code),
       programFolderName,
       bookingFolderName,
+      // AGN: also accept a box named after the Production ID (what ops sometimes use).
+      bookingFolderNameAlts: isAgency ? [buildBookingFolderName(booking.bookingCode, jobName)] : undefined,
       episodeFolderNames: epNames,
     })
 

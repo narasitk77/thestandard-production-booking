@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.0] — 2026-06-26
+
+### Fixed — AGN Detect: find OB/event footage + box named by Production ID
+- พบจากของจริง: booking **AGN-260625-LOC-01** (CEA, project PP-26-025) เป็นงาน **อีเวนต์ (OB)** — footage เป็นไฟล์ PGM/HyperDeck กองใน `OB / PGM OB`, `OB / Rec.Stream/…` (ไม่ได้อยู่ใต้โฟลเดอร์ EP) และ ops ตั้งชื่อกล่องด้วย **Production ID** (`AGN-260625-LOC-01 · …`) ใต้ **Content Agency → Event / Forum** ขณะที่ booking ถูกตั้ง category=ADVERTORIAL → app ไปหากล่อง `PP-26-025 · …` ใต้ *Advertorial* (กล่องว่าง) → Detect = 0.
+- แก้ 3 จุด:
+  1. **category → EVENT** (ข้อมูล) — งานนี้เป็นอีเวนต์จริง, ให้ app resolve ใต้ *Event / Forum* ที่ไฟล์อยู่.
+  2. **resolver รับชื่อกล่องสำรอง**: `findEpisodeFolderUrls({bookingFolderNameAlts})` — AGN ลองชื่อกล่อง Production ID (`<bookingCode> · <project>`) เมื่อหากล่อง Project ID ไม่เจอ (read-side: detect-footage + ep-folders).
+  3. **AGN Detect เก็บ footage นอกโฟลเดอร์ EP ด้วย**: สแกนกล่อง recursive เพิ่ม โดย `skipFolder` ข้ามโฟลเดอร์ EP ของโปรเจค (`<projectId>-…`) เพื่อไม่ปนกับใบจองอื่น → เก็บ OB/PGM/Rec.Stream. label ตาม depth จริงของ path.
+- ไม่ย้ายไฟล์ ไม่ rename Drive. baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.101.2] — 2026-06-26
 
 ### Fixed — Detect: label EP/camera by real folder depth + ซ่อน _SHOOT.txt
