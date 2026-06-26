@@ -5,6 +5,24 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.102.3 — Detect auto-loads + Back → previous page, DEPLOYED + VERIFIED LIVE
+
+Ops feedback (sharp): the footage links should "อยู่ตลอดไป" — not require pressing
+Detect every visit — and the /upload Back button went to a fixed page instead of
+where they came from.
+- **Detect auto-load**: `UploadSection` runs Detect on mount (`useEffect` keyed by
+  booking.id) → the folder list + links render automatically; the button is now a
+  manual "🔄 ตรวจใหม่" refresh with a "กำลังตรวจหา…" loading line.
+- **Back button**: `/upload` was a hardcoded `<Link href="/my-bookings">` → now a
+  `<button>` calling `router.back()` (actual previous page), falling back to
+  /my-bookings only when there's no history (page opened directly). Label "กลับ".
+
+**✅ DEPLOYED + VERIFIED LIVE** (`sha-0faafc3`, `/api/version` → 1.102.3). Reloaded
+`/upload?bookingId=…` with NO click → 6 folder rows auto-rendered (📁 OB, L01/CAM-A,
+L01/CAM-B, S02/Clip : IPHONE, S15/CAM-A, S18/CAM-A); Back is a `<button> กลับ`.
+
+---
+
 ## 2026-06-26 · v1.102.1 + v1.102.2 — Detect = clickable folder list (camera-level), DEPLOYED + VERIFIED LIVE
 
 Ops follow-up: "แสดงแค่ลิสต์ folder กับลิงก์ก็พอ" (just a folder list + links).
