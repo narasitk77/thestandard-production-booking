@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.7] — 2026-06-26
+
+### Fixed — Outlet PM ใช้ dropdown Project Manager เสมอ (รวม Event)
+- เดิม `useProducerDropdown` ปิด dropdown เมื่อ Shoot Type = Event (กฎ v1.85 สำหรับ producer แบบ ad-hoc ของงาน event) → ทำให้ outlet **PM** ที่จองงาน Event ไม่เห็น dropdown รายชื่อ Project Manager. แก้: PM ใช้ dropdown เสมอ (`shootType !== 'Event' || outletCode === 'PM'`) — producer ของ PM อยู่ใน roster (6 Project Manager) เสมอ. `/api/producers?outlet=PM` คืนครบอยู่แล้ว.
+- baseline: tsc 0 · 151 tests pass.
+
+---
+
 ## [1.102.6] — 2026-06-26
 
 ### Fixed — Project Manager ไม่ควรมีสิทธิ์ OT Approval

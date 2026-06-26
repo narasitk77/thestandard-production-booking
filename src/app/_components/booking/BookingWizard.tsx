@@ -317,10 +317,11 @@ export default function BookingWizard() {
   const isContentAgency = outletCode === 'AGN'
   // v1.59 — non-AGN outlets use the per-outlet Producer/Co-Producer dropdown
   // when the outlet has people configured; otherwise fall back to free text.
-  // v1.85 — EVENT shoots always use the free-text producer: an event's producer
-  // is often an ad-hoc person not in the outlet's regular producer roster
-  // (brought back from the pre-v1.59 type-the-name input, per ops request).
-  const useProducerDropdown = !isContentAgency && outletProducers.length > 0 && shootType !== 'Event'
+  // v1.85 — EVENT shoots use the free-text producer: an event's producer is often
+  // an ad-hoc person not in the outlet's regular roster. v1.102.7 — EXCEPT the PM
+  // (Project Management Office) outlet, whose producer is always one of the Project
+  // Managers in the roster, so PM keeps its dropdown even for Event shoots.
+  const useProducerDropdown = !isContentAgency && outletProducers.length > 0 && (shootType !== 'Event' || outletCode === 'PM')
   const selProd = outletProducers.find(p => p.email === producerSel)
   const selCoProd = outletCoProducers.find(p => p.email === coProducerSel)
 
