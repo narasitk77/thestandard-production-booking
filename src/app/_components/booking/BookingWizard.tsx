@@ -186,6 +186,9 @@ export default function BookingWizard() {
   // v1.67 — Block Shot: relaxes the camera/mic requirement for flexible-queue shoots.
   const [isBlockShot, setIsBlockShot] = useState(false)
   const [needsVan, setNeedsVan] = useState(false)
+  // v1.101 — Event shoots are "office" by default; tick this when the event is at
+  // an EXTERNAL venue → behaves like On Location (Map location + van + validation).
+  const [eventExternal, setEventExternal] = useState(false)
   const [specialEquipment, setSpecialEquipment] = useState<string[]>([])
   const [agencyRef, setAgencyRef] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -336,7 +339,7 @@ export default function BookingWizard() {
   // v1.58 — On Location = off-site: show a Map location box + van option, hide
   // the office-room picker. Studio/Event = office: pick a room, no external
   // options, no van.
-  const offsite = shootType === 'On Location'
+  const offsite = shootType === 'On Location' || (shootType === 'Event' && eventExternal)
   const resolvedLocationName = offsite
     ? (mapLocation.trim() || null)
     : !selectedLocation
@@ -351,7 +354,7 @@ export default function BookingWizard() {
     outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType,
     locationId, locationCustom, mapLocation, callTime, estimatedWrap,
     producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
-    creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan,
+    creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal,
     specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel,
     notes, epCount, epRows, step,
   })
@@ -371,7 +374,7 @@ export default function BookingWizard() {
     }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
 
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
   const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
@@ -404,6 +407,7 @@ export default function BookingWizard() {
       if (d.micCount != null) setMicCount(d.micCount)
       if (typeof d.isBlockShot === 'boolean') setIsBlockShot(d.isBlockShot)
       if (typeof d.needsVan === 'boolean') setNeedsVan(d.needsVan)
+      if (typeof d.eventExternal === 'boolean') setEventExternal(d.eventExternal)
       if (Array.isArray(d.specialEquipment)) setSpecialEquipment(d.specialEquipment)
       if (d.agencyRef != null) setAgencyRef(d.agencyRef)
       if (d.projectId != null) setProjectId(d.projectId)
@@ -972,6 +976,9 @@ export default function BookingWizard() {
                             setShootType(t)
                             // v1.58 — keep the two location modes from carrying
                             // stale values across a switch, and van is off-site only.
+                            // v1.101 — a fresh shoot-type starts "office"; clear the
+                            // Event-external flag too.
+                            setEventExternal(false)
                             if (t === 'On Location') {
                               setLocationId(''); setLocationCustom('')
                             } else {
@@ -986,6 +993,29 @@ export default function BookingWizard() {
                   </div>
                   <FieldHelp>ประเภทการผลิต — ไม่ใช่ห้อง/สถานที่ ใส่ตรงข้างล่าง</FieldHelp>
                 </div>
+
+                {/* v1.101 — Event at an external venue → behaves like On Location
+                    (Map location + van). Office events keep the room picker. */}
+                {shootType === 'Event' && (
+                  <div>
+                    <Label>สถานที่จัดงาน</Label>
+                    <label className={`ops-choice ${eventExternal ? 'ops-choice-selected' : ''} cursor-pointer`}>
+                      <input
+                        type="checkbox"
+                        checked={eventExternal}
+                        onChange={e => {
+                          const ext = e.target.checked
+                          setEventExternal(ext)
+                          if (ext) { setLocationId(''); setLocationCustom('') }   // → external: drop room
+                          else { setMapLocation(''); setNeedsVan(false) }          // → office: drop map + van
+                        }}
+                        className="accent-brand-primary mt-0.5"
+                      />
+                      <span className="text-sm text-gray-700">📍 สถานที่ภายนอก (จัดงานนอกบริษัท)</span>
+                    </label>
+                    <FieldHelp>อีเวนต์นอกบริษัท — เลือกข้อนี้เพื่อใส่ Map location + ขอรถตู้</FieldHelp>
+                  </div>
+                )}
 
                 {/* v1.41.0 — van request, v1.58 — off-site only. Adds 🚐 to the
                     calendar event title (web + Google) so logistics see it. */}

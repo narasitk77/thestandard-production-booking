@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.101.1] — 2026-06-26
+
+### Added — Event: option "สถานที่ภายนอก" (อีเวนต์นอกบริษัท)
+- Step 3 (Location) ของ wizard: เมื่อ Shoot Type = **Event** เพิ่ม checkbox **"📍 สถานที่ภายนอก (จัดงานนอกบริษัท)"**. ติ๊กแล้ว → behaves เหมือน On Location: โชว์ **Map location** + **🚐 ขอรถตู้** + validation (mapLocation required) — reuse `offsite` flag เดิม (`offsite = On Location || (Event && eventExternal)`). ไม่ติ๊ก = office (room picker เหมือนเดิม). state `eventExternal` persist ใน draft, reset เมื่อเปลี่ยน Shoot Type.
+- baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.101.0] — 2026-06-26
 
 ### Added — ปุ่ม "Detect" บนหน้า Upload (ตรวจหา footage ที่ย้ายจาก NAS เข้ากล่อง)
