@@ -7,6 +7,7 @@ import { isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
 import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react'
 import StatusPill from './_components/StatusPill'
+import { resolveTier, tierAllows } from '@/lib/tiers'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -36,6 +37,11 @@ export default function HomeOverview() {
   const [allBookings, setAllBookings] = useState<Booking[] | null>(null)
   const [myBookings, setMyBookings] = useState<Booking[] | null>(null)
   const [error, setError] = useState('')
+  // v1.102.5 — only tiers that may open /new get the "New Booking" CTA. Crew
+  // (videographers) can't access /new → middleware bounces them to /upload, so
+  // showing them the button just dumped them on the upload page. Default false
+  // (resolve from /api/me) so a non-booker never sees a button that redirects.
+  const [canCreate, setCanCreate] = useState(false)
 
   useEffect(() => {
     // Pull a generous slice — the API caps at 500. Enough to populate
@@ -51,6 +57,10 @@ export default function HomeOverview() {
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(d => setMyBookings(d.bookings || []))
       .catch(() => setMyBookings([]))
+    fetch('/api/me')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setCanCreate(tierAllows(resolveTier(d?.user?.role, d?.user?.position), '/new')))
+      .catch(() => {})
   }, [])
 
   const loading = allBookings === null || myBookings === null
@@ -102,10 +112,12 @@ export default function HomeOverview() {
             Today’s production schedule and items needing attention.
           </p>
         </div>
-        <Link href="/new" className="ops-btn-primary">
-          <Plus className="w-4 h-4" />
-          New Booking
-        </Link>
+        {canCreate && (
+          <Link href="/new" className="ops-btn-primary">
+            <Plus className="w-4 h-4" />
+            New Booking
+          </Link>
+        )}
       </div>
 
       {/* กติกาการจองคิว — สื่อสารกับทุกฝ่ายก่อนกดจอง (v1.52) */}
@@ -147,7 +159,7 @@ export default function HomeOverview() {
           loading={loading}
         >
           {mine.length === 0 ? (
-            <EmptyRow label="No upcoming bookings yet." cta={{ href: '/new', label: 'Create a booking' }} />
+            <EmptyRow label="No upcoming bookings yet." cta={canCreate ? { href: '/new', label: 'Create a booking' } : undefined} />
           ) : (
             <BookingList items={mine} />
           )}

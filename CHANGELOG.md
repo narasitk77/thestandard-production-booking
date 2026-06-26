@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.5] — 2026-06-26
+
+### Fixed — Home "New Booking" ส่ง crew ไปหน้า upload
+- **บั๊ค**: หน้า Home (overview) แสดงปุ่ม "New Booking" + empty-state "Create a booking" ให้ **ทุก** user แต่ tier `crew` (วิดีโอกราเฟอร์ ~31 คน) เปิด `/new` ไม่ได้ → middleware เด้งไป `tierHome` = `/upload`. ผลคือกด New Booking แล้วเด้งไปหน้า upload งงๆ.
+- **แก้**: gate ปุ่มทั้งสองด้วย `tierAllows(resolveTier(role, position), '/new')` (fetch /api/me) — เหมือนที่ Nav + /admin ทำอยู่แล้ว. คนที่จองได้ (admin/coordinator/producer) เห็นปุ่มเหมือนเดิม; crew/sound-mgmt ไม่เห็น (ไม่โดนเด้ง). default false กัน flash.
+- baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.102.4] — 2026-06-26
 
 ### Added — ปุ่ม "📣 แจ้งทุกคนว่าไฟล์พร้อม"
