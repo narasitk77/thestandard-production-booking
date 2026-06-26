@@ -5,6 +5,18 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.100.3 — Episode Type "Event" for the EVT outlet
+
+Added a single-char `E` program (`Event · งานอีเวนต์ / Staff`) to the EVT outlet
+in data.ts → it shows in the Episode Type picker for Event-team bookings (the
+picker = outlet's single-char programs; EVT now has L/S/A/T + E). Scoped to EVT
+(not the universal EPISODE_TYPE_PROGRAMS), so other outlets don't see it.
+episodeId handles it (type slot is `[A-Z0-9]{1,4}`). This deploy also carries the
+dead-code cleanup from the chore entry below. tsc 0 · 150 tests. NOTE (pending):
+deploy + verify the EVT Episode Type picker shows "Event".
+
+---
+
 ## 2026-06-26 · chore — dead-code cleanup (no version bump, no deploy)
 
 Ops asked to remove anything unused/broken to reduce confusion. Ran a dead-code

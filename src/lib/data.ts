@@ -192,6 +192,9 @@ export const OUTLETS: Outlet[] = [
     borderColor: 'border-orange-200',
     sort: 10,
     programs: [
+      // v1.100.3 — "Event" Episode Type (single-char code → shows in the Episode
+      // Type picker, for the Event team booking Staff for an event).
+      { code: 'E', name: 'Event · งานอีเวนต์ / Staff', category: 'One-off/Event' },
       { code: 'EVF', name: 'Event / Forum', category: 'One-off/Event' },
       { code: 'EVS', name: 'Event Recap / Short Clip', category: 'Short-form' },
     ],

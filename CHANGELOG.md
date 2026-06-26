@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.100.3] — 2026-06-26
+
+### Added — Episode Type "Event" สำหรับ outlet Event (EVT)
+- เพิ่ม Episode Type **`E · Event · งานอีเวนต์ / Staff`** ใน programs ของ outlet **EVT** (code 'E' = single-char → โผล่ใน Episode Type picker ของ EVT). สำหรับทีม Event จองงานอีเวนต์/Staff. picker ของ EVT ตอนนี้ = L/S/A/T (universal) + **E**. outlet อื่นไม่เห็น (scoped to EVT). episodeId รองรับ (เช่น `EVT-EVF-260626-E-01` — regex type slot `[A-Z0-9]{1,4}`). ไม่มี hardcoded L/S/A/T ที่ไหนต้องแก้.
+- (ติดมากับ deploy นี้: chore dead-code cleanup `375f0e1` — ลบ unused exports + 4 one-off scripts, ไม่กระทบ runtime.) tsc 0 · 150 tests pass.
+
+---
+
 ## [1.100.2] — 2026-06-26
 
 ### Fixed — ปุ่มสแกน: แสดงเหตุผลตอน worker idle
