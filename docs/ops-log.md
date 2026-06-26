@@ -5,6 +5,22 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.101.2 — Detect: label by real folder depth + hide _SHOOT.txt, DEPLOYED + VERIFIED LIVE
+
+Live-verify of v1.101.1 caught a Detect labeling bug: a booking with episodes but
+**flat legacy footage** (`<ID>/CAM-A/file`, pre-per-EP) had `CAM-A` mislabeled as
+the EP (the `booking.episodes.length` heuristic). Fixed to read the real
+`folderPath` depth — last element = camera, the one above = EP — handling both
+nested and flat layouts. Also filter `_SHOOT*.txt` out of the results.
+
+**✅ DEPLOYED + VERIFIED LIVE** (sha-bcbb1a0; `/api/version` → 1.101.2). Detect on
+a COMPLETED booking with footage: `found: 2` (two real MP4s, 6.1GB + 839MB),
+`camera: "CAM-A"`, `ep: ""` (correct now), `_SHOOT.txt` excluded, stable `id`
+present. (Bundles v1.101.0 Detect + v1.101.1 Event-external; v1.101.0's per-EP
+scope + v1.101.1's Event checkbox are in the same image.)
+
+---
+
 ## 2026-06-26 · v1.101.1 — Event external-venue option (+ ships v1.101.0 Detect)
 
 Wizard Step 3: when Shoot Type = Event, a new **"📍 สถานที่ภายนอก"** checkbox makes
@@ -12,8 +28,10 @@ the event behave like On Location (Map location + van + the offsite validation) 
 reusing the existing `offsite` flag (`On Location || (Event && eventExternal)`).
 Office events keep the room picker. `eventExternal` persists in the draft and
 resets when the shoot type changes. This deploy also carries v1.101.0 (the Detect
-button + its 4 pre-deploy review fixes). tsc 0 · 150 tests. NOTE (pending): deploy
-+ verify (Detect on the CEA booking + the Event checkbox shows + flips to offsite).
+button + its 4 pre-deploy review fixes). tsc 0 · 150 tests. Deployed in the
+sha-bcbb1a0 image (see the v1.101.2 entry above for the live verify). Event
+checkbox itself is a simple `shootType === 'Event'` conditional reusing the
+proven `offsite` flag — confirm by picking Event on Step 3.
 
 ---
 
