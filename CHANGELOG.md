@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.4] — 2026-06-26
+
+### Added — ปุ่ม "📣 แจ้งทุกคนว่าไฟล์พร้อม"
+- บนการ์ด Detect (/upload): ปุ่มสีเขียวส่งอีเมลแจ้ง **ทุกคนบนงานนี้** (Producer + ทีมที่ assign + ผู้สร้าง booking + CC ตัวเอง) พร้อมลิงก์โฟลเดอร์ footage ทั้งหมด ว่า "footage พร้อมแล้ว". `POST /api/bookings/[id]/notify-ready` — gate เดียวกับ "ส่งงาน" (assigned crew/admin). UI **preview ก่อน → confirm รายชื่อผู้รับ → ค่อยส่ง**.
+- resolver แชร์: แยก `resolveFootageFolders()` (src/lib/footage-folders.ts) ออกจาก detect-footage → ทั้ง Detect และ notify-ready ใช้ลิงก์ชุดเดียวกัน (server resolve เอง ไม่เชื่อ client).
+- **PRE-DEPLOY review (19 agents) เจอ 1 medium**: เดิมยัด recipients ทุกคนใน `To:` เดียว → freelancer (อยู่ใน assignedEmails, อีเมลส่วนตัว) เห็นอีเมลกันหมด. แก้: **ส่งทีละคน** (Promise.allSettled, `to:[one]`) เหมือน assign route — ไม่มีใครเห็นอีเมลคนอื่น (sendEmail ไม่มี BCC).
+- baseline: tsc 0 · 150 tests pass.
+
+---
+
 ## [1.102.3] — 2026-06-26
 
 ### Changed — Detect แสดงเอง + ปุ่ม Back กลับหน้าก่อนหน้า

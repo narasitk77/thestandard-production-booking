@@ -170,6 +170,9 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // moved from NAS into the boxes, which have no Upload row).
   const [detecting, setDetecting] = useState(false)
   const [detected, setDetected] = useState<{ found: number; fileCount?: number; folders: Array<{ label: string; url: string; fileCount: number; totalBytes: number }>; bookingFolderUrl: string | null; error?: string } | null>(null)
+  // v1.102.4 — "แจ้งทุกคนว่าไฟล์พร้อม"
+  const [notifying, setNotifying] = useState(false)
+  const [notifyMsg, setNotifyMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
@@ -265,6 +268,28 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // there; ops shouldn't have to press Detect every visit. Button = manual refresh.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { detectFootage() }, [booking.id])
+
+  // v1.102.4 — email EVERYONE on the booking the footage links ("ไฟล์พร้อมแล้ว").
+  // Preview first (who gets it) → confirm → send. Server resolves the links + list.
+  const notifyReady = async () => {
+    setNotifyMsg(null)
+    let preview: any
+    try {
+      const pr = await fetch(`/api/bookings/${booking.id}/notify-ready?preview=1`, { method: 'POST' })
+      preview = await pr.json().catch(() => ({}))
+      if (!pr.ok) { setNotifyMsg({ ok: false, text: preview.error || `ไม่สำเร็จ (HTTP ${pr.status})` }); return }
+    } catch (e: any) { setNotifyMsg({ ok: false, text: e?.message || 'ไม่สำเร็จ' }); return }
+    const who = (preview.recipients || [])
+    if (!confirm(`ส่งลิงก์แจ้ง "footage พร้อมแล้ว" ถึง ${who.length} คน?\n\n${who.join('\n')}`)) return
+    setNotifying(true)
+    try {
+      const r = await fetch(`/api/bookings/${booking.id}/notify-ready`, { method: 'POST' })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) setNotifyMsg({ ok: false, text: d.error || `ส่งไม่สำเร็จ (HTTP ${r.status})` })
+      else setNotifyMsg({ ok: true, text: `แจ้งแล้ว — เมลถึง ${d.emailed} คน${(d.recipients || []).length ? ` (${d.recipients.join(', ')})` : ''}${d.emailConfigured ? '' : ' · ⚠️ ระบบอีเมลยังไม่ตั้งค่า (บันทึกแล้วแต่ยังไม่ส่ง)'}` })
+    } catch (e: any) { setNotifyMsg({ ok: false, text: e?.message || 'ส่งไม่สำเร็จ' }) }
+    finally { setNotifying(false) }
+  }
 
   const startQueue = (fileList: FileList | File[] | null) => {
     if (!fileList || fileList.length === 0) return
@@ -549,6 +574,16 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
               {detected.bookingFolderUrl && (
                 <a href={detected.bookingFolderUrl} target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:underline">เปิดกล่องงานทั้งหมด ↗</a>
               )}
+              {/* v1.102.4 — notify everyone on the booking that footage is ready */}
+              <div className="pt-1 border-t border-gray-100 space-y-1">
+                <button onClick={notifyReady} disabled={notifying}
+                  className="text-xs px-3 py-1.5 rounded font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 inline-flex items-center gap-1">
+                  {notifying && <Loader2 className="w-3.5 h-3.5 animate-spin" />} 📣 แจ้งทุกคนว่าไฟล์พร้อม
+                </button>
+                {notifyMsg && (
+                  <div className={`text-[11px] ${notifyMsg.ok ? 'text-green-700' : 'text-red-700'}`}>{notifyMsg.text}</div>
+                )}
+              </div>
             </div>
           )
         )}
