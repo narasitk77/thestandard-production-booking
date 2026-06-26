@@ -5,6 +5,26 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-26 · v1.102.1 + v1.102.2 — Detect = clickable folder list (camera-level), DEPLOYED + VERIFIED LIVE
+
+Ops follow-up: "แสดงแค่ลิสต์ folder กับลิงก์ก็พอ" (just a folder list + links).
+- **v1.102.1** (`sha-048289d`): `/detect-footage` now aggregates footage into the
+  FOLDERS that contain it (label + Drive folder link + file count + total size)
+  instead of returning every file. Payload shrinks → `maxFiles` 1000/1500 bumped to
+  5000 (no more 1000-cap truncation). UI renders the folder list.
+- **v1.102.2** (`sha-44a6dfc`): camera-card trees (`CAM-A/PRIVATE/M4ROOT/CLIP/…`)
+  were showing as many rows with duplicate `…/CAM-A` labels. `listFilesRecursive`
+  now tags each file with `topFolderId` (its top-level ancestor under the scan
+  root); Detect aggregates by that → one row per camera/group folder, linking to it.
+
+**✅ DEPLOYED + VERIFIED LIVE** (`/api/version` → 1.102.2). Detect on
+`AGN-260625-LOC-01` → **6 folders / 1334 files / ~404 GB**: `OB` (16 files, 156.9 GB),
+`…L01/CAM-A` (814, 68.6), `…L01/CAM-B` (233, 61.1), `…S02/Clip : IPHONE` (65, 45.0),
+`…S15/CAM-A` (202, 37.6), `…S18/CAM-A` (4, 35.1). Each row links straight to the
+Drive folder.
+
+---
+
 ## 2026-06-26 · v1.102.0 — AGN Detect finds OB/event footage + Production-ID box, DEPLOYED + VERIFIED LIVE
 
 Ops reported "แก้ มันอยู่ใน EVENT" pointing at the `AGN-260625-LOC-01 · Awesome
