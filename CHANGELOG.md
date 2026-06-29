@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.105.2] — 2026-06-30
+
+### Fixed/Added — คิวงาน: แก้ปี 2569→ค.ศ. + แสดงวันที่จอง (Requested) + แบ่งตามเดือน
+- **🐛 ปี 2569 (พ.ศ.) บนการ์ดคิวงาน** ไม่ใช่บั๊คการแสดงผล — เป็น **ข้อมูลผิด**: booking `AGN-690702-LOC-01` (จาก calendar migration) เก็บ `shootDate=2569-07-02` (พ.ศ.) → **แก้ data เป็น 2026-07-02** (prisma update ผ่าน exec; ทุก booking ที่ปี≥2500 แปลง −543). *(Production ID ยังเป็น AGN-690702 — ไม่แตะ เพราะผูกกับโฟลเดอร์ Drive; calendar event ต้องกด Re-sync ให้ย้ายมา 2026).*
+- **กัน Buddhist year ซ้ำ:** `create-booking.ts` ถ้าปี shootDate/shootEndDate ≥ 2500 → −543 อัตโนมัติ (กัน migration/API ใส่ พ.ศ.; wizard ใช้ `<input type=date>` เป็น ค.ศ. อยู่แล้ว) — แก้ทั้งวันที่ + Production ID ที่ derive จากวันนั้น.
+- **คิวงานแสดง "📝 ขอเมื่อ <วันที่>"** (createdAt = วันที่ทำการจอง) บนทุกการ์ด + **จัดกลุ่มตามเดือน** (หัวข้อเดือนคั่นระหว่างการ์ด, en-US ค.ศ.). tsc 0 · 162 tests · build ✓.
+
+---
+
 ## [1.105.1] — 2026-06-30
 
 ### Changed — อัพเดตรายการ KND + เพิ่ม producer narongkorn.m

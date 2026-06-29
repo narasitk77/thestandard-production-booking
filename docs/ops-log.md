@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-30 · v1.105.2 — queue: 2569→Gregorian data fix + Requested date + month grouping
+
+The "2569 (พ.ศ.)" on a queue card was a DATA bug, not display: AGN-690702-LOC-01 (from
+the calendar migration) had shootDate stored as 2569-07-02. Fixed via Portainer exec
+(prisma: any booking with year ≥ 2500 → −543). One row fixed: 2569-07-02 → 2026-07-02.
+Its Production ID (AGN-690702) and calendar event are NOT auto-corrected — the ID is
+left (Drive folders), and the calendar event needs a manual Re-sync to move to 2026.
+Code: create-booking now normalizes a Buddhist-era year (≥2500) to Gregorian so it can't
+recur (fixes both the date and the derived Production ID); /admin queue cards show
+"📝 ขอเมื่อ <createdAt>" and are grouped by shoot month. tsc 0 · 162 tests · build ✓.
+
+---
+
 ## 2026-06-30 · v1.105.0 — Switcher count + PM producer-"none"→Co-Pro
 
 - Booking.switcherCount (Int @default(1), additive — created by start.sh's prisma db push):

@@ -2,7 +2,7 @@
 
 import { bookingShowName } from '@/lib/display'
 import { CameraMicTag } from './_components/CameraMicTag'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
 import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
@@ -226,8 +226,16 @@ export default function AdminPage() {
           </p>
         ) : null}
         <div className="space-y-3">
-          {visibleBookings.map(b => (
-            <div key={b.id} className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
+          {(() => { let lastMonth = ''; return visibleBookings.map(b => {
+            // Group cards by shoot month (en-US = Gregorian, so "July 2026" not 2569).
+            const md = new Date(b.shootDate)
+            const m = isNaN(md.getTime()) ? '—' : md.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+            const showHeader = m !== lastMonth
+            lastMonth = m
+            return (
+            <Fragment key={b.id}>
+            {showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
                 <div className="flex-1 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -247,6 +255,7 @@ export default function AdminPage() {
                     <span className="text-xs text-gray-400">
                       {formatDisplayDate(b.shootDate)} · {b.callTime}
                     </span>
+                    <span className="text-xs text-gray-400">· 📝 ขอเมื่อ {formatDisplayDate(b.createdAt)}</span>
                   </div>
                   <div className="font-medium text-gray-800 text-sm sm:text-base">
                     {b.outlet.name} · {bookingShowName(b)}
@@ -361,7 +370,8 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
-          ))}
+            </Fragment>
+            )})})()}
         </div>
         </>
       )}

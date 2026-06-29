@@ -115,6 +115,12 @@ export async function createBookingFromPayload(
 
   const parsedDate = new Date(shootDate)
   if (isNaN(parsedDate.getTime())) return fail(400, `Invalid shootDate: ${shootDate}`)
+  // Guard: a Buddhist-era year (พ.ศ. ≥ 2500, e.g. a migration pasting 2569 for 2026)
+  // would corrupt both the displayed date AND the Production ID (derived below).
+  // Normalize to Gregorian. Wizard <input type="date"> is always Gregorian.
+  if (parsedDate.getUTCFullYear() >= 2500) parsedDate.setUTCFullYear(parsedDate.getUTCFullYear() - 543)
+  const parsedEnd = shootEndDate ? new Date(shootEndDate) : null
+  if (parsedEnd && parsedEnd.getUTCFullYear() >= 2500) parsedEnd.setUTCFullYear(parsedEnd.getUTCFullYear() - 543)
 
   // v1.66 — camera + mic counts are REQUIRED for every creation path (wizard,
   // routine generator, API/MCP). 0 is valid (audio-only / no-camera shoots) but
@@ -254,7 +260,7 @@ export async function createBookingFromPayload(
       // or the first local Episode ID (other outlets).
       bookingCode,
       shootDate: parsedDate,
-      shootEndDate: shootEndDate ? new Date(shootEndDate) : null,
+      shootEndDate: parsedEnd,
       category: bookingCategory,
       videoType: videoType || null,
       shootType,
