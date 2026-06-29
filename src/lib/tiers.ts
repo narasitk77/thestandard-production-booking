@@ -39,7 +39,11 @@ export function tierHome(tier: Tier): string {
 // authorize by OWNER at the data/API layer (canViewBooking / isOwner+REQUESTED), so
 // the tier gate must not block them — doing so locked producers/crew out of their own
 // bookings (v1.92.1 fix).
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings']
+// /ot is gated by OTLayout (team member / OT approver / admin) at the data layer,
+// so the tier path gate must not block it — leaving it out locked crew, producer
+// and sound-mgmt team members out of submitting their own overtime (weekly-audit
+// 2026-06-29, same class of bug as the v1.92.1 /dashboard + /bookings lockout).
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/ot']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],
