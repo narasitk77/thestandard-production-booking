@@ -255,8 +255,18 @@ export default function AdminPage() {
                     )}
                   </div>
                   {b.cancelRequestedAt && (
-                    <div className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
-                      🚫 ขอยกเลิก: {b.cancelReason || '—'}{b.cancelRequestedBy ? ` (${b.cancelRequestedBy})` : ''}
+                    <div className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 flex items-center justify-between gap-2">
+                      <span>🚫 ขอยกเลิก: {b.cancelReason || '—'}{b.cancelRequestedBy ? ` (${b.cancelRequestedBy})` : ''}</span>
+                      <button
+                        onClick={async () => {
+                          if (!confirm('เก็บงานนี้ไว้ (ปฏิเสธคำขอยกเลิก)?')) return
+                          await fetch(`/api/bookings/${b.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clearCancelRequest: true }) })
+                          fetch_()
+                        }}
+                        title="เก็บงานไว้ — ลบคำขอยกเลิก"
+                        className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-red-300 text-red-700 hover:bg-red-100">
+                        เก็บงานไว้
+                      </button>
                     </div>
                   )}
                   <div className="flex flex-wrap items-center gap-1 mt-2">
@@ -290,7 +300,7 @@ export default function AdminPage() {
                       <HardDeleteButton bookingId={b.id} onDone={fetch_} />
                     </>
                   )}
-                  {!showingDeleted && b.status === 'REQUESTED' && (
+                  {!showingDeleted && (b.status === 'REQUESTED' || b.status === 'ASSIGNED') && (
                     <>
                       <Link href={`/admin/${b.id}`}
                         className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">

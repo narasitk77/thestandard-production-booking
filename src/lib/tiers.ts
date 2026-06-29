@@ -42,7 +42,12 @@ export function tierHome(tier: Tier): string {
 // itself + POST /api/bookings (session-only); blocking it for the crew tier trapped
 // brand-new USER-role users (no roster row → /upload dead-ends too) with no way to
 // request a booking. v1.102.5 hid the CTA as a band-aid; this is the root fix.
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/new']
+// '/booking' (singular: the post-submit success/confirmation screen) and '/ot'
+// (self-service overtime — gated by ot/layout.tsx to roster + approvers) are
+// reachable by everyone, like '/new': blocking them at the tier gate trapped
+// non-admin tiers after submitting a booking, and locked the roster out of
+// recording their own OT. Their own layouts/APIs do the real authorization.
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],

@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.103.3] — 2026-06-29
+
+### Fixed — QA sweep (ทดสอบทุกฟังก์ชัน + การกดย้อนหลัง): 8 confirmed issues
+จาก audit ทั้งแอป (18-agent workflow, find→verify) — เน้น back-navigation + ฟังก์ชันใช้งานจริง:
+- **🔴 หน้า success หลังจอง booking เข้าไม่ได้สำหรับ tier ที่ไม่ใช่ admin.** `/booking/success` (เอกพจน์ `/booking`) ไม่อยู่ใน tier `ALWAYS` (มีแต่ `/bookings` พหูพจน์) → producer/crew/coordinator จองเสร็จแล้วโดนเด้งไป tierHome ไม่เห็นจอ Episode IDs/โฟลเดอร์/Calendar Packet. แก้: เพิ่ม `/booking` ใน ALWAYS.
+- **🔴 ทีมงาน (crew/producer/sound-mgmt) เข้า `/ot` ไม่ได้** (บันทึก OT ตัวเอง) — `/ot` ไม่อยู่ใน ALWAYS, tier gate เด้งออกแม้ ot/layout ตั้งใจให้เข้า. รวมถึง position-based approver (Video Production Manager) เข้า /ot/admin ไม่ได้. แก้: เพิ่ม `/ot` ใน ALWAYS (layout ยัง gate roster/approver จริง). [ตรงกับที่ค้างใน weekly-audit PR #12]
+- **🔴 คำขอยกเลิก (v1.103.2) ไม่มีปุ่มปฏิเสธ/เก็บงาน** → ติดค้างใน tab "ขอยกเลิก" ถาวร, producer ขอใหม่ไม่ได้. แก้: เพิ่ม `clearCancelRequest` ใน `PATCH /api/bookings/[id]` (staff-only) + ปุ่ม "เก็บงานไว้" บนการ์ด → ล้าง flag.
+- **🟠 การ์ดสถานะ ASSIGNED ในคิว/tab ขอยกเลิก ไม่มีปุ่ม action** → เพิ่มให้ ASSIGNED ใช้ปุ่มเดียวกับ REQUESTED (EDIT/Approve/Cancel).
+- **🟠 back link หน้า team/permissions/reminders/health ชี้ `/admin` (คิวงาน)** แทน `/admin/production-space` (hub ที่มาจาก) → แก้ทั้ง 4.
+- **🟡 `/admin/vendor-prices` ไม่อยู่ใน isAdminOnlyModule** → non-admin เข้าถึงหน้าได้แต่ API 403 (จอ error). แก้: เพิ่มใน middleware regex + Nav ADMIN_HUB.
+- **🟡 success page ปุ่ม "New Booking" ลิงก์ `/`** (ไม่ใช่ `/new`) → แก้เป็น `/new`.
+- **🟡 error boundary ปุ่ม "Back to Admin"** เด้ง crew/producer (เข้า /admin ไม่ได้) → เปลี่ยนเป็น "Back to Home" (`/`).
+- **+ back link หน้า /admin/purchases หาย** (ตอนเปลี่ยนเป็น custom page v1.103.0) → เพิ่มกลับ → /admin/production-space.
+- ✅ live-tested: ทุก 28 หน้า serve 200 (admin), /upload back → /my-bookings ถูก, /dashboard/[id] back → /dashboard ถูก, /new wizard Back/Next ใช้ได้.
+- **ยังเหลือ (LOW, ไม่แก้รอบนี้):** back ของ /admin/[id] hardcode `/admin` ทำให้ลืม tab เดิม (browser-back ยังถูก); resume-draft ลบ Producer ที่เลือก (อยู่ใน PR #12). regression tests: ทุก tier เปิด /new + /booking/success + /ot. tsc 0 · 161 tests · build ✓.
+
+---
+
 ## [1.103.2] — 2026-06-29
 
 ### Added — ปุ่ม "ขอยกเลิกงาน" (ระบุเหตุผล) + อีเมลแจ้ง + tab งานที่ขอยกเลิก

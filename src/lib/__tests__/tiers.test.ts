@@ -38,7 +38,6 @@ test('tierAllows: producer = bookings/producer, not console/upload', () => {
   assert.equal(tierAllows('producer', '/calendar'), true)
   assert.equal(tierAllows('producer', '/admin'), false)
   assert.equal(tierAllows('producer', '/upload'), false)
-  assert.equal(tierAllows('producer', '/ot'), false)
 })
 
 test('tierAllows: every tier can open its OWN booking detail + self-edit (v1.92.1 lockout fix)', () => {
@@ -63,6 +62,17 @@ test('tierAllows: every signed-in tier can open /new (the booking wizard is for 
   // brand-new users with no way to request a booking. Regression for that.
   for (const tier of ['crew', 'producer', 'coordinator', 'sound-mgmt', 'admin'] as const) {
     assert.equal(tierAllows(tier, '/new'), true, `${tier} → /new`)
+  }
+})
+
+test('tierAllows: every tier reaches /booking/success + /ot (layouts do the real gating)', () => {
+  // After submitting the wizard, every tier must see the success/confirmation
+  // screen at /booking/success (singular /booking). /ot is self-service overtime
+  // for the whole roster (ot/layout.tsx gates to team members + approvers).
+  for (const tier of ['crew', 'producer', 'coordinator', 'sound-mgmt', 'admin'] as const) {
+    assert.equal(tierAllows(tier, '/booking/success'), true, `${tier} → /booking/success`)
+    assert.equal(tierAllows(tier, '/ot'), true, `${tier} → /ot`)
+    assert.equal(tierAllows(tier, '/ot/admin'), true, `${tier} → /ot/admin`)
   }
 })
 

@@ -26,8 +26,8 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
         )}
         <div className="flex gap-2">
           <button onClick={reset} className="gf-submit text-sm">Try again</button>
-          <Link href="/admin" className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50">
-            Back to Admin
+          <Link href="/" className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50">
+            Back to Home
           </Link>
         </div>
       </div>

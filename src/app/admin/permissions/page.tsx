@@ -160,7 +160,7 @@ export default function PermissionsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
-      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+      <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
         <ArrowLeft className="w-4 h-4" /> Admin Console
       </Link>
 

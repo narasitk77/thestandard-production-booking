@@ -105,7 +105,7 @@ export default function RemindersPage() {
     <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
       <div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+          <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
             <ArrowLeft className="w-4 h-4" /> Admin
           </Link>
           <h1 className="text-xl sm:text-2xl font-normal text-gray-800 mt-1">⏰ Reminders</h1>

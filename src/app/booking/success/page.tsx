@@ -164,7 +164,7 @@ function SuccessContent() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3">
-        <Link href="/" className="btn-secondary flex-1 justify-center">
+        <Link href="/new" className="btn-secondary flex-1 justify-center">
           New Booking
         </Link>
         <Link href="/dashboard" className="btn-primary flex-1 justify-center">

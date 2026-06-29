@@ -124,6 +124,7 @@ export async function PATCH(
       itinerary,
       assignedEquipmentIds,
       episodeTitles, // Array<{ id: string, title: string }> — only updates titles, NOT episodeId
+      clearCancelRequest, // staff "keep the job": dismiss a pending cancellation request
     } = body
 
     const existing = await prisma.booking.findUnique({
@@ -193,6 +194,9 @@ export async function PATCH(
           ...(rentalGearNote !== undefined && { rentalGearNote: rentalGearNote || null }),
           ...(itinerary !== undefined && { itinerary: itinerary || null }),
           ...(Array.isArray(assignedEquipmentIds) && { assignedEquipmentIds: assignedEquipmentIds.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
+          // Staff dismissed the cancellation request (keep the job) — clears the
+          // flag so it leaves the "ขอยกเลิก" tab and the producer can re-request.
+          ...(clearCancelRequest === true && { cancelRequestedAt: null, cancelReason: null, cancelRequestedBy: null }),
         },
         include: {
           outlet: true,

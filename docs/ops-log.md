@@ -5,6 +5,27 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-29 · v1.103.3 — QA sweep fixes (test-all-functions + back-navigation)
+
+Full-app audit (18-agent find→verify workflow) + live browser smoke. 8 confirmed
+issues fixed; the headline finds were tier-allowlist gaps in the same family as the
+earlier /new trap:
+- `/booking/success` (singular `/booking`) added to tier ALWAYS — non-admin tiers were
+  bounced off the post-submit confirmation screen.
+- `/ot` added to tier ALWAYS — crew/producer/sound-mgmt (the roster) couldn't reach
+  self-service overtime; position-based approvers couldn't reach /ot/admin. (Same fix
+  the weekly-audit PR #12 carries; applied here on main too.)
+- Cancel-request (v1.103.2) gained a staff "keep job" dismiss (PATCH clearCancelRequest)
+  — was a permanent flag with no reject path. ASSIGNED cards gained EDIT/Approve/Cancel.
+- Back links fixed: team/permissions/reminders/health → /admin/production-space (was
+  /admin); /admin/purchases regained its back link; error boundary → Home; success-page
+  "New Booking" → /new. vendor-prices added to isAdminOnlyModule.
+
+Not fixed (LOW): /admin/[id] back drops the active tab (browser-back works); resume-draft
+producer wipe (tracked in PR #12). tsc 0 · 161 tests · next build ✓.
+
+---
+
 ## 2026-06-29 · v1.103.2 — "ขอยกเลิกงาน" request-cancellation flow (button + reason + email + tab)
 
 Producers/owners can now request a cancellation (with a reason) from /dashboard/[id]
