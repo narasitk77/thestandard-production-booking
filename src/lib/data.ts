@@ -110,10 +110,15 @@ export const OUTLETS: Outlet[] = [
     bgColor: 'bg-teal-50',
     borderColor: 'border-teal-200',
     sort: 6,
+    // Programs synced from the ops outlet-DB sheet (Program tab), 2026-06-30.
     programs: [
-      { code: 'LMF', name: 'KND ล่ามฟ้าพาแปล', category: 'Recurring' },
-      { code: 'KNF', name: 'คำนี้ดี Featuring', category: 'Recurring' },
-      { code: 'SUB', name: 'Subtitle', category: 'Recurring' },
+      { code: 'KNF', name: 'Featuring', category: 'Recurring' },
+      { code: 'WKE', name: 'Walking English', category: 'Recurring' },
+      { code: 'LSS', name: 'Long Story Short', category: 'Recurring' },
+      { code: 'WOD', name: 'Word of The Day', category: 'Recurring' },
+      { code: 'PLY', name: 'Play Along', category: 'Recurring' },
+      { code: 'ENU', name: 'English Unlock', category: 'Recurring' },
+      { code: 'SHF', name: 'Short Form', category: 'Recurring' },
     ],
   },
   {

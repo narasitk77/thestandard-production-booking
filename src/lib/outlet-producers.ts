@@ -64,4 +64,6 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   { employeeId: 'TSD00298', thaiName: 'นางสาววรปรีย์ คร้ามสมอ',  nickname: 'มะเหมี่ยว', email: 'worrapree.k@thestandard.co',   outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
   // v1.99.2 — News producer แพท (sheet title "Project Coordinator"; added as Producer per ops request 2026-06-26).
   { employeeId: 'TSD00056', thaiName: 'นางสาวภาวิกา ขันติศรีสกุล', nickname: 'แพท',    email: 'phawika.k@thestandard.co',    outlet: 'NWS', role: 'Producer',    position: 'Producer' },
+  // v1.105.1 — KND producer ปลั๊กไฟ (sheet: International News / Content Creator; added to outlet KND per ops request 2026-06-30).
+  { employeeId: 'TSD00016', thaiName: 'นายณรงค์กร มโนจันทร์เพ็ญ',  nickname: 'ปลั๊กไฟ', email: 'narongkorn.m@thestandard.co', outlet: 'KND', role: 'Producer',    position: 'Content Creator' },
 ]

@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.105.1] — 2026-06-30
+
+### Changed — อัพเดตรายการ KND + เพิ่ม producer narongkorn.m
+- **KND program list** (data.ts) sync จากชีต (Program tab): Featuring (KNF), Walking English (WKE), Long Story Short (LSS), Word of The Day (WOD), Play Along (PLY), English Unlock (ENU), Short Form (SHF) — แทนของเดิม (LMF/KNF/SUB). *(code 3 ตัวอักษรตั้งให้เอง — บอกได้ถ้าอยากเปลี่ยน)*
+- **เพิ่ม producer ปลั๊กไฟ** (ณรงค์กร, TSD00016, narongkorn.m@) เข้า outlet **KND** (role Producer, position Content Creator) — ในชีตอยู่ News/International News, ใส่ KND ตามที่ ops จับคู่กับ KND. ต้องรัน `POST /api/admin/import-producers` หลัง deploy เพื่อ upsert เข้า User table (account + dropdown KND). tsc 0 · 162 tests.
+
+---
+
 ## [1.105.0] — 2026-06-30
 
 ### Added — ระบุจำนวน Switcher > 1 + Outlet PM เลือก Producer "ไม่มี" (→ Co-Pro)
