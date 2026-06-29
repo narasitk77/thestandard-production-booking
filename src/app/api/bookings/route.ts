@@ -21,6 +21,10 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
     const outlet = searchParams.get('outlet')
     const date = searchParams.get('date')
+    // Half-open shootDate range [from, to) — used by the Week Plan to fetch just
+    // the visible week (not the newest-N), so it's correct for any week + size.
+    const from = searchParams.get('from')
+    const to = searchParams.get('to')
     const scope = searchParams.get('scope') // 'mine' | 'all' | 'producer'
     // v1.51 — deleted=1 (ADMIN only) lists soft-deleted bookings for the
     // Deleted tab on /admin; every other request filters them out.
@@ -59,6 +63,7 @@ export async function GET(request: NextRequest) {
       ...(status && { status: status as any }),
       ...(outlet && { outlet: { code: outlet } }),
       ...(date && { shootDate: new Date(date) }),
+      ...((from || to) && !date && { shootDate: { ...(from && { gte: new Date(from) }), ...(to && { lt: new Date(to) }) } }),
     }
 
     const [bookings, total] = await Promise.all([

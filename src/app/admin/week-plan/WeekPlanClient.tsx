@@ -42,10 +42,13 @@ export default function WeekPlanClient() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      // ponytail: newest-200 CONFIRMED, filtered to the week client-side. Fine while
-      // total CONFIRMED < 200 (well under today); add a server date-range filter if it grows.
+      // Fetch ONLY the visible week (half-open [from, to)) so the planner is correct
+      // for any week regardless of total CONFIRMED count, and conflict detection
+      // (always same-day, within the week) sees every holder.
+      const fromD = format(weekStart, 'yyyy-MM-dd')
+      const toD = format(addDays(weekStart, 7), 'yyyy-MM-dd')
       const [b, c] = await Promise.all([
-        fetch('/api/bookings?status=CONFIRMED&limit=200'),
+        fetch(`/api/bookings?status=CONFIRMED&from=${fromD}&to=${toD}&limit=200`),
         fetch('/api/admin/equipment?category=CAMERA'),
       ])
       if (!b.ok) throw new Error(`โหลดงานไม่สำเร็จ (HTTP ${b.status})`)
@@ -55,7 +58,7 @@ export default function WeekPlanClient() {
       // hide retired/disposed units from the allocation picker
       setCameras((cRes.equipment || []).filter((e: Camera) => e.status !== 'RETIRED'))
     } catch (e: any) { setError(e?.message || String(e)) } finally { setLoading(false) }
-  }, [])
+  }, [weekStart])
   useEffect(() => { load() }, [load])
 
   // bookings on a given day (by shootDate)

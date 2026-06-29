@@ -5,6 +5,15 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-29 · v1.104.2 — Week Plan fetches the visible week only (closes the limit=200 ceiling)
+
+Added a half-open `?from=&to=` shootDate range to GET /api/bookings; /admin/week-plan now
+fetches just the displayed Mon–Sun week (refetch on nav) instead of the newest-200 CONFIRMED.
+Makes the planner + conflict detection correct for any week regardless of total CONFIRMED
+count. tsc 0 · 162 tests · next build ✓.
+
+---
+
 ## 2026-06-29 · v1.104.1 — OT closed-month-edit + Bangkok-TZ fixes (cherry-picked from weekly-audit)
 
 Two adversarially-verified OT bug fixes from the weekly-audit branch (PR #12) that

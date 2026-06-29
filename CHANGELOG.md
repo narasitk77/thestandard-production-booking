@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.104.2] — 2026-06-29
+
+### Fixed — Week Plan: ดึงงานเฉพาะสัปดาห์ที่ดู (ปิด ceiling limit=200)
+- เดิม `/admin/week-plan` ดึงงาน CONFIRMED 200 อันใหม่สุดแล้วกรอง client-side → ถ้าเลื่อนไปสัปดาห์เก่ามากๆ หรือ total CONFIRMED > 200 จะแสดงงานไม่ครบ + **ตรวจกล้องชนพลาดได้**. เพิ่ม date-range filter `?from=&to=` (half-open) ใน `GET /api/bookings` และให้ Week Plan ดึงเฉพาะช่วง จ.–อา. ที่กำลังดู (refetch ตอนเลื่อนสัปดาห์) → ถูกต้องทุกสัปดาห์ ไม่ขึ้นกับจำนวนงานรวม. tsc 0 · 162 tests · build ✓.
+
+---
+
 ## [1.104.1] — 2026-06-29
 
 ### Fixed — OT 2 บั๊กจาก weekly-audit ที่ยังไม่ขึ้น prod (cherry-pick เข้า main)
