@@ -245,7 +245,7 @@ function ReviewCard({ row, onConfirm, busy }: { row: ReviewRow; onConfirm: (() =
           📦 {fmtBytes(row.totalBytes)}
         </div>
         <div className="px-2 py-1 rounded border border-gray-200 text-gray-600">
-          {row.lastUploadAt ? `🕐 ${new Date(row.lastUploadAt).toLocaleString('th-TH')}` : '🕐 —'}
+          {row.lastUploadAt ? `🕐 ${new Date(row.lastUploadAt).toLocaleString('th-TH-u-ca-gregory')}` : '🕐 —'}
         </div>
       </div>
       {row.uploaders.length > 0 && (

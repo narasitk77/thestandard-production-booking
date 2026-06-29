@@ -340,10 +340,10 @@ function DayReviewCard({ date, records, summary, acting, onApprove, onReject }: 
                 <div className="flex items-center gap-1 mt-1 flex-wrap">
                   {statusChip(r.approvalStatus)}
                   {r.submittedAt && (
-                    <span className="text-[9px] text-gray-400">ส่ง {new Date(r.submittedAt).toLocaleDateString('th-TH')}</span>
+                    <span className="text-[9px] text-gray-400">ส่ง {new Date(r.submittedAt).toLocaleDateString('th-TH-u-ca-gregory')}</span>
                   )}
                   {r.approvedAt && (
-                    <span className="text-[9px] text-gray-400">โดย {r.approvedByEmail} เมื่อ {new Date(r.approvedAt).toLocaleDateString('th-TH')}</span>
+                    <span className="text-[9px] text-gray-400">โดย {r.approvedByEmail} เมื่อ {new Date(r.approvedAt).toLocaleDateString('th-TH-u-ca-gregory')}</span>
                   )}
                   {r.bookingId && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">auto</span>}
                 </div>

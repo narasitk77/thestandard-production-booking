@@ -144,7 +144,7 @@ export default function SignaturePage() {
             วาดลายเซ็น
             {updatedAt && (
               <span className="ml-2 text-[11px] text-gray-400">
-                อัปเดตล่าสุด {new Date(updatedAt).toLocaleString('th-TH')}
+                อัปเดตล่าสุด {new Date(updatedAt).toLocaleString('th-TH-u-ca-gregory')}
               </span>
             )}
           </div>

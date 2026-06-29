@@ -153,7 +153,7 @@ export async function POST(
             await updateBookingRow(booking.bookingCode || '', {
               status: 'CONFIRMED',
               calendarEventId: booking.calendarEventId,
-              approvedAt: approvedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
+              approvedAt: approvedAt.toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }),
             }).catch(e => console.error('updateBookingRow error:', e?.message))
           }
           return
@@ -225,7 +225,7 @@ export async function POST(
           await updateBookingRow(booking.bookingCode || '', {
             status: 'CONFIRMED',
             calendarEventId: calendarEventId || '',
-            approvedAt: approvedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
+            approvedAt: approvedAt.toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }),
           }).catch(e => console.error('updateBookingRow error:', e?.message))
         }
       } catch (e: any) {

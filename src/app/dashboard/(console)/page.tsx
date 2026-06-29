@@ -633,7 +633,7 @@ function SheetMonitor({
 
   const syncAgo = ts ? Math.round((Date.now() - ts.getTime()) / 60000) : null
   const syncLabel = ts
-    ? ts.toLocaleString('th-TH', {
+    ? ts.toLocaleString('th-TH-u-ca-gregory', {
         timeZone: 'Asia/Bangkok',
         day: 'numeric', month: 'short', year: '2-digit',
         hour: '2-digit', minute: '2-digit', hour12: false,

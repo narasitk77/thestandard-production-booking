@@ -587,10 +587,10 @@ function DayCard({ date, records, summary, editable, onDelete }: {
                   {statusChip(r.approvalStatus)}
                   {r.bookingId && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">auto</span>}
                   {r.submittedAt && r.approvalStatus !== 'DRAFT' && r.approvalStatus !== 'APPROVED' && (
-                    <span className="text-[9px] text-gray-400">ส่ง {new Date(r.submittedAt).toLocaleDateString('th-TH')}</span>
+                    <span className="text-[9px] text-gray-400">ส่ง {new Date(r.submittedAt).toLocaleDateString('th-TH-u-ca-gregory')}</span>
                   )}
                   {r.approvedAt && r.approvalStatus === 'APPROVED' && (
-                    <span className="text-[9px] text-gray-400">อนุมัติ {new Date(r.approvedAt).toLocaleDateString('th-TH')}</span>
+                    <span className="text-[9px] text-gray-400">อนุมัติ {new Date(r.approvedAt).toLocaleDateString('th-TH-u-ca-gregory')}</span>
                   )}
                 </div>
               </div>

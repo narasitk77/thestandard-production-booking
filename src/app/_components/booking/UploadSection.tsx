@@ -658,7 +658,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             <div className="flex items-center gap-2 flex-wrap">
               {report.deliveredAt && (
                 <span className="text-[11px] text-green-700">
-                  ✅ ส่งงานแล้ว {new Date(report.deliveredAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+                  ✅ ส่งงานแล้ว {new Date(report.deliveredAt).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short' })}
                 </span>
               )}
               <button onClick={deliver} disabled={delivering}

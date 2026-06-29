@@ -243,7 +243,7 @@ function HistoryList({ rows }: { rows?: HistoryRow[] }) {
       <ul className="space-y-1">
         {rows.map(r => (
           <li key={r.id} className="text-xs text-gray-500">
-            <span className="text-gray-400">{new Date(r.at).toLocaleString('th-TH')}</span>
+            <span className="text-gray-400">{new Date(r.at).toLocaleString('th-TH-u-ca-gregory')}</span>
             {' · '}<span className="font-medium text-gray-700">{r.action.replace('booking.', '')}</span>
             {r.fromStatus && r.toStatus ? ` · ${r.fromStatus}→${r.toStatus}` : ''}
             {r.changes?.message ? ` · "${r.changes.message}"` : ''}

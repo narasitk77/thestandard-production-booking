@@ -56,6 +56,9 @@ export default function AdminPage() {
   // jobs that need sound/mics; everyone else can toggle it.
   const [tier, setTier] = useState<Tier>('crew')
   const [soundOnly, setSoundOnly] = useState(false)
+  // v1.105.3 — filter the queue by shoot month + sort by date (default earliest→latest).
+  const [monthFilter, setMonthFilter] = useState('all') // 'all' | 'YYYY-MM'
+  const [sortAsc, setSortAsc] = useState(true)
   useEffect(() => {
     fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.user?.canUpload) setCanUpload(true)
@@ -66,8 +69,22 @@ export default function AdminPage() {
     }).catch(() => {})
   }, [])
 
+  // Months present in the current tab's bookings (ascending, e.g. Jul→Dec).
+  const months = Array.from(new Set(bookings.map(b => (b.shootDate || '').slice(0, 7)).filter(Boolean))).sort()
+  const monthLabel = (ym: string) => {
+    const d = new Date(ym + '-01')
+    return isNaN(d.getTime()) ? ym : d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+  }
   // A job "needs sound" when it requests mics. sound-mgmt is locked to this view.
-  const visibleBookings = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
+  // Then filter by selected month and sort by shoot date (default earliest first).
+  const visibleBookings = (() => {
+    let list = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
+    if (monthFilter !== 'all') list = list.filter(b => (b.shootDate || '').slice(0, 7) === monthFilter)
+    return [...list].sort((a, b) => {
+      const cmp = (a.shootDate || '').localeCompare(b.shootDate || '')
+      return sortAsc ? cmp : -cmp
+    })
+  })()
 
   const showingDeleted = filter === 'DELETED'
   const showingRoutine = filter === 'ROUTINE'
@@ -104,6 +121,8 @@ export default function AdminPage() {
   }, [filter])
 
   useEffect(() => { fetch_() }, [fetch_])
+  // Switching status tab → reset the month filter (months differ per tab).
+  useEffect(() => { setMonthFilter('all') }, [filter])
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
@@ -210,6 +229,29 @@ export default function AdminPage() {
         {tier === 'sound-mgmt' && <span className="text-[10px] text-amber-700">(ล็อกสำหรับทีมเสียง)</span>}
       </label>
 
+      {/* v1.105.3 — month filter tabs (ascending) + sort toggle */}
+      {!showingDeleted && months.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <div className="flex gap-1 flex-wrap">
+            <button onClick={() => setMonthFilter('all')}
+              className={`px-2.5 py-1 text-xs rounded-full border ${monthFilter === 'all' ? 'bg-[#673ab7] text-white border-[#673ab7]' : 'border-gray-300 text-gray-600 hover:border-[#673ab7]'}`}>
+              ทุกเดือน
+            </button>
+            {months.map(m => (
+              <button key={m} onClick={() => setMonthFilter(m)}
+                className={`px-2.5 py-1 text-xs rounded-full border ${monthFilter === m ? 'bg-[#673ab7] text-white border-[#673ab7]' : 'border-gray-300 text-gray-600 hover:border-[#673ab7]'}`}>
+                {monthLabel(m)}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setSortAsc(s => !s)}
+            title="สลับการเรียงตามวันถ่าย"
+            className="ml-auto px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1">
+            {sortAsc ? '↑ วันน้อย→มาก' : '↓ วันมาก→น้อย'}
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="py-16 text-center text-gray-400 text-sm">Loading…</div>
       ) : visibleBookings.length === 0 ? (
@@ -234,7 +276,7 @@ export default function AdminPage() {
             lastMonth = m
             return (
             <Fragment key={b.id}>
-            {showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
+            {monthFilter === 'all' && showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
                 <div className="flex-1 min-w-0 w-full">
