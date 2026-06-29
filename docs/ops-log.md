@@ -5,7 +5,18 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-06-29 · v1.103.0 — Purchases redesign (monthly batch + approval) — NOT deployed yet
+## 2026-06-29 · v1.103.0 — Purchases redesign (monthly batch + approval) — ✅ DEPLOYED + VERIFIED LIVE (sha-793ac49)
+
+DEPLOYED via Portainer git/redeploy (stack 125, IMAGE_TAG sha-981f3a1 → sha-793ac49,
+pullImage:true) after a 12-agent pre-deploy review + fixes. Version flipped
+1.102.8 → 1.103.0 through a ~70s container-recreate 502 window. `prisma db push
+--accept-data-loss` on start dropped `purchase_items` and created
+`purchase_batches`/`purchases` (old rows cleared, as authorized). Verified live
+(authenticated as narasit.k): `/admin/purchases` renders the new UI; GET
+/api/admin/purchases → 200 `{batches:[]}`; `?month=2026-06` → 200 `{batch:null}`;
+vendor dropdown loads. **DRIVE_DOCS_ROOT was already set on the stack**
+(`1o5AyqzVBltZ4TASQG4Pc8L7_EHJkOtu5`) so receipt folders work; PURCHASE_APPROVER_EMAIL
+not set → approval emails go to active MANAGER users.
 
 Rebuilt the Purchases module from a flat per-row table into a monthly workflow:
 `PurchaseBatch` (one month per buyer, approval status DRAFT→SUBMITTED→APPROVED/REJECTED)
