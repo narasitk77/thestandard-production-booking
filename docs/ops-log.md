@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-29 · v1.104.1 — OT closed-month-edit + Bangkok-TZ fixes (cherry-picked from weekly-audit)
+
+Two adversarially-verified OT bug fixes from the weekly-audit branch (PR #12) that
+hadn't reached prod — cherry-picked onto main + deployed:
+- PATCH /api/ot/[id] now re-validates the destination month (was: edit a record's date
+  into a closed/exported payroll month). 
+- currentMonthYYYYMM()/cleanupOTRecords use Bangkok time, not server-UTC (was: same-day
+  OT wrongly rejected during the first ~7h of each Bangkok month).
+PR #12's third fix (/ot in tier ALWAYS) already shipped in v1.103.3, so PR #12 is now
+superseded and can be closed. tsc 0 · 162 tests · next build ✓.
+
+---
+
 ## 2026-06-29 · v1.104.0 — Week Plan camera-allocation page
 
 New ADMIN-only /admin/week-plan: confirmed shoots grouped Mon–Sun (week nav), per-job

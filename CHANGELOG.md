@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.104.1] — 2026-06-29
+
+### Fixed — OT 2 บั๊กจาก weekly-audit ที่ยังไม่ขึ้น prod (cherry-pick เข้า main)
+- **🔴 OT แก้วันที่ย้ายเข้าเดือนที่ปิดแล้วได้:** `PATCH /api/ot/[id]` เช็คแค่เดือนเดิมของ record ว่าเปิดอยู่ไหม แล้วเขียนทับ `month` จากวันที่ใหม่โดยไม่เช็คซ้ำ → ย้าย record เข้าเดือน payroll ที่ปิด/ส่งออกไปแล้วได้ (POST กันอยู่แล้ว แต่ PATCH ไม่กัน). เพิ่ม guard เช็คเดือนปลายทาง.
+- **🟡 OT "เดือนปัจจุบัน" ใช้ UTC ไม่ใช่ Bangkok:** `currentMonthYYYYMM()` (+ `cleanupOTRecords`) อิง `new Date()` บน container UTC → ช่วง ~7 ชม.แรกของแต่ละเดือน (เวลาไทย) การกรอก OT วันนี้โดนปฏิเสธว่าเป็นเดือนปิด. เปลี่ยนไปใช้ `todayBangkokStr()`.
+- 2 fix นี้ผ่าน adversarial review ใน weekly-audit แล้ว (อยู่ใน PR #12 แต่ยังไม่ merge — fix `/ot` tier ของ PR นั้นขึ้น main ไปแล้วใน v1.103.3, เหลือ 2 อันนี้). PR #12 ตอนนี้ถือว่า superseded. +1 ot-cleanup regression test. tsc 0 · 162 tests · build ✓.
+
+---
+
 ## [1.104.0] — 2026-06-29
 
 ### Added — 📅 Week Plan: จัดสรรกล้องให้งานที่ Confirmed (มุมมองรายสัปดาห์)
