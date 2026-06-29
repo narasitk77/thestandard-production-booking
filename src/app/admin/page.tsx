@@ -12,6 +12,7 @@ interface Episode { episodeId: string; title: string; program?: { code?: string;
 interface Booking {
   id: string; shootDate: string; callTime: string; status: string
   producer: string; assignedEmails: string[]
+  cancelRequestedAt?: string | null; cancelReason?: string | null; cancelRequestedBy?: string | null
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean
   projectName?: string | null
   outlet: { code: string; name: string }
@@ -87,7 +88,9 @@ export default function AdminPage() {
         ? new URLSearchParams({ limit: '200', deleted: '1' })
         : filter === 'ROUTINE'
           ? new URLSearchParams({ limit: '200', routine: 'only' })
-          : new URLSearchParams({ limit: '200', routine: 'exclude', ...(filter && { status: filter }) })
+          : filter === 'CANCEL_REQ'
+            ? new URLSearchParams({ limit: '200', cancelRequested: '1' })
+            : new URLSearchParams({ limit: '200', routine: 'exclude', ...(filter && { status: filter }) })
       const res = await fetch(`/api/bookings?${params}`)
       const data = await res.json()
       if (seq !== fetchSeq.current) return // stale response — a newer tab fetch won
@@ -168,6 +171,17 @@ export default function AdminPage() {
         >
           🔁 Routine
         </button>
+        <button
+          onClick={() => setFilter('CANCEL_REQ')}
+          title="งานที่มีคนขอยกเลิก — รอ admin ตัดสินใจยกเลิกจริงหรือไม่"
+          className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+            filter === 'CANCEL_REQ'
+              ? 'border-red-500 text-red-600 font-medium'
+              : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          🚫 ขอยกเลิก
+        </button>
         {isAdmin && (
           <button
             onClick={() => setFilter('DELETED')}
@@ -240,6 +254,11 @@ export default function AdminPage() {
                       </div>
                     )}
                   </div>
+                  {b.cancelRequestedAt && (
+                    <div className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+                      🚫 ขอยกเลิก: {b.cancelReason || '—'}{b.cancelRequestedBy ? ` (${b.cancelRequestedBy})` : ''}
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center gap-1 mt-2">
                     {b.episodes.map(ep => (
                       <span key={ep.episodeId} className="episode-badge text-xs">{ep.episodeId}</span>

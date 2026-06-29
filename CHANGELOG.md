@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.103.2] — 2026-06-29
+
+### Added — ปุ่ม "ขอยกเลิกงาน" (ระบุเหตุผล) + อีเมลแจ้ง + tab งานที่ขอยกเลิก
+- **ปุ่ม "ขอยกเลิกงาน" บนหน้า booking** (`/dashboard/[id]`) สำหรับ producer/เจ้าของงาน (non-staff) — กดแล้วใส่เหตุผล → ส่งคำขอ. ไม่ได้ยกเลิกจริง แค่ flag ไว้ให้ทีมรีวิว (staff ยังมีปุ่ม Cancel ตรงเหมือนเดิม). เมื่อขอแล้วโชว์แบนเนอร์ 🚫 พร้อมเหตุผล+ผู้ขอ.
+- **อีเมลแจ้งเมื่อมีคนขอยกเลิก** → `CANCEL_NOTIFY_EMAIL` (env, ใส่อีเมล Tui) ถ้าไม่ตั้งจะส่งหา user role MANAGER ทั้งหมด. ส่งทีละคน (ไม่เผยรายชื่อใน To:), best-effort (ไม่บล็อกคำขอ).
+- **Tab "🚫 ขอยกเลิก" ในคิวงาน** (`/admin`) — แสดงงานที่มีคนขอยกเลิก (ยังไม่ถูกยกเลิกจริง) พร้อมเหตุผลบนการ์ด → admin/Tui กด Cancel จริงได้จากหน้า booking.
+- Schema (additive, nullable): `Booking.cancelRequestedAt / cancelReason / cancelRequestedBy` — ไม่แตะ status enum/state machine. API: `POST /api/bookings/[id]/request-cancel` (gate=canViewBooking, reason required, บล็อก CANCELLED/COMPLETED) + `GET /api/bookings?cancelRequested=1`.
+- tsc 0 · 160 tests · next build ✓ · pre-deploy verify (2 agents) 0 blockers (permission/leak/null-crash ผ่าน).
+
+---
+
 ## [1.103.1] — 2026-06-29
 
 ### Fixed — ผู้ใช้ใหม่ติดกับดัก (สร้าง booking ไม่ได้) + login ในแอป (LINE) ถูก Google บล็อก

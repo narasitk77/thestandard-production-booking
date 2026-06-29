@@ -46,11 +46,16 @@ export async function GET(request: NextRequest) {
             ],
           }
 
+    // ?cancelRequested=1 — the "ขอยกเลิก" tab: bookings someone asked to cancel
+    // that aren't already cancelled.
+    const cancelRequested = searchParams.get('cancelRequested') === '1'
+
     const where = {
       ...userFilter,
       deletedAt: showDeleted ? { not: null } : null,
       ...(routine === 'only' && { isRoutine: true }),
       ...(routine === 'exclude' && { isRoutine: false }),
+      ...(cancelRequested && { cancelRequestedAt: { not: null }, status: { not: 'CANCELLED' as const } }),
       ...(status && { status: status as any }),
       ...(outlet && { outlet: { code: outlet } }),
       ...(date && { shootDate: new Date(date) }),

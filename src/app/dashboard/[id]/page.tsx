@@ -47,6 +47,9 @@ interface BookingDetail {
   episodes: Episode[]
   uploads: UploadRecord[]
   createdAt: string
+  cancelRequestedAt?: string | null
+  cancelReason?: string | null
+  cancelRequestedBy?: string | null
 }
 
 export default function BookingDetailPage({ params }: { params: { id: string } }) {
@@ -63,6 +66,10 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   // v1.100 — per-EP "open footage on Drive" links, resolved from the EP's folder
   // path (works for footage moved from NAS into the boxes, not just uploads).
   const [epFolders, setEpFolders] = useState<Record<string, string | null>>({})
+  // Request-cancellation (owner/producer asks; staff actually cancels).
+  const [showCancelForm, setShowCancelForm] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [requesting, setRequesting] = useState(false)
 
   useEffect(() => {
     fetch(`/api/bookings/${id}`)
@@ -111,6 +118,26 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       setBooking(prev => prev ? { ...prev, status: data.booking.status } : prev)
     } finally {
       setUpdating(false)
+    }
+  }
+
+  const submitCancelRequest = async () => {
+    if (!booking || !cancelReason.trim()) return
+    setRequesting(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/bookings/${id}/request-cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: cancelReason.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data?.error || 'ขอยกเลิกไม่สำเร็จ'); return }
+      setBooking(prev => prev ? { ...prev, cancelRequestedAt: data.booking.cancelRequestedAt, cancelReason: data.booking.cancelReason, cancelRequestedBy: data.booking.cancelRequestedBy } : prev)
+      setShowCancelForm(false)
+      setCancelReason('')
+    } finally {
+      setRequesting(false)
     }
   }
 
@@ -229,6 +256,40 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div><div className="text-gray-400">Agency Ref</div><div className="font-medium text-gray-800">{booking.agencyRef || '—'}</div></div>
         </div>
       </div>
+
+      {/* Cancellation request — owner/producer asks; staff cancels for real */}
+      {booking.cancelRequestedAt ? (
+        <div className="gf-card p-4 border-l-4 border-red-400 bg-red-50/40">
+          <div className="text-sm text-red-800 font-medium">🚫 มีการขอยกเลิกงานนี้</div>
+          <div className="text-xs text-gray-600 mt-1">เหตุผล: {booking.cancelReason}</div>
+          {booking.cancelRequestedBy && <div className="text-xs text-gray-400 mt-0.5">โดย {booking.cancelRequestedBy}</div>}
+          {isStaff && <div className="text-xs text-gray-500 mt-1">กด Cancel ด้านบนเพื่อยกเลิกจริง</div>}
+        </div>
+      ) : (!isStaff && booking.status !== 'CANCELLED' && booking.status !== 'COMPLETED') ? (
+        <div className="gf-card p-4">
+          {!showCancelForm ? (
+            <button onClick={() => setShowCancelForm(true)}
+              className="text-sm text-red-600 hover:text-red-700 inline-flex items-center gap-1">
+              <XCircle className="w-4 h-4" /> ขอยกเลิกงาน
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-sm text-gray-700">ระบุเหตุผลที่ขอยกเลิก</div>
+              <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={3}
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                placeholder="เช่น ลูกค้าเลื่อนงาน / ถ่ายไม่ทัน ..." />
+              <div className="flex gap-2">
+                <button onClick={submitCancelRequest} disabled={requesting || !cancelReason.trim()}
+                  className="px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                  {requesting ? 'กำลังส่ง…' : 'ส่งคำขอยกเลิก'}
+                </button>
+                <button onClick={() => { setShowCancelForm(false); setCancelReason('') }}
+                  className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">ยกเลิก</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {/* Episode IDs */}
       <div className="gf-card p-5">

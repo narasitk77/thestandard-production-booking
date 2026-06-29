@@ -5,7 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-06-29 · v1.103.1 — Incident fix: new users trapped (can't create booking) + LINE in-app login blocked
+## 2026-06-29 · v1.103.2 — "ขอยกเลิกงาน" request-cancellation flow (button + reason + email + tab)
+
+Producers/owners can now request a cancellation (with a reason) from /dashboard/[id]
+instead of having no cancel path at all (direct Cancel stays staff-only). Flags the
+booking (cancelRequestedAt/cancelReason/cancelRequestedBy — additive nullable cols, no
+status-enum change), emails the notify list, and surfaces in a new "🚫 ขอยกเลิก" tab in
+the /admin queue (reason shown on the card). Staff then cancel for real.
+
+**Env:** `CANCEL_NOTIFY_EMAIL` (comma-sep) = who gets the request email (intended: Tui).
+If unset, falls back to active MANAGER users. NOT yet set on the stack — set it to Tui's
+email after confirming the address (Tui not found in the User table by name/nickname).
+
+tsc 0 · 160 tests · next build ✓ · pre-deploy verify workflow (2 agents) 0 blockers.
 
 Two production incidents reported by ops (new users olan.a / thiwaporn.p):
 1. **Trapped new user** — `/new` is "for everyone" (page + session-only POST /api/bookings)

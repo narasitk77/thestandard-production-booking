@@ -277,6 +277,12 @@ model Booking {
   adminNotes       String?
   status           BookingStatus @default(REQUESTED)
   createdByEmail   String?
+  // Cancellation REQUEST (producer/owner asks; staff actually cancels). Keeps the
+  // status as-is so the queue/state machine is untouched — a non-null
+  // cancelRequestedAt just flags the booking into the "ขอยกเลิก" tab.
+  cancelRequestedAt DateTime?
+  cancelReason      String?
+  cancelRequestedBy String?
   calendarEventId  String?
   // v1.32.2 — async calendar sync visibility. Approve sets PENDING
   // before kicking off the background create; the background task
