@@ -70,6 +70,14 @@ export async function PATCH(
       }
     }
 
+    // A date change rewrites the record's month (line below). The existing.month
+    // gate only proved the CURRENT month is open — re-check the DESTINATION month
+    // so a record can't be moved into a closed/exported month (POST already blocks
+    // creating into a closed month; this closes the same hole on edit).
+    if (date && !isMonthEditable(String(date).slice(0, 7))) {
+      return NextResponse.json({ error: 'Cannot move a record into a closed month' }, { status: 400 })
+    }
+
     const ownerEditingSubmitted =
       existing.userEmail === session.email && existing.approvalStatus === 'SUBMITTED'
 
