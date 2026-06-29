@@ -176,10 +176,12 @@ export default function WeekPlanClient() {
                             {cameras.map(c => {
                               const on = assigned.has(c.id)
                               const conflict = on && (conflicts.get(c.id) || 0) > 1
+                              // No disable during the 700ms debounce — rapid toggles must collapse
+                              // into one PATCH (the optimistic update + reschedule keep it consistent).
                               return (
-                                <button key={c.id} onClick={() => toggleCamera(b, c.id)} disabled={savingId === b.id}
+                                <button key={c.id} onClick={() => toggleCamera(b, c.id)}
                                   title={c.serialNumber || c.name}
-                                  className={`text-[11px] px-2 py-1 rounded border transition-colors disabled:opacity-50 ${
+                                  className={`text-[11px] px-2 py-1 rounded border transition-colors ${
                                     conflict ? 'bg-red-100 border-red-400 text-red-800'
                                     : on ? 'bg-[#673ab7] border-[#673ab7] text-white'
                                     : 'bg-white border-gray-300 text-gray-600 hover:border-[#673ab7]'}`}>

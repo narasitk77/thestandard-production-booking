@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.105.4] — 2026-06-30
+
+### Fixed — correctness audit (9-agent find→verify ของฟีเจอร์วันนี้) เจอ 3 จุด (low) แก้ครบ
+- **เงินติดลบ/ล้น:** `decOrNull` (admin-parse.ts) เก็บเครื่องหมายลบ → ใส่ unitPrice/total ติดลบได้ → ยอดรวมเดือน + อีเมลอนุมัติเพี้ยน; และค่า 13+ หลักเกิน Decimal(12,2) → 500. แก้: reject ค่าติดลบ (คืน null, ไม่แปลงเป็นบวก) + cap ที่ 9999999999.99. มีผลกับทุก money field ที่ใช้ decOrNull (amount/cost/price/total). +unit test.
+- **Nav tab ผิด:** `week-plan` ไม่อยู่ใน `ADMIN_HUB` regex ของ Nav (มีใน middleware) → เปิด /admin/week-plan แล้ว tab "คิวงาน" ติดสว่างแทน "Admin". แก้: เพิ่ม week-plan ใน ADMIN_HUB.
+- **Week Plan ปุ่มกล้องล็อกตอน debounce:** คลิกกล้อง 1 ตัว → ปุ่มกล้องทั้งงานนั้น disabled 700ms+ → กดต่อเร็วๆ ไม่ได้ (ขัดกับ debounce ที่ตั้งใจรวบ). แก้: เอา disabled ออก (optimistic + reschedule คุมความถูกต้องอยู่แล้ว).
+- tsc 0 · 164 tests · build ✓. (ฟีเจอร์อื่นทั้งหมด audit แล้ว = สะอาด.)
+
+---
+
 ## [1.105.3] — 2026-06-30
 
 ### Changed — แสดงผล ค.ศ. ทุกที่ + คิวงาน tab เดือน + ปุ่ม sort

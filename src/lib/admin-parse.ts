@@ -22,10 +22,15 @@ export function dateOrNull(v: unknown): Date | null {
  */
 export function decOrNull(v: unknown): string | null {
   if (v === null || v === undefined || v === '') return null
+  // Money/qty fields only (amount/cost/price/total). Keep the minus while parsing
+  // so a negative is DETECTED (not silently flipped to positive) and rejected, and
+  // cap at the Decimal(12,2) ceiling so an over-long value returns null instead of
+  // throwing a raw 500 from Prisma.
   const cleaned = String(v).replace(/[, ]/g, '').replace(/[^\d.\-]/g, '')
   if (cleaned === '' || cleaned === '-' || cleaned === '.') return null
   const n = Number(cleaned)
-  return Number.isFinite(n) ? n.toString() : null
+  if (!Number.isFinite(n) || n < 0 || n > 9999999999.99) return null
+  return n.toString()
 }
 
 /** Parse to a non-negative int with a fallback. */

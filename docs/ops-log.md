@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-30 · v1.105.4 — correctness audit fixes (3 low bugs across today's features)
+
+9-agent find→verify audit of everything shipped today (v1.103–1.105). 3 confirmed (all
+low), all fixed: (1) decOrNull kept a leading minus → negative/over-long money values
+accepted (skewed purchase totals + a Prisma 500); now rejects negatives (returns null,
+not flipped to positive) and caps at the Decimal(12,2) ceiling, +unit test. (2) Nav
+ADMIN_HUB regex missing 'week-plan' (present in middleware) → wrong nav tab highlighted on
+/admin/week-plan; added it. (3) Week Plan camera buttons were disabled during the 700ms
+debounce, blocking the rapid toggles the debounce exists to batch; removed the disable.
+Everything else audited clean. tsc 0 · 164 tests · next build ✓.
+
+---
+
 ## 2026-06-30 · v1.105.2 — queue: 2569→Gregorian data fix + Requested date + month grouping
 
 The "2569 (พ.ศ.)" on a queue card was a DATA bug, not display: AGN-690702-LOC-01 (from

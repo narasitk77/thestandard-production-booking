@@ -54,7 +54,7 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
   // v1.73 — nav split by role: "คิวงาน" (booking queue, Coordinator+) vs "Admin"
   // (back-office + system, ADMIN only). The Admin hub owns these /admin/* sub-
   // routes; everything else under /admin belongs to the queue.
-  const ADMIN_HUB = /^\/admin\/(production-space|equipment|loans|repairs|rentals|purchases|vendors|vendor-prices|team|reminders|permissions|health)(\/|$)/
+  const ADMIN_HUB = /^\/admin\/(production-space|equipment|loans|repairs|rentals|purchases|vendors|vendor-prices|week-plan|team|reminders|permissions|health)(\/|$)/
   const queueActive = pathname === '/admin' || (pathname.startsWith('/admin/') && !ADMIN_HUB.test(pathname))
 
   type Item = { href: string; label: string; show: boolean; tone?: 'default' | 'danger'; match?: (p: string) => boolean }
