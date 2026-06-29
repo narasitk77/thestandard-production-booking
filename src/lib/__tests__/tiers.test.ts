@@ -56,7 +56,14 @@ test('tierAllows: crew = upload job task, not console/producer', () => {
   assert.equal(tierAllows('crew', '/my-bookings'), true)
   assert.equal(tierAllows('crew', '/admin'), false)
   assert.equal(tierAllows('crew', '/producer'), false)
-  assert.equal(tierAllows('crew', '/new'), false)
+})
+
+test('tierAllows: every signed-in tier can open /new (the booking wizard is for everyone)', () => {
+  // /new + POST /api/bookings are session-only; blocking the crew tier trapped
+  // brand-new users with no way to request a booking. Regression for that.
+  for (const tier of ['crew', 'producer', 'coordinator', 'sound-mgmt', 'admin'] as const) {
+    assert.equal(tierAllows(tier, '/new'), true, `${tier} → /new`)
+  }
 })
 
 test('tierAllows: sound-mgmt = queue only, not the console tools', () => {

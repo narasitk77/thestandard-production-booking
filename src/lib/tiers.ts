@@ -38,8 +38,11 @@ export function tierHome(tier: Tier): string {
 // /bookings/[id]/edit (producer self-edit) are linked from /my-bookings and already
 // authorize by OWNER at the data/API layer (canViewBooking / isOwner+REQUESTED), so
 // the tier gate must not block them — doing so locked producers/crew out of their own
-// bookings (v1.92.1 fix).
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings']
+// bookings (v1.92.1 fix). /new (the booking wizard) is "for everyone" per the page
+// itself + POST /api/bookings (session-only); blocking it for the crew tier trapped
+// brand-new USER-role users (no roster row → /upload dead-ends too) with no way to
+// request a booking. v1.102.5 hid the CTA as a band-aid; this is the root fix.
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/new']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],

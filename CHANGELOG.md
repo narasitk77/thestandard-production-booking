@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.103.1] — 2026-06-29
+
+### Fixed — ผู้ใช้ใหม่ติดกับดัก (สร้าง booking ไม่ได้) + login ในแอป (LINE) ถูก Google บล็อก
+- **🔴 New user ติดกับดัก: เปิด New Booking ไม่ได้.** `/new` ตั้งใจให้ "ทุกคน" ใช้ได้ (คอมเมนต์ในหน้า + `POST /api/bookings` ใช้แค่ session) แต่ tier middleware (v1.90) บล็อก tier **`crew`** (= ค่า default ของ user ใหม่ role USER) ออกจาก `/new` → เด้งไป `/upload` ซึ่งก็ใช้ไม่ได้ถ้าไม่อยู่ใน roster → **ติดกับดัก สร้าง booking ไม่ได้เลย**. v1.102.5 แค่ซ่อนปุ่ม (แก้ปลายเหตุ). **แก้ที่ต้นเหตุ: ใส่ `/new` ใน `ALWAYS` (src/lib/tiers.ts)** → ทุก tier เปิด wizard ได้ + ปุ่ม "New Booking" โผล่/กดได้ทุกคน (verify แล้ว: ทุก API ที่ wizard เรียกใช้ session-only ไม่ใช่ console-gated). + เพิ่มลิงก์ "+ New Booking" บนหน้า /upload dead-end (กันคนที่ไม่อยู่ roster ตัน). middleware admin-only check ยังกัน /admin/* เหมือนเดิม (รันก่อน tier gate).
+- **📱 Login ในแอป (LINE/Messenger) ถูกบล็อก:** Google OAuth ปฏิเสธ embedded webview (`Error 403: disallowed_useragent`). เพิ่ม `isInAppBrowser(ua)` (src/lib/in-app-browser.ts, ตรวจ LINE/FB/Messenger/IG/WeChat/TikTok/KakaoTalk/Android wv) + แบนเนอร์เตือนบนหน้า `/login` ให้เปิดใน **Safari/Chrome** ก่อน (มีปุ่มคัดลอกลิงก์). บายพาส Google ไม่ได้ — กันก่อนชนกำแพง. (0 false positive: Safari/Chrome/CriOS ผ่านหมด).
+- regression tests: ทุก tier เปิด `/new` ได้ + in-app-browser detection (LINE iOS/Android, FB, IG, wv vs Safari/Chrome). tsc 0 · 160 tests · next build ผ่าน. **Pre-deploy verify workflow (3 agents) = 0 blockers.**
+
+---
+
 ## [1.103.0] — 2026-06-29
 
 ### Changed — ออกแบบ Purchases ใหม่: จัดซื้อรายเดือน + อนุมัติ + โฟลเดอร์ใบเสร็จ (BREAKING: ล้างข้อมูลเก่า)

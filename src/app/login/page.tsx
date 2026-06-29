@@ -2,12 +2,23 @@
 
 import { signIn } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
-import { Suspense } from 'react'
+import { Suspense, useEffect, useState } from 'react'
+import { isInAppBrowser } from '@/lib/in-app-browser'
 
 function LoginInner() {
   const params = useSearchParams()
   const callbackUrl = params.get('callbackUrl') || params.get('next') || '/'
   const error = params.get('error')
+
+  // Google's OAuth rejects in-app browsers (LINE/Messenger/etc.) with
+  // "disallowed_useragent". Detect it and tell the user to open in Safari/Chrome
+  // instead of letting them hit Google's wall.
+  const [inApp, setInApp] = useState(false)
+  const [copied, setCopied] = useState(false)
+  useEffect(() => { setInApp(isInAppBrowser(navigator.userAgent)) }, [])
+  const copyLink = async () => {
+    try { await navigator.clipboard.writeText(window.location.href); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {}
+  }
 
   const errorMessage =
     error === 'domain' ? 'Only @thestandard.co Google accounts can sign in.' :
@@ -25,6 +36,23 @@ function LoginInner() {
         {errorMessage && (
           <div className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded mb-4">
             {errorMessage}
+          </div>
+        )}
+
+        {inApp && (
+          <div className="text-sm bg-amber-50 border border-amber-300 text-amber-900 px-3 py-3 rounded mb-4 space-y-2">
+            <p className="font-medium">⚠️ เปิดในเบราว์เซอร์ก่อนเข้าสู่ระบบ</p>
+            <p className="text-[13px] leading-relaxed">
+              การเข้าสู่ระบบด้วย Google ใช้ไม่ได้ในแอป (เช่น LINE) — Google จะบล็อก
+              (<code>disallowed_useragent</code>). กรุณาเปิดลิงก์นี้ใน <strong>Safari</strong> หรือ <strong>Chrome</strong>
+              {' '}(แตะ ⋯ มุมขวา → “เปิดในเบราว์เซอร์”).
+            </p>
+            <button
+              onClick={copyLink}
+              className="text-[13px] underline hover:no-underline"
+            >
+              {copied ? '✓ คัดลอกลิงก์แล้ว — วางในเบราว์เซอร์' : 'คัดลอกลิงก์'}
+            </button>
           </div>
         )}
 

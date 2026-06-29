@@ -24,7 +24,10 @@ export default async function UploadLayout({ children }: { children: React.React
           Footage upload is limited to the video and sound team. If you should
           have access, ask an admin to add you to the team roster at <code>/admin/team</code>.
         </p>
-        <Link href="/my-bookings" className="gf-link">Go to My Bookings</Link>
+        <div className="flex items-center justify-center gap-4">
+          <Link href="/new" className="gf-link">+ New Booking</Link>
+          <Link href="/my-bookings" className="gf-link">Go to My Bookings</Link>
+        </div>
       </div>
     )
   }

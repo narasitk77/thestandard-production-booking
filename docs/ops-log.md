@@ -5,7 +5,22 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-06-29 · v1.103.0 — Purchases redesign (monthly batch + approval) — ✅ DEPLOYED + VERIFIED LIVE (sha-793ac49)
+## 2026-06-29 · v1.103.1 — Incident fix: new users trapped (can't create booking) + LINE in-app login blocked
+
+Two production incidents reported by ops (new users olan.a / thiwaporn.p):
+1. **Trapped new user** — `/new` is "for everyone" (page + session-only POST /api/bookings)
+   but the v1.90 tier middleware blocked the `crew` tier (default for new role=USER users)
+   → New Booking bounced to /upload, which dead-ends for non-roster users. Root fix: added
+   `/new` to `ALWAYS` in src/lib/tiers.ts (v1.102.5 only hid the CTA — a band-aid). Added a
+   "+ New Booking" escape to the /upload non-roster dead-end. Verified: every API the wizard
+   calls is session-only, so crew can create a REQUESTED booking; admin-only modules still
+   gated (isAdminOnlyModule runs before the tier gate).
+2. **LINE/in-app-browser login blocked** — Google OAuth rejects embedded webviews
+   (Error 403 disallowed_useragent). Added src/lib/in-app-browser.ts + a /login banner telling
+   the user to open in Safari/Chrome (copy-link button). Can't bypass Google — warns pre-wall.
+
+tsc 0 · 160 tests · next build ✓ · pre-deploy verify workflow (3 agents) 0 blockers. Deploying
+on top of v1.103.0 (sha-793ac49).
 
 DEPLOYED via Portainer git/redeploy (stack 125, IMAGE_TAG sha-981f3a1 → sha-793ac49,
 pullImage:true) after a 12-agent pre-deploy review + fixes. Version flipped
