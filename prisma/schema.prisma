@@ -492,10 +492,13 @@ enum RentalStatus {
   ARCHIVED
 }
 
-enum PurchaseStatus {
-  OPEN
-  RECEIVED
-  CANCELLED
+// Monthly purchasing is submitted as a whole month for manager sign-off, so the
+// approval state lives on the batch (the month), mirroring the OT workflow.
+enum PurchaseApprovalStatus {
+  DRAFT      // buyer is still adding items — not in the manager's queue
+  SUBMITTED  // buyer pushed the month for approval
+  APPROVED   // manager signed off
+  REJECTED   // manager pushed back with rejectionNote; buyer edits + resubmits
 }
 
 enum DocKind {
@@ -633,7 +636,7 @@ model Vendor {
 
   rentals   RentalJob[]
   repairs   RepairTicket[]
-  purchases PurchaseItem[]
+  purchases Purchase[]
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
@@ -673,27 +676,53 @@ model RentalJob {
   @@map("rental_jobs")
 }
 
-model PurchaseItem {
-  id          String         @id @default(cuid())
-  month       String? // YYYY-MM
-  item        String
-  quantity    Int            @default(1)
-  vendorId    String?
-  vendor      Vendor?        @relation(fields: [vendorId], references: [id])
-  productLink String?
-  unitPrice   Decimal?       @db.Decimal(12, 2)
-  total       Decimal?       @db.Decimal(12, 2)
-  kind        String? // ADD / REPLACE / FIX
-  status      PurchaseStatus @default(OPEN)
-  remark      String?
+// One month's purchasing for one buyer — the unit that gets submitted, approved,
+// summed, and filed into a Drive folder. Items hang off it.
+model PurchaseBatch {
+  id              String                 @id @default(cuid())
+  month           String                 // YYYY-MM
+  ownerEmail      String                 // the buyer who owns this month's purchasing
+  status          PurchaseApprovalStatus @default(DRAFT)
+  submittedAt     DateTime?
+  approvedByEmail String?
+  approvedAt      DateTime?
+  rejectionNote   String?
+  // The month folder in Drive (DRIVE_DOCS_ROOT/จัดซื้อ/<month>); items get subfolders.
+  driveFolderId   String?
+  driveFolderUrl  String?
+
+  items     Purchase[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([ownerEmail, month]) // one batch per buyer per month
+  @@index([status])
+  @@index([month])
+  @@map("purchase_batches")
+}
+
+model Purchase {
+  id           String        @id @default(cuid())
+  batchId      String
+  batch        PurchaseBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  purchaseDate DateTime?     @db.Date // the actual buy date (was only a month string before)
+  item         String
+  quantity     Int           @default(1)
+  vendorId     String?
+  vendor       Vendor?       @relation(fields: [vendorId], references: [id])
+  productLink  String?
+  unitPrice    Decimal?      @db.Decimal(12, 2)
+  total        Decimal?      @db.Decimal(12, 2)
+  kind         String? // ADD / REPLACE / FIX
+  remark       String?
+  driveFolderId String? // the item subfolder under the batch's month folder
 
   documents DocumentRef[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
-  @@index([month])
-  @@index([status])
-  @@map("purchase_items")
+  @@index([batchId])
+  @@map("purchases")
 }
 
 // Drive-file reference, attachable to a rental / purchase / repair / loan via
@@ -708,8 +737,8 @@ model DocumentRef {
 
   rentalJobId    String?
   rentalJob      RentalJob?     @relation(fields: [rentalJobId], references: [id], onDelete: Cascade)
-  purchaseItemId String?
-  purchaseItem   PurchaseItem?  @relation(fields: [purchaseItemId], references: [id], onDelete: Cascade)
+  purchaseId     String?
+  purchase       Purchase?      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   repairTicketId String?
   repairTicket   RepairTicket?  @relation(fields: [repairTicketId], references: [id], onDelete: Cascade)
   loanId         String?
@@ -718,7 +747,7 @@ model DocumentRef {
   createdAt DateTime @default(now())
 
   @@index([rentalJobId])
-  @@index([purchaseItemId])
+  @@index([purchaseId])
   @@index([repairTicketId])
   @@index([loanId])
   @@map("document_refs")

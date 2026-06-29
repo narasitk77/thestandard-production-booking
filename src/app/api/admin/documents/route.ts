@@ -5,15 +5,16 @@ import { requireConsole } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, inEnum } from '@/lib/admin-parse'
 import { ensureFolderPath, uploadFileToFolder, deleteDriveFile } from '@/lib/google-drive'
+import { ensurePurchaseItemFolder } from '@/lib/purchase-drive'
 import { DocKind } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 // Exactly one owner FK is set per document. Maps the request's `ownerType` to
 // the column so the polymorphic-by-nullable-FK shape stays consistent.
-const OWNER_FK: Record<string, 'rentalJobId' | 'purchaseItemId' | 'repairTicketId' | 'loanId'> = {
+const OWNER_FK: Record<string, 'rentalJobId' | 'purchaseId' | 'repairTicketId' | 'loanId'> = {
   rental: 'rentalJobId',
-  purchase: 'purchaseItemId',
+  purchase: 'purchaseId',
   repair: 'repairTicketId',
   loan: 'loanId',
 }
@@ -41,10 +42,7 @@ async function ownerFolderLabel(ownerType: string, ownerId: string): Promise<str
     const r = await prisma.rentalJob.findUnique({ where: { id: ownerId }, select: { jobName: true, quoteNo: true } })
     return safeFolderName(r?.jobName || r?.quoteNo || '', ownerId)
   }
-  if (ownerType === 'purchase') {
-    const r = await prisma.purchaseItem.findUnique({ where: { id: ownerId }, select: { item: true, month: true } })
-    return safeFolderName([r?.month, r?.item].filter(Boolean).join(' '), ownerId)
-  }
+  // Purchase is special-cased in resolveDocsFolder (nested month → item), never here.
   if (ownerType === 'repair') {
     const r = await prisma.repairTicket.findUnique({ where: { id: ownerId }, select: { itemLabel: true } })
     return safeFolderName(r?.itemLabel || '', ownerId)
@@ -58,6 +56,13 @@ async function ownerFolderLabel(ownerType: string, ownerId: string): Promise<str
 async function resolveDocsFolder(ownerType: string, ownerId: string): Promise<string> {
   const root = process.env.DRIVE_DOCS_ROOT
   if (!root) throw new Error('ยังไม่ได้ตั้งค่า DRIVE_DOCS_ROOT (โฟลเดอร์ปลายทางใน Drive)')
+  // Purchases nest by month → item so receipts land in the same folder the
+  // batch workflow builds (จัดซื้อ/<YYYY-MM>/<item>).
+  if (ownerType === 'purchase') {
+    const r = await prisma.purchase.findUnique({ where: { id: ownerId }, select: { item: true, batch: { select: { month: true } } } })
+    if (!r) throw new Error('ไม่พบรายการจัดซื้อ')
+    return ensurePurchaseItemFolder(r.batch.month, r.item, ownerId)
+  }
   const label = await ownerFolderLabel(ownerType, ownerId)
   return ensureFolderPath(root, [CATEGORY_FOLDER[ownerType], label])
 }

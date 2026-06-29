@@ -327,40 +327,12 @@ async function importRentals(): Promise<Counts> {
   return c
 }
 
+// Purchases are no longer imported from the finance sheet — the v1.103 redesign
+// replaced the flat PurchaseItem with a monthly PurchaseBatch + approval workflow
+// and the old rows are intentionally dropped ("ล้างอันเก่า ไม่ต้อง migrate"). Kept
+// as a no-op so the rest of the importer (equipment/rentals/repairs/loans) still runs.
 async function importPurchases(): Promise<Counts> {
-  const c = zero()
-  const tabs = (await listTabs(FINANCE_SHEET_ID)).filter((t) => DEFAULTS.purchaseTabs.some((n) => t.toLowerCase().includes(n.toLowerCase())))
-  if (!tabs.length) { console.warn(`  purchases: no matching tabs. Tabs: ${(await listTabs(FINANCE_SHEET_ID)).join(' | ')}`); return c }
-  for (const tab of tabs) {
-    const grid = await readGrid(FINANCE_SHEET_ID, tab)
-    const headers = grid[0] || []
-    const iMonth = colIndex(headers, 'เดือน', 'month')
-    const iItem = colIndex(headers, 'รายการ', 'item')
-    const iQty = colIndex(headers, 'จำนวน', 'qty', 'quantity')
-    const iVendor = colIndex(headers, 'ซื้อจาก', 'vendor', 'from')
-    const iLink = colIndex(headers, 'link')
-    const iUnit = colIndex(headers, 'ราคาต่อหน่วย', 'unit')
-    const iTotal = colIndex(headers, 'ราคารวม', 'total')
-    const iKind = colIndex(headers, 'remark', 'kind')
-    for (const row of grid.slice(1)) {
-      const item = cleanStr(cell(row, iItem))
-      if (!item) { c.skipped++; continue }
-      const month = cleanStr(cell(row, iMonth))
-      const total = decOrNull(cell(row, iTotal))
-      const data = {
-        month, item, quantity: parseInt(cell(row, iQty), 10) || 1,
-        productLink: cleanStr(cell(row, iLink)), unitPrice: decOrNull(cell(row, iUnit)), total,
-        kind: cleanStr(cell(row, iKind)),
-        vendorId: COMMIT ? (await prisma.vendor.findFirst({ where: { name: cleanStr(cell(row, iVendor)) || '___' }, select: { id: true } }))?.id || null : null,
-      }
-      if (COMMIT) {
-        const existing = await prisma.purchaseItem.findFirst({ where: { item, month: month || undefined, total: total ? (total as any) : undefined } })
-        if (existing) { await prisma.purchaseItem.update({ where: { id: existing.id }, data }); c.updated++ }
-        else { await prisma.purchaseItem.create({ data }); c.inserted++ }
-      } else c.inserted++
-    }
-  }
-  return c
+  return zero()
 }
 
 async function importRepairs(): Promise<Counts> {

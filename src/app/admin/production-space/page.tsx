@@ -36,7 +36,7 @@ async function getStats() {
     prisma.rentalJob.count({ where: { status: { not: 'ARCHIVED' }, paymentStatus: { in: ['PENDING', 'INVOICED'] } } }),
     prisma.rentalJob.count({ where: { status: { not: 'ARCHIVED' }, paymentStatus: 'PENDING' } }),
     prisma.rentalJob.count({ where: { status: 'ACTIVE', returnedAt: null, returnDueDate: { not: null, lt: today } } }),
-    prisma.purchaseItem.groupBy({ by: ['status'], _count: { _all: true } }),
+    prisma.purchaseBatch.groupBy({ by: ['status'], _count: { _all: true } }),
     prisma.vendor.count(),
     prisma.vendorPrice.count(),
   ])
@@ -51,7 +51,7 @@ async function getStats() {
     loans: { active: loansActive, overdue: loansOverdue },
     repairs: { open: g(repairsByStatus, 'REPORTED') + g(repairsByStatus, 'SENT'), done: g(repairsByStatus, 'RETURNED') },
     rentals: { active: rentalsActive, unpaid: rentalsUnpaid, pending: rentalsPending, returnOverdue: rentalsReturnOverdue },
-    purchases: { open: g(purchasesByStatus, 'OPEN'), received: g(purchasesByStatus, 'RECEIVED') },
+    purchases: { pending: g(purchasesByStatus, 'SUBMITTED'), approved: g(purchasesByStatus, 'APPROVED') },
     vendors: { total: vendorsTotal },
     vendorPrices: { total: vendorPricesTotal },
   }
@@ -193,9 +193,9 @@ export default async function ProductionAdminSpacePage() {
           <Metric label="กำลังเช่า" value={s.rentals.active} tone="blue" />
           <Metric label="ค้างจ่าย" value={s.rentals.unpaid} tone="red" />
         </ModuleCard>
-        <ModuleCard href="/admin/purchases" emoji="🛒" title="Purchases · จัดซื้อ" sub="สั่งซื้ออุปกรณ์ใหม่">
-          <Metric label="รอดำเนินการ" value={s.purchases.open} tone="amber" />
-          <Metric label="รับของแล้ว" value={s.purchases.received} tone="green" />
+        <ModuleCard href="/admin/purchases" emoji="🛒" title="Purchases · จัดซื้อ" sub="สั่งซื้อรายเดือน + อนุมัติ">
+          <Metric label="รออนุมัติ" value={s.purchases.pending} tone="amber" />
+          <Metric label="อนุมัติแล้ว" value={s.purchases.approved} tone="green" />
         </ModuleCard>
         <ModuleCard href="/admin/vendors" emoji="🏷️" title="Vendors · ผู้ขาย" sub="ร้านเช่า/ซ่อม/ขาย">
           <Metric label="ทั้งหมด" value={s.vendors.total} tone="gray" />

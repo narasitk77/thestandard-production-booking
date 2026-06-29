@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.103.0] — 2026-06-29
+
+### Changed — ออกแบบ Purchases ใหม่: จัดซื้อรายเดือน + อนุมัติ + โฟลเดอร์ใบเสร็จ (BREAKING: ล้างข้อมูลเก่า)
+- **เลิกใช้ `PurchaseItem` แบบแบนๆ** (มีแค่ `month` เป็น string, สถานะ OPEN/RECEIVED/CANCELLED). ของเดิม **ถูกลบทิ้งตอน deploy** (`prisma db push --accept-data-loss`) — ตามที่ ops สั่ง "ล้างอันเก่า ไม่ต้อง migrate". ตัว importer (`scripts/import-workspace.ts`) ฝั่ง purchases กลายเป็น no-op.
+- **โมเดลใหม่ = เดือน + รายการ + อนุมัติ:**
+  - `PurchaseBatch` = การจัดซื้อ 1 เดือนของผู้ซื้อ 1 คน (`@@unique([ownerEmail, month])`) มีสถานะอนุมัติ `DRAFT → SUBMITTED → APPROVED/REJECTED` (เหมือน OT) + ลิงก์โฟลเดอร์ Drive ของเดือน.
+  - `Purchase` = รายการ มี **`purchaseDate` (วันที่ซื้อจริง)** — เดิมมีแค่ month string (นี่คือ "วันเดือนปี" ที่ขอให้แก้). คงไว้: qty, vendor, ราคา/หน่วย, รวม, kind, ลิงก์, หมายเหตุ, ใบเสร็จ.
+  - `DocumentRef.purchaseItemId` → `purchaseId` (ชี้ `Purchase`).
+- **โฟลเดอร์ Drive แบ่งตามเดือน → รายการ:** `DRIVE_DOCS_ROOT/จัดซื้อ (Purchases)/<YYYY-MM>/<รายการ>/` — ใบเสร็จ PDF อัปผ่านปุ่มแนบในแต่ละรายการ (ใช้ `DocsCell`/`/api/admin/documents` เดิม, แก้ให้ nest month→item). helper ใหม่ `src/lib/purchase-drive.ts`.
+- **Flow ส่งอนุมัติ:** เพิ่มรายการ → แนบใบเสร็จ → ปุ่ม "ส่งให้ Manager อนุมัติ" (สร้างโฟลเดอร์ Drive + อีเมลแจ้ง manager พร้อมยอดรวม/ลิงก์โฟลเดอร์/ลิงก์เปิดอนุมัติ) → manager กด อนุมัติ/ไม่อนุมัติ (พร้อมเหตุผล) จากตาราง "ทุกเดือน". REJECTED → แก้แล้วส่งใหม่ได้. ผู้อนุมัติ = manager/admin (ใช้ `getOTApproverAccess` ชุดเดียวกับ OT); target อีเมล = `PURCHASE_APPROVER_EMAIL` → users role MANAGER → `REMINDER_ADMIN_EMAIL`. การสร้างโฟลเดอร์/อีเมลเป็น best-effort (ไม่บล็อกการส่ง).
+- **API:** `GET /api/admin/purchases` (`?month=` เดือนของฉัน · `?batchId=` เปิดของใครก็ได้ · ไม่มี param = overview ทุกเดือนพร้อมยอดรวม) · `POST` (เพิ่มรายการ, สร้าง batch อัตโนมัติ) · `PATCH/DELETE /[id]` (แก้/ลบรายการ — เฉพาะเดือนที่ยังแก้ได้) · `POST /batch` (action: submit/sync-folder/approve/reject). gate = `requireConsole` (ผู้ซื้อ) / manager (อนุมัติ). batch ที่ส่ง/อนุมัติแล้ว ล็อกการแก้รายการ.
+- **UI:** `/admin/purchases` เปลี่ยนจาก CrudTable เป็นหน้า custom — เลือกเดือน, สรุปยอด+จำนวน, ตารางรายการ (วันที่/รายการ/จำนวน/vendor/รวม/ใบเสร็จ), ฟอร์มเพิ่ม-แก้, ปุ่มโฟลเดอร์+ส่งอนุมัติ, ตารางทุกเดือน (manager อนุมัติ inline). production-space dashboard + badge ปรับเป็นสถานะใหม่.
+- helper `src/lib/purchase-batch.ts` (เงิน + กฎสถานะ) + 4 unit tests. baseline: **tsc 0 · 157 tests · `next build` ผ่าน**. ⚠️ ต้องตั้ง env **`DRIVE_DOCS_ROOT`** (ยังไม่ได้ตั้งบน prod) ฟีเจอร์โฟลเดอร์/ใบเสร็จถึงจะทำงาน; `PURCHASE_APPROVER_EMAIL` (ออปชัน) ระบุผู้รับอีเมลอนุมัติ. **ยังไม่ deploy.**
+
+---
+
 ## [1.102.8] — 2026-06-26
 
 ### Added — งาน Photo album → โฟลเดอร์ใน Photographer Shared Drive

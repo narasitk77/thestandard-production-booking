@@ -5,6 +5,33 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-29 · v1.103.0 — Purchases redesign (monthly batch + approval) — NOT deployed yet
+
+Rebuilt the Purchases module from a flat per-row table into a monthly workflow:
+`PurchaseBatch` (one month per buyer, approval status DRAFT→SUBMITTED→APPROVED/REJECTED)
++ `Purchase` items (now with a real `purchaseDate`), receipts filed into
+`DRIVE_DOCS_ROOT/จัดซื้อ (Purchases)/<YYYY-MM>/<item>/`, "ส่งให้ Manager อนุมัติ" with
+an email to the manager, and inline approve/reject. Custom `/admin/purchases` page
+replaces the CrudTable.
+
+**BREAKING / data:** old `purchase_items` rows are intentionally dropped on the next
+deploy (`prisma db push --accept-data-loss`) — ops asked to clear, not migrate. The
+schema rename (`PurchaseItem`→`PurchaseBatch`+`Purchase`, `DocumentRef.purchaseItemId`
+→`purchaseId`) is applied by the same db push.
+
+**Env to set before the folder/receipt + email features work:**
+- `DRIVE_DOCS_ROOT` — still UNSET on prod (📎 upload + folder creation throw a clear
+  Thai error until set). Already wired in `docker-compose.portainer.yml`.
+- `PURCHASE_APPROVER_EMAIL` (optional, comma-sep) — who gets the approval email;
+  falls back to active MANAGER users, then `REMINDER_ADMIN_EMAIL`/`EMAIL_FROM`.
+
+Verification (local, no DB/auth/Drive available here): `npx tsc --noEmit` 0 ·
+`npm test` 157 pass · `next build` succeeds (page + 3 API routes compile). Live click-path
+not exercised — needs prod DB + Google auth + Drive. **Not deployed; on branch
+`feat/purchases-redesign`.**
+
+---
+
 ## 2026-06-26 · v1.102.4 — "📣 แจ้งทุกคนว่าไฟล์พร้อม" footage-ready email, DEPLOYED + VERIFIED LIVE
 
 New green button on the Detect card emails EVERYONE on the booking (producer +

@@ -51,9 +51,10 @@ export const PAYMENT_STATUS: BadgeMap = {
 }
 
 export const PURCHASE_STATUS: BadgeMap = {
-  OPEN: { th: 'รอดำเนินการ', c: C.amber },
-  RECEIVED: { th: 'รับของแล้ว', c: C.green },
-  CANCELLED: { th: 'ยกเลิก', c: C.gray },
+  DRAFT: { th: 'ร่าง', c: C.gray },
+  SUBMITTED: { th: 'รออนุมัติ', c: C.amber },
+  APPROVED: { th: 'อนุมัติแล้ว', c: C.green },
+  REJECTED: { th: 'ไม่อนุมัติ', c: C.red },
 }
 
 export const CATEGORY_TH: Record<string, string> = {
