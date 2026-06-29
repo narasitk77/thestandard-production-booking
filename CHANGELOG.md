@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.104.0] — 2026-06-29
+
+### Added — 📅 Week Plan: จัดสรรกล้องให้งานที่ Confirmed (มุมมองรายสัปดาห์)
+- หน้าใหม่ **`/admin/week-plan`** (ลิงก์ "📅 Week Plan" บนหัวคิวงาน /admin) — แสดงงานที่ **CONFIRMED** แบ่งตามวัน จ.–อา. (เลื่อนสัปดาห์ก่อน/นี้/ถัดไป) แต่ละงานเลือก **กล้อง (Equipment category = CAMERA) เป็นรายตัว** ได้ → บันทึกลง `Booking.assignedEquipmentIds` (เก็บอุปกรณ์ที่ไม่ใช่กล้องไว้เหมือนเดิม).
+- **เตือนกล้องชนกัน:** กล้องตัวเดียวถูกจัดให้ ≥2 งานในวันเดียว → ขึ้นสีแดงทั้งคู่. หัวแต่ละวันสรุป "จัดแล้ว X/Y" + ⚠️ ถ้าชน.
+- บันทึกอัตโนมัติแบบ debounce 700ms/งาน (กันยิง Google Calendar re-sync รัวๆ — PATCH ทุกครั้ง re-sync event). ไม่ใช้ schema/endpoint ใหม่ (ใช้ GET /api/bookings?status=CONFIRMED + GET /api/admin/equipment?category=CAMERA + PATCH /api/bookings/[id]).
+- **ADMIN-only** (page redirect + ลิงก์ซ่อน + middleware isAdminOnlyModule) — ให้ตรงกับ /api/admin/equipment ที่เป็น ADMIN. load() เช็ค r.ok แล้ว surface error (ไม่เงียบ).
+- **Pre-deploy review (2 agents):** 0 blockers. แก้ก่อน deploy: access-gate mismatch (page console แต่ equipment API ADMIN → กล้องว่างเงียบ) → ทำเป็น ADMIN-only + เช็ค r.ok. **CEILING (ไม่บล็อก):** ดึง CONFIRMED แค่ 200 ใหม่สุด (พอสำหรับตอนนี้ ~28 งาน); concurrent edit = last-write-wins; กล้อง RETIRED ที่เคยจัดไว้จะไม่โชว์ในตัวเลือก. tsc 0 · 161 tests · build ✓.
+
+---
+
 ## [1.103.4] — 2026-06-29
 
 ### Fixed — 2 รายการ LOW ที่ค้างจาก QA sweep (แก้ให้ครบ)

@@ -126,6 +126,11 @@ export default function AdminPage() {
                 Routine
               </Link>
             )}
+            {isAdmin && (
+              <Link href="/admin/week-plan" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
+                📅 Week Plan
+              </Link>
+            )}
             {tierAllows(tier, '/new') && <Link href="/new" className="gf-submit text-xs sm:text-sm">+ New</Link>}
           </div>
         </div>

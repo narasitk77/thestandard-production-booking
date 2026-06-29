@@ -5,6 +5,20 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-29 · v1.104.0 — Week Plan camera-allocation page
+
+New ADMIN-only /admin/week-plan: confirmed shoots grouped Mon–Sun (week nav), per-job
+camera-unit picker writing Booking.assignedEquipmentIds (preserves non-camera gear),
+same-day double-booking highlighted red, debounced save (avoids Google Calendar re-sync
+spam). No schema/endpoint added — reuses GET /api/bookings?status=CONFIRMED,
+GET /api/admin/equipment?category=CAMERA, PATCH /api/bookings/[id]. Link on the /admin
+queue header (ADMIN only). Pre-deploy review (2 agents) 0 blockers; fixed the access-gate
+mismatch before deploy (equipment API is ADMIN, so the page is ADMIN-only + load() checks
+r.ok). Ceilings (non-blocking): newest-200 CONFIRMED fetch, last-write-wins concurrent edit,
+RETIRED-but-assigned cameras hidden from the picker. tsc 0 · 161 tests · next build ✓.
+
+---
+
 ## 2026-06-29 · v1.103.4 — closed the 2 remaining LOW QA items
 
 - /admin/[id] back now uses window.history.back() (returns to the exact queue tab) with

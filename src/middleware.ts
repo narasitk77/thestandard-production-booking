@@ -33,7 +33,7 @@ export async function middleware(request: NextRequest) {
   // Non-admin console staff (Coordinator/Manager/Support) get bounced back to
   // the booking queue. Keep this list in sync with ADMIN_HUB in Nav.tsx.
   const isAdminOnlyModule =
-    /^\/admin\/(production-space|equipment|loans|repairs|rentals|purchases|vendors|vendor-prices|team|reminders|permissions|health)(\/|$)/.test(pathname)
+    /^\/admin\/(production-space|equipment|loans|repairs|rentals|purchases|vendors|vendor-prices|week-plan|team|reminders|permissions|health)(\/|$)/.test(pathname)
   if (isAdminOnlyModule && (token as any)?.role !== 'ADMIN') {
     const url = request.nextUrl.clone()
     url.pathname = '/admin'
