@@ -205,7 +205,7 @@ export default function PurchasesClient({ currentEmail, isApprover }: { currentE
                 <td className="px-3 py-2 text-right tabular-nums">{it.quantity}</td>
                 <td className="px-3 py-2 text-gray-600">{it.vendor?.name || '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{baht(it.total ?? (it.unitPrice != null ? it.unitPrice * it.quantity : null))}</td>
-                <td className="px-3 py-2"><DocsCell ownerType="purchase" ownerId={it.id} initial={it.documents} /></td>
+                <td className="px-3 py-2"><DocsCell ownerType="purchase" ownerId={it.id} initial={it.documents} readOnly={!editable} /></td>
                 {editable && (
                   <td className="px-3 py-2 whitespace-nowrap text-right">
                     <button onClick={() => beginEdit(it)} className="text-xs text-gray-500 hover:text-gray-800 mr-2">แก้</button>
@@ -273,7 +273,7 @@ export default function PurchasesClient({ currentEmail, isApprover }: { currentE
                   <td className="px-3 py-2"><Badge map={PURCHASE_BADGE} value={b.status} /></td>
                   <td className="px-3 py-2 whitespace-nowrap text-right">
                     {b.driveFolderUrl && <a href={b.driveFolderUrl} target="_blank" rel="noreferrer" className="text-xs text-[#673ab7] hover:underline mr-3">📁</a>}
-                    {isApprover && b.status === 'SUBMITTED' && (
+                    {isApprover && b.status === 'SUBMITTED' && b.ownerEmail !== currentEmail && (
                       <>
                         <button onClick={() => approve(b.id, b.month)} disabled={busy} className="text-xs text-green-600 hover:text-green-800 mr-2">อนุมัติ</button>
                         <button onClick={() => reject(b.id)} disabled={busy} className="text-xs text-red-500 hover:text-red-700">ไม่อนุมัติ</button>

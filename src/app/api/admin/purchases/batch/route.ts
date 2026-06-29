@@ -84,11 +84,10 @@ export async function POST(request: NextRequest) {
           if (to.length) {
             const total = baht(batchTotal(batch.items.map(i => ({ quantity: i.quantity, unitPrice: i.unitPrice == null ? null : Number(i.unitPrice), total: i.total == null ? null : Number(i.total) }))))
             const link = process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL.replace(/\/$/, '')}/admin/purchases?batchId=${batch.id}` : ''
-            await sendEmail({
-              to,
-              subject: `[จัดซื้อ] ขออนุมัติเดือน ${month} — ${batch.items.length} รายการ ${total}`,
-              text: `${session.email} ส่งรายการจัดซื้อเดือน ${month} ให้อนุมัติ\nจำนวน ${batch.items.length} รายการ · รวม ${total}\n${driveUrl ? `โฟลเดอร์ใบเสร็จ: ${driveUrl}\n` : ''}${link ? `เปิดเพื่ออนุมัติ: ${link}` : ''}`,
-            })
+            const subject = `[จัดซื้อ] ขออนุมัติเดือน ${month} — ${batch.items.length} รายการ ${total}`
+            const body = `${session.email} ส่งรายการจัดซื้อเดือน ${month} ให้อนุมัติ\nจำนวน ${batch.items.length} รายการ · รวม ${total}\n${driveUrl ? `โฟลเดอร์ใบเสร็จ: ${driveUrl}\n` : ''}${link ? `เปิดเพื่ออนุมัติ: ${link}` : ''}`
+            // One message per approver — don't expose the manager list in a flat To:.
+            await Promise.allSettled(to.map(addr => sendEmail({ to: [addr], subject, text: body })))
           }
         }
       } catch (e) { console.error('purchase submit: email failed (continuing):', e) }
@@ -105,6 +104,8 @@ export async function POST(request: NextRequest) {
       const batch = await prisma.purchaseBatch.findUnique({ where: { id: batchId } })
       if (!batch) return NextResponse.json({ error: 'Not found' }, { status: 404 })
       if (batch.status !== 'SUBMITTED') return NextResponse.json({ error: 'เดือนนี้ไม่ได้อยู่ในสถานะรออนุมัติ' }, { status: 400 })
+      // Segregation of duties — the buyer can't approve (or reject) their own spend.
+      if (batch.ownerEmail === session.email) return NextResponse.json({ error: 'ผู้ส่งรายการอนุมัติเองไม่ได้ — ต้องให้ Manager คนอื่นอนุมัติ' }, { status: 403 })
 
       if (action === 'reject') {
         const note = cleanStr(b.note)

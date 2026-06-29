@@ -29,7 +29,7 @@ const KINDS: { value: string; label: string }[] = [
 ]
 const kindLabel = (k: string) => KINDS.find((x) => x.value === k)?.label || k
 
-export default function DocsCell({ ownerType, ownerId, initial }: { ownerType: DocOwner; ownerId: string; initial?: DocRef[] }) {
+export default function DocsCell({ ownerType, ownerId, initial, readOnly }: { ownerType: DocOwner; ownerId: string; initial?: DocRef[]; readOnly?: boolean }) {
   const [open, setOpen] = useState(false)
   const [docs, setDocs] = useState<DocRef[]>(initial || [])
   const [kind, setKind] = useState('QUOTATION')
@@ -93,7 +93,8 @@ export default function DocsCell({ ownerType, ownerId, initial }: { ownerType: D
             <div className="p-4 space-y-3">
               {error && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</div>}
 
-              {/* Upload row */}
+              {/* Upload row — hidden when the owner record is locked (read-only). */}
+              {!readOnly && (
               <div className="flex items-center gap-2">
                 <select value={kind} onChange={(e) => setKind(e.target.value)} className="border border-gray-300 rounded px-2 py-1.5 text-sm">
                   {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
@@ -112,7 +113,8 @@ export default function DocsCell({ ownerType, ownerId, initial }: { ownerType: D
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} อัปโหลด
                 </button>
               </div>
-              <p className="text-[11px] text-gray-400">เก็บใน Google Drive แยกโฟลเดอร์ตามงานให้อัตโนมัติ · ไฟล์ละไม่เกิน 25MB</p>
+              )}
+              {!readOnly && <p className="text-[11px] text-gray-400">เก็บใน Google Drive แยกโฟลเดอร์ตามงานให้อัตโนมัติ · ไฟล์ละไม่เกิน 25MB</p>}
 
               {/* List */}
               {docs.length === 0 ? (
@@ -126,7 +128,7 @@ export default function DocsCell({ ownerType, ownerId, initial }: { ownerType: D
                       {d.driveUrl && (
                         <a href={d.driveUrl} target="_blank" rel="noreferrer" className="text-gray-400 hover:text-[#673ab7] p-1" title="เปิดใน Drive"><ExternalLink className="w-3.5 h-3.5" /></a>
                       )}
-                      <button onClick={() => remove(d.id)} className="text-gray-400 hover:text-red-600 p-1" title="ลบ"><Trash2 className="w-3.5 h-3.5" /></button>
+                      {!readOnly && <button onClick={() => remove(d.id)} className="text-gray-400 hover:text-red-600 p-1" title="ลบ"><Trash2 className="w-3.5 h-3.5" /></button>}
                     </li>
                   ))}
                 </ul>

@@ -6,7 +6,20 @@ import { logAudit } from '@/lib/audit'
 import { cleanStr, inEnum } from '@/lib/admin-parse'
 import { ensureFolderPath, uploadFileToFolder, deleteDriveFile } from '@/lib/google-drive'
 import { ensurePurchaseItemFolder } from '@/lib/purchase-drive'
+import { isBatchEditable } from '@/lib/purchase-batch'
 import { DocKind } from '@prisma/client'
+
+// Receipts on a purchase are the financial paperwork the approval state machine
+// freezes. Only the batch owner may add/remove them, and only while the month is
+// still editable (DRAFT/REJECTED) — so SUBMITTED/APPROVED stays immutable and one
+// buyer can't touch another's receipts. Mirrors guardEditable on the item routes.
+async function purchaseDocGuard(purchaseId: string, email: string): Promise<NextResponse | null> {
+  const p = await prisma.purchase.findUnique({ where: { id: purchaseId }, select: { batch: { select: { ownerEmail: true, status: true } } } })
+  if (!p) return NextResponse.json({ error: 'ไม่พบรายการจัดซื้อ' }, { status: 404 })
+  if (p.batch.ownerEmail !== email) return NextResponse.json({ error: 'จัดการใบเสร็จได้เฉพาะรายการของตนเอง' }, { status: 403 })
+  if (!isBatchEditable(p.batch.status)) return NextResponse.json({ error: 'เดือนนี้ส่งอนุมัติแล้ว — แก้ไขไม่ได้' }, { status: 400 })
+  return null
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -107,6 +120,7 @@ export async function POST(request: NextRequest) {
       const ownerId = cleanStr(form.get('ownerId'))
       const kind = inEnum(DocKind, form.get('kind')) ? (form.get('kind') as DocKind) : 'OTHER'
       if (!fk || !ownerId) return NextResponse.json({ error: 'ownerType (rental|purchase|repair|loan) + ownerId required' }, { status: 400 })
+      if (ownerType === 'purchase') { const blocked = await purchaseDocGuard(ownerId, session.email); if (blocked) return blocked }
       if (!(file instanceof File)) return NextResponse.json({ error: 'file is required' }, { status: 400 })
       if (file.size === 0) return NextResponse.json({ error: 'ไฟล์ว่าง' }, { status: 400 })
       if (file.size > MAX_BYTES) return NextResponse.json({ error: `ไฟล์ใหญ่เกิน ${MAX_BYTES / 1024 / 1024}MB` }, { status: 413 })
@@ -132,6 +146,7 @@ export async function POST(request: NextRequest) {
     const ownerId = cleanStr(b.ownerId)
     const fileName = cleanStr(b.fileName)
     if (!fk || !ownerId) return NextResponse.json({ error: 'ownerType (rental|purchase|repair|loan) + ownerId required' }, { status: 400 })
+    if (String(b.ownerType) === 'purchase') { const blocked = await purchaseDocGuard(ownerId, session.email); if (blocked) return blocked }
     if (!fileName) return NextResponse.json({ error: 'fileName is required' }, { status: 400 })
     const kind = inEnum(DocKind, b.kind) ? b.kind : 'OTHER'
     const doc = await prisma.documentRef.create({
@@ -152,7 +167,8 @@ export async function DELETE(request: NextRequest) {
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   try {
-    const doc = await prisma.documentRef.findUnique({ where: { id }, select: { driveFileId: true } })
+    const doc = await prisma.documentRef.findUnique({ where: { id }, select: { driveFileId: true, purchaseId: true } })
+    if (doc?.purchaseId) { const blocked = await purchaseDocGuard(doc.purchaseId, session.email); if (blocked) return blocked }
     if (doc?.driveFileId) {
       // Best-effort: a missing/already-deleted Drive file shouldn't block detach.
       await deleteDriveFile(doc.driveFileId).catch((e) => console.warn('Drive delete failed:', e?.message || e))

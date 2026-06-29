@@ -9,10 +9,11 @@ export const dynamic = 'force-dynamic'
 
 const itemInclude = { vendor: { select: { id: true, name: true } }, documents: true } as const
 
-/** The item's batch must be DRAFT/REJECTED to mutate it. Returns an error response or null. */
-async function guardEditable(id: string) {
-  const existing = await prisma.purchase.findUnique({ where: { id }, select: { batch: { select: { status: true } } } })
+/** The caller must OWN the item's batch and it must be DRAFT/REJECTED to mutate. Error response or null. */
+async function guardEditable(id: string, email: string) {
+  const existing = await prisma.purchase.findUnique({ where: { id }, select: { batch: { select: { status: true, ownerEmail: true } } } })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (existing.batch.ownerEmail !== email) return NextResponse.json({ error: 'แก้ไขได้เฉพาะรายการของตนเอง' }, { status: 403 })
   if (!isBatchEditable(existing.batch.status)) return NextResponse.json({ error: 'เดือนนี้ส่งอนุมัติแล้ว — แก้ไขไม่ได้' }, { status: 400 })
   return null
 }
@@ -22,7 +23,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
-    const blocked = await guardEditable(params.id)
+    const blocked = await guardEditable(params.id, session.email)
     if (blocked) return blocked
     const b = await request.json()
     const data: Record<string, unknown> = {}
@@ -32,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       data.item = item
     }
     if ('purchaseDate' in b) data.purchaseDate = dateOrNull(b.purchaseDate)
-    if ('quantity' in b) data.quantity = intOr(b.quantity, 1)
+    if ('quantity' in b) data.quantity = Math.max(1, intOr(b.quantity, 1))
     if ('vendorId' in b) data.vendorId = cleanStr(b.vendorId)
     if ('productLink' in b) data.productLink = cleanStr(b.productLink)
     if ('unitPrice' in b) data.unitPrice = decOrNull(b.unitPrice)
@@ -54,7 +55,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   try {
-    const blocked = await guardEditable(params.id)
+    const blocked = await guardEditable(params.id, session.email)
     if (blocked) return blocked
     await prisma.purchase.delete({ where: { id: params.id } })
     logAudit({ actorEmail: session.email, action: 'purchase.item.delete', entityType: 'Purchase', entityId: params.id })

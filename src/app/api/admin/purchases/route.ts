@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
         batchId: batch.id,
         item,
         purchaseDate: dateOrNull(b.purchaseDate),
-        quantity: intOr(b.quantity, 1),
+        quantity: Math.max(1, intOr(b.quantity, 1)),
         vendorId: cleanStr(b.vendorId),
         productLink: cleanStr(b.productLink),
         unitPrice: decOrNull(b.unitPrice),
