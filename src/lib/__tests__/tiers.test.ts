@@ -38,7 +38,15 @@ test('tierAllows: producer = bookings/producer, not console/upload', () => {
   assert.equal(tierAllows('producer', '/calendar'), true)
   assert.equal(tierAllows('producer', '/admin'), false)
   assert.equal(tierAllows('producer', '/upload'), false)
-  assert.equal(tierAllows('producer', '/ot'), false)
+})
+
+test('tierAllows: every team tier can open /ot to submit their own overtime (weekly-audit 2026-06-29)', () => {
+  // /ot is gated by OTLayout (team member / OT approver / admin) server-side, so
+  // the tier gate must not bounce crew/producer/sound-mgmt — they file their own OT.
+  for (const tier of ['producer', 'crew', 'sound-mgmt', 'coordinator'] as const) {
+    assert.equal(tierAllows(tier, '/ot'), true, `${tier} → /ot`)
+    assert.equal(tierAllows(tier, '/ot/admin'), true, `${tier} → /ot/admin`)
+  }
 })
 
 test('tierAllows: every tier can open its OWN booking detail + self-edit (v1.92.1 lockout fix)', () => {
