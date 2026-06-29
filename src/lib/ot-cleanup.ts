@@ -1,4 +1,5 @@
 import { prisma } from './db'
+import { todayBangkokStr } from './bangkok-day'
 
 /**
  * Cleanup OT records based on the 10-day archive policy:
@@ -10,17 +11,14 @@ import { prisma } from './db'
  * Runs lazily on each /api/ot fetch — no cron needed.
  */
 export async function cleanupOTRecords(): Promise<number> {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const currentMonth = `${year}-${month}` // e.g. "2026-04"
+  // Bangkok-local date — the server runs UTC, so deriving "now" from new Date()
+  // drifts a day (and the month) for the ~7h each morning that is still yesterday
+  // in UTC. Use the same business-timezone source as the editable-month gate.
+  const [year, month, day] = todayBangkokStr().split('-').map(Number)
+  const currentMonth = `${year}-${String(month).padStart(2, '0')}` // e.g. "2026-04"
 
-  const prevDate = new Date(year, now.getMonth() - 1, 1)
-  const prevYear = prevDate.getFullYear()
-  const prevMon = String(prevDate.getMonth() + 1).padStart(2, '0')
-  const prevMonth = `${prevYear}-${prevMon}`
-
-  const day = now.getDate()
+  const prevDate = new Date(Date.UTC(year, month - 2, 1)) // month is 1-based; -2 = previous month index
+  const prevMonth = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`
 
   // Within 10-day grace: keep current + previous
   // After day 10: keep only current
@@ -47,8 +45,9 @@ export async function cleanupOTRecords(): Promise<number> {
 }
 
 export function currentMonthYYYYMM(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  // Bangkok month, not server-UTC month — otherwise OT entry/edit for "today" is
+  // wrongly rejected as a closed month during the early-morning UTC/Bangkok gap.
+  return todayBangkokStr().slice(0, 7)
 }
 
 export function isMonthEditable(month: string): boolean {
