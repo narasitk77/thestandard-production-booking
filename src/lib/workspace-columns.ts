@@ -35,6 +35,7 @@ export interface WorkspaceBooking {
   creative?: string[] | null
   crewRequired?: string[] | null
   videographerCount?: number | null
+  switcherCount?: number | null
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
@@ -172,6 +173,8 @@ export const WORKSPACE_COLUMNS: WorkspaceColumn[] = [
     value: b => (b.crewRequired || []).join(', ') },
   { key: 'videographerCount', label: 'Videographers', group: 'Crew & Gear', align: 'right',
     value: b => String(b.videographerCount ?? ''), num: b => b.videographerCount ?? 0 },
+  { key: 'switcherCount', label: 'Switchers', group: 'Crew & Gear', align: 'right',
+    value: b => String(b.switcherCount ?? ''), num: b => b.switcherCount ?? 0 },
   { key: 'cameraCount', label: 'Cameras', group: 'Crew & Gear', align: 'right',
     value: b => b.cameraCount == null ? '' : String(b.cameraCount), num: b => b.cameraCount ?? 0 },
   { key: 'micCount', label: 'Mics', group: 'Crew & Gear', align: 'right',

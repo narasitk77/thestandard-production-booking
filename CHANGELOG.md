@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.105.0] — 2026-06-30
+
+### Added — ระบุจำนวน Switcher > 1 + Outlet PM เลือก Producer "ไม่มี" (→ Co-Pro)
+- **Switcher ระบุจำนวนได้ (>1 คน):** เพิ่มฟิลด์ `Booking.switcherCount` (Int default 1, additive) — ในฟอร์มจอง เลือก Switcher แล้วมีช่องจำนวน (เหมือน Videographer); แสดง "Switcher ×N" ใน Review/หน้า booking; mirror ครบทุกที่ (create-booking clamp 1–10, draft, summary, admin/[id], workspace-columns, audit, mcp, routine).
+- **Outlet PM เลือก Producer = "— ไม่มี (ใช้ Co-Producer) —" ได้:** ถ้าไม่เลือก Producer → **Co-Producer กลายเป็น Producer ของงาน** (producer/producerEmail = ของ Co-Pro, booking ไปอยู่กับ Co-Pro). validation: PM ต้องมี Producer หรือ Co-Producer อย่างน้อย 1 (outlet อื่นยังบังคับ Producer). dropdown PM โผล่แม้มีแต่ Co-Producer. Review preview สะท้อนการ promote.
+- Pre-deploy review (2 agents) 0 blockers; แก้ 2 non-blocker (Review preview + PM-only-CoPro dropdown). tsc 0 · 162 tests · build ✓.
+
+---
+
 ## [1.104.2] — 2026-06-29
 
 ### Fixed — Week Plan: ดึงงานเฉพาะสัปดาห์ที่ดู (ปิด ceiling limit=200)

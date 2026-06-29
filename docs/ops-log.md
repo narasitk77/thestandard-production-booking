@@ -5,6 +5,21 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-30 · v1.105.0 — Switcher count + PM producer-"none"→Co-Pro
+
+- Booking.switcherCount (Int @default(1), additive — created by start.sh's prisma db push):
+  the wizard lets you specify >1 Switcher (mirrors videographerCount end to end).
+- Outlet PM may pick Producer = "ไม่มี (ใช้ Co-Producer)"; the booking is then attributed
+  to the Co-Producer (producer/producerEmail promoted, coProducer nulled). PM validation
+  requires Producer OR Co-Producer; the PM dropdown shows even with only Co-Producers.
+Pre-deploy review (2 agents) 0 blockers. tsc 0 · 162 tests · next build ✓.
+
+NOTE: two items from the same batch still pending user input — the "2569 (พ.ศ.)" screen
+(booking lists already render Gregorian; need the exact screen) and KND/narongkorn.m
+mapping (sheet has no KND section; narongkorn.m is under News/International News).
+
+---
+
 ## 2026-06-29 · v1.104.2 — Week Plan fetches the visible week only (closes the limit=200 ceiling)
 
 Added a half-open `?from=&to=` shootDate range to GET /api/bookings; /admin/week-plan now

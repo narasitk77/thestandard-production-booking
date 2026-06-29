@@ -16,7 +16,7 @@ interface Episode { id: string; episodeId: string; title: string; program?: { co
 interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
-  producer: string; producerEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number
+  producer: string; producerEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number; switcherCount?: number
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean; needsVan?: boolean; specialEquipment?: string[]
   equipmentNote?: string | null; rentalGearNote?: string | null; itinerary?: string | null; assignedEquipmentIds?: string[]
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
@@ -777,6 +777,8 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 : booking.crewRequired
                     .map(c => c === 'Videographer' && (booking.videographerCount || 1) > 1
                       ? `${c} × ${booking.videographerCount}`
+                      : c === 'Switcher' && (booking.switcherCount || 1) > 1
+                      ? `${c} × ${booking.switcherCount}`
                       : c)
                     .join(', ')
             }</div></div>

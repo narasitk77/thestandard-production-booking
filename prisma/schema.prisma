@@ -245,6 +245,7 @@ model Booking {
   creative         String[]
   crewRequired     String[]
   videographerCount     Int     @default(1)  // how many videographers requested at booking time
+  switcherCount         Int     @default(1)  // how many switchers requested at booking time
   // v1.41.0 — equipment counts surfaced on the calendar event (🎥 / 🎙).
   // Nullable: legacy bookings have none; 0/null both render as "not specified".
   cameraCount      Int?

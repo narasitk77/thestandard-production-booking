@@ -76,6 +76,7 @@ const EDITABLE_BOOKING_FIELDS = [
   'assignedEmails',
   'mainVideographerEmail',
   'videographerCount',
+  'switcherCount',
   'producerEmail',
   'producerPhone',
   'director',

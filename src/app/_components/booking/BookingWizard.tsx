@@ -181,6 +181,7 @@ export default function BookingWizard() {
   const [creative, setCreative] = useState('')
   const [crew, setCrew] = useState<string[]>([])
   const [videographerCount, setVideographerCount] = useState('1') // string so the field can be cleared & retyped
+  const [switcherCount, setSwitcherCount] = useState('1')
   const [cameraCount, setCameraCount] = useState('')
   const [micCount, setMicCount] = useState('')
   // v1.67 — Block Shot: relaxes the camera/mic requirement for flexible-queue shoots.
@@ -323,7 +324,10 @@ export default function BookingWizard() {
   // an ad-hoc person not in the outlet's regular roster. v1.102.7 — EXCEPT the PM
   // (Project Management Office) outlet, whose producer is always one of the Project
   // Managers in the roster, so PM keeps its dropdown even for Event shoots.
-  const useProducerDropdown = !isContentAgency && outletProducers.length > 0 && (shootType !== 'Event' || outletCode === 'PM')
+  // PM can run with only Co-Producers (Producer = "ไม่มี"), so its dropdown shows
+  // when there's at least one Producer OR Co-Producer; other outlets need a Producer.
+  const hasDropdownPeople = outletProducers.length > 0 || (outletCode === 'PM' && outletCoProducers.length > 0)
+  const useProducerDropdown = !isContentAgency && hasDropdownPeople && (shootType !== 'Event' || outletCode === 'PM')
   const selProd = outletProducers.find(p => p.email === producerSel)
   const selCoProd = outletCoProducers.find(p => p.email === coProducerSel)
 
@@ -357,7 +361,7 @@ export default function BookingWizard() {
     outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType,
     locationId, locationCustom, mapLocation, callTime, estimatedWrap,
     producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
-    creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal,
+    creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal,
     specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel,
     notes, epCount, epRows, step,
   })
@@ -377,7 +381,7 @@ export default function BookingWizard() {
     }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
 
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
   const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
@@ -406,6 +410,7 @@ export default function BookingWizard() {
       if (d.creative != null) setCreative(d.creative)
       if (Array.isArray(d.crew)) setCrew(d.crew)
       if (d.videographerCount != null) setVideographerCount(d.videographerCount)
+      if (d.switcherCount != null) setSwitcherCount(d.switcherCount)
       if (d.cameraCount != null) setCameraCount(d.cameraCount)
       if (d.micCount != null) setMicCount(d.micCount)
       if (typeof d.isBlockShot === 'boolean') setIsBlockShot(d.isBlockShot)
@@ -534,7 +539,13 @@ export default function BookingWizard() {
         if (projectSelectable && !projectId) errs.projectId = 'กรุณาเลือก Project ID'
         if (projectId && selectedEpisodeIds.length === 0) errs.selectedEpisodeIds = 'กรุณาเลือกอย่างน้อย 1 Episode'
       } else if (useProducerDropdown) {
-        if (!producerSel) errs.producerSel = 'กรุณาเลือก Producer'
+        // PM may leave Producer = "ไม่มี" — but then a Co-Producer is required
+        // (the booking is attributed to the Co-Pro instead).
+        if (outletCode === 'PM') {
+          if (!producerSel && !coProducerSel) errs.producerSel = 'เลือก Producer หรือ Co-Producer อย่างน้อย 1 คน'
+        } else if (!producerSel) {
+          errs.producerSel = 'กรุณาเลือก Producer'
+        }
         const missing: string[] = []
         epRows.forEach((r, i) => {
           if (!r.programCode) missing.push(`โปรแกรม EP${i + 1}`)
@@ -631,6 +642,13 @@ export default function BookingWizard() {
     }
     setSubmitting(true)
     setError('')
+    // PM "ไม่มี Producer" → the Co-Producer becomes the producer of record, so the
+    // booking belongs to them (My Bookings / producer scope key off producerEmail).
+    const promoteCoPro = outletCode === 'PM' && useProducerDropdown && !producerSel && !!coProducerSel
+    const effProducer = promoteCoPro ? (selCoProd?.nickname || selCoProd?.name || '') : (selProd?.nickname || selProd?.name || '')
+    const effProducerEmail = promoteCoPro ? coProducerSel : (producerSel || null)
+    const effCoProducer = promoteCoPro ? null : (selCoProd?.nickname || selCoProd?.name || null)
+    const effCoProducerEmail = promoteCoPro ? null : (coProducerSel || null)
     try {
       const res = await fetch('/api/bookings', {
         method: 'POST',
@@ -649,12 +667,12 @@ export default function BookingWizard() {
           producer: isContentAgency
             ? producers.find(p => p.email === producerEmail)?.nickname || ''
             : useProducerDropdown
-              ? (selProd?.nickname || selProd?.name || '')
+              ? effProducer
               : producerName.trim(),
           producerEmail: isContentAgency
             ? producerEmail
             : useProducerDropdown
-              ? (producerSel || null)
+              ? effProducerEmail
               : (producerEmailText.trim() || null),
           producerPhone: isContentAgency || useProducerDropdown ? null : (producerPhone.trim() || null),
           director: isContentAgency
@@ -662,11 +680,12 @@ export default function BookingWizard() {
             : null,
           directorEmail: isContentAgency ? directorEmail : null,
           // v1.59 — Co-Producer (non-AGN dropdown only)
-          coProducer: useProducerDropdown ? (selCoProd?.nickname || selCoProd?.name || null) : null,
-          coProducerEmail: useProducerDropdown ? (coProducerSel || null) : null,
+          coProducer: useProducerDropdown ? effCoProducer : null,
+          coProducerEmail: useProducerDropdown ? effCoProducerEmail : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           videographerCount: crew.includes('Videographer') ? Math.max(1, parseInt(videographerCount, 10) || 1) : 1,
+          switcherCount: crew.includes('Switcher') ? Math.max(1, parseInt(switcherCount, 10) || 1) : 1,
           cameraCount: cameraCount.trim() === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
           micCount: micCount.trim() === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
           isBlockShot,
@@ -723,11 +742,14 @@ export default function BookingWizard() {
     producer: isContentAgency
       ? (caProducer?.nickname ? `${caProducer.nickname} (${producerEmail})` : producerEmail)
       : useProducerDropdown
-        ? (selProd ? `${selProd.nickname}` : '')
+        // PM "ไม่มี" → preview the Co-Pro as the producer (matches what's submitted)
+        ? (outletCode === 'PM' && !producerSel && coProducerSel
+            ? (selCoProd ? `${selCoProd.nickname} (Co-Producer → Producer)` : '')
+            : (selProd ? `${selProd.nickname}` : ''))
         : (producerName
             ? `${producerName}${producerPhone ? ` · ${producerPhone}` : ''}${producerEmailText ? ` · ${producerEmailText}` : ''}`
             : ''),
-    coProducer: useProducerDropdown && selCoProd ? selCoProd.nickname : '',
+    coProducer: useProducerDropdown && selCoProd && !(outletCode === 'PM' && !producerSel && coProducerSel) ? selCoProd.nickname : '',
     director: isContentAgency
       ? (caDirector?.nickname ? `${caDirector.nickname} (${directorEmail})` : directorEmail)
       : '',
@@ -747,7 +769,11 @@ export default function BookingWizard() {
     productCode: agencyRef,
     crew: crew.length > 0
       ? (() => { const vc = Math.max(1, parseInt(videographerCount, 10) || 1)
-          return crew.map(c => c === 'Videographer' && vc > 1 ? `${c} ×${vc}` : c).join(', ') })()
+          const sc = Math.max(1, parseInt(switcherCount, 10) || 1)
+          return crew.map(c =>
+            c === 'Videographer' && vc > 1 ? `${c} ×${vc}`
+            : c === 'Switcher' && sc > 1 ? `${c} ×${sc}`
+            : c).join(', ') })()
       : '',
     equipment: [
       isBlockShot ? '📦 Block Shot (ไม่ระบุจำนวนกล้อง/ไมค์)' : '',
@@ -1150,7 +1176,7 @@ export default function BookingWizard() {
                     /* v1.59 — per-outlet Producer + Co-Producer dropdowns */
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <Label htmlFor="producerSel" required>Producer</Label>
+                        <Label htmlFor="producerSel" required={outletCode !== 'PM'}>Producer</Label>
                         <select
                           id="producerSel"
                           className={`ops-input ${fieldErrors.producerSel ? 'ops-input-invalid' : ''}`}
@@ -1159,7 +1185,8 @@ export default function BookingWizard() {
                           disabled={outletPeopleLoading}
                           aria-invalid={!!fieldErrors.producerSel}
                         >
-                          <option value="">{outletPeopleLoading ? 'Loading…' : '— เลือก Producer —'}</option>
+                          {/* PM may pick "ไม่มี" — then the Co-Producer becomes the booking's producer. */}
+                          <option value="">{outletPeopleLoading ? 'Loading…' : outletCode === 'PM' ? '— ไม่มี (ใช้ Co-Producer) —' : '— เลือก Producer —'}</option>
                           {outletProducers.map(p => (
                             <option key={p.email} value={p.email}>{p.nickname}</option>
                           ))}
@@ -1488,11 +1515,25 @@ export default function BookingWizard() {
                               คน
                             </span>
                           )}
+                          {c === 'Switcher' && checked && (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 shrink-0">
+                              <NumberStepper
+                                value={switcherCount}
+                                onChange={setSwitcherCount}
+                                min={1}
+                                max={10}
+                                allowEmpty={false}
+                                ariaLabel="จำนวน Switcher"
+                                className="w-36"
+                              />
+                              คน
+                            </span>
+                          )}
                         </div>
                       )
                     })}
                   </div>
-                  <FieldHelp>เลือก crew ทุกตำแหน่งที่ต้องใช้ · ระบุจำนวน Videographer ถ้าต้องมากกว่า 1</FieldHelp>
+                  <FieldHelp>เลือก crew ทุกตำแหน่งที่ต้องใช้ · ระบุจำนวน Videographer / Switcher ถ้าต้องมากกว่า 1</FieldHelp>
                 </div>
 
                 {/* v1.41.0 — equipment counts (🎥 / 🎙). Surfaced on the
