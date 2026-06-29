@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.102.9] — 2026-06-29
+
+### Fixed — Weekly audit: 3 confirmed bugs (OT tier lockout · OT closed-month edit bypass · OT month timezone)
+- **OT page locked out the whole Production roster.** `/ot` was missing from the tier `ALWAYS` allow-list, so crew / producer / sound-mgmt team members were redirected to their tier home (and the OT nav link was hidden) when they tried to file their own overtime — even though `OTLayout` already gates the section to team members + OT approvers + admins at the data layer. Added `/ot` to `ALWAYS` (same class of fix as the v1.92.1 `/dashboard` + `/bookings` lockout). `src/lib/tiers.ts`.
+- **OT edit could move a record into a closed month.** `PATCH /api/ot/[id]` only checked that the record's *existing* month was open, then rewrote `month` from the client's new `date` with no re-check — letting a current-month record be edited into a prior, exported payroll month. Added a destination-month editability guard mirroring the POST create guard. `src/app/api/ot/[id]/route.ts`.
+- **OT "current month" used server-UTC, not Bangkok.** `currentMonthYYYYMM()` (and `cleanupOTRecords`) derived the month from `new Date()` on the UTC-only container, so during the first ~7h of each Bangkok month, same-day OT entry/edit was wrongly rejected as a closed month. Switched to the existing `todayBangkokStr()` source. `src/lib/ot-cleanup.ts`.
+- Tests: +2 (tiers `/ot` regression for every team tier; ot-cleanup month-at-UTC-rollover). tsc 0 · 155 tests pass.
+- **Reported, not auto-fixed** (need a human decision — see PR): concurrent booking-create race on `bookingCode` (no tx/retry → P2002 500); photo-album footage uploaded via `/upload` + Detect/notify-ready still target VIDEO 2026 not the Photographer Shared Drive (v1.102.8 gap); resume-draft wipes the restored Producer dropdown for non-AGN outlets; unvalidated AGN `category` → opaque 500.
+
+---
+
 ## [1.102.8] — 2026-06-26
 
 ### Added — งาน Photo album → โฟลเดอร์ใน Photographer Shared Drive

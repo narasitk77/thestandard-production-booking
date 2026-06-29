@@ -5,6 +5,31 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-29 · v1.102.9 — Weekly audit fixes (NOT deployed — PR for human review)
+
+Autonomous weekly bug audit. Adversarial multi-agent review (6 finders → per-finding
+refute pass) of booking create/approve, Drive folder routing, tiers/auth, producers/outlets,
+upload/detect/notify, and OT/calendar. 8 findings confirmed; 3 fixed on branch
+`weekly-audit/2026-06-29`, the rest reported for a human decision.
+
+**Fixed (tsc 0 · 155 tests, +2):**
+- `/ot` added to tier `ALWAYS` (`src/lib/tiers.ts`) — crew/producer/sound-mgmt were
+  redirected away from the OT page they're meant to use to file their own overtime.
+- `PATCH /api/ot/[id]` now re-validates the destination month — closes a hole that let
+  an OT record be edited into a closed/exported payroll month (POST already blocked this).
+- `currentMonthYYYYMM()` / `cleanupOTRecords` use Bangkok (`todayBangkokStr()`) instead of
+  server-UTC, fixing wrongful "closed month" rejections in the early-morning UTC/Bangkok gap.
+
+**Reported, not auto-fixed (need human decision):** booking-create `bookingCode` race
+(no tx/retry → P2002 500); photo-album footage uploaded via `/upload` + Detect/notify-ready
+still target VIDEO 2026 not the Photographer Shared Drive (v1.102.8 design gap, touches the
+live upload path); resume-draft wipes the restored Producer dropdown for non-AGN outlets
+(client React); unvalidated AGN `category` → opaque 500.
+
+**No deploy** — human reviews the PR and deploys. IMAGE_TAG unchanged.
+
+---
+
 ## 2026-06-26 · v1.102.4 — "📣 แจ้งทุกคนว่าไฟล์พร้อม" footage-ready email, DEPLOYED + VERIFIED LIVE
 
 New green button on the Detect card emails EVERYONE on the booking (producer +
