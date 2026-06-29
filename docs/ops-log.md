@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-29 · v1.103.4 — closed the 2 remaining LOW QA items
+
+- /admin/[id] back now uses window.history.back() (returns to the exact queue tab) with
+  /admin fallback — was a hardcoded Link to /admin that always reset to the REQUESTED tab.
+- resume-draft no longer wipes the restored dropdown Producer/Co-Producer: moved the
+  producerSel/coProducerSel clear out of the [outletCode] effect into handleOutletChange
+  (the genuine outlet-switch path), so resumeDraft's raw restore survives. (This is the
+  bug also tracked in weekly-audit PR #12; fixed here on main.)
+
+tsc 0 · 161 tests · next build ✓. QA sweep now fully closed.
+
+---
+
 ## 2026-06-29 · v1.103.3 — QA sweep fixes (test-all-functions + back-navigation)
 
 Full-app audit (18-agent find→verify workflow) + live browser smoke. 8 confirmed

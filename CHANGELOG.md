@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.103.4] — 2026-06-29
+
+### Fixed — 2 รายการ LOW ที่ค้างจาก QA sweep (แก้ให้ครบ)
+- **back ของ /admin/[id] ลืม tab ที่เปิดอยู่:** เดิม `<Link href="/admin">` (hardcode) → กลับมาที่ tab REQUESTED เสมอ. เปลี่ยนเป็นปุ่มใช้ `window.history.back()` (กลับ tab เดิมที่มาจากจริง) + fallback `/admin` เมื่อเปิดตรง. `src/app/admin/[id]/page.tsx`.
+- **resume-draft ("ทำต่อ") ลบ Producer ที่เลือกไว้** (outlet แบบ dropdown non-AGN): effect `[outletCode]` เคลียร์ `producerSel/coProducerSel` ทุกครั้งที่ outlet เปลี่ยน รวมถึงตอน resume → ทับค่าที่เพิ่ง restore. ย้ายการเคลียร์ไปไว้ที่ `handleOutletChange` (ทางที่ user เปลี่ยน outlet จริง) แทน — resume ไม่โดนทับแล้ว, การเปลี่ยน outlet ปกติยังเคลียร์เหมือนเดิม. `src/app/_components/booking/BookingWizard.tsx`.
+- tsc 0 · 161 tests · next build ✓. (ปิดงาน QA sweep ครบทุกข้อที่ confirmed.)
+
+---
+
 ## [1.103.3] — 2026-06-29
 
 ### Fixed — QA sweep (ทดสอบทุกฟังก์ชัน + การกดย้อนหลัง): 8 confirmed issues

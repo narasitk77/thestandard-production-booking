@@ -545,9 +545,13 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   return (
     <div className="max-w-[680px] mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
 
-      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
+      {/* Back = real history (returns to the exact queue tab you came from), with
+          /admin fallback for a direct load. ponytail: window.history, no router import. */}
+      <button
+        onClick={() => { if (typeof window !== 'undefined' && window.history.length > 1) window.history.back(); else window.location.href = '/admin' }}
+        className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
         <ArrowLeft className="w-4 h-4" /> Admin Console
-      </Link>
+      </button>
 
       {/* v1.51 — soft-deleted: only ADMIN can open this page; actions 409 server-side */}
       {booking.deletedAt && (

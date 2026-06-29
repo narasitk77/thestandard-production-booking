@@ -254,7 +254,9 @@ export default function BookingWizard() {
   // v1.59 — load per-outlet producers/co-producers for the non-AGN dropdowns
   // whenever the outlet changes. AGN keeps its _Users-based producer flow.
   useEffect(() => {
-    setProducerSel(''); setCoProducerSel('')
+    // NOTE: do NOT clear producerSel/coProducerSel here — this effect also fires
+    // on resumeDraft's outlet restore and would wipe the just-restored selection.
+    // The genuine outlet-switch path (handleOutletChange) does the clearing instead.
     if (!outletCode || outletCode === 'AGN') { setOutletProducers([]); setOutletCoProducers([]); return }
     let cancelled = false
     setOutletPeopleLoading(true)
@@ -439,6 +441,8 @@ export default function BookingWizard() {
 
     setOutletCode(code)
     setProgramCode('')
+    setProducerSel('')      // dropdown producer — was cleared by the [outletCode] effect (moved here so resumeDraft doesn't wipe it)
+    setCoProducerSel('')
     setProducerEmail('')
     setDirectorEmail('')
     setProducerName('')
