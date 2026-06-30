@@ -5,6 +5,26 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-30 · v1.107.0–1.107.2 — "ทีมงานยังไม่ครบ" crew-gap warning + queue filter, DEPLOYED + VERIFIED LIVE
+
+Ops: งาน CONFIRMED บางที assign ไม่ครบ (เช่นใส่แค่ช่างเสียง ลืมช่างวิดีโอ) อยากให้เตือนว่าขาดตำแหน่งไหน.
+- **v1.107.0**: แถบเตือนบน `/admin/[id]` "ทีมงานยังไม่ครบ — ยังขาด: ช่างภาพ, …". `src/lib/crew-gaps.ts`
+  (`crewRoleFromPosition` + `missingCrewRoles`) เทียบ `crewRequired` กับตำแหน่งของคน assign
+  (resolve `assignedEmails`→`User.position`). `GET /api/bookings/[id]/crew-status` (canViewBooking).
+- **v1.107.1**: หน้าคิว `/admin` แท็บ CONFIRMED → toggle "🚨 เฉพาะงานที่ทีมงานยังไม่ครบ (N)" + badge
+  "⚠️ ขาด:…" ต่อการ์ด. `GET /api/bookings/crew-gaps` (requireConsole) batch-resolve ตำแหน่งทุกงาน
+  CONFIRMED/ASSIGNED ใน query เดียว → map by booking id.
+- **v1.107.2** (พบจาก verify live): Lighting/DIT/Art Director ไม่มี staff position (freelancer ล้วน)
+  → ขึ้น "ขาดช่างไฟ" เกือบทุกงาน = false noise. แก้: `missingCrewRoles` จำกัด `STAFF_TRACKABLE_ROLES`
+  = Videographer/Sound/Photographer/Switcher/Virtual Production.
+
+**✅ DEPLOYED + VERIFIED LIVE** (`sha-a7afe51`, `/api/version`→1.107.2). `/crew-gaps`: 41 งานมี gap จริง,
+`stillFlaggingLighting:0`, ทุก gap เป็น staff role (ช่างวิดีโอ/ช่างเสียง/Virtual Production); เคสตัวอย่าง
+`TSS-EXE-261204-L-01 → ขาดช่างเสียง` ตรงเป๊ะ. tsc 0 · 168 tests. **CEILING**: freelancer ไม่มี role →
+soft hint (โชว์จำนวน freelancer "ถ้าครอบคลุมแล้วข้ามได้"); freelance video/sound อาจ false-flag.
+
+---
+
 ## 2026-06-30 · v1.106.0 — crew self-requisition of equipment (Cheqroom-style)
 
 Photographers/crew can now requisition gear for their own bookings. New card "🎒 เบิกอุปกรณ์"
