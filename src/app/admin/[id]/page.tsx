@@ -138,6 +138,8 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [producerCustom, setProducerCustom] = useState(false)
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot
   const [cameraOverload, setCameraOverload] = useState('')
+  // v1.107 — which required crew roles still have nobody assigned (warn the assigner)
+  const [crewGaps, setCrewGaps] = useState<{ missing: string[]; missingTh: string[]; freelancerCount: number } | null>(null)
   const [editForm, setEditForm] = useState({
     callTime: '',
     estimatedWrap: '',
@@ -218,6 +220,19 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       .catch(() => {})
     return () => { cancelled = true }
   }, [booking])
+
+  // v1.107 — which required crew roles still have nobody assigned. Re-runs when the
+  // assignment changes (assignedEmails) so the warning clears as crew get added.
+  useEffect(() => {
+    if (!booking?.id || booking.status === 'CANCELLED') { setCrewGaps(null); return }
+    let cancelled = false
+    fetch(`/api/bookings/${booking.id}/crew-status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d) setCrewGaps({ missing: d.missing || [], missingTh: d.missingTh || [], freelancerCount: d.freelancerCount || 0 }) })
+      .catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking?.id, booking?.status, (booking?.assignedEmails || []).join(','), (booking?.crewRequired || []).join(',')])
 
   useEffect(() => {
     fetch(`/api/bookings/${id}`)
@@ -618,6 +633,20 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       {booking.isBlockShot && (
         <div className="gf-card p-2.5 text-xs border-l-4 border-[#673ab7] bg-[#f3f0fb] text-[#5e35b1] inline-flex items-center gap-1.5">
           📦 Block Shot — ไม่ระบุจำนวนกล้อง/ไมค์โดยตั้งใจ
+        </div>
+      )}
+
+      {/* v1.107 — crew not fully assigned: prompt the assigner with the missing roles */}
+      {crewGaps && crewGaps.missing.length > 0 && (booking.status === 'CONFIRMED' || booking.status === 'ASSIGNED') && (
+        <div className="gf-card p-3 text-sm border-l-4 border-orange-400 bg-orange-50 text-orange-900 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">ทีมงานยังไม่ครบ — ยังขาด: {crewGaps.missingTh.join(', ')}</div>
+            <div className="text-xs text-orange-700 mt-0.5">
+              กด Assign เพื่อเพิ่มคนให้ครบตามที่งานต้องการ
+              {crewGaps.freelancerCount > 0 && ` · มี freelancer ${crewGaps.freelancerCount} คนที่ระบบเช็คตำแหน่งไม่ได้ — ถ้าครอบคลุมแล้วข้ามได้`}
+            </div>
+          </div>
         </div>
       )}
 

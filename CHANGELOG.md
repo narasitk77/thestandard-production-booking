@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.107.0] — 2026-06-30
+
+### Added — เตือน "ทีมงานยังไม่ครบ" บนงาน CONFIRMED
+- งานที่ confirm แล้วบางที assign ไม่ครบ (เช่น ใส่แค่ช่างเสียง ลืมช่างวิดีโอ/ภาพ) → เพิ่ม **แถบเตือนบน /admin/[id]**: "ทีมงานยังไม่ครบ — ยังขาด: ช่างภาพ, ช่างวิดีโอ …" เพื่อให้คน assign คิวเพิ่มคนให้ถูก.
+- กลไก: `crewRequired` (ตำแหน่งที่งานต้องการ) เทียบกับตำแหน่งของคนที่ assign — resolve `assignedEmails` (เฉพาะ staff) → `User.position` → classify เป็น crew role (`crewRoleFromPosition`, src/lib/crew-gaps.ts) → role ใน crewRequired ที่ไม่มีใคร cover = "ยังขาด". Endpoint `GET /api/bookings/[id]/crew-status` (canViewBooking). โชว์เฉพาะ CONFIRMED/ASSIGNED, refresh เมื่อ assignedEmails เปลี่ยน.
+- **CEILING**: freelancer ไม่มี field ตำแหน่ง → classify ไม่ได้ → เตือนแบบ soft hint (โชว์จำนวน freelancer ที่เช็คตำแหน่งไม่ได้ "ถ้าครอบคลุมแล้วข้ามได้"). DIT/Lighting/Art Director ไม่มี staff position → ถ้าใส่ใน crewRequired จะขึ้น "ขาด" เสมอ (เป็น freelancer ล้วน). classifier ครอบคลุม Videographer/Sound/Photographer/Switcher/Virtual Production (มี staff จริง).
+- baseline: tsc 0 · 167 tests pass.
+
+---
+
 ## [1.106.0] — 2026-06-30
 
 ### Added — ช่างภาพเบิกอุปกรณ์เองได้ (crew self-requisition แบบ Cheqroom)
