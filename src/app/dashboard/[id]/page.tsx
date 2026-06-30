@@ -64,6 +64,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   // v1.50.2 — the page is reachable by anyone on the booking (the API scopes
   // reads); status actions stay console-only, so hide them for plain users.
   const [isStaff, setIsStaff] = useState(false)
+  const [canUpload, setCanUpload] = useState(false)
   const [myEmail, setMyEmail] = useState('')
   // v1.100 — per-EP "open footage on Drive" links, resolved from the EP's folder
   // path (works for footage moved from NAS into the boxes, not just uploads).
@@ -87,7 +88,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       .finally(() => setLoading(false))
     fetch('/api/me')
       .then(r => r.json())
-      .then(d => { setIsStaff(hasConsoleAccess(d?.user?.role)); setMyEmail(d?.user?.email || '') })
+      .then(d => { setIsStaff(hasConsoleAccess(d?.user?.role)); setCanUpload(!!d?.user?.canUpload); setMyEmail(d?.user?.email || '') })
       .catch(() => {})
     // best-effort, non-blocking — Drive folder links per EP (incl. NAS-moved footage)
     fetch(`/api/bookings/${id}/ep-folders`)
@@ -353,10 +354,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             <Upload className="w-4 h-4 text-gray-500" />
             <h2 className="text-sm font-medium text-gray-700">Footage Uploads ({booking.uploads.length})</h2>
           </div>
-          <Link href={`/upload?bookingId=${booking.id}`}
-            className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
-            Upload Footage
-          </Link>
+          {canUpload && (
+            <Link href={`/upload?bookingId=${booking.id}`}
+              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+              Upload Footage
+            </Link>
+          )}
         </div>
         {booking.uploads.length === 0 ? (
           <p className="text-xs text-gray-400 text-center py-4">No uploads yet.</p>

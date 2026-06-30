@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft, Trash2, Save, Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react'
 import SignaturePad, { SignaturePadHandle } from '@/app/_components/SignaturePad'
 
 const MAX_UPLOAD_BYTES = 200 * 1024
 
 export default function SignaturePage() {
+  const router = useRouter()
   const padRef = useRef<SignaturePadHandle>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [initialUrl, setInitialUrl] = useState<string | null>(null)
@@ -113,9 +114,11 @@ export default function SignaturePage() {
 
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
-      <Link href="/ot" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
-        <ArrowLeft className="w-4 h-4" /> กลับหน้า OT
-      </Link>
+      <button
+        onClick={() => { if (window.history.length > 1) router.back(); else router.push('/profile') }}
+        className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+        <ArrowLeft className="w-4 h-4" /> กลับ
+      </button>
 
       <div className="gf-header p-4 sm:p-6">
         <h1 className="text-xl sm:text-2xl font-normal text-gray-800">ลายเซ็น</h1>

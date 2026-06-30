@@ -82,7 +82,7 @@ test('tierAllows: sound-mgmt = queue only, not the console tools', () => {
   assert.equal(tierAllows('sound-mgmt', '/admin/workspace'), false)
   assert.equal(tierAllows('sound-mgmt', '/admin/routine'), false)
   assert.equal(tierAllows('sound-mgmt', '/admin/upload-review'), false)
-  assert.equal(tierAllows('sound-mgmt', '/upload'), false)
+  assert.equal(tierAllows('sound-mgmt', '/upload'), true) // sound engineers upload sound footage
 })
 
 test('tierAllows: coordinator = the booking queue + crew tools', () => {

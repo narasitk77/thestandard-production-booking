@@ -167,8 +167,8 @@ function SuccessContent() {
         <Link href="/new" className="btn-secondary flex-1 justify-center">
           New Booking
         </Link>
-        <Link href="/dashboard" className="btn-primary flex-1 justify-center">
-          View Dashboard <ArrowRight className="w-4 h-4" />
+        <Link href="/my-bookings" className="btn-primary flex-1 justify-center">
+          ดูงานของฉัน / My Bookings <ArrowRight className="w-4 h-4" />
         </Link>
       </div>
     </div>

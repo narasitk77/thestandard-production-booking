@@ -5,6 +5,34 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-30 · v1.108.1 — QA sweep: back-nav / redirect / upload-gate fixes
+
+User goal: "ตรวจทุกฟีเจอร์ + ปุ่มย้อนกลับ/redirect ต้องถูกต้อง". A 20-agent
+adversarial audit surfaced 9 real issues (6 false-positives rejected), reduced
+to 5 fixes — dominant theme: **`canUpload` (true for sound roster) diverged from
+the tier gate**, so Upload buttons shown to sound engineers everywhere bounced
+to /admin.
+
+1. **Root cause:** `ALLOW['sound-mgmt']` lacked `/upload` while
+   `getUploadAccess` returns true for the sound role (and v1.108 expects the
+   sound team to upload). Added `/upload` to `ALLOW['sound-mgmt']` (tiers.ts) +
+   updated tiers.test.ts. One line closes 4 bounce sites (admin queue,
+   my-bookings, admin/[id] card, and the divergence itself).
+2. **[HIGH] AGN draft data-loss:** BookingWizard `[projectId]` effect cleared
+   `selectedEpisodeIds` on every projectId change, including resumeDraft's
+   restore → "ทำต่อ" wiped chosen episodes. Moved the clear to the Project ID
+   `<select>` onChange (mirrors the `[outletCode]`/producerSel pattern).
+3. **Dashboard Upload link bounced producers:** gated `/dashboard/[id]` "Upload
+   Footage" link with `canUpload` (from /api/me, nested under `user`).
+4. **Booking success CTA:** "View Dashboard" → `/dashboard` (staff wall) changed
+   to `/my-bookings` (universal; the new booking lives there).
+5. **Signature back dead-end:** hardcoded `/ot` back link → `router.back()`
+   fallback `/profile`.
+
+tsc 0 · 169 tests. Build/deploy: see below.
+
+---
+
 ## 2026-06-30 · v1.108.0 — Sound staging + merge routine, producer roster re-check, DEPLOYED + VERIFIED LIVE
 
 **Sound (ทีมเสียง) → กล่องเดียวกับวิดีโอ:** Sound-crew bookings pre-create

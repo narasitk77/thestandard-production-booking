@@ -273,7 +273,9 @@ export default function BookingWizard() {
     if (!projectId) { setProjectEpisodes([]); setSelectedEpisodeIds([]); return }
     let cancelled = false
     setEpisodesLoading(true)
-    setSelectedEpisodeIds([])
+    // NOTE: do NOT clear selectedEpisodeIds here — this effect also fires on
+    // resumeDraft's projectId restore and would wipe the just-restored episodes.
+    // The genuine project-switch path (the Project ID <select> onChange) clears it.
     fetch(`/api/projects/${encodeURIComponent(projectId)}/episodes`)
       .then(r => r.ok ? r.json() : { episodes: [] })
       .then(d => { if (!cancelled) setProjectEpisodes(d.episodes || []) })
@@ -1269,7 +1271,7 @@ export default function BookingWizard() {
                       id="projectId"
                       className={`ops-input ${fieldErrors.projectId ? 'ops-input-invalid' : ''}`}
                       value={projectId}
-                      onChange={e => setProjectId(e.target.value)}
+                      onChange={e => { setProjectId(e.target.value); setSelectedEpisodeIds([]) }}
                       disabled={projectsLoading}
                       aria-invalid={!!fieldErrors.projectId}
                     >

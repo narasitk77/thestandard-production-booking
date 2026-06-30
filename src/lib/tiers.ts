@@ -51,7 +51,10 @@ const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog'
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],
-  'sound-mgmt': ['/admin'],
+  // sound engineers upload their own sound footage (getUploadAccess → true for the
+  // sound roster role; v1.108 sound-staging workflow) — the tier gate must match,
+  // else the Upload buttons shown to them everywhere bounce to /admin.
+  'sound-mgmt': ['/admin', '/upload'],
   producer: ['/producer', '/new'],
   crew: ['/upload'],
 }

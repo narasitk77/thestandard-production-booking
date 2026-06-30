@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.108.1] — 2026-06-30
+
+### Fixed — QA sweep (20-agent audit): back-nav / redirect / feature-gate correctness
+ผู้ใช้ขอ "ตรวจทุกฟีเจอร์ + ปุ่มย้อนกลับ/redirect ต้องถูกต้อง". 20-agent audit เจอ 9 จุดจริง (6 false-positive) — รวมเป็น 5 แก้:
+- **Sound engineers อัปโหลดไม่ได้ (root cause)**: `getUploadAccess` คืน true ให้ sound roster แต่ tier gate (`ALLOW['sound-mgmt']`) ไม่มี `/upload` → ปุ่ม Upload ที่โชว์ทุกที่ (admin queue, my-bookings, admin/[id] card) เด้งกลับ /admin. แก้: เพิ่ม `/upload` ใน `ALLOW['sound-mgmt']` (ตรงกับ workflow v1.108 ที่ทีมเสียงต้องอัปไฟล์เสียงเอง). ตัวเดียวปิด 4 จุดเด้ง.
+- **[HIGH] BookingWizard ลบ episode ของ AGN ตอน "ทำต่อ" (resume draft)**: effect `[projectId]` เรียก `setSelectedEpisodeIds([])` ทุกครั้งที่ projectId เปลี่ยน รวมถึงตอน resumeDraft restore → episode ที่เลือกไว้หาย. แก้: ย้ายการเคลียร์ไป Project ID `<select>` onChange (เลียนแบบ pattern `[outletCode]`/producerSel) — switch project จริงยังเคลียร์, แต่ resume ไม่โดนลบ.
+- **Dashboard "Upload Footage" link เด้ง producer**: ลิงก์โชว์ทุกคนที่เปิด /dashboard/[id] แต่ producer อัปไม่ได้ → bounce. แก้: gate ด้วย `canUpload` (จาก /api/me).
+- **Booking success "View Dashboard" → กำแพง staff-only**: CTA href `/dashboard` (staff page) เด้ง user ธรรมดา. แก้เป็น `/my-bookings` (ทุกคนเข้าได้, งานที่เพิ่งสร้างอยู่ที่นั่น).
+- **Signature page back เด้งตาย**: ปุ่ม "กลับหน้า OT" hardcode `/ot` → คนที่มาจาก /profile ติดกำแพง. แก้เป็น `router.back()` fallback `/profile`.
+- baseline: tsc 0 · 169 tests pass.
+
+---
+
 ## [1.108.0] — 2026-06-30
 
 ### Added — ทีมเสียง: Sound staging + routine merge (เข้ากล่องเดียวกับวิดีโอ)
