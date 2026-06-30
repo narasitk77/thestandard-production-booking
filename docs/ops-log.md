@@ -5,6 +5,36 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-30 · v1.108.0 — Sound staging + merge routine, producer roster re-check, DEPLOYED + VERIFIED LIVE
+
+**Sound (ทีมเสียง) → กล่องเดียวกับวิดีโอ:** Sound-crew bookings pre-create
+`<FOOTAGE_ROOT>/_SOUND-STAGING/<Production ID·job>/` (outside the video project
+folder the videographer wholesale-overwrites). Hourly `sound-merge` worker copies
+staged audio → box `AUDIO/` by Production ID (idempotent name+size, copy-only,
+self-healing). New helpers (`ensureSoundStagingFolder`/`copyFileToFolder`/
+`findChildFolder`/`listChildFolders`), `GET /api/internal/sound-merge/run`, worker
+in start.sh + heartbeat, admin "🎙️ รวมไฟล์เสียง" button + staging link on /upload.
+**20-agent review fixed 2 medium:** staging lookup by immutable Production-ID
+prefix (title-rename drift); 45-day shootDate window (unbounded re-scan). CEILING:
+AGN skipped (shared box); copy not yet file-smoke-tested (plumbing verified live:
+staging auto-created on a real Sound booking, worker runs + prefix-matches it,
+AGN/no-staging skips correct).
+
+**Producer roster re-check vs DB Outlet Booking sheet** (ops: "ปลั๊กไฟ ไปอยู่ KND,
+ขอความถูกต้อง อย่าให้เกิดอีก"): narongkorn.m KND→**NWS** (sheet Section=NEWS),
+jatuphorn.l TSS→**KND** (sheet knd/Content Creator), +karuna.m→**PM**, +aphisit.h→
+**KND** (new from sheet); วิว/แพท kept (ops). **`import-producers` now AUTHORITATIVE**
+(`producerOutlets` = seed, SET not merge) — root cause: merge-only left ปลั๊กไฟ
+stuck in KND. Verified live: KND producers = [ปู๊น, มิ้ง], ปลั๊กไฟ removed from KND,
+now in NWS.
+
+**OPS migration (calendar→Probook):** `NWS-260701-L-01` "THE WORLD DIALOGUE / Mai-Lan
+AWS" (1 Jul 7-9, สตู2, cam1/mic1/Lighting) → create→approve→assign (Thanakorn video,
+Krittapon sound, Sound@/video@ groups)→COMPLETED. calendarSyncStatus OK (event +
+guest invites sent).
+
+---
+
 ## 2026-06-30 · v1.107.0–1.107.2 — "ทีมงานยังไม่ครบ" crew-gap warning + queue filter, DEPLOYED + VERIFIED LIVE
 
 Ops: งาน CONFIRMED บางที assign ไม่ครบ (เช่นใส่แค่ช่างเสียง ลืมช่างวิดีโอ) อยากให้เตือนว่าขาดตำแหน่งไหน.
