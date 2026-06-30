@@ -40,3 +40,10 @@ test('missingCrewRoles: flags required roles no assigned staff covers', () => {
   // empty required → none
   assert.deepEqual(missingCrewRoles([], ['Videographer']), [])
 })
+
+test('missingCrewRoles: freelancer-only roles (Lighting/DIT/Art Director) never flagged', () => {
+  // these have no staff position → tracking them = constant false noise → skipped
+  assert.deepEqual(missingCrewRoles(['Lighting', 'DIT', 'Art Director'], []), [])
+  // mixed: only the staff-trackable Sound is flagged, Lighting is not
+  assert.deepEqual(missingCrewRoles(['Sound', 'Lighting'], []), ['Sound'])
+})

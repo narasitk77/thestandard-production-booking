@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.107.2] — 2026-06-30
+
+### Fixed — crew-gap warning ไม่เตือน Lighting/DIT/Art Director (false positive)
+- พบจาก verify live: "ช่างไฟ (Lighting)" ขึ้น "ขาด" เกือบทุกงาน เพราะ Lighting/DIT/Art Director **ไม่มี staff position** (เป็น freelancer ล้วน) → track ไม่ได้ → flag ตลอด = noise. แก้: `missingCrewRoles` จำกัดเฉพาะ **STAFF_TRACKABLE_ROLES** = Videographer/Sound/Photographer/Switcher/Virtual Production (role ที่มี staff จริง "ไม่มีคน assign" ถึงจะมีความหมาย). freelancer-only roles ไม่เตือน (assigner จัด freelancer เอง).
+- baseline: tsc 0 · 168 tests pass.
+
+---
+
 ## [1.107.1] — 2026-06-30
 
 ### Added — คิวงาน: filter "เฉพาะงานที่ทีมงานยังไม่ครบ" (แท็บ CONFIRMED)

@@ -1,5 +1,3 @@
-import { CREW_OPTIONS } from './data'
-
 /**
  * v1.107 — "ทีมงานยังไม่ครบ" warning. A CONFIRMED booking lists the roles it needs
  * in `crewRequired` (CREW_OPTIONS), but crew are assigned as a FLAT email list
@@ -47,15 +45,24 @@ export function crewRoleFromPosition(position?: string | null): string | null {
 }
 
 /**
- * Roles in `crewRequired` that no assigned staff position covers. Only considers
- * real CREW_OPTIONS roles; unknown/blank required entries are ignored.
+ * Roles a staff member actually holds a `User.position` for, so "no staff
+ * assigned" is a meaningful signal. Lighting / DIT / Art Director have NO staff
+ * (always booked as freelancers, who carry no position) — tracking them would
+ * flag "missing" on every such job forever, so they're left out of the warning.
+ */
+export const STAFF_TRACKABLE_ROLES = ['Videographer', 'Sound', 'Photographer', 'Switcher', 'Virtual Production']
+
+/**
+ * Roles in `crewRequired` that no assigned staff position covers. Limited to the
+ * staff-trackable roles (see above) so freelancer-only roles don't produce
+ * constant false "missing" noise. Unknown/blank required entries are ignored.
  */
 export function missingCrewRoles(crewRequired: string[] | null | undefined, assignedPositions: Array<string | null | undefined>): string[] {
   const covered = new Set(assignedPositions.map(crewRoleFromPosition).filter(Boolean) as string[])
   const seen = new Set<string>()
   const out: string[] = []
   for (const role of crewRequired || []) {
-    if (CREW_OPTIONS.includes(role) && !covered.has(role) && !seen.has(role)) {
+    if (STAFF_TRACKABLE_ROLES.includes(role) && !covered.has(role) && !seen.has(role)) {
       seen.add(role)
       out.push(role)
     }
