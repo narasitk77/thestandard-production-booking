@@ -54,6 +54,17 @@ export default function LoansPage() {
     } catch (e: any) { setError(e?.message || String(e)) } finally { setBusy(null) }
   }
 
+  // Approve a crew REQUESTED loan → ACTIVE (checks out + marks the gear ON_LOAN).
+  const checkout = async (id: string) => {
+    setBusy(id); setError('')
+    try {
+      const res = await fetch(`/api/admin/loans/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'ACTIVE' }) })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      await load()
+    } catch (e: any) { setError(e?.message || String(e)) } finally { setBusy(null) }
+  }
+
   const create = async () => {
     setSaving(true); setError('')
     try {
@@ -88,8 +99,8 @@ export default function LoansPage() {
       </div>
 
       <div className="flex items-center gap-2 mb-3 text-sm">
-        {['ACTIVE', 'RETURNED', 'all'].map((s) => (
-          <button key={s} onClick={() => setFilter(s)} className={`px-2.5 py-1 rounded border ${filter === s ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-300 hover:bg-gray-50'}`}>{s === 'all' ? 'ทั้งหมด' : s}</button>
+        {['REQUESTED', 'ACTIVE', 'RETURNED', 'all'].map((s) => (
+          <button key={s} onClick={() => setFilter(s)} className={`px-2.5 py-1 rounded border ${filter === s ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-300 hover:bg-gray-50'}`}>{s === 'all' ? 'ทั้งหมด' : s === 'REQUESTED' ? '🆕 ขอเบิก' : s}</button>
         ))}
       </div>
 
@@ -127,6 +138,11 @@ export default function LoansPage() {
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <DocsCell ownerType="loan" ownerId={l.id} initial={l.documents} />
+                    {l.status === 'REQUESTED' && (
+                      <button onClick={() => checkout(l.id)} disabled={busy === l.id} className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white disabled:opacity-50">
+                        เช็คเอาท์
+                      </button>
+                    )}
                     {l.status === 'ACTIVE' && (
                       <button onClick={() => markReturned(l.id)} disabled={busy === l.id} className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-green-300 text-green-700 rounded hover:bg-green-50 disabled:opacity-50">
                         <RotateCcw className="w-3.5 h-3.5" /> คืนแล้ว

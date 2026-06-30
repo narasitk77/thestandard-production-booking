@@ -2,6 +2,7 @@
 
 import { bookingShowName } from '@/lib/display'
 import { hasConsoleAccess } from '@/lib/roles'
+import EquipmentRequest from './EquipmentRequest'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
@@ -63,6 +64,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   // v1.50.2 — the page is reachable by anyone on the booking (the API scopes
   // reads); status actions stay console-only, so hide them for plain users.
   const [isStaff, setIsStaff] = useState(false)
+  const [myEmail, setMyEmail] = useState('')
   // v1.100 — per-EP "open footage on Drive" links, resolved from the EP's folder
   // path (works for footage moved from NAS into the boxes, not just uploads).
   const [epFolders, setEpFolders] = useState<Record<string, string | null>>({})
@@ -85,7 +87,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       .finally(() => setLoading(false))
     fetch('/api/me')
       .then(r => r.json())
-      .then(d => setIsStaff(hasConsoleAccess(d?.user?.role)))
+      .then(d => { setIsStaff(hasConsoleAccess(d?.user?.role)); setMyEmail(d?.user?.email || '') })
       .catch(() => {})
     // best-effort, non-blocking — Drive folder links per EP (incl. NAS-moved footage)
     fetch(`/api/bookings/${id}/ep-folders`)
@@ -323,6 +325,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           </div>
         </div>
       </div>
+
+      {/* Crew equipment requisition (เบิกอุปกรณ์) — gated by canViewBooking at the API */}
+      <EquipmentRequest bookingId={id} myEmail={myEmail} />
 
       {/* Calendar packet */}
       <div className="gf-card p-5">

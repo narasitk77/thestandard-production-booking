@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.106.0] — 2026-06-30
+
+### Added — ช่างภาพเบิกอุปกรณ์เองได้ (crew self-requisition แบบ Cheqroom)
+- **การ์ด "🎒 เบิกอุปกรณ์" บน /dashboard/[id]:** ช่างภาพ/ทีมงานที่อยู่ในงาน เปิดการ์ดในหน้างานของตัวเอง → ค้นหา/กรองตามหมวด (กล้อง/เลนส์/เสียง/ไฟ/กริป/แบต/สตอเรจ) → ติ๊กเลือกอุปกรณ์ที่ "พร้อมใช้" → ส่งคำขอเบิก. เห็นสถานะคำขอของตัวเอง (รออนุมัติ/เบิกแล้ว/คืนแล้ว) + ยกเลิกคำขอที่ยัง "รออนุมัติ" ของตัวเองได้.
+- **API `/api/bookings/[id]/equipment-request`** (GET/POST/DELETE) gate ด้วย `canViewBooking` — เบิกได้เฉพาะงานที่ตัวเองอยู่ (console/ผู้สร้าง/โปรดิวเซอร์/ทีมที่ถูก assign). POST สร้าง `EquipmentLoan` สถานะใหม่ **REQUESTED** (ไม่ล็อกอุปกรณ์ — รอผู้ดูแลเช็คเอาท์). availability guard: เลือกได้เฉพาะ loanable + AVAILABLE. DELETE ยกเลิกได้เฉพาะคำขอ REQUESTED ของตัวเอง.
+- **`LoanStatus` += `REQUESTED`** — เฉพาะ `ACTIVE` เท่านั้นที่ทำให้อุปกรณ์เป็น ON_LOAN (reconcileEquipmentStatus คีย์ที่ ACTIVE) → คำขอที่ยังไม่อนุมัติไม่ไปกันอุปกรณ์.
+- **/admin/loans:** tab "🆕 ขอเบิก" + ปุ่ม "เช็คเอาท์" (REQUESTED→ACTIVE = ผูกอุปกรณ์ ON_LOAN ให้อัตโนมัติ). badge REQUESTED = "ขอเบิก".
+- **Checkout conflict guard:** เช็คเอาท์ (→ACTIVE) re-validate ว่าอุปกรณ์ชิ้นนั้นไม่ได้ถูกเช็คเอาท์ใน loan ACTIVE อื่นอยู่ → ถ้าชนคืน error ชื่ออุปกรณ์ (กันสองคนถืออุปกรณ์ชิ้นเดียวกันเงียบๆ).
+- Pre-deploy review (2 มิติ: permission/inventory + UI/crash/build) = 0 blockers. 2 non-blocker: soft double-checkout (กันด้วย guard ข้างบนแล้ว), เบิกบน booking ที่ถูกยกเลิก (policy gap, ผู้ดูแลเห็นในคิว). tsc 0 · 164 tests · build ✓.
+
+---
+
 ## [1.105.4] — 2026-06-30
 
 ### Fixed — correctness audit (9-agent find→verify ของฟีเจอร์วันนี้) เจอ 3 จุด (low) แก้ครบ

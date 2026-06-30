@@ -43,6 +43,18 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (Object.keys(data).length === 0) return NextResponse.json({ error: 'No editable fields' }, { status: 400 })
 
     const loan = await prisma.$transaction(async (tx) => {
+      // Checking out (→ACTIVE)? Re-assert none of this loan's units is already
+      // held by ANOTHER active loan — turns a silent double-claim into a 409.
+      if (data.status === 'ACTIVE' && before.status !== 'ACTIVE') {
+        const ids = await loanEquipmentIds(tx, params.id)
+        if (ids.length) {
+          const clash = await tx.equipmentLoanItem.findFirst({
+            where: { equipmentId: { in: ids }, loanId: { not: params.id }, loan: { status: 'ACTIVE' } },
+            select: { nameSnapshot: true },
+          })
+          if (clash) throw new Error(`อุปกรณ์ถูกเช็คเอาท์ไปแล้วในงานอื่น: ${clash.nameSnapshot}`)
+        }
+      }
       const updated = await tx.equipmentLoan.update({ where: { id: params.id }, data, include: { items: true } })
       // Loan active-ness may have flipped (return or un-return) — re-derive the
       // linked gear's status instead of blindly freeing it.
