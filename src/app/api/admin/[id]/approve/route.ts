@@ -6,8 +6,8 @@ import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
-import { ensureShootCameraFolders, ensurePhotoAlbumFolder, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking } from '@/lib/outlet-folders'
+import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 
@@ -132,6 +132,22 @@ export async function POST(
         })
       } catch (e: any) {
         console.error('[approve] Drive pre-create failed (non-fatal):', e?.message || e)
+      }
+    })()
+
+    // 1c) v1.108 — Sound team drops audio DIRECT into a staging tree OUTSIDE the
+    //     video project folder (so the videographer's wholesale folder overwrite
+    //     can't wipe it); the sound-merge routine folds it into the box AUDIO.
+    //     Best-effort, additive to the video box. Only for Sound-crew bookings.
+    ;(async () => {
+      if (!updated.bookingCode || !hasDriveCredentials() || !bookingNeedsSound(updated.crewRequired)) return
+      const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+      if (!root) return
+      try {
+        const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
+        await ensureSoundStagingFolder({ rootFolderId: root, bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName) })
+      } catch (e: any) {
+        console.error('[approve] sound staging pre-create failed (non-fatal):', e?.message || e)
       }
     })()
 

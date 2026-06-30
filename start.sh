@@ -356,5 +356,16 @@ echo "==> Starting prep-folders worker (supervised)..."
   done
 ) &
 
+# v1.108 — sound-merge worker. ON BY DEFAULT (idempotent + copy-only: folds staged
+# audio into each booking's video box AUDIO). Set SOUND_MERGE_WORKER_ENABLED=0 to disable.
+echo "==> Starting sound-merge worker (supervised)..."
+(
+  while true; do
+    node scripts/sound-merge-worker.js
+    echo "[sound-merge] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start

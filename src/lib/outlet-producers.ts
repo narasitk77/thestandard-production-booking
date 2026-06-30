@@ -24,7 +24,8 @@ export interface OutletProducerSeed {
 }
 
 export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
-  { employeeId: 'TSD00171', thaiName: 'นางสาวจตุพร ลัมยศ',        nickname: 'มิ้ง',  email: 'jatuphorn.l@thestandard.co', outlet: 'TSS', role: 'Co-Producer', position: 'Co-Producer' },
+  // v1.108 — มิ้ง: sheet Section = knd / Content Creator → KND Producer (corrected from TSS Co-Producer).
+  { employeeId: 'TSD00171', thaiName: 'นางสาวจตุพร ลัมยศ',        nickname: 'มิ้ง',  email: 'jatuphorn.l@thestandard.co', outlet: 'KND', role: 'Producer',    position: 'Content Creator' },
   { employeeId: 'TSD00301', thaiName: 'นางสาวอิงตะวัน สุวรรณสุภา', nickname: 'แพร',   email: 'ingtawan.s@thestandard.co',  outlet: 'TSS', role: 'Producer',    position: 'Producer' },
   { employeeId: 'TSD00236', thaiName: 'นางสาวชุติกาญจน์ ปิยะมังคลา', nickname: 'ขิม',  email: 'chutikarn.p@thestandard.co', outlet: 'POP', role: 'Producer',    position: 'Producer' },
   { employeeId: 'TSD00273', thaiName: 'นางสาวธัญศิริ ลิ่มสถาพร',   nickname: 'มีน',   email: 'thansiri.l@thestandard.co',  outlet: 'LIF', role: 'Producer',    position: 'Producer' },
@@ -64,6 +65,9 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   { employeeId: 'TSD00298', thaiName: 'นางสาววรปรีย์ คร้ามสมอ',  nickname: 'มะเหมี่ยว', email: 'worrapree.k@thestandard.co',   outlet: 'PM', role: 'Co-Producer', position: 'Project Coordinator' },
   // v1.99.2 — News producer แพท (sheet title "Project Coordinator"; added as Producer per ops request 2026-06-26).
   { employeeId: 'TSD00056', thaiName: 'นางสาวภาวิกา ขันติศรีสกุล', nickname: 'แพท',    email: 'phawika.k@thestandard.co',    outlet: 'NWS', role: 'Producer',    position: 'Producer' },
-  // v1.105.1 — KND producer ปลั๊กไฟ (sheet: International News / Content Creator; added to outlet KND per ops request 2026-06-30).
-  { employeeId: 'TSD00016', thaiName: 'นายณรงค์กร มโนจันทร์เพ็ญ',  nickname: 'ปลั๊กไฟ', email: 'narongkorn.m@thestandard.co', outlet: 'KND', role: 'Producer',    position: 'Content Creator' },
+  // v1.108 — ปลั๊กไฟ: sheet Section = NEWS → NWS (corrected from KND; KND was a 2026-06-30 mis-assignment).
+  { employeeId: 'TSD00016', thaiName: 'นายณรงค์กร มโนจันทร์เพ็ญ',  nickname: 'ปลั๊กไฟ', email: 'narongkorn.m@thestandard.co', outlet: 'NWS', role: 'Producer',    position: 'Content Creator' },
+  // v1.108 — added from sheet (per ops re-check 2026-06-30): ขวัญ (CEO Office, ทำหน้าที่ PM) → PM; ปู๊น (knd) → KND.
+  { employeeId: 'TSD00325', thaiName: 'นางสาวกรุณา มาตี๋',         nickname: 'ขวัญ',   email: 'karuna.m@thestandard.co',     outlet: 'PM',  role: 'Producer',    position: 'Project Manager' },
+  { employeeId: 'TSD00033', thaiName: 'นายอภิสิทธิ์ หรรษาภิรมย์โชค', nickname: 'ปู๊น',   email: 'aphisit.h@thestandard.co',    outlet: 'KND', role: 'Producer',    position: 'Assistant to KND Manager' },
 ]

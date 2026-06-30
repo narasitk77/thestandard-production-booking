@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.108.0] — 2026-06-30
+
+### Added — ทีมเสียง: Sound staging + routine merge (เข้ากล่องเดียวกับวิดีโอ)
+- งานที่ `crewRequired` มี **Sound** → ระบบ pre-create โฟลเดอร์ **staging** `<FOOTAGE_ROOT>/_SOUND-STAGING/<Production ID · job>/` (อยู่นอกโฟลเดอร์โปรเจควิดีโอ → ไม่โดน overwrite ของช่างภาพ). ทีมเสียงลงไฟล์ **direct** ที่นี่ (ลิงก์โผล่บนการ์ด Detect ใน /upload).
+- **routine `sound-merge`** (worker รายชั่วโมง, ON by default, supervised ใน start.sh + heartbeat): ก๊อปไฟล์เสียงจาก staging → โฟลเดอร์ `AUDIO/` ในกล่องวิดีโอ ตาม Production ID. idempotent (dedup ชื่อ+ขนาด), copy-only (staging เป็น master), self-healing (ถ้ากล่องโดน re-overwrite รอบหน้าก๊อปกลับ). endpoint `GET /api/internal/sound-merge/run` (+dryRun) + ปุ่ม admin "🎙️ รวมไฟล์เสียง".
+- helpers: `ensureSoundStagingFolder`, `copyFileToFolder`, `findChildFolder`, `listChildFolders` (google-drive.ts); `bookingNeedsSound` (outlet-folders.ts); branch ที่ approve + prep worker (additive).
+- **Pre-deploy review (20 agents) แก้ 2 medium**: (1) staging lookup เปลี่ยนเป็น match ด้วย Production-ID prefix (กัน title rename หลัง approve ทำให้หาโฟลเดอร์ไม่เจอ); (2) bound query ที่ shootDate ≤ 45 วัน (กัน worker scan ทุก booking ในประวัติทุกชั่วโมง). **CEILING**: AGN ข้าม (project box ใช้ร่วม); box resolution ยัง drift ตาม title เหมือน detect (pre-existing).
+
+### Fixed — โปรดิวเซอร์ผู้มีสิทธิ์จอง: re-check ทั้งหมดเทียบชีต (DB Outlet Booking)
+- **ปลั๊กไฟ (narongkorn.m): KND → NWS** (ชีต Section = NEWS; KND เป็น mis-assignment 2026-06-30). **มิ้ง (jatuphorn.l): TSS → KND** (ชีต knd/Content Creator). **+ ขวัญ (karuna.m) → PM, + ปู๊น (aphisit.h) → KND** (คนใหม่จากชีต). วิว/แพท คงเดิม (ops decision).
+- **`import-producers` เปลี่ยนเป็น authoritative**: `producerOutlets` = seed outlet (SET ไม่ใช่ merge) → ย้าย outlet ใน seed แล้ว stale tag หายจริง (เดิม merge-only ทำให้ ปลั๊กไฟ ค้าง KND). **อย่าให้เกิดอีก** = seed เป็นแหล่งความจริงของ outlet membership.
+- baseline: tsc 0 · 169 tests pass.
+
+---
+
 ## [1.107.2] — 2026-06-30
 
 ### Fixed — crew-gap warning ไม่เตือน Lighting/DIT/Art Director (false positive)

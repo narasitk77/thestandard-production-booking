@@ -23,11 +23,11 @@ test('Event (EVT) + PM outlets exist with a multi-char program (so the form drop
   }
 })
 
-test('the 17 Event + PM team members are seeded and tagged to EVT/PM', () => {
+test('the Event + PM team members are seeded and tagged to EVT/PM', () => {
   const evt = OUTLET_PRODUCERS.filter(p => p.outlet === 'EVT')
   const pm = OUTLET_PRODUCERS.filter(p => p.outlet === 'PM')
   assert.equal(evt.length, 7, 'Event team should have 7 members')
-  assert.equal(pm.length, 10, 'PM team should have 10 members')
+  assert.equal(pm.length, 11, 'PM team should have 11 members (v1.108 +ขวัญ)')
   // emails are unique across the whole seed (the import upserts by email)
   const emails = OUTLET_PRODUCERS.map(p => p.email.toLowerCase())
   assert.equal(new Set(emails).size, emails.length, 'duplicate producer email in seed')

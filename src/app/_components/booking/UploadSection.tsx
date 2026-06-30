@@ -166,10 +166,11 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [scanMsg, setScanMsg] = useState<string | null>(null)
+  const [mergingSound, setMergingSound] = useState(false)
   // v1.101 — "Detect": scan THIS booking's Drive folders for footage (incl. files
   // moved from NAS into the boxes, which have no Upload row).
   const [detecting, setDetecting] = useState(false)
-  const [detected, setDetected] = useState<{ found: number; fileCount?: number; folders: Array<{ label: string; url: string; fileCount: number; totalBytes: number }>; bookingFolderUrl: string | null; error?: string } | null>(null)
+  const [detected, setDetected] = useState<{ found: number; fileCount?: number; folders: Array<{ label: string; url: string; fileCount: number; totalBytes: number }>; bookingFolderUrl: string | null; soundStagingUrl?: string | null; error?: string } | null>(null)
   // v1.102.4 — "แจ้งทุกคนว่าไฟล์พร้อม"
   const [notifying, setNotifying] = useState(false)
   const [notifyMsg, setNotifyMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -244,6 +245,25 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       setScanMsg(e?.message || 'สแกนไม่สำเร็จ')
     } finally {
       setScanning(false)
+    }
+  }
+
+  // v1.108 — admin: fold staged audio into the box AUDIO folders now (the hourly
+  // sound-merge worker does this automatically; this is the on-demand trigger).
+  const triggerSoundMerge = async () => {
+    setMergingSound(true)
+    setScanMsg(null)
+    try {
+      const r = await fetch('/api/internal/sound-merge/run', { credentials: 'include' })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) setScanMsg(d.error || `รวมเสียงไม่สำเร็จ (HTTP ${r.status})`)
+      else if (d.skipped) setScanMsg(`รวมเสียงยังไม่ทำงาน: ${d.reason || 'ตั้งค่ายังไม่ครบ'}`)
+      else setScanMsg(`รวมเสียง: ${d.bookings ?? 0} งาน · staged ${d.staged ?? 0} ไฟล์ · ก๊อปเข้ากล่อง ${d.merged ?? 0} · error ${d.errors ?? 0}`)
+      detectFootage()
+    } catch (e: any) {
+      setScanMsg(e?.message || 'รวมเสียงไม่สำเร็จ')
+    } finally {
+      setMergingSound(false)
     }
   }
 
@@ -545,6 +565,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังตรวจหาโฟลเดอร์ footage บน Drive…
           </div>
         )}
+        {detected?.soundStagingUrl && (
+          <div className="text-[11px] bg-green-50 border border-green-200 rounded p-2 text-green-900 flex items-center gap-2 flex-wrap">
+            🎙️ <span className="flex-1">ทีมเสียง: ลงไฟล์เสียงที่โฟลเดอร์นี้ (ลากไฟล์ใส่ได้เลย) — ระบบจะรวมเข้ากล่องงานให้อัตโนมัติทุกชั่วโมง</span>
+            <a href={detected.soundStagingUrl} target="_blank" rel="noreferrer" className="underline font-medium whitespace-nowrap">เปิดโฟลเดอร์เสียง ↗</a>
+          </div>
+        )}
         {detected && (
           detected.error ? (
             <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-2">{detected.error}</div>
@@ -717,6 +743,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
               <button onClick={triggerScan} disabled={scanning} title="สแกน Drive หา footage แล้ว match กับ booking ตาม Production ID (ทั้งระบบ)"
                 className="text-xs px-2 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-purple-50 inline-flex items-center gap-1 disabled:opacity-50">
                 {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} สแกนหา footage
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={triggerSoundMerge} disabled={mergingSound} title="รวมไฟล์เสียงจาก staging เข้าโฟลเดอร์ AUDIO ในกล่อง ตาม Production ID (ทั้งระบบ)"
+                className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50 inline-flex items-center gap-1 disabled:opacity-50">
+                {mergingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>🎙️</span>} รวมไฟล์เสียง
               </button>
             )}
             <button onClick={fetchHistory} disabled={historyLoading}

@@ -8,7 +8,7 @@
  * moving, no _SHOOT.txt — approve handles that).
  */
 import { prisma } from '@/lib/db'
-import { ensureShootCameraFolders, ensureFlatShootFolders, ensurePhotoAlbumFolder, hasDriveCredentials } from '@/lib/google-drive'
+import { ensureShootCameraFolders, ensureFlatShootFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
   shootFolderLayers,
@@ -17,6 +17,7 @@ import {
   camerasToPreCreate,
   hasOutletFolderMapping,
   isPhotoAlbumBooking,
+  bookingNeedsSound,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 
@@ -64,7 +65,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     },
     select: {
       id: true, bookingCode: true, cameraCount: true, micCount: true,
-      projectId: true, projectName: true, category: true,
+      projectId: true, projectName: true, category: true, crewRequired: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
@@ -78,6 +79,12 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
 
   for (const b of bookings) {
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+    // v1.108 — Sound-crew bookings: keep a staging tree outside the video project
+    // folder (additive, best-effort, in addition to whatever video/photo prep runs).
+    if (!opts.dryRun && bookingNeedsSound(b.crewRequired)) {
+      try { await ensureSoundStagingFolder({ rootFolderId: root, bookingFolderName: buildBookingFolderName(b.bookingCode!, jobName) }) }
+      catch (e: any) { console.error('[prep] sound staging failed (non-fatal):', b.bookingCode, e?.message || e) }
+    }
     // v1.102.8 — Photo album jobs → one flat folder in the Photographer Shared
     // Drive (not VIDEO 2026). Handled before the outlet-mapping / camera checks
     // (those are video-only). Idempotent with the approve route's pre-create.

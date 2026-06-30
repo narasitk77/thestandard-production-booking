@@ -14,9 +14,12 @@ export const dynamic = 'force-dynamic'
  * an account to sign into and (b) appear in the per-outlet Producer dropdowns
  * (GET /api/producers). Idempotent: re-run anytime after editing the seed.
  *
- * For an existing user we merge the outlet into producerOutlets (never drop
- * outlets they already had) and fill nickname/thaiName/employeeId/position;
- * role and active are left untouched so we never demote or disable anyone.
+ * v1.108 — the seed is AUTHORITATIVE for outlet membership: an existing user's
+ * producerOutlets is SET to exactly the seed outlet (not merged), so moving a
+ * person between outlets in the seed actually removes the old tag on re-run
+ * (a merge-only import left stale tags — e.g. ปลั๊กไฟ stuck in KND). nickname/
+ * thaiName/employeeId/position are filled; role and active are left untouched
+ * so we never demote or disable anyone.
  */
 export async function POST() {
   const session = await requireAdmin()
@@ -31,10 +34,9 @@ export async function POST() {
     const outletTag = p.role === 'Other' ? [] : [p.outlet]
     const existing = await prisma.user.findUnique({
       where: { email },
-      select: { id: true, producerOutlets: true },
+      select: { id: true },
     })
     if (existing) {
-      const outlets = Array.from(new Set([...(existing.producerOutlets || []), ...outletTag]))
       await prisma.user.update({
         where: { id: existing.id },
         data: {
@@ -42,7 +44,7 @@ export async function POST() {
           nickname: p.nickname,
           employeeId: p.employeeId,
           position: p.position,
-          producerOutlets: outlets,
+          producerOutlets: outletTag, // authoritative — seed defines the outlet(s); stale tags removed
         },
       })
       updated++

@@ -27,6 +27,9 @@ export function workerSpecs(): WorkerSpec[] {
       intervalMs: posInt(process.env.REMINDERS_WORKER_INTERVAL_MS, 24 * HOUR) },
     { key: 'footage', label: 'Footage sync', enabled: enabled(process.env.FOOTAGE_WORKER_ENABLED),
       intervalMs: posInt(process.env.FOOTAGE_WORKER_INTERVAL_MS, 10 * MINUTE) },
+    // v1.108 — sound-merge is ON by default (off only when explicitly disabled).
+    { key: 'sound-merge', label: 'Sound merge', enabled: !['0', 'false', 'no'].includes(String(process.env.SOUND_MERGE_WORKER_ENABLED || '').toLowerCase()),
+      intervalMs: posInt(process.env.SOUND_MERGE_INTERVAL_MS, HOUR) },
     { key: 'backup', label: 'DB backup', enabled: enabled(process.env.BACKUP_WORKER_ENABLED),
       intervalMs: posInt(process.env.BACKUP_INTERVAL_MS, 24 * HOUR) },
   ]

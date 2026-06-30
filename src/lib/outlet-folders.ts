@@ -222,6 +222,15 @@ export function isPhotoAlbumBooking(episodes: Array<{ program?: { code?: string 
 }
 
 /**
+ * v1.108 — a booking that the Sound team works on (`crewRequired` includes 'Sound').
+ * Such bookings get a Sound staging folder pre-created; the sound-merge routine
+ * later folds their audio into the video box.
+ */
+export function bookingNeedsSound(crewRequired?: string[] | null): boolean {
+  return (crewRequired || []).some(r => r === 'Sound')
+}
+
+/**
  * v1.94 — the two folder layers between `<NN · Outlet>` and the EP folders.
  * They differ by outlet kind:
  *   Content Agency (AGN): footage is organised by category → PROJECT. The

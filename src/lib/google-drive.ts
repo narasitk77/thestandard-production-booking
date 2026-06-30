@@ -551,6 +551,65 @@ export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string;
 }
 
 /**
+ * v1.108 — "Sound staging": where the sound team drops audio DIRECT, kept OUTSIDE
+ * the per-booking video project folder so the videographer's wholesale folder
+ * overwrite (HDD→Production Team mirror) can never delete it. A top-level tree
+ * under the VIDEO 2026 footage root: `<FOOTAGE_ROOT>/_SOUND-STAGING/<Production ID · job>/`.
+ * The sound-merge routine then copies these into the box's AUDIO folder.
+ */
+export const SOUND_STAGING_DIR = '_SOUND-STAGING'
+
+export async function ensureSoundStagingFolder(input: { rootFolderId: string; bookingFolderName: string; subject?: string }): Promise<{ stagingFolderId: string }> {
+  const stagingFolderId = await ensureFolderPath(input.rootFolderId, [SOUND_STAGING_DIR, input.bookingFolderName])
+  return { stagingFolderId }
+}
+
+/** Read-only: all direct child folders (id + name), paginated. */
+export async function listChildFolders(parentId: string): Promise<Array<{ id: string; name: string }>> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const out: Array<{ id: string; name: string }> = []
+  let pageToken: string | undefined
+  do {
+    const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`,
+      fields: 'nextPageToken, files(id, name)', pageSize: 1000, pageToken,
+      supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+    })
+    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name })
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return out
+}
+
+/** Read-only: id of a direct child folder by exact name, or null. */
+export async function findChildFolder(parentId: string, name: string): Promise<string | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const safeName = name.replace(/'/g, "\\'")
+  const res = await drive.files.list({
+    q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}' and name = '${safeName}'`,
+    fields: 'files(id, name)', pageSize: 5,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+  })
+  return res.data.files?.[0]?.id ?? null
+}
+
+/**
+ * v1.108 — copy one Drive file into `targetFolderId` (works across Shared Drives).
+ * Used by the sound-merge routine to assemble audio into the video box.
+ */
+export async function copyFileToFolder(fileId: string, targetFolderId: string, name?: string, subject?: string): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
+  const res = await drive.files.copy({
+    fileId,
+    requestBody: { parents: [targetFolderId], ...(name ? { name } : {}) },
+    fields: 'id',
+    supportsAllDrives: true,
+  })
+  if (!res.data.id) throw new Error(`Drive copy returned no id for file ${fileId}`)
+  return res.data.id
+}
+
+/**
  * v1.88 — flat variant: <root>/<bookingFolderName>/<camera>/ with no
  * outlet/program layer. Used to pre-create the shoot folder in the "Production
  * Team" landing Shared Drive (where the NAS syncs footage) named by Production
