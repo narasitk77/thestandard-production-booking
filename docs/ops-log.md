@@ -5,6 +5,20 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-06-30 · v1.106.0 — crew self-requisition of equipment (Cheqroom-style)
+
+Photographers/crew can now requisition gear for their own bookings. New card "🎒 เบิกอุปกรณ์"
+on /dashboard/[id] (canViewBooking-gated): search/filter the AVAILABLE+loanable catalog, tick
+items, submit → creates a REQUESTED EquipmentLoan. LoanStatus gained REQUESTED — it does NOT
+lock the unit (reconcileEquipmentStatus keys on ACTIVE only); the gear manager checks it out
+in /admin/loans (new "🆕 ขอเบิก" tab + "เช็คเอาท์" button) which flips it ACTIVE → ON_LOAN.
+Checkout re-validates the unit isn't already on another ACTIVE loan (409-style guard) to stop
+silent double-claims. Crew can cancel their own still-REQUESTED request. Pre-deploy 2-dim
+review = 0 blockers. tsc 0 · 164 tests · next build ✓. Deploy: Portainer stack 125, IMAGE_TAG
+→ sha-<filled after build>.
+
+---
+
 ## 2026-06-30 · v1.105.4 — correctness audit fixes (3 low bugs across today's features)
 
 9-agent find→verify audit of everything shipped today (v1.103–1.105). 3 confirmed (all

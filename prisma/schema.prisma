@@ -476,6 +476,7 @@ enum EquipmentStatus {
 }
 
 enum LoanStatus {
+  REQUESTED  // crew self-requested gear for their booking — awaits gear-manager checkout (does NOT lock the unit; only ACTIVE does)
   ACTIVE
   RETURNED
 }

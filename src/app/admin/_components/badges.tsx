@@ -26,6 +26,7 @@ export const EQUIP_STATUS: BadgeMap = {
 }
 
 export const LOAN_STATUS: BadgeMap = {
+  REQUESTED: { th: 'ขอเบิก', c: C.blue },
   ACTIVE: { th: 'ยืมอยู่', c: C.amber },
   RETURNED: { th: 'คืนแล้ว', c: C.gray },
   OVERDUE: { th: 'เกินกำหนด', c: C.red }, // derived (ACTIVE + dueDate < today)
