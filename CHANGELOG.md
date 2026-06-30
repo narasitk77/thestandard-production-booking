@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.107.1] — 2026-06-30
+
+### Added — คิวงาน: filter "เฉพาะงานที่ทีมงานยังไม่ครบ" (แท็บ CONFIRMED)
+- บนแท็บ **CONFIRMED** ของ /admin เพิ่ม toggle **"🚨 เฉพาะงานที่ทีมงานยังไม่ครบ (N งาน)"** + **badge "⚠️ ขาด: ช่างภาพ, …"** บนการ์ดงานที่ทีมไม่ครบ → คน assign เห็นทั้งหมดในที่เดียว ไม่ต้องเปิดทีละงาน.
+- Endpoint `GET /api/bookings/crew-gaps` (requireConsole) — batch resolve ตำแหน่งของคนที่ assign ทุกงาน CONFIRMED/ASSIGNED ใน query เดียว แล้วคืน map `{bookingId: {missing, missingTh}}` เฉพาะงานที่ขาด. โหลดเฉพาะตอนอยู่แท็บ CONFIRMED, reset filter เมื่อออกจากแท็บ. ใช้ logic เดียวกับ v1.107.0 (`missingCrewRoles`).
+- baseline: tsc 0 · 167 tests pass.
+
+---
+
 ## [1.107.0] — 2026-06-30
 
 ### Added — เตือน "ทีมงานยังไม่ครบ" บนงาน CONFIRMED

@@ -56,6 +56,9 @@ export default function AdminPage() {
   // jobs that need sound/mics; everyone else can toggle it.
   const [tier, setTier] = useState<Tier>('crew')
   const [soundOnly, setSoundOnly] = useState(false)
+  // v1.107 — CONFIRMED tab: spot jobs whose crew isn't fully assigned yet.
+  const [crewGaps, setCrewGaps] = useState<Record<string, { missing: string[]; missingTh: string[] }>>({})
+  const [crewIncompleteOnly, setCrewIncompleteOnly] = useState(false)
   // v1.105.3 — filter the queue by shoot month + sort by date (default earliest→latest).
   const [monthFilter, setMonthFilter] = useState('all') // 'all' | 'YYYY-MM'
   const [sortAsc, setSortAsc] = useState(true)
@@ -79,6 +82,7 @@ export default function AdminPage() {
   // Then filter by selected month and sort by shoot date (default earliest first).
   const visibleBookings = (() => {
     let list = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
+    if (crewIncompleteOnly) list = list.filter(b => crewGaps[b.id])
     if (monthFilter !== 'all') list = list.filter(b => (b.shootDate || '').slice(0, 7) === monthFilter)
     return [...list].sort((a, b) => {
       const cmp = (a.shootDate || '').localeCompare(b.shootDate || '')
@@ -123,6 +127,17 @@ export default function AdminPage() {
   useEffect(() => { fetch_() }, [fetch_])
   // Switching status tab → reset the month filter (months differ per tab).
   useEffect(() => { setMonthFilter('all') }, [filter])
+  // v1.107 — load crew-gap map only on the CONFIRMED tab (where assignment matters);
+  // reset the "incomplete only" filter when leaving the tab.
+  useEffect(() => {
+    if (filter !== 'CONFIRMED') { setCrewGaps({}); setCrewIncompleteOnly(false); return }
+    let cancelled = false
+    fetch('/api/bookings/crew-gaps')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d) setCrewGaps(d.gaps || {}) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [filter, bookings])
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
@@ -229,6 +244,15 @@ export default function AdminPage() {
         {tier === 'sound-mgmt' && <span className="text-[10px] text-amber-700">(ล็อกสำหรับทีมเสียง)</span>}
       </label>
 
+      {/* v1.107 — CONFIRMED tab only: filter to jobs whose crew isn't fully assigned */}
+      {filter === 'CONFIRMED' && (
+        <label className="flex items-center gap-2 mb-4 -mt-2 text-sm text-gray-600 w-fit cursor-pointer">
+          <input type="checkbox" checked={crewIncompleteOnly} onChange={e => setCrewIncompleteOnly(e.target.checked)} className="accent-orange-500" />
+          🚨 เฉพาะงานที่ทีมงานยังไม่ครบ
+          <span className="text-[10px] text-orange-700">({Object.keys(crewGaps).length} งาน)</span>
+        </label>
+      )}
+
       {/* v1.105.3 — month filter tabs (ascending) + sort toggle */}
       {!showingDeleted && months.length > 0 && (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -256,7 +280,7 @@ export default function AdminPage() {
         <div className="py-16 text-center text-gray-400 text-sm">Loading…</div>
       ) : visibleBookings.length === 0 ? (
         <div className="py-16 text-center text-gray-400 text-sm">
-          {soundOnly ? 'ไม่มีงานที่ต้องการเสียง/ไมค์ในแท็บนี้' : `No ${filter || ''} bookings.`}
+          {crewIncompleteOnly ? '🎉 งาน CONFIRMED ทุกงานทีมครบแล้ว' : soundOnly ? 'ไม่มีงานที่ต้องการเสียง/ไมค์ในแท็บนี้' : `No ${filter || ''} bookings.`}
         </div>
       ) : (
         <>
@@ -298,6 +322,11 @@ export default function AdminPage() {
                       {formatDisplayDate(b.shootDate)} · {b.callTime}
                     </span>
                     <span className="text-xs text-gray-400">· 📝 ขอเมื่อ {formatDisplayDate(b.createdAt)}</span>
+                    {crewGaps[b.id] && (
+                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-200 font-medium">
+                        ⚠️ ขาด: {crewGaps[b.id].missingTh.join(', ')}
+                      </span>
+                    )}
                   </div>
                   <div className="font-medium text-gray-800 text-sm sm:text-base">
                     {b.outlet.name} · {bookingShowName(b)}
