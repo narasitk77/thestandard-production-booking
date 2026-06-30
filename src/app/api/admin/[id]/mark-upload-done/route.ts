@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { assessCompleteness } from '@/lib/upload-completeness'
+import { isShootOver } from '@/lib/booking-complete'
 import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -58,6 +59,16 @@ export async function POST(
       return NextResponse.json({
         error: `Cannot mark a ${booking.status} booking as Done — only CONFIRMED bookings can be reviewed`,
         code: 'BAD_BOOKING_STATUS',
+      }, { status: 400 })
+    }
+
+    // Guard: never close a booking before its shoot day ends (Bangkok time).
+    // Same rule as the auto-completer — keeps an early footage upload + review
+    // from flipping a future booking to COMPLETED before it's even been shot.
+    if (!isShootOver(booking)) {
+      return NextResponse.json({
+        error: 'ยังถ่ายไม่เสร็จ — ปิดงาน (COMPLETED) ก่อนจบวันถ่ายไม่ได้',
+        code: 'SHOOT_NOT_OVER',
       }, { status: 400 })
     }
 

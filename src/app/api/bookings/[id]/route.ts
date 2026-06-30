@@ -7,6 +7,7 @@ import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-ca
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
+import { isShootOver } from '@/lib/booking-complete'
 import { logAudit, diffBooking } from '@/lib/audit'
 import type { BookingStatus } from '@prisma/client'
 
@@ -146,6 +147,15 @@ export async function PATCH(
       } catch (e: any) {
         return NextResponse.json(
           { error: e?.message || 'Invalid status transition' },
+          { status: 400 },
+        )
+      }
+      // Guard: a booking can only be COMPLETED once its shoot day has ended
+      // (Bangkok time) — same rule as the auto-completer. Stops an accidental
+      // "Mark Complete" from closing a future booking before it's been shot.
+      if (status === 'COMPLETED' && !isShootOver(existing)) {
+        return NextResponse.json(
+          { error: 'ยังถ่ายไม่เสร็จ — ปิดงาน (COMPLETED) ก่อนจบวันถ่ายไม่ได้', code: 'SHOOT_NOT_OVER' },
           { status: 400 },
         )
       }
