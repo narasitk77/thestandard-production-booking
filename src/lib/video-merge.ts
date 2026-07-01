@@ -51,7 +51,7 @@ type Stats = { seen: number; moved: number; dup: number; err: number }
  * subtree. `destId` is null only in a dryRun where the box subfolder doesn't
  * exist yet (then dedup is skipped and everything counts as would-move).
  */
-async function mirrorMove(srcId: string, destId: string | null, code: string, stats: Stats, dryRun: boolean): Promise<void> {
+export async function mirrorMove(srcId: string, destId: string | null, code: string, stats: Stats, dryRun: boolean): Promise<void> {
   const files = (await listFilesInFolder(srcId)).filter(f => !isShootInfo(f.name))
   if (files.length) {
     const have = destId
@@ -139,4 +139,66 @@ export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<Vi
   }
 
   return { skipped: false, ...base }
+}
+
+// ── Per-booking variant (v1.111) ────────────────────────────────────────────
+// The upload page needs to merge ONE booking fast (the system-wide runVideoMerge
+// walks ~110 bookings and blows past the 60s reverse-proxy timeout, so the UI
+// reported failure even though the user only cared about one job). Same logic as
+// the loop body above, scoped to a single booking.
+
+export interface VideoMergeBooking {
+  bookingCode: string | null
+  projectId: string | null
+  projectName: string | null
+  category: string | null
+  outlet: { code: string }
+  program: { name: string }
+  episodes: Array<{ episodeId: string; sequence: number; title: string; program: { name: string } | null }>
+}
+
+export interface BookingVideoMergeResult {
+  skipped?: boolean
+  reason?: string
+  seen: number
+  moved: number
+  dup: number
+  err: number
+  boxFolderUrl?: string | null
+}
+
+/** MOVE this ONE booking's NAS landing footage into its VIDEO 2026 box. */
+export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: boolean } = {}): Promise<BookingVideoMergeResult> {
+  const dryRun = !!opts.dryRun
+  const zero = { seen: 0, moved: 0, dup: 0, err: 0 }
+  const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+  if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'ยังไม่ได้ตั้งค่า Drive', ...zero }
+  const code = b.bookingCode
+  if (!code) return { skipped: true, reason: 'ไม่มี Production ID', ...zero }
+  if (b.outlet.code === 'AGN') return { skipped: true, reason: 'AGN ใช้กล่องโปรเจกต์ร่วมกัน — ข้ามการรวมวิดีโอ', ...zero }
+
+  const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+  const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
+
+  const flatChildren = await listChildFolders(PRODUCTION_TEAM_ROOT)
+  const flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+  if (!flatId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์ใน Production Team (NAS ยังไม่ sync?)', ...zero }
+
+  const { programFolderName } = shootFolderLayers({
+    outletCode: b.outlet.code, showName, category: b.category,
+    projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
+  })
+  const resolved = await findEpisodeFolderUrls({
+    rootFolderId: root,
+    outletCanonicalName: outletDriveFolderName(b.outlet.code),
+    programFolderName,
+    bookingFolderName: buildBookingFolderName(code, jobName, showName),
+    bookingFolderNameAlts: [legacyBookingFolderName(code, jobName)],
+    episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, {})),
+  })
+  if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง Video 2026 (ยังไม่ถูก prep?)', ...zero }
+
+  const stats: Stats = { seen: 0, moved: 0, dup: 0, err: 0 }
+  await mirrorMove(flatId, resolved.bookingFolderId, code, stats, dryRun)
+  return { ...stats, boxFolderUrl: resolved.bookingFolderUrl ?? null }
 }

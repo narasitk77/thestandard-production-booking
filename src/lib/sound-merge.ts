@@ -122,3 +122,77 @@ export async function runSoundMerge(opts: { dryRun?: boolean } = {}): Promise<So
 
   return { skipped: false, ...base }
 }
+
+// ── Per-booking variant (v1.111) ────────────────────────────────────────────
+// Fold ONE booking's staged audio into its box AUDIO folder — the fast, scoped
+// counterpart of runSoundMerge, for the upload page's per-booking merge button.
+
+export interface SoundMergeBooking {
+  bookingCode: string | null
+  projectId: string | null
+  projectName: string | null
+  category: string | null
+  crewRequired: string[] | null
+  outlet: { code: string }
+  program: { name: string }
+  episodes: Array<{ episodeId: string; sequence: number; title: string; program: { name: string } | null }>
+}
+
+export interface BookingSoundMergeResult {
+  skipped?: boolean
+  reason?: string
+  staged: number
+  copied: number
+  err: number
+  boxFolderUrl?: string | null
+}
+
+/** COPY this ONE booking's staged audio into its box AUDIO folder (dedup by name+size). */
+export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: boolean } = {}): Promise<BookingSoundMergeResult> {
+  const dryRun = !!opts.dryRun
+  const zero = { staged: 0, copied: 0, err: 0 }
+  const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+  if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'ยังไม่ได้ตั้งค่า Drive', ...zero }
+  const code = b.bookingCode
+  if (!code) return { skipped: true, reason: 'ไม่มี Production ID', ...zero }
+  if (!bookingNeedsSound(b.crewRequired)) return { skipped: true, reason: 'งานนี้ไม่มีทีมเสียง', ...zero }
+  if (b.outlet.code === 'AGN') return { skipped: true, reason: 'AGN ใช้กล่องโปรเจกต์ร่วมกัน — ข้ามการรวมเสียง', ...zero }
+
+  const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
+  if (!stagingRoot) return { skipped: true, reason: 'ยังไม่มี _SOUND-STAGING', ...zero }
+  const stagingChildren = await listChildFolders(stagingRoot)
+  const stagingId = stagingChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+  if (!stagingId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์เสียงใน staging', ...zero }
+  const stagingFiles = (await listFilesRecursive(stagingId, { maxFiles: 2000 })).filter(f => isAudio(f.name))
+  if (stagingFiles.length === 0) return { ...zero }
+
+  const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+  const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
+  const { programFolderName } = shootFolderLayers({
+    outletCode: b.outlet.code, showName, category: b.category,
+    projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
+  })
+  const resolved = await findEpisodeFolderUrls({
+    rootFolderId: root,
+    outletCanonicalName: outletDriveFolderName(b.outlet.code),
+    programFolderName,
+    bookingFolderName: buildBookingFolderName(code, jobName, showName),
+    bookingFolderNameAlts: [legacyBookingFolderName(code, jobName)],
+    episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, {})),
+  })
+  if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง (วิดีโอยังไม่ลง?)', staged: stagingFiles.length, copied: 0, err: 0 }
+
+  const existingAudio = await findChildFolder(resolved.bookingFolderId, 'AUDIO')
+  const have = new Set(existingAudio ? (await listFilesRecursive(existingAudio, { maxFiles: 2000 })).map(f => `${f.name}|${f.size ?? ''}`) : [])
+  const toCopy = stagingFiles.filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
+  if (dryRun) return { staged: stagingFiles.length, copied: toCopy.length, err: 0, boxFolderUrl: resolved.bookingFolderUrl ?? null }
+  if (toCopy.length === 0) return { staged: stagingFiles.length, copied: 0, err: 0, boxFolderUrl: resolved.bookingFolderUrl ?? null }
+
+  const audioId = existingAudio || await ensureFolderPath(resolved.bookingFolderId, ['AUDIO'])
+  let copied = 0, err = 0
+  for (const f of toCopy) {
+    try { await copyFileToFolder(f.id, audioId, f.name); copied++ }
+    catch (e: any) { err++; console.error('[sound-merge] copy failed:', code, f.name, e?.message || e) }
+  }
+  return { staged: stagingFiles.length, copied, err, boxFolderUrl: resolved.bookingFolderUrl ?? null }
+}

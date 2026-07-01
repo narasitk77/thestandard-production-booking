@@ -160,14 +160,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [report, setReport] = useState<FootageReportView | null>(null)
   const [delivering, setDelivering] = useState(false)
   const [deliverMsg, setDeliverMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  // v1.100.1 — admin-only "scan Drive for footage now" (triggers runFootageSync
-  // on-demand instead of waiting for the ~10-min worker; useful right after
-  // moving NAS files into the boxes).
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [scanning, setScanning] = useState(false)
+  // v1.111 — per-booking "รวมไฟล์เข้ากล่องนี้": MOVE this job's NAS footage into
+  // the box, then fold its staged sound into AUDIO. Scoped to one booking so it's
+  // fast (the old system-wide sweeps timed out at the 60s proxy). The system-wide
+  // sweeps moved to /admin/footage-tools.
   const [scanMsg, setScanMsg] = useState<string | null>(null)
-  const [mergingSound, setMergingSound] = useState(false)
-  const [mergingVideo, setMergingVideo] = useState(false)
+  const [merging, setMerging] = useState(false)
   // v1.101 — "Detect": scan THIS booking's Drive folders for footage (incl. files
   // moved from NAS into the boxes, which have no Upload row).
   const [detecting, setDetecting] = useState(false)
@@ -226,65 +224,27 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     }
   }
   useEffect(() => { fetchHistory() }, [booking.id])
-  useEffect(() => {
-    fetch('/api/me').then(r => r.json()).then(d => setIsAdmin(d?.user?.role === 'ADMIN')).catch(() => {})
-  }, [])
 
-  // v1.100.1 — kick the footage matcher now (walks DRIVE_FOOTAGE_ROOT, matches by
-  // Production ID, logs matched footage). Admin-only; the endpoint 401s otherwise.
-  const triggerScan = async () => {
-    setScanning(true)
+  // v1.111 — per-booking consolidate: MOVE this job's NAS footage into the box,
+  // then fold its staged sound into AUDIO. One booking → fast (no 60s timeout).
+  const triggerMerge = async () => {
+    if (!confirm('รวมไฟล์เข้ากล่องของงานนี้?\n\n• ย้ายวิดีโอจาก Production Team (NAS) เข้ากล่อง — เป็นการ MOVE (ไฟล์จะหายจาก Production Team)\n• รวมไฟล์เสียงจาก Staging เข้าโฟลเดอร์ AUDIO\n\nทำเมื่อ NAS sync เสร็จแล้ว')) return
+    setMerging(true)
     setScanMsg(null)
     try {
-      const r = await fetch('/api/internal/footage/sync', { credentials: 'include' })
+      const r = await fetch(`/api/bookings/${booking.id}/merge`, { method: 'POST', credentials: 'include' })
       const d = await r.json().catch(() => ({}))
-      if (!r.ok) setScanMsg(d.error || `สแกนไม่สำเร็จ (HTTP ${r.status})`)
-      else if (d.skipped || d.ok === false) setScanMsg(`สแกนยังไม่ทำงาน: ${d.reason || 'ตั้งค่ายังไม่ครบ (DRIVE_FOOTAGE_ROOT / FOOTAGE_LOG_SHEET_ID)'}`)
-      else setScanMsg(`สแกน ${d.scanned ?? 0} ไฟล์ · match ใหม่ ${d.matched ?? 0} · รอ booking ${d.parsedNoBooking ?? 0} · อ่าน ID ไม่ออก ${d.unparsed ?? 0}`)
-      fetchHistory()
-    } catch (e: any) {
-      setScanMsg(e?.message || 'สแกนไม่สำเร็จ')
-    } finally {
-      setScanning(false)
-    }
-  }
-
-  // v1.108 — admin: fold staged audio into the box AUDIO folders now (the hourly
-  // sound-merge worker does this automatically; this is the on-demand trigger).
-  const triggerSoundMerge = async () => {
-    setMergingSound(true)
-    setScanMsg(null)
-    try {
-      const r = await fetch('/api/internal/sound-merge/run', { credentials: 'include' })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok) setScanMsg(d.error || `รวมเสียงไม่สำเร็จ (HTTP ${r.status})`)
-      else if (d.skipped) setScanMsg(`รวมเสียงยังไม่ทำงาน: ${d.reason || 'ตั้งค่ายังไม่ครบ'}`)
-      else setScanMsg(`รวมเสียง: ${d.bookings ?? 0} งาน · staged ${d.staged ?? 0} ไฟล์ · ก๊อปเข้ากล่อง ${d.merged ?? 0} · error ${d.errors ?? 0}`)
-      detectFootage()
-    } catch (e: any) {
-      setScanMsg(e?.message || 'รวมเสียงไม่สำเร็จ')
-    } finally {
-      setMergingSound(false)
-    }
-  }
-
-  // v1.109 — admin: MOVE NAS footage from the flat Production Team landing into the
-  // VIDEO 2026 boxes now (system-wide, by Production ID). MOVE, not copy — confirm first.
-  const triggerVideoMerge = async () => {
-    if (!confirm('ย้ายไฟล์วิดีโอจาก Production Team (ที่ NAS ทิ้งไว้) เข้ากล่อง Video 2026 ตาม Production ID ทั้งระบบ?\n\nเป็นการ MOVE (ไฟล์จะหายจาก Production Team) — ทำเมื่อ NAS sync เสร็จแล้ว')) return
-    setMergingVideo(true)
-    setScanMsg(null)
-    try {
-      const r = await fetch('/api/internal/video-merge/run', { credentials: 'include' })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok) setScanMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`)
-      else if (d.skipped) setScanMsg(`รวมไฟล์ยังไม่ทำงาน: ${d.reason || 'ตั้งค่ายังไม่ครบ'}`)
-      else setScanMsg(`รวมไฟล์วิดีโอ: ${d.bookings ?? 0} งาน · เจอ ${d.landed ?? 0} ไฟล์ · ย้ายเข้ากล่อง ${d.moved ?? 0} · error ${d.errors ?? 0}`)
-      detectFootage()
+      if (!r.ok) { setScanMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`); return }
+      const v = d.video || {}, s = d.sound || {}
+      const vTxt = v.skipped ? `ข้าม (${v.reason || ''})` : `ย้าย ${v.moved ?? 0}/${v.seen ?? 0}${v.err ? ` · error ${v.err}` : ''}`
+      const sTxt = s.skipped ? `ข้าม (${s.reason || ''})` : `รวม ${s.copied ?? 0}/${s.staged ?? 0}${s.err ? ` · error ${s.err}` : ''}`
+      setScanMsg(`วิดีโอ: ${vTxt} · เสียง: ${sTxt}`)
     } catch (e: any) {
       setScanMsg(e?.message || 'รวมไฟล์ไม่สำเร็จ')
     } finally {
-      setMergingVideo(false)
+      setMerging(false)
+      detectFootage()
+      fetchHistory()
     }
   }
 
@@ -759,25 +719,14 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             ไฟล์ที่ upload แล้ว ({history.length})
           </div>
           <div className="flex items-center gap-2">
-            {/* v1.100.1 — admin: trigger the Drive footage scan now (matches NAS-moved files by Production ID) */}
-            {isAdmin && (
-              <button onClick={triggerScan} disabled={scanning} title="สแกน Drive หา footage แล้ว match กับ booking ตาม Production ID (ทั้งระบบ)"
-                className="text-xs px-2 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-purple-50 inline-flex items-center gap-1 disabled:opacity-50">
-                {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} สแกนหา footage
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={triggerSoundMerge} disabled={mergingSound} title="รวมไฟล์เสียงจาก staging เข้าโฟลเดอร์ AUDIO ในกล่อง ตาม Production ID (ทั้งระบบ)"
-                className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50 inline-flex items-center gap-1 disabled:opacity-50">
-                {mergingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>🎙️</span>} รวมไฟล์เสียง
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={triggerVideoMerge} disabled={mergingVideo} title="ย้ายไฟล์วิดีโอจาก Production Team (NAS) เข้ากล่อง Video 2026 ตาม Production ID — MOVE, ทั้งระบบ"
-                className="text-xs px-2 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-purple-50 inline-flex items-center gap-1 disabled:opacity-50">
-                {mergingVideo ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>🎬</span>} รวมไฟล์วิดีโอ
-              </button>
-            )}
+            {/* v1.111 — per-booking consolidate: MOVE this job's NAS footage into
+                the box, then fold its staged sound into AUDIO. Scoped to one job →
+                fast (the old system-wide sweeps timed out; they moved to
+                /admin/footage-tools). */}
+            <button onClick={triggerMerge} disabled={merging} title="ย้ายวิดีโอจาก Production Team (NAS) เข้ากล่อง แล้วรวมไฟล์เสียงจาก Staging เข้า AUDIO — เฉพาะงานนี้"
+              className="text-xs px-2 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-purple-50 inline-flex items-center gap-1 disabled:opacity-50">
+              {merging ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>🎬🎙️</span>} รวมไฟล์เข้ากล่องนี้
+            </button>
             <button onClick={fetchHistory} disabled={historyLoading}
               className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
               <RefreshCw className={`w-3 h-3 ${historyLoading ? 'animate-spin' : ''}`} /> Refresh

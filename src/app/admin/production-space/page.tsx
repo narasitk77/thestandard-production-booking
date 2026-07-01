@@ -211,6 +211,7 @@ export default async function ProductionAdminSpacePage() {
           { href: '/admin/team', emoji: '👥', title: 'ทีมงาน', sub: 'Crew roster' },
           { href: '/admin/permissions', emoji: '🔑', title: 'สิทธิ์ผู้ใช้', sub: 'Roles & access' },
           { href: '/admin/reminders', emoji: '⏰', title: 'Reminders', sub: 'แจ้งเตือนของค้าง' },
+          { href: '/admin/footage-tools', emoji: '🎬', title: 'รวมไฟล์ footage', sub: 'ย้าย/รวมทั้งระบบ' },
           { href: '/admin/health', emoji: '🩺', title: 'Health', sub: 'สถานะระบบ' },
         ].map(m => (
           <Link key={m.href} href={m.href} className="group block border border-gray-200 rounded-lg p-3 bg-white hover:border-[#673ab7] hover:shadow-sm transition-colors">
