@@ -610,6 +610,22 @@ export async function copyFileToFolder(fileId: string, targetFolderId: string, n
 }
 
 /**
+ * Rename a Drive file/folder in place (same id, same parents). Used by the
+ * ID-regeneration flow (v1.109) to keep a booking's box folder name in sync when
+ * its Production ID is regenerated. No-op-safe: caller decides whether the folder
+ * exists first (findChildFolder) — this throws only on a real API failure.
+ */
+export async function renameDriveItem(fileId: string, newName: string, subject?: string): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
+  await drive.files.update({
+    fileId,
+    requestBody: { name: newName },
+    fields: 'id',
+    supportsAllDrives: true,
+  })
+}
+
+/**
  * v1.88 — flat variant: <root>/<bookingFolderName>/<camera>/ with no
  * outlet/program layer. Used to pre-create the shoot folder in the "Production
  * Team" landing Shared Drive (where the NAS syncs footage) named by Production
