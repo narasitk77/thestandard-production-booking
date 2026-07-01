@@ -5,8 +5,9 @@ import { hasConsoleAccess } from '@/lib/roles'
 import EquipmentRequest from './EquipmentRequest'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import BackButton from '@/app/_components/BackButton'
 import { formatDateRange, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
-import { ArrowLeft, Copy, Check, Calendar, Folder, Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { Copy, Check, Calendar, Folder, Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 interface Episode {
   id: string
@@ -204,9 +205,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-3">
-      <Link href={backHref} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
-        <ArrowLeft className="w-4 h-4" /> {backLabel}
-      </Link>
+      <BackButton fallback={backHref} />
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 

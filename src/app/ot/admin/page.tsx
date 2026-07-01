@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users, CheckCircle2, Inbox, FileSignature, Eye } from 'lucide-react'
+import BackButton from '@/app/_components/BackButton'
+import { Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users, CheckCircle2, Inbox, FileSignature, Eye } from 'lucide-react'
 import { WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
 
 interface PersonSummary {
@@ -293,9 +294,7 @@ export default function OTAdminPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3 pb-24">
-      <Link href="/ot" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
-        <ArrowLeft className="w-4 h-4" /> กลับหน้า OT
-      </Link>
+      <BackButton fallback="/ot" label="กลับหน้า OT" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800" />
 
       <div className="gf-header p-4 sm:p-6">
         <h1 className="text-xl sm:text-2xl font-normal text-gray-800">OT Cover Sheet — Admin</h1>

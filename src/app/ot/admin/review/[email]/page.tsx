@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import BackButton from '@/app/_components/BackButton'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, AlertTriangle, Lock, Send, Download } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, AlertTriangle, Lock, Send, Download } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { summarizeDay, formatTHB, dateOffsetDays, type DaySummary } from '@/lib/ot-calc'
 
@@ -153,9 +153,7 @@ export default function OTReviewPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3 pb-24">
-      <Link href={`/ot/admin?month=${month}`} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
-        <ArrowLeft className="w-4 h-4" /> กลับ Admin
-      </Link>
+      <BackButton fallback={`/ot/admin?month=${month}`} label="กลับ Admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800" />
 
       <div className="gf-header p-4 sm:p-6 flex items-start justify-between gap-3 flex-wrap">
         <div>

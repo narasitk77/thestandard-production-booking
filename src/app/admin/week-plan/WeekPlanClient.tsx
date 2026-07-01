@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Check } from 'lucide-react'
+import BackButton from '@/app/_components/BackButton'
+import { ChevronLeft, ChevronRight, Loader2, Check } from 'lucide-react'
 import { startOfWeek, addDays, addWeeks, format, parseISO, isSameDay } from 'date-fns'
 import { bookingShowName } from '@/lib/display'
 
@@ -107,9 +108,7 @@ export default function WeekPlanClient() {
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-4">
-      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
-        <ArrowLeft className="w-4 h-4" /> คิวงาน
-      </Link>
+      <BackButton fallback="/admin" label="คิวงาน" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800" />
 
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import Link from 'next/link'
+import BackButton from '@/app/_components/BackButton'
 import {
-  ArrowLeft, Loader2, UserPlus, Lock,
+  Loader2, UserPlus, Lock,
   Search, Pencil, Check, X, Mail,
 } from 'lucide-react'
 import {
@@ -160,9 +160,7 @@ export default function PermissionsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
-      <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
-        <ArrowLeft className="w-4 h-4" /> Admin Console
-      </Link>
+      <BackButton fallback="/admin/production-space" label="Admin Console" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800" />
 
       {/* Header */}
       <div className="gf-header p-4 sm:p-6">

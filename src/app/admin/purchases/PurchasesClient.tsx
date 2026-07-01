@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import BackButton from '@/app/_components/BackButton'
 import { Badge, PURCHASE_STATUS as PURCHASE_BADGE } from '../_components/badges'
 import DocsCell, { type DocRef } from '../_components/DocsCell'
 
@@ -139,9 +138,7 @@ export default function PurchasesClient({ currentEmail, isApprover }: { currentE
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-      <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
-        <ArrowLeft className="w-4 h-4" /> Production Admin Space
-      </Link>
+      <BackButton fallback="/admin/production-space" label="Production Admin Space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900" />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-medium text-gray-800">จัดซื้อรายเดือน · Purchases</h1>

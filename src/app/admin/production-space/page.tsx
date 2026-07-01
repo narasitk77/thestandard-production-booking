@@ -1,6 +1,7 @@
 import Link from 'next/link'
+import BackButton from '@/app/_components/BackButton'
 import { redirect } from 'next/navigation'
-import { ArrowLeft, AlertTriangle, ChevronRight } from 'lucide-react'
+import { AlertTriangle, ChevronRight } from 'lucide-react'
 import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
 import { startOfTodayBangkok } from '@/lib/bangkok-day'
@@ -115,9 +116,7 @@ export default async function ProductionAdminSpacePage() {
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
-      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
-        <ArrowLeft className="w-4 h-4" /> คิวงาน
-      </Link>
+      <BackButton fallback="/admin" label="คิวงาน" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3" />
 
       <div className="mb-2">
         <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Production Admin Space</h1>

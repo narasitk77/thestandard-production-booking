@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import BackButton from '@/app/_components/BackButton'
 import { Loader2, ArrowLeft, Save } from 'lucide-react'
 import { bookingShowName } from '@/lib/display'
 import { shootTypeLabel } from '@/lib/utils'
@@ -151,7 +152,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
   const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
-      <Link href="/my-bookings" className="text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1 mb-3"><ArrowLeft className="w-3.5 h-3.5" /> My Bookings</Link>
+      <BackButton fallback="/my-bookings" className="text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1 mb-3" iconClassName="w-3.5 h-3.5" />
 
       {/* Locked identity — read-only */}
       <div className="ops-card ops-card-pad mb-3">

@@ -10,8 +10,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import BackButton from '@/app/_components/BackButton'
 import {
-  ArrowLeft, Search, X, Download, Columns3, RotateCcw,
+  Search, X, Download, Columns3, RotateCcw,
   ChevronUp, ChevronDown, Loader2, Check, Users, Filter,
 } from 'lucide-react'
 import { OUTLETS } from '@/lib/data'
@@ -214,9 +215,7 @@ export default function WorkspacePage() {
   // ── render ──────────────────────────────────────────────────────────
   return (
     <div className="max-w-[1500px] mx-auto px-3 sm:px-4 py-4 sm:py-6">
-      <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
-        <ArrowLeft className="w-4 h-4" /> คิวงาน
-      </Link>
+      <BackButton fallback="/admin" label="คิวงาน" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3" />
 
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">

@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import Link from 'next/link'
-import { ArrowLeft, Loader2, AlertCircle, BellOff, Check, RefreshCw } from 'lucide-react'
+import BackButton from '@/app/_components/BackButton'
+import { Loader2, AlertCircle, BellOff, Check, RefreshCw } from 'lucide-react'
 
 /* =============================================================================
    /admin/reminders — anti-forget inbox.
@@ -105,9 +105,7 @@ export default function RemindersPage() {
     <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
       <div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
-            <ArrowLeft className="w-4 h-4" /> Admin
-          </Link>
+          <BackButton fallback="/admin/production-space" label="Admin" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700" />
           <h1 className="text-xl sm:text-2xl font-normal text-gray-800 mt-1">⏰ Reminders</h1>
           <p className="text-xs sm:text-sm text-gray-500">
             งานค้างที่ระบบเตือนให้ — กด Dismiss เพื่อปิดเสียง, Resolve เมื่อทำเสร็จ

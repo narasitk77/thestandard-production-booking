@@ -9,8 +9,8 @@
    ============================================================================= */
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
-import { ArrowLeft, Loader2, CalendarPlus, X, Trash2, Check, AlertTriangle } from 'lucide-react'
+import BackButton from '@/app/_components/BackButton'
+import { Loader2, CalendarPlus, X, Trash2, Check, AlertTriangle } from 'lucide-react'
 import { OUTLETS, OUTLET_MAP } from '@/lib/data'
 import { generateRoutineDates } from '@/lib/routine'
 import NumberStepper from './NumberStepper'
@@ -155,9 +155,7 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
       {backHref && (
-        <Link href={backHref} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
-          <ArrowLeft className="w-4 h-4" /> Admin Console
-        </Link>
+        <BackButton fallback={backHref} label="Admin Console" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3" />
       )}
 
       <div className="mb-4">

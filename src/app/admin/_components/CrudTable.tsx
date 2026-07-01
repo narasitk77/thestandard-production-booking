@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
-import { ArrowLeft, Plus, Loader2, AlertCircle, Pencil, Trash2, X, Search, ChevronUp, ChevronDown, ChevronsUpDown, RotateCcw } from 'lucide-react'
+import BackButton from '@/app/_components/BackButton'
+import { Plus, Loader2, AlertCircle, Pencil, Trash2, X, Search, ChevronUp, ChevronDown, ChevronsUpDown, RotateCcw } from 'lucide-react'
 import DocsCell, { type DocOwner } from './DocsCell'
 
 /* =============================================================================
@@ -213,9 +213,7 @@ export default function CrudTable({ config }: { config: CrudConfig }) {
 
   return (
     <div className="max-w-[1400px] mx-auto px-3 sm:px-4 py-4 sm:py-6">
-      <Link href="/admin/production-space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3">
-        <ArrowLeft className="w-4 h-4" /> Production Admin Space
-      </Link>
+      <BackButton fallback="/admin/production-space" label="Production Admin Space" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 mb-3" />
 
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
         <div>
