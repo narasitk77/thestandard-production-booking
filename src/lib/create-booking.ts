@@ -5,20 +5,12 @@
  * 1:1 move of the route logic; the route keeps only auth + HTTP shaping.
  */
 import { prisma } from '@/lib/db'
-import { generateEpisodeId, formatShootDateForId } from '@/lib/episode-id'
+import { generateEpisodeId, parseEpisodeId, formatShootDateForId } from '@/lib/episode-id'
 import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
 import { deriveBookingCategory } from '@/lib/booking-category'
-
-// Production ID middle segment, derived from the shoot type (e.g. AGN-260423-EVT-01).
-const SHOOT_TYPE_CODE: Record<string, string> = {
-  STUDIO: 'STD',
-  ON_LOCATION: 'LOC',
-  EVENT: 'EVT',
-  REMOTE_ONLINE: 'REM',
-}
 
 export type CreateBookingResult =
   | { ok: true; booking: any }
@@ -171,17 +163,19 @@ export async function createBookingFromPayload(
     if (chosen.length === 0) {
       return fail(400, 'Episode ที่เลือกถ่ายไม่ได้แล้ว (อาจถูก Published) — เลือกใหม่')
     }
-    // Production ID = OUT-YYMMDD-SHOOTTYPE-NN, numbered per outlet+date+type.
-    const shootCode = SHOOT_TYPE_CODE[shootType as string] || 'GEN'
-    const codePrefix = `${outletCode}-${formatShootDateForId(parsedDate)}-${shootCode}-`
-    const lastBk = await prisma.booking.findFirst({
+    // Production ID = OUT-YYMMDD-NN, numbered per outlet+date (v1.109: [TYPE] dropped).
+    // Prefix matches both new (OUT-YYMMDD-NN) and any legacy (OUT-YYMMDD-TYPE-NN) IDs
+    // for this outlet+date, so the sequence never reuses a number across the migration.
+    const codePrefix = `${outletCode}-${formatShootDateForId(parsedDate)}-`
+    const priorBk = await prisma.booking.findMany({
       where: { bookingCode: { startsWith: codePrefix } },
-      orderBy: { bookingCode: 'desc' },
       select: { bookingCode: true },
     })
-    const lastSeq = lastBk?.bookingCode?.match(/-(\d+)$/)?.[1]
-    const seq = (lastSeq ? parseInt(lastSeq, 10) : 0) + 1
-    bookingCode = generateEpisodeId(outletCode, parsedDate, shootCode, seq) // AGN-260423-EVT-01
+    const seq = priorBk.reduce((mx, b) => {
+      const p = b.bookingCode ? parseEpisodeId(b.bookingCode) : null
+      return p && p.sequence > mx ? p.sequence : mx
+    }, 0) + 1
+    bookingCode = generateEpisodeId(outletCode, parsedDate, seq) // AGN-260423-01
     episodeRecords = chosen.map((e, idx) => ({
       episodeId: e.episodeId,
       sequence: idx + 1,
@@ -191,10 +185,10 @@ export async function createBookingFromPayload(
   } else {
     // Episode ID carries the per-episode program code (v1.46.0 — ops
     // feedback: "รหัสรายการให้อยู่ใน Booking ID เช่น NWS-KYM-…"):
-    //   [OUT]-[PROG]-[YYMMDD]-[EpisodeType]-[NN]  e.g. NWS-KYM-260616-L-01
-    // sequenced per outlet+program+date+Episode-Type, so each show gets
-    // its own numbering stream. Episodes in one booking may carry
-    // different programs — each draws from its own stream.
+    //   [OUT]-[PROG]-[YYMMDD]-[NN]  e.g. NWS-KYM-260616-01  (v1.109: [TYPE] dropped)
+    // sequenced per outlet+program+date, so each show gets its own numbering
+    // stream. Episodes in one booking may carry different programs — each draws
+    // from its own stream.
     const dateStr = formatShootDateForId(parsedDate)
 
     // Upsert each distinct per-episode program once and cache its DB id.
@@ -225,21 +219,25 @@ export async function createBookingFromPayload(
       const streamKey = progForId ?? ''
       let nextSeq = nextSeqByProgram.get(streamKey)
       if (nextSeq === undefined) {
+        // v1.109 — sequence is per outlet+program+date (the [TYPE] segment is gone).
+        // Prefix matches both new (…-date-NN) and legacy (…-date-TYPE-NN) IDs so the
+        // number never collides across the migration.
         const prefix = progForId
-          ? `${outletCode}-${progForId}-${dateStr}-${programCode}-`
-          : `${outletCode}-${dateStr}-${programCode}-`
-        const lastEp = await prisma.episode.findFirst({
+          ? `${outletCode}-${progForId}-${dateStr}-`
+          : `${outletCode}-${dateStr}-`
+        const prior = await prisma.episode.findMany({
           where: { episodeId: { startsWith: prefix } },
-          orderBy: { episodeId: 'desc' },
           select: { episodeId: true },
         })
-        const lastNum = lastEp?.episodeId.match(/-(\d{2})$/)?.[1]
-        nextSeq = (lastNum ? parseInt(lastNum, 10) : 0) + 1
+        nextSeq = prior.reduce((mx, e) => {
+          const p = parseEpisodeId(e.episodeId)
+          return p && p.sequence > mx ? p.sequence : mx
+        }, 0) + 1
       }
       nextSeqByProgram.set(streamKey, nextSeq + 1)
 
       episodeRecords.push({
-        episodeId: generateEpisodeId(outletCode, parsedDate, programCode, nextSeq, progForId),
+        episodeId: generateEpisodeId(outletCode, parsedDate, nextSeq, progForId),
         sequence: nextSeq,
         title: ep.title,
         programId: epProgramId,

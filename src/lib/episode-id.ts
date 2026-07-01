@@ -1,9 +1,9 @@
 /**
- * Episode ID format: [OUT]-[PROG]-[YYMMDD]-[TYPE]-[EE]
- * e.g., NWS-KYM-260616-L-01 — program segment added v1.46.0
- * (ops feedback: "รหัสรายการให้อยู่ใน Booking ID ด้วย เช่น NWS-KYM-…").
- * The legacy shape without the program segment stays valid and parseable:
- * [OUT]-[YYMMDD]-[TYPE]-[EE], e.g. TSS-260423-EXE-01, NWS-260608-L-01.
+ * Episode ID format (v1.109): [OUT]-[PROG]-[YYMMDD]-[EE]  e.g. NWS-KYM-260616-01
+ * The [TYPE] segment (Episode Type L/S/A/T · Shoot Type STD/LOC/EVT) was dropped
+ * per ops. Older IDs that still carry a [TYPE] — [OUT]-[PROG]-[YYMMDD]-[TYPE]-[EE]
+ * and the program-less [OUT]-[YYMMDD]-[TYPE]-[EE] — stay valid and parseable
+ * (type is an OPTIONAL segment in the regexes below).
  *
  * Rules:
  * - Immutable once created
@@ -20,7 +20,7 @@
  * it requires a trailing '-' right after 2–4 alnums, and YYMMDD is always
  * 6 chars, so on a legacy ID the group fails and `\d{6}` consumes the date.
  */
-export const EPISODE_ID_RE = /^([A-Z]{2,4})-(?:([A-Z0-9]{2,4})-)?(\d{6})-([A-Z0-9]{1,4})-(\d{2})$/
+export const EPISODE_ID_RE = /^([A-Z]{2,4})-(?:([A-Z0-9]{2,4})-)?(\d{6})(?:-([A-Z0-9]{1,4}))?-(\d{2})$/
 
 /**
  * Non-anchored format with word boundaries — matches a Production ID
@@ -42,7 +42,7 @@ export const EPISODE_ID_RE = /^([A-Z]{2,4})-(?:([A-Z0-9]{2,4})-)?(\d{6})-([A-Z0-
  * Matching is leftmost-first, so `NWS-KYM-260616-L-01` is captured whole
  * from `NWS`, never as the shorter `KYM-260616-L-01` tail.
  */
-export const EPISODE_ID_RE_LOOSE = /(?<![A-Za-z0-9])([A-Z]{2,4}-(?:[A-Z0-9]{2,4}-)?\d{6}-[A-Z0-9]{1,4}-\d{2})(?!\d)/
+export const EPISODE_ID_RE_LOOSE = /(?<![A-Za-z0-9])([A-Z]{2,4}-(?:[A-Z0-9]{2,4}-)?\d{6}(?:-[A-Z0-9]{1,4})?-\d{2})(?!\d)/
 
 /**
  * Lowercase-detection variant. Same shape but case-insensitive on the
@@ -51,20 +51,20 @@ export const EPISODE_ID_RE_LOOSE = /(?<![A-Za-z0-9])([A-Z]{2,4}-(?:[A-Z0-9]{2,4}
  * was typed in the wrong case (so the user can fix the typo instead of
  * silently watching it land in `unparsed`).
  */
-export const EPISODE_ID_RE_CASE_INSENSITIVE = /(?<![A-Za-z0-9])([A-Za-z]{2,4}-(?:[A-Za-z0-9]{2,4}-)?\d{6}-[A-Za-z0-9]{1,4}-\d{2})(?!\d)/
+export const EPISODE_ID_RE_CASE_INSENSITIVE = /(?<![A-Za-z0-9])([A-Za-z]{2,4}-(?:[A-Za-z0-9]{2,4}-)?\d{6}(?:-[A-Za-z0-9]{1,4})?-\d{2})(?!\d)/
 
 /**
- * Build an Episode / Production ID. `typeCode` is the stream
- * discriminator that has always sat before the sequence (Episode Type
- * L/S/A/T for outlet bookings, Shoot Type STD/LOC/EVT for Content
- * Agency productions). Pass `programCode` (e.g. KYM) to get the v1.46.0
- * shape with the program right after the outlet; omit it for the legacy
- * shape (Content Agency keeps omitting it — a production isn't a show).
+ * Build an Episode / Production ID: [OUT]-[PROG?]-[YYMMDD]-[NN].
+ * v1.109 — the [TYPE] segment (Episode Type L/S/A/T for outlet bookings, Shoot
+ * Type STD/LOC/EVT for Content Agency) was dropped per ops. Pass `programCode`
+ * (e.g. KYM) for the [OUT]-[PROG]-[YYMMDD]-[NN] shape; omit it for
+ * [OUT]-[YYMMDD]-[NN] (Content Agency productions — a production isn't a show).
+ * Sequence is per outlet+program+date (see create-booking.ts) so no [TYPE] is
+ * needed to keep IDs unique. Old IDs that still carry a [TYPE] remain parseable.
  */
 export function generateEpisodeId(
   outletCode: string,
   shootDate: Date,
-  typeCode: string,
   epSeq: number,
   programCode?: string | null
 ): string {
@@ -73,7 +73,7 @@ export function generateEpisodeId(
   const dd = String(shootDate.getDate()).padStart(2, '0')
   const seq = String(epSeq).padStart(2, '0')
   const prog = programCode?.trim() ? `${programCode.trim().toUpperCase()}-` : ''
-  return `${outletCode}-${prog}${yy}${mm}${dd}-${typeCode}-${seq}`
+  return `${outletCode}-${prog}${yy}${mm}${dd}-${seq}`
 }
 
 export function parseEpisodeId(episodeId: string): {
@@ -81,8 +81,8 @@ export function parseEpisodeId(episodeId: string): {
   /** Program segment (e.g. KYM) — null on legacy IDs that don't carry one. */
   programCode: string | null
   dateStr: string
-  /** The slot before the sequence: Episode Type (L/S/A/T) or Shoot Type (STD/LOC/EVT). */
-  typeCode: string
+  /** Legacy slot before the sequence (Episode Type L/S/A/T or Shoot Type STD/LOC/EVT); null on new IDs that dropped it. */
+  typeCode: string | null
   sequence: number
   shootDate: Date
 } | null {
@@ -98,7 +98,7 @@ export function parseEpisodeId(episodeId: string): {
     outletCode,
     programCode: programCode || null,
     dateStr,
-    typeCode,
+    typeCode: typeCode || null,
     sequence: parseInt(seqStr),
     shootDate: new Date(yy, mm, dd),
   }
