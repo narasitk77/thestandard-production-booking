@@ -54,6 +54,21 @@ export async function GET(request: NextRequest) {
     // that aren't already cancelled.
     const cancelRequested = searchParams.get('cancelRequested') === '1'
 
+    // v1.109 — unified search box (admin queue): one field that matches EITHER a
+    // Production/Episode ID (bookingCode or any episode's episodeId, substring,
+    // case-insensitive) OR the internal booking id (exact cuid). AND-wrapped so it
+    // composes with the userFilter OR (restricted users) without clobbering it.
+    const search = (searchParams.get('search') || '').trim()
+    const searchClause = search
+      ? {
+          OR: [
+            { bookingCode: { contains: search, mode: 'insensitive' as const } },
+            { id: search },
+            { episodes: { some: { episodeId: { contains: search, mode: 'insensitive' as const } } } },
+          ],
+        }
+      : null
+
     const where = {
       ...userFilter,
       deletedAt: showDeleted ? { not: null } : null,
@@ -64,6 +79,7 @@ export async function GET(request: NextRequest) {
       ...(outlet && { outlet: { code: outlet } }),
       ...(date && { shootDate: new Date(date) }),
       ...((from || to) && !date && { shootDate: { ...(from && { gte: new Date(from) }), ...(to && { lt: new Date(to) }) } }),
+      ...(searchClause && { AND: [searchClause] }),
     }
 
     const [bookings, total] = await Promise.all([

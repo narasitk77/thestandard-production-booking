@@ -37,6 +37,11 @@ const HEADERS = [
 
 // 1-indexed column positions for partial updates.
 const COL = {
+  // v1.109 — productionId (col A) + episodeIds (col Q) are writable so the
+  // ID-regeneration flow can rewrite a booking's Production ID in place. The
+  // row is still LOCATED by the OLD code (col A) before col A is overwritten.
+  productionId: 1,
+  episodeIds: 17,
   assignedEmails: 21,
   status: 22,
   calendarEventId: 23,
@@ -244,14 +249,27 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
   }
 }
 
+/**
+ * Outcome of a sheet row patch. v1.109 — updateBookingRow used to return void and
+ * swallow every failure, so callers couldn't tell a real write from a no-op. The
+ * ID-regeneration flow needs the truth (to decide whether it may commit the DB),
+ * so it now returns a status. Legacy callers that ignore the return are unaffected.
+ */
+export type SheetUpdateResult = 'updated' | 'not-found' | 'skipped' | 'error'
+
 export async function updateBookingRow(bookingCode: string, fields: Partial<{
+  /** v1.109 — rewrite col A (Production ID). Row is found by the OLD code passed
+   *  as `bookingCode`, then col A is overwritten with this new value. */
+  productionId: string
+  /** v1.109 — rewrite col Q (Episode IDs), comma-joined. */
+  episodeIds: string
   assignedEmails: string
   status: string
   calendarEventId: string
   approvedAt: string
   mainVideographer: string
-}>) {
-  if (!hasCredentials() || !bookingCode) return
+}>): Promise<SheetUpdateResult> {
+  if (!hasCredentials() || !bookingCode) return 'skipped'
   try {
     const spreadsheetId = getSheetId()
     const sheets = google.sheets({ version: 'v4', auth: getAuth() })
@@ -268,7 +286,7 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
     )
     if (idx < 0) {
       console.error(`updateBookingRow: Production ID "${bookingCode}" not found in "${SHEET_TAB}" — skipping`)
-      return
+      return 'not-found'
     }
     const rowIndex = idx + 2 // data rows start at sheet row 2
 
@@ -287,13 +305,13 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
       values: [[fmtDateTime(new Date())]],
     })
 
-    if (updates.length > 0) {
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId,
-        requestBody: { valueInputOption: 'RAW', data: updates },
-      })
-    }
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: 'RAW', data: updates },
+    })
+    return 'updated'
   } catch (e) {
     console.error('updateBookingRow error:', e)
+    return 'error'
   }
 }

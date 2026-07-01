@@ -86,6 +86,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [savedTone, setSavedTone] = useState<'success' | 'warning'>('success')
   const [approved, setApproved] = useState(false)
   const [forcingStatus, setForcingStatus] = useState(false)
+  const [regeneratingId, setRegeneratingId] = useState(false)
   const [error, setError] = useState('')
 
   // Freelancers
@@ -434,6 +435,38 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // v1.109 — regenerate this booking's Production/Episode ID to the current
+  // format (drop the legacy [TYPE] segment) and cascade the rename to the Drive
+  // box + sheet + calendar. Reloads on success so every derived link is fresh.
+  const regenerateId = async () => {
+    if (!confirm(
+      'Regenerate เลข ID เป็นรูปแบบล่าสุด (ตัด segment เก่าออก) และ rename โฟลเดอร์ Drive + แก้ Sheet/Calendar ให้ตรงกัน?\n\n' +
+      'เขียน audit log และย้อนกลับยาก — ยืนยันหรือไม่?'
+    )) return
+    setError('')
+    setRegeneratingId(true)
+    try {
+      const res = await fetch(`/api/admin/${id}/regenerate-id`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Regenerate failed')
+      if (data.noChange) {
+        showSaved('ID นี้เป็นรูปแบบล่าสุดอยู่แล้ว — ไม่มีอะไรต้องแก้')
+        return
+      }
+      const r = data.result
+      showSaved(`✓ Regenerate: ${r.oldCode} → ${r.newCode} — กำลังรีเฟรช…`)
+      setTimeout(() => window.location.reload(), 1200)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setRegeneratingId(false)
+    }
+  }
+
   const handleSaveDetails = async () => {
     setError('')
     setEditSaving(true)
@@ -658,6 +691,17 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           {forcingStatus && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
         </div>
         <div className="text-gray-400 mt-1.5">ข้ามกฎ transition + เช็ควันถ่าย · เขียน audit log · ใช้เมื่อสถานะหลุด (เช่น reassign วันงานแล้วเด้ง)</div>
+
+        {/* v1.109 — regenerate the Production/Episode ID (drop legacy [TYPE]) + rename Drive/Sheet/Calendar */}
+        <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center gap-2">
+          <span className="text-gray-400">เลข ID:</span>
+          <button onClick={regenerateId} disabled={regeneratingId}
+            className="px-2 py-1 border border-gray-500 text-gray-700 rounded hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-1">
+            <RotateCcw className="w-3 h-3" /> Regenerate ID
+          </button>
+          {regeneratingId && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+          <span className="text-gray-400">ตัด segment เก่า (เช่น -L-/-STD-) → rename โฟลเดอร์ + Sheet + Calendar ให้ตรงกัน</span>
+        </div>
       </details>
 
       {/* v1.68 — incomplete-details warning, surfaced right on the card */}

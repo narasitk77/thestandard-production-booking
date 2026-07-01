@@ -62,6 +62,11 @@ export default function AdminPage() {
   // v1.105.3 — filter the queue by shoot month + sort by date (default earliest→latest).
   const [monthFilter, setMonthFilter] = useState('all') // 'all' | 'YYYY-MM'
   const [sortAsc, setSortAsc] = useState(true)
+  // v1.109 — unified ID search (Episode ID / Production ID / internal id).
+  // `search` is the input box; `searchApplied` is what the query actually uses
+  // (set on Enter / button) so we don't refetch on every keystroke.
+  const [search, setSearch] = useState('')
+  const [searchApplied, setSearchApplied] = useState('')
   useEffect(() => {
     fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.user?.canUpload) setCanUpload(true)
@@ -105,7 +110,12 @@ export default function AdminPage() {
       // v1.56 — Routine tab shows only routine bookings (any status); the
       // status/All tabs exclude routine so the normal queue stays focused on
       // one-off jobs. Deleted tab unchanged.
-      const params = filter === 'DELETED'
+      // v1.109 — a non-empty search overrides the tab: find a booking by its
+      // Production/Episode ID (or internal id) across EVERY status, so you never
+      // have to guess which tab it's on.
+      const params = searchApplied
+        ? new URLSearchParams({ limit: '200', search: searchApplied })
+        : filter === 'DELETED'
         ? new URLSearchParams({ limit: '200', deleted: '1' })
         : filter === 'ROUTINE'
           ? new URLSearchParams({ limit: '200', routine: 'only' })
@@ -122,11 +132,12 @@ export default function AdminPage() {
     } finally {
       if (seq === fetchSeq.current) setLoading(false)
     }
-  }, [filter])
+  }, [filter, searchApplied])
 
   useEffect(() => { fetch_() }, [fetch_])
-  // Switching status tab → reset the month filter (months differ per tab).
-  useEffect(() => { setMonthFilter('all') }, [filter])
+  // Switching status tab → reset the month filter (months differ per tab) and
+  // clear any active ID search so the clicked tab actually takes over (v1.109).
+  useEffect(() => { setMonthFilter('all'); setSearch(''); setSearchApplied('') }, [filter])
   // v1.107 — load crew-gap map only on the CONFIRMED tab (where assignment matters);
   // reset the "incomplete only" filter when leaving the tab.
   useEffect(() => {
@@ -173,6 +184,28 @@ export default function AdminPage() {
         </p>
         {/* v1.64.0 — back-office modules moved to ADMIN-only /admin/production-space */}
       </div>
+
+      {/* v1.109 — unified ID search: matches Episode ID / Production ID / internal
+          booking id across EVERY status (overrides the tab while active). */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); setSearchApplied(search.trim()) }}
+        className="mb-3 flex items-center gap-2"
+      >
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="🔍 ค้นหาเลข EP ID / Production ID / Booking ID…"
+          className="flex-1 max-w-md px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#673ab7]/40"
+        />
+        <button type="submit" className="px-3 py-2 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">ค้นหา</button>
+        {searchApplied && (
+          <button type="button" onClick={() => { setSearch(''); setSearchApplied('') }} className="px-3 py-2 text-sm text-gray-500 hover:text-gray-800">ล้าง</button>
+        )}
+      </form>
+      {searchApplied && (
+        <div className="mb-3 text-xs text-gray-500">ผลการค้นหา “{searchApplied}” (ทุกสถานะ) · {total} รายการ</div>
+      )}
 
       {/* Status tabs */}
       <div className="flex gap-1 mb-5 border-b border-gray-200">

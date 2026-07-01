@@ -597,6 +597,11 @@ export async function updateCalendarEventDetails(
     notes?: string | null
     adminNotes?: string | null
   },
+  // v1.109 — `sendUpdates` defaults to 'all' (an admin editing the shoot
+  // time/title SHOULD notify crew). The ID-regeneration flow passes 'none': a
+  // Production-ID/description rewrite isn't a schedule change, so it must not
+  // spam every attendee — critical when a bulk migration patches many events.
+  opts: { sendUpdates?: 'all' | 'none' } = {},
 ): Promise<boolean> {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
     return false
@@ -613,7 +618,7 @@ export async function updateCalendarEventDetails(
       calendarId: CALENDAR_ID,
       eventId,
       // No attendee change here, so notify guests only of the time/detail shift.
-      sendUpdates: 'all',
+      sendUpdates: opts.sendUpdates ?? 'all',
       requestBody: {
         summary: buildEventTitle(booking),
         description: buildEventDescription(booking, (booking.assignedEmails || []).filter(Boolean)),
