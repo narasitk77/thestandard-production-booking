@@ -28,7 +28,7 @@ export type ReprogramPlan =
       newBookingCode: string
       episodeChanges: EpisodeIdChange[]
       /** episode DB id → the Program DB id it should point to after the change. */
-      programUpdates: Array<{ episodeDbId: string; programId: string; programCode: string }>
+      programUpdates: Array<{ episodeDbId: string; programId: string; programCode: string; programName: string }>
     }
 
 /**
@@ -61,7 +61,7 @@ export async function planReprogram(
   const dateStr = formatShootDateForId(booking.shootDate)
 
   // Validate every requested program + resolve/ensure its DB row.
-  const programUpdates: Array<{ episodeDbId: string; programId: string; programCode: string }> = []
+  const programUpdates: Array<{ episodeDbId: string; programId: string; programCode: string; programName: string }> = []
   const targetProgByEp = new Map<string, string>() // episode DB id -> upper program code
   for (const ep of booking.episodes) {
     const raw = programByEpisodeDbId[ep.id]
@@ -80,7 +80,7 @@ export async function planReprogram(
         update: {},
         create: { code: prog.code, name: prog.name, category: prog.category, outletId: booking.outletId },
       })
-      programUpdates.push({ episodeDbId: ep.id, programId: programDb.id, programCode: code })
+      programUpdates.push({ episodeDbId: ep.id, programId: programDb.id, programCode: code, programName: prog.name })
     }
   }
 

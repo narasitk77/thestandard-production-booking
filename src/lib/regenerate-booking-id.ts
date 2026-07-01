@@ -85,8 +85,9 @@ export type RegenerateOptions = {
   /** Episodes whose episodeId changes (usually [0] mirrors bookingCode for non-AGN). */
   episodeChanges?: Array<{ episodeDbId: string; newEpisodeId: string }>
   /** v1.109 — episodes whose program (รายการ) is reassigned, applied in the same
-   *  DB transaction as the ID change (reprogram flow). */
-  programUpdates?: Array<{ episodeDbId: string; programId: string }>
+   *  DB transaction as the ID change (reprogram flow). programCode/programName let
+   *  the in-memory calendar rebuild show the NEW show name (not the stale one). */
+  programUpdates?: Array<{ episodeDbId: string; programId: string; programCode?: string; programName?: string }>
   actorEmail: string
   /** Compute the plan + validate collisions but touch nothing. */
   dryRun?: boolean
@@ -158,7 +159,20 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
   // calendar rebuild + sheet write use the NEW code + episode ids.
   const jobName = booking.projectName?.trim() || booking.episodes[0]?.title?.trim() || null
   const changeById = new Map(episodeChanges.map(c => [c.episodeDbId, c.newEpisodeId]))
-  const episodesAfter = booking.episodes.map(e => changeById.has(e.id) ? { ...e, episodeId: changeById.get(e.id)! } : e)
+  // v1.109 — also refresh the episode's program relation for reprogrammed episodes
+  // so the in-memory calendar rebuild renders the NEW show name (bookingShowName
+  // reads episodes[].program.name), not the stale one loaded before the change.
+  const progById = new Map(
+    programUpdates
+      .filter(p => p.programCode)
+      .map(p => [p.episodeDbId, { code: p.programCode!, name: p.programName ?? p.programCode! }]),
+  )
+  const episodesAfter = booking.episodes.map(e => {
+    const newEpId = changeById.get(e.id)
+    const newProg = progById.get(e.id)
+    if (!newEpId && !newProg) return e
+    return { ...e, ...(newEpId ? { episodeId: newEpId } : {}), ...(newProg ? { program: newProg } : {}) }
+  })
   const bookingAfter = { ...booking, bookingCode: newBookingCode, episodes: episodesAfter }
 
   const effects: RegenerateResult['effects'] = { ...NOOP_EFFECTS }
@@ -313,6 +327,15 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
       oldCode,
       newCode: newBookingCode,
       episodeChanges: episodeChanges.map(c => ({ from: c.oldEpisodeId, to: c.newEpisodeId })),
+      // v1.109 — capture the show/รายการ reassignment (the point of a reprogram),
+      // which the ID-only audit above would otherwise miss.
+      ...(programUpdates.length ? {
+        programChanges: programUpdates.map(p => ({
+          episodeDbId: p.episodeDbId,
+          from: epById.get(p.episodeDbId)?.program?.code ?? null,
+          to: p.programCode ?? null,
+        })),
+      } : {}),
       effects,
     },
   })

@@ -629,6 +629,14 @@ export async function updateCalendarEventDetails(
     })
     return true
   } catch (e: any) {
+    // v1.109 — a 404 means the event was deleted/aged out of the calendar. Treat
+    // that as a no-op success (mirrors deleteCalendarEvent) rather than a failure,
+    // so a stale calendarEventId can never permanently block an ID regenerate /
+    // reprogram / migration (which aborts on a calendar failure).
+    if (e?.code === 404 || e?.response?.status === 404) {
+      console.warn('updateCalendarEventDetails: event not found (404) — treating as no-op:', eventId)
+      return true
+    }
     console.error('updateCalendarEventDetails error:', e?.message || e)
     return false
   }

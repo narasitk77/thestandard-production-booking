@@ -42,7 +42,7 @@ export async function POST(
         bookingId: params.id,
         newBookingCode: plan.newBookingCode,
         episodeChanges: plan.episodeChanges.map(c => ({ episodeDbId: c.episodeDbId, newEpisodeId: c.newEpisodeId })),
-        programUpdates: plan.programUpdates.map(p => ({ episodeDbId: p.episodeDbId, programId: p.programId })),
+        programUpdates: plan.programUpdates.map(p => ({ episodeDbId: p.episodeDbId, programId: p.programId, programCode: p.programCode, programName: p.programName })),
         actorEmail: session.email,
         dryRun,
         notifyCalendar,
