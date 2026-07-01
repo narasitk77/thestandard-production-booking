@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls } from '@/lib/google-drive'
 
@@ -44,9 +44,10 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
     const isAgency = booking.outlet.code === 'AGN'
     const jobName = booking.projectName?.trim() || booking.episodes[0]?.title?.trim() || null
+    const showName = bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
     const { programFolderName, bookingFolderName } = shootFolderLayers({
       outletCode: booking.outlet.code,
-      showName: bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes }),
+      showName,
       category: booking.category,
       projectId: booking.projectId,
       projectName: booking.projectName,
@@ -60,8 +61,11 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       outletCanonicalName: outletDriveFolderName(booking.outlet.code),
       programFolderName,
       bookingFolderName,
-      // AGN: also accept a box named after the Production ID (what ops sometimes use).
-      bookingFolderNameAlts: isAgency ? [buildBookingFolderName(booking.bookingCode, jobName)] : undefined,
+      // v1.110 — accept the pre-rename legacy "<code> · <job>" box + AGN Production-ID box.
+      bookingFolderNameAlts: [
+        legacyBookingFolderName(booking.bookingCode, jobName),
+        ...(isAgency ? [buildBookingFolderName(booking.bookingCode, jobName, showName)] : []),
+      ],
       episodeFolderNames: epNames,
     })
 

@@ -24,7 +24,10 @@ import { prisma } from './db'
 import {
   findEpisodeFolderUrls,
   findChildFolder,
+  findChildFolderByCode,
   renameDriveItem,
+  moveAndRenameFile,
+  ensureProgramPath,
   hasDriveCredentials,
   DRIVE_PHOTO_ROOT,
   SOUND_STAGING_DIR,
@@ -33,6 +36,7 @@ import {
   outletDriveFolderName,
   shootFolderLayers,
   buildBookingFolderName,
+  legacyBookingFolderName,
   isPhotoAlbumBooking,
   bookingNeedsSound,
 } from './outlet-folders'
@@ -213,33 +217,56 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
   if (codeChanged && oldCode && hasDriveCredentials()) {
     const isPhoto = isPhotoAlbumBooking(booking.episodes)
     const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+    // v1.110 — folder names lead with the show; a reprogram changes the show, so
+    // FIND the folder by the OLD show/code and rename it to the NEW show/code (the
+    // legacy "<code> · <job>" shape is also accepted when finding, so pre-rename
+    // folders convert to the show-first shape here too).
+    const oldShowName = bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
+    const newShowName = bookingShowName({ projectName: bookingAfter.projectName, program: bookingAfter.program, episodes: bookingAfter.episodes })
 
     // (a) main booking box — VIDEO tree, non-photo. AGN's box is keyed by
     //     projectId so old === new and this is skipped automatically.
     if (!isPhoto && root) {
-      const layerArgs = {
+      const baseArgs = {
         outletCode: booking.outlet.code,
-        showName: bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes }),
         category: booking.category,
         projectId: booking.projectId,
         projectName: booking.projectName,
         jobName,
       }
-      const oldName = shootFolderLayers({ ...layerArgs, bookingCode: oldCode }).bookingFolderName
-      const { programFolderName, bookingFolderName: newName } = shootFolderLayers({ ...layerArgs, bookingCode: newBookingCode })
-      if (oldName === newName) {
+      const outletCanon = outletDriveFolderName(booking.outlet.code)
+      const oldLayers = shootFolderLayers({ ...baseArgs, showName: oldShowName, bookingCode: oldCode })
+      const newLayers = shootFolderLayers({ ...baseArgs, showName: newShowName, bookingCode: newBookingCode })
+      // A reprogram that changes the show also changes the program-layer folder,
+      // so the box must MOVE (not just rename) into the new show's folder.
+      const samePlace = oldLayers.programFolderName === newLayers.programFolderName
+      if (oldLayers.bookingFolderName === newLayers.bookingFolderName && samePlace) {
         effects.driveBookingFolder = 'skipped'
       } else {
         try {
+          // FIND under the OLD show's program folder (where the box physically sits),
+          // tolerating the pre-v1.110 "<code> · <job>" name.
           const resolved = await findEpisodeFolderUrls({
             rootFolderId: root,
-            outletCanonicalName: outletDriveFolderName(booking.outlet.code),
-            programFolderName,
-            bookingFolderName: oldName,
+            outletCanonicalName: outletCanon,
+            programFolderName: oldLayers.programFolderName,
+            bookingFolderName: oldLayers.bookingFolderName,
+            bookingFolderNameAlts: [legacyBookingFolderName(oldCode, jobName)], // pre-v1.110 box
             episodeFolderNames: [],
           })
           if (resolved.bookingFolderId) {
-            await renameDriveItem(resolved.bookingFolderId, newName)
+            let moved = false
+            if (!samePlace && resolved.programFolderId) {
+              // Show changed → relocate the box under the NEW show's program folder,
+              // AND rename, in ONE atomic files.update so a failure leaves the box
+              // untouched (old parent + old name) — exactly where a retry looks.
+              const newProgramId = await ensureProgramPath(root, outletCanon, newLayers.programFolderName)
+              if (newProgramId !== resolved.programFolderId) {
+                await moveAndRenameFile(resolved.bookingFolderId, newProgramId, resolved.programFolderId, newLayers.bookingFolderName)
+                moved = true
+              }
+            }
+            if (!moved) await renameDriveItem(resolved.bookingFolderId, newLayers.bookingFolderName)
             effects.driveBookingFolder = 'renamed'
           } else {
             // Not found = folder never created (REQUESTED) OR already renamed by a
@@ -254,13 +281,12 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
       }
     }
 
-    // (b) sound-staging folder — <root>/_SOUND-STAGING/<code · job> — any outlet.
+    // (b) sound-staging folder — <root>/_SOUND-STAGING/<name> — any outlet.
     if (root && bookingNeedsSound(booking.crewRequired)) {
       try {
-        const oldName = buildBookingFolderName(oldCode, jobName)
-        const newName = buildBookingFolderName(newBookingCode, jobName)
+        const newName = buildBookingFolderName(newBookingCode, jobName, newShowName)
         const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
-        const fid = stagingRoot ? await findChildFolder(stagingRoot, oldName) : null
+        const fid = stagingRoot ? await findChildFolderByCode(stagingRoot, oldCode) : null
         if (fid) {
           await renameDriveItem(fid, newName)
           effects.driveSoundFolder = 'renamed'
@@ -277,9 +303,8 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
     // (c) photo-album folder — flat under the Photographer Shared Drive.
     if (isPhoto) {
       try {
-        const oldName = buildBookingFolderName(oldCode, jobName)
-        const newName = buildBookingFolderName(newBookingCode, jobName)
-        const fid = await findChildFolder(DRIVE_PHOTO_ROOT, oldName)
+        const newName = buildBookingFolderName(newBookingCode, jobName, newShowName)
+        const fid = await findChildFolderByCode(DRIVE_PHOTO_ROOT, oldCode)
         if (fid) {
           await renameDriveItem(fid, newName)
           effects.drivePhotoFolder = 'renamed'

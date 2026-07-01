@@ -18,6 +18,7 @@
 import { Readable } from 'stream'
 import { google, drive_v3 } from 'googleapis'
 import { getCalendarImpersonateSubject } from './google-calendar'
+import { folderNameMatchesCode } from './outlet-folders'
 
 // v1.36.0 — read path uses the SAME full `drive` scope as the write path.
 // Domain-Wide Delegation authorizes scopes EXACTLY, not hierarchically: the
@@ -400,13 +401,34 @@ interface ShootFolderInput {
   programFolderName: string
   /** "<Production ID> · <job>" */
   bookingFolderName: string
+  /** v1.110 — the immutable Production ID. When set, the booking folder is located
+   *  by CODE (either legacy "<code> · …" or new "<show> · … (<code>)" shape) and
+   *  REUSED, so a pre-rename folder is never duplicated by the show-first name. */
+  bookingCode?: string
+}
+
+/**
+ * v1.110 — find-or-create the per-booking folder under `parentId`. If a folder
+ * matching the Production ID already exists (EITHER the legacy "<code> · …" or the
+ * new "<show> · … (<code>)" shape), REUSE it — so the naming change never creates a
+ * duplicate box beside a pre-rename one (which would split footage). Otherwise
+ * create it with `newName` (the show-first name). Renaming legacy→new is left to
+ * the one-off rename tool, not done here (keeps the upload path side-effect-free).
+ */
+async function ensureBookingFolder(drive: drive_v3.Drive, parentId: string, bookingCode: string, newName: string): Promise<string> {
+  // listChildFolders paginates fully — a flat archive (photo / _SOUND-STAGING) can
+  // exceed one page, and missing a match there would recreate a duplicate.
+  const existing = (await listChildFolders(parentId)).find(f => folderNameMatchesCode(f.name, bookingCode))
+  if (existing) return existing.id
+  return ensureChildFolder(drive, parentId, newName)
 }
 
 /**
  * Resolve (creating where missing) <root>/<outlet>/<program>/<bookingFolder>/.
  * outlet + program are matched FUZZILY (ordering-prefix tolerant) so we land in
  * PMC's pre-created "09 · Content Agency" / "Key Message" boxes instead of
- * making duplicates; the shoot (booking) folder is our own naming → exact.
+ * making duplicates; the shoot (booking) folder is matched by Production ID
+ * (v1.110 — tolerant of both name shapes) so it's reused, never duplicated.
  * Shared by the upload path and the approve-time pre-create so they never drift.
  */
 async function resolveShootFolder(
@@ -417,10 +439,23 @@ async function resolveShootFolder(
   const programFolderId = await ensureChildFolderByCanonicalName(drive, outletId, input.programFolderName)
   // Defensive: an empty bookingFolderName nests the EP/camera folders directly
   // under the program box (rather than creating a folder literally named "").
-  const bookingFolderId = input.bookingFolderName
-    ? await ensureChildFolder(drive, programFolderId, input.bookingFolderName)
-    : programFolderId
+  const bookingFolderId = !input.bookingFolderName
+    ? programFolderId
+    : input.bookingCode
+      ? await ensureBookingFolder(drive, programFolderId, input.bookingCode, input.bookingFolderName)
+      : await ensureChildFolder(drive, programFolderId, input.bookingFolderName)
   return { bookingFolderId }
+}
+
+/**
+ * v1.110 — resolve (creating if missing) the program-layer folder id
+ * <root>/<outlet>/<program>. Used by the reprogram flow to MOVE a booking box into
+ * the NEW show's program folder when a reprogram changes the show.
+ */
+export async function ensureProgramPath(rootFolderId: string, outletCanonicalName: string, programFolderName: string, subject?: string): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
+  const outletId = await ensureChildFolderByCanonicalName(drive, rootFolderId, outletCanonicalName)
+  return ensureChildFolderByCanonicalName(drive, outletId, programFolderName)
 }
 
 /**
@@ -441,7 +476,7 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
    * the booking they see rather than the canonical "<projectId> · <project>".
    */
   bookingFolderNameAlts?: string[]
-}): Promise<{ bookingFolderId: string | null; bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; folderId: string | null; url: string | null }> }> {
+}): Promise<{ programFolderId: string | null; bookingFolderId: string | null; bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; folderId: string | null; url: string | null }> }> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() }) // read-only: never creates
   const folderUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`
   const listFolders = async (parentId: string): Promise<Array<{ id: string; name: string }>> => {
@@ -466,7 +501,7 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   const findExact = async (parentId: string, name: string) =>
     (await listFolders(parentId)).find(f => f.name === name)?.id ?? null
 
-  const empty = { bookingFolderId: null, bookingFolderUrl: null, episodes: input.episodeFolderNames.map(n => ({ episodeFolderName: n, folderId: null, url: null })) }
+  const empty = { programFolderId: null, bookingFolderId: null, bookingFolderUrl: null, episodes: input.episodeFolderNames.map(n => ({ episodeFolderName: n, folderId: null, url: null })) }
   const outletId = await findFuzzy(input.rootFolderId, input.outletCanonicalName)
   if (!outletId) return empty
   const programId = await findFuzzy(outletId, input.programFolderName)
@@ -485,7 +520,7 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
     const epId = await findExact(bookingId, n)
     return { episodeFolderName: n, folderId: epId, url: epId ? folderUrl(epId) : null }
   }))
-  return { bookingFolderId: bookingId, bookingFolderUrl: folderUrl(bookingId), episodes }
+  return { programFolderId: programId, bookingFolderId: bookingId, bookingFolderUrl: folderUrl(bookingId), episodes }
 }
 
 /**
@@ -544,9 +579,11 @@ export async function ensureShootCameraFolders(input: ShootFolderInput & {
  */
 export const DRIVE_PHOTO_ROOT = process.env.DRIVE_PHOTO_ROOT?.trim() || '0ALBpF3fzYT-SUk9PVA'
 
-export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string; subject?: string }): Promise<{ bookingFolderId: string }> {
+export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string; bookingCode?: string; subject?: string }): Promise<{ bookingFolderId: string }> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
-  const bookingFolderId = await ensureChildFolder(drive, DRIVE_PHOTO_ROOT, input.bookingFolderName)
+  const bookingFolderId = input.bookingCode
+    ? await ensureBookingFolder(drive, DRIVE_PHOTO_ROOT, input.bookingCode, input.bookingFolderName)
+    : await ensureChildFolder(drive, DRIVE_PHOTO_ROOT, input.bookingFolderName)
   return { bookingFolderId }
 }
 
@@ -559,8 +596,15 @@ export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string;
  */
 export const SOUND_STAGING_DIR = '_SOUND-STAGING'
 
-export async function ensureSoundStagingFolder(input: { rootFolderId: string; bookingFolderName: string; subject?: string }): Promise<{ stagingFolderId: string }> {
-  const stagingFolderId = await ensureFolderPath(input.rootFolderId, [SOUND_STAGING_DIR, input.bookingFolderName])
+export async function ensureSoundStagingFolder(input: { rootFolderId: string; bookingFolderName: string; bookingCode?: string; subject?: string }): Promise<{ stagingFolderId: string }> {
+  if (!input.bookingCode) {
+    const stagingFolderId = await ensureFolderPath(input.rootFolderId, [SOUND_STAGING_DIR, input.bookingFolderName])
+    return { stagingFolderId }
+  }
+  // v1.110 — reuse an existing staging folder matched by Production ID (either shape).
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
+  const stagingRoot = await ensureChildFolder(drive, input.rootFolderId, SOUND_STAGING_DIR)
+  const stagingFolderId = await ensureBookingFolder(drive, stagingRoot, input.bookingCode, input.bookingFolderName)
   return { stagingFolderId }
 }
 
@@ -579,6 +623,25 @@ export async function listChildFolders(parentId: string): Promise<Array<{ id: st
     pageToken = res.data.nextPageToken ?? undefined
   } while (pageToken)
   return out
+}
+
+/**
+ * v1.110 — Read-only: id of a direct child folder BELONGING TO `bookingCode`,
+ * tolerating both the legacy "<code> · …" and the show-first "… (<code>)" folder
+ * name shapes (folderNameMatchesCode). Use this instead of findChildFolder(exact
+ * name) wherever a booking's folder is located by its Production ID, so the lookup
+ * survives the naming change until folders are renamed.
+ */
+export async function findChildFolderByCode(parentId: string, bookingCode: string): Promise<string | null> {
+  const child = (await listChildFolders(parentId)).find(f => folderNameMatchesCode(f.name, bookingCode))
+  return child?.id ?? null
+}
+
+/** Read-only: current name of a Drive file/folder by id, or null. */
+export async function getFileName(fileId: string): Promise<string | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res = await drive.files.get({ fileId, fields: 'name', supportsAllDrives: true })
+  return res.data.name ?? null
 }
 
 /** Read-only: id of a direct child folder by exact name, or null. */
@@ -661,6 +724,25 @@ export async function moveFileToFolder(fileId: string, targetFolderId: string, r
 }
 
 /**
+ * v1.110 — ATOMIC move + rename in a single files.update (relocate to
+ * targetFolderId AND set the new name at once). Used by the reprogram flow when a
+ * show change requires both moving the box to the new program folder and renaming
+ * it: doing both in one call means a failure leaves the folder UNTOUCHED (old
+ * parent, old name), so a retry finds it exactly where the finder looks.
+ */
+export async function moveAndRenameFile(fileId: string, targetFolderId: string, removeParentId: string, newName: string, subject?: string): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
+  await drive.files.update({
+    fileId,
+    addParents: targetFolderId,
+    removeParents: removeParentId,
+    requestBody: { name: newName },
+    fields: 'id, parents',
+    supportsAllDrives: true,
+  })
+}
+
+/**
  * v1.88 — flat variant: <root>/<bookingFolderName>/<camera>/ with no
  * outlet/program layer. Used to pre-create the shoot folder in the "Production
  * Team" landing Shared Drive (where the NAS syncs footage) named by Production
@@ -669,12 +751,15 @@ export async function moveFileToFolder(fileId: string, targetFolderId: string, r
 export async function ensureFlatShootFolders(input: {
   rootFolderId: string
   bookingFolderName: string
+  bookingCode?: string
   cameras: string[]
   /** v1.93 — same per-episode nesting as ensureShootCameraFolders. */
   episodeFolderNames?: string[]
 }): Promise<{ bookingFolderId: string }> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
-  const bookingFolderId = await ensureChildFolder(drive, input.rootFolderId, input.bookingFolderName)
+  const bookingFolderId = input.bookingCode
+    ? await ensureBookingFolder(drive, input.rootFolderId, input.bookingCode, input.bookingFolderName)
+    : await ensureChildFolder(drive, input.rootFolderId, input.bookingFolderName)
   const parents = input.episodeFolderNames?.length
     ? await Promise.all(input.episodeFolderNames.map(ep => ensureChildFolder(drive, bookingFolderId, ep)))
     : [bookingFolderId]

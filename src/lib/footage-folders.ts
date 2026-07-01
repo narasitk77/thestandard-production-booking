@@ -1,4 +1,4 @@
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls, listFilesRecursive, type DriveFile } from '@/lib/google-drive'
 
@@ -35,9 +35,10 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
 
   const isAgency = booking.outlet.code === 'AGN'
   const jobName = booking.projectName?.trim() || booking.episodes[0]?.title?.trim() || null
+  const showName = bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
   const { programFolderName, bookingFolderName } = shootFolderLayers({
     outletCode: booking.outlet.code,
-    showName: bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes }),
+    showName,
     category: booking.category,
     projectId: booking.projectId,
     projectName: booking.projectName,
@@ -51,8 +52,12 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     outletCanonicalName: outletDriveFolderName(booking.outlet.code),
     programFolderName,
     bookingFolderName,
-    // AGN: also accept a box named after the Production ID (what ops sometimes use).
-    bookingFolderNameAlts: isAgency ? [buildBookingFolderName(booking.bookingCode, jobName)] : undefined,
+    // v1.110 — also accept the pre-rename legacy "<code> · <job>" box (until folders
+    // are renamed) + AGN's Production-ID box (new shape, what ops sometimes use).
+    bookingFolderNameAlts: [
+      legacyBookingFolderName(booking.bookingCode, jobName),
+      ...(isAgency ? [buildBookingFolderName(booking.bookingCode, jobName, showName)] : []),
+    ],
     episodeFolderNames: epNames,
   })
 

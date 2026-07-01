@@ -79,20 +79,22 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
 
   for (const b of bookings) {
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+    // v1.110 — show-first folder names ("<show> · <job> (<code>)").
+    const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
     // v1.108 — Sound-crew bookings: keep a staging tree outside the video project
     // folder (additive, best-effort, in addition to whatever video/photo prep runs).
     if (!opts.dryRun && bookingNeedsSound(b.crewRequired)) {
-      try { await ensureSoundStagingFolder({ rootFolderId: root, bookingFolderName: buildBookingFolderName(b.bookingCode!, jobName) }) }
+      try { await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: b.bookingCode!, bookingFolderName: buildBookingFolderName(b.bookingCode!, jobName, showName) }) }
       catch (e: any) { console.error('[prep] sound staging failed (non-fatal):', b.bookingCode, e?.message || e) }
     }
     // v1.102.8 — Photo album jobs → one flat folder in the Photographer Shared
     // Drive (not VIDEO 2026). Handled before the outlet-mapping / camera checks
     // (those are video-only). Idempotent with the approve route's pre-create.
     if (isPhotoAlbumBooking(b.episodes)) {
-      const photoName = buildBookingFolderName(b.bookingCode!, jobName)
+      const photoName = buildBookingFolderName(b.bookingCode!, jobName, showName)
       if (opts.dryRun) { results.push({ bookingCode: b.bookingCode, wouldCreate: [`(photo) ${photoName}`] }); prepared++; continue }
       try {
-        await ensurePhotoAlbumFolder({ bookingFolderName: photoName })
+        await ensurePhotoAlbumFolder({ bookingCode: b.bookingCode!, bookingFolderName: photoName })
         results.push({ bookingCode: b.bookingCode, created: [`(photo) ${photoName}`] })
         prepared++
       } catch (e: any) {
@@ -136,16 +138,18 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
         programFolderName,
         bookingFolderName,
+        // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
+        bookingCode: b.outlet.code === 'AGN' ? undefined : b.bookingCode!,
         cameras,
         episodeFolderNames,
       })
       // 2) v1.88 — landing folder in Production Team (flat, ALWAYS named by
       //    Production ID — it's a NAS drop zone, identity = the shoot, not the
       //    project). Best-effort: a Production Team hiccup must not undo the box prep.
-      const landingFolderName = buildBookingFolderName(b.bookingCode!, jobName)
+      const landingFolderName = buildBookingFolderName(b.bookingCode!, jobName, showName)
       let prodTeam = 'ok'
       try {
-        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingFolderName: landingFolderName, cameras, episodeFolderNames })
+        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: landingFolderName, cameras, episodeFolderNames })
       } catch (ptErr: any) {
         prodTeam = `error: ${ptErr?.message || ptErr}`
         prodTeamErrors++ // v1.92.1 — count it so a total Production Team outage shows in the headline log

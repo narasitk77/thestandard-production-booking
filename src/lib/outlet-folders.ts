@@ -176,10 +176,64 @@ export function sanitizeNameSegment(raw: string, maxLen = 120): string {
  * The Production ID always leads so the folder sorts + searches by the
  * code the team uses, with the producer's job name appended for humans.
  */
-export function buildBookingFolderName(bookingCode: string, jobName?: string | null): string {
+/**
+ * v1.110 — strip a trailing "logistics" parenthetical from a job name so the
+ * folder reads cleanly. The [REQUEST]-migrated jobs carry van/phone/plate notes
+ * in a trailing "(…)" (e.g. "วิน Souri (รถ. 1. ก.ค ทัด. 081-8018202 ฮย-3959)");
+ * ops wants those removed. Only a trailing group that LOOKS like logistics
+ * (contains รถ / โทร / ทัด or 2+ digits) is dropped — a legit trailing "(…)" with
+ * no digits/keywords is kept.
+ */
+export function cleanJobName(raw?: string | null): string {
+  return String(raw || '')
+    .trim()
+    .replace(/\s*\([^)]*(?:รถ|โทร|ทัด|\d{2,})[^)]*\)\s*$/, '')
+    .trim()
+}
+
+/**
+ * Human-readable Drive folder name for a booking (v1.110):
+ *   "Exclusive Interview · โบนัสสุกี้ (WLT-EXI-260701-01)"   (show + job)
+ *   "The Secret Sauce (TSS-TSS-260701-01)"                   (no distinct job)
+ *   "โบนัสสุกี้ (WLT-EXI-260701-01)"                          (no show passed)
+ *   "WLT-EXI-260701-01"                                       (neither)
+ *
+ * Show name leads (so a folder is self-describing even in the flat NAS landing,
+ * which has no program layer above it); the Production ID trails in parens as the
+ * stable identity. `showName` should be bookingShowName(booking). Pre-v1.110
+ * folders used "<code> · <job>" — see legacyBookingFolderName + folderNameMatchesCode
+ * for backward-compatible lookups.
+ */
+export function buildBookingFolderName(bookingCode: string, jobName?: string | null, showName?: string | null): string {
+  const code = String(bookingCode || '').trim()
+  const job = sanitizeNameSegment(cleanJobName(jobName), 100)
+  const show = sanitizeNameSegment(showName || '', 80)
+  const lead = show && job && show !== job ? `${show} ${MIDDLE_DOT} ${job}` : (show || job)
+  return lead ? `${lead} (${code})` : code
+}
+
+/**
+ * Pre-v1.110 folder name ("<code> · <job>", job NOT cleaned) — kept ONLY so
+ * lookups can still find folders created before the naming change, until they're
+ * renamed. Never use for NEW folders.
+ */
+export function legacyBookingFolderName(bookingCode: string, jobName?: string | null): string {
   const code = String(bookingCode || '').trim()
   const job = sanitizeNameSegment(jobName || '', 100)
   return job ? `${code} ${MIDDLE_DOT} ${job}` : code
+}
+
+/**
+ * True when a Drive folder name belongs to `bookingCode`, tolerating BOTH the
+ * legacy "<code> · …" (code leads) and the v1.110 "… (<code>)" (code trails)
+ * shapes. Used by the merge/detect routines that match a booking's folder by its
+ * immutable Production ID rather than the full (editable) name.
+ */
+export function folderNameMatchesCode(name: string, bookingCode: string): boolean {
+  const n = String(name || '')
+  const code = String(bookingCode || '').trim()
+  if (!code) return false
+  return n === code || n.startsWith(code + ' ') || n.includes(`(${code})`)
 }
 
 /**
@@ -256,13 +310,16 @@ export function shootFolderLayers(input: {
       // category box (Advertorial / Event · Forum) — pass category ONLY so the
       // fallback lands on "Advertorial", never the show/project name.
       programFolderName: programFolderName({ outletCode: input.outletCode, category: input.category }),
-      // Project box, nested under the category box.
-      bookingFolderName: buildBookingFolderName(input.projectId, input.projectName),
+      // Project box (shared across the project's bookings, keyed by projectId) —
+      // keep the legacy "<projectId> · <projectName>" shape; the v1.110 show-first
+      // rename targets the per-booking/landing folders, not this shared box.
+      bookingFolderName: legacyBookingFolderName(input.projectId, input.projectName),
     }
   }
   return {
     programFolderName: programFolderName({ outletCode: input.outletCode, showName: input.showName, category: input.category }),
-    bookingFolderName: buildBookingFolderName(input.bookingCode, input.jobName),
+    // v1.110 — show-first: "<show> · <job> (<code>)".
+    bookingFolderName: buildBookingFolderName(input.bookingCode, input.jobName, input.showName),
   }
 }
 

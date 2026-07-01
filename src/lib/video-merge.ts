@@ -23,7 +23,7 @@ import {
   findEpisodeFolderUrls, ensureFolderPath, hasDriveCredentials,
 } from './google-drive'
 import {
-  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName,
+  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode,
 } from './outlet-folders'
 import { bookingShowName } from './display'
 
@@ -100,18 +100,21 @@ export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<Vi
     base.bookings++
     const code = b.bookingCode
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+    const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
     try {
       // AGN shares ONE project box across bookings (per-EP keyed) → a flat
       // per-booking merge would misplace footage. Skip (landing kept).
       if (b.outlet.code === 'AGN') { base.results.push({ bookingCode: code, skipped: 'AGN project box shared — merge skipped' }); continue }
 
-      const flatId = flatChildren.find(c => c.name === code || c.name.startsWith(code + ' '))?.id ?? null
+      // v1.110 — match the landing folder by Production ID (legacy "<code> · …" OR
+      // new "<show> · … (<code>)" shape).
+      const flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
       if (!flatId) { base.results.push({ bookingCode: code, skipped: 'no landing folder' }); continue }
 
       // Resolve the box (read-only). If it hasn't landed yet → skip (try next run).
       const { programFolderName } = shootFolderLayers({
         outletCode: b.outlet.code,
-        showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
+        showName,
         category: b.category, projectId: b.projectId, projectName: b.projectName,
         bookingCode: code, jobName,
       })
@@ -119,7 +122,8 @@ export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<Vi
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
         programFolderName,
-        bookingFolderName: buildBookingFolderName(code, jobName),
+        bookingFolderName: buildBookingFolderName(code, jobName, showName),
+        bookingFolderNameAlts: [legacyBookingFolderName(code, jobName)], // pre-v1.110 box
         episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, {})),
       })
       if (!resolved.bookingFolderId) { base.results.push({ bookingCode: code, skipped: 'box not found (not prepped yet)' }); continue }

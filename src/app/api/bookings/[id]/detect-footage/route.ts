@@ -3,8 +3,8 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
 import { resolveFootageFolders } from '@/lib/footage-folders'
-import { findChildFolder, SOUND_STAGING_DIR } from '@/lib/google-drive'
-import { bookingNeedsSound, buildBookingFolderName } from '@/lib/outlet-folders'
+import { findChildFolder, findChildFolderByCode, SOUND_STAGING_DIR } from '@/lib/google-drive'
+import { bookingNeedsSound } from '@/lib/outlet-folders'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // recursive Drive walks can be slow for big bookings
@@ -51,8 +51,9 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     if (root && booking.bookingCode && bookingNeedsSound(booking.crewRequired)) {
       const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
       if (stagingRoot) {
-        const jobName = booking.projectName?.trim() || booking.episodes[0]?.title?.trim() || null
-        const id = await findChildFolder(stagingRoot, buildBookingFolderName(booking.bookingCode, jobName))
+        // v1.110 — match by Production ID (folder may be legacy "<code> · …" or the
+        // new "<show> · … (<code>)" shape).
+        const id = await findChildFolderByCode(stagingRoot, booking.bookingCode)
         if (id) soundStagingUrl = `https://drive.google.com/drive/folders/${id}`
       }
     }

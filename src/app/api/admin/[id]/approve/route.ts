@@ -97,7 +97,7 @@ export async function POST(
         // Photographer Shared Drive (not the VIDEO 2026 tree). Photographers drop
         // the photos inside; no camera/EP layers.
         if (isPhotoAlbumBooking(updated.episodes)) {
-          const { bookingFolderId } = await ensurePhotoAlbumFolder({ bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName) })
+          const { bookingFolderId } = await ensurePhotoAlbumFolder({ bookingCode: updated.bookingCode, bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName, bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes })) })
           await upsertTextFile({ parentFolderId: bookingFolderId, name: '_SHOOT.txt', content: renderBookingInfo(bookingInfoInput(updated)) })
           return
         }
@@ -120,6 +120,8 @@ export async function POST(
           outletCanonicalName: outletDriveFolderName(updated.outlet.code),
           programFolderName,
           bookingFolderName,
+          // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
+          bookingCode: updated.outlet.code === 'AGN' ? undefined : updated.bookingCode,
           cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
           // v1.93 — one folder per episode; empty for no-episode bookings.
           episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,
@@ -145,7 +147,7 @@ export async function POST(
       if (!root) return
       try {
         const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
-        await ensureSoundStagingFolder({ rootFolderId: root, bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName) })
+        await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: updated.bookingCode, bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName, bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes })) })
       } catch (e: any) {
         console.error('[approve] sound staging pre-create failed (non-fatal):', e?.message || e)
       }

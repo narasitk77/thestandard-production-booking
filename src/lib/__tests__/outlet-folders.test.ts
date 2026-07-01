@@ -4,6 +4,9 @@ import {
   outletDriveFolderName,
   programFolderName,
   buildBookingFolderName,
+  legacyBookingFolderName,
+  cleanJobName,
+  folderNameMatchesCode,
   buildEpisodeFolderName,
   buildStoragePath,
   shootFolderLayers,
@@ -31,11 +34,47 @@ test('programFolderName: AGN keys off category, outlets use the show name', () =
   assert.equal(programFolderName({ outletCode: 'NWS', showName: '' }), 'รายการ')
 })
 
-test('buildBookingFolderName uses the U+00B7 middle-dot separator', () => {
-  assert.equal(buildBookingFolderName('TSS-EXE-260826-L-01', 'งานทดสอบ'), `TSS-EXE-260826-L-01 ${DOT} งานทดสอบ`)
-  assert.equal(buildBookingFolderName('TSS-EXE-260826-L-01', null), 'TSS-EXE-260826-L-01') // no job → bare code
-  // explicitly NOT a hyphen
+test('buildBookingFolderName: v1.110 show-first "<show> · <job> (<code>)"', () => {
+  assert.equal(
+    buildBookingFolderName('WLT-EXI-260701-01', 'โบนัสสุกี้', 'Exclusive Interview'),
+    `Exclusive Interview ${DOT} โบนัสสุกี้ (WLT-EXI-260701-01)`,
+  )
+  // job == show (no distinct job) → "<show> (<code>)"
+  assert.equal(
+    buildBookingFolderName('WLT-EXI-260701-01', 'Exclusive Interview', 'Exclusive Interview'),
+    'Exclusive Interview (WLT-EXI-260701-01)',
+  )
+  // no show passed → "<job> (<code>)"
+  assert.equal(buildBookingFolderName('TSS-EXE-260826-01', 'งานทดสอบ'), 'งานทดสอบ (TSS-EXE-260826-01)')
+  // strips the van/logistics parenthetical out of the job
+  assert.equal(
+    buildBookingFolderName('TSS-TSS-260701-01', 'วิน Souri (รถ. 1. ก.ค ทัด. 081-8018202 ฮย-3959)', 'The Secret Sauce'),
+    `The Secret Sauce ${DOT} วิน Souri (TSS-TSS-260701-01)`,
+  )
+  // neither show nor job → bare code
+  assert.equal(buildBookingFolderName('X-01', null), 'X-01')
   assert.ok(!buildBookingFolderName('X-01', 'job').includes(' - '))
+})
+
+test('cleanJobName strips ONLY a trailing logistics parenthetical', () => {
+  assert.equal(cleanJobName('วิน Souri (รถ. 1. ก.ค ทัด. 081-8018202 ฮย-3959)'), 'วิน Souri')
+  assert.equal(cleanJobName('งาน (โทร. 0812345678)'), 'งาน')
+  assert.equal(cleanJobName('โบนัสสุกี้'), 'โบนัสสุกี้')
+  assert.equal(cleanJobName('EP.5 (พิเศษ)'), 'EP.5 (พิเศษ)') // no digits/keywords → kept
+  assert.equal(cleanJobName(null), '')
+})
+
+test('legacyBookingFolderName keeps the pre-v1.110 "<code> · <job>" shape', () => {
+  assert.equal(legacyBookingFolderName('TSS-EXE-260826-L-01', 'งานทดสอบ'), `TSS-EXE-260826-L-01 ${DOT} งานทดสอบ`)
+  assert.equal(legacyBookingFolderName('TSS-EXE-260826-L-01', null), 'TSS-EXE-260826-L-01')
+})
+
+test('folderNameMatchesCode matches legacy (code leads) AND v1.110 (code in parens)', () => {
+  assert.equal(folderNameMatchesCode('TSS-260701-01 · job', 'TSS-260701-01'), true)          // legacy
+  assert.equal(folderNameMatchesCode('The Secret Sauce · วิน (TSS-260701-01)', 'TSS-260701-01'), true) // v1.110
+  assert.equal(folderNameMatchesCode('TSS-260701-01', 'TSS-260701-01'), true)                 // bare
+  assert.equal(folderNameMatchesCode('OTHER-01 · x', 'TSS-260701-01'), false)
+  assert.equal(folderNameMatchesCode('TSS-260701-011 · x', 'TSS-260701-01'), false)           // no prefix false-match
 })
 
 test('buildEpisodeFolderName: "EPnn · title" (1-based, zero-padded), bare "EPnn" without a title', () => {
@@ -81,7 +120,7 @@ test('shootFolderLayers: AGN nests Project under the category box; others use sh
     projectId: null, projectName: null, bookingCode: 'NWS-KYM-260616-L-01', jobName: 'Morning',
   })
   assert.equal(nws.programFolderName, 'Key Message')
-  assert.equal(nws.bookingFolderName, `NWS-KYM-260616-L-01 ${DOT} Morning`)
+  assert.equal(nws.bookingFolderName, `Key Message ${DOT} Morning (NWS-KYM-260616-L-01)`) // v1.110 show-first
   // AGN with no projectId (shouldn't happen) → falls back to the normal layout
   const agnNoProj = shootFolderLayers({
     outletCode: 'AGN', showName: '', category: 'ADVERTORIAL',

@@ -316,6 +316,8 @@ export async function POST(request: NextRequest) {
         outletCanonicalName: outletDriveFolderName(booking.outlet.code),
         programFolderName: driveProgramFolder,
         bookingFolderName,
+        // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
+        bookingCode: booking.outlet.code === 'AGN' ? undefined : (booking.bookingCode ?? undefined),
         episodeFolderName,
         camera,
         subject,
