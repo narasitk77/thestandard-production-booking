@@ -85,6 +85,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [savedMessage, setSavedMessage] = useState('✓ Saved')
   const [savedTone, setSavedTone] = useState<'success' | 'warning'>('success')
   const [approved, setApproved] = useState(false)
+  const [forcingStatus, setForcingStatus] = useState(false)
   const [error, setError] = useState('')
 
   // Freelancers
@@ -301,7 +302,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     setTimeout(() => setSaved(false), 3000)
   }
 
-  const handleAssign = async () => {
+  const handleAssign = async (sendEmail: boolean = true) => {
     setError('')
     setSaving(true)
     try {
@@ -327,6 +328,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           adminNotes,
           freelancers: freelancerPayload,
           mainVideographerEmail: mainVdo,
+          sendEmail,
         }),
       })
       const data = await res.json()
@@ -365,7 +367,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               ? '' // booking not approved yet — silent, normal flow
               : ` · ⚠ calendar guests NOT added (${cal.error || 'unknown error'})`
 
-      if (data.warning) {
+      if (email.skipped) {
+        showSaved('✓ บันทึกแล้ว — ไม่ส่งอีเมล' + calendarFragment, cal && !cal.ok ? 'warning' : 'success')
+      } else if (data.warning) {
         showSaved(data.warning + calendarFragment, 'warning')
       } else if (email.requested === 0) {
         showSaved('✓ Saved (no email recipients)' + calendarFragment, cal && !cal.ok ? 'warning' : 'success')
@@ -404,6 +408,29 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       setError(e.message)
     } finally {
       setApproving(false)
+    }
+  }
+
+  // v1.108.x — admin escape hatch: force status past the normal transition/date guards
+  // (e.g. un-stick a shoot-day crew swap that bounced back to ASSIGNED).
+  const forceStatus = async (newStatus: string) => {
+    if (!confirm(`บังคับสถานะเป็น ${newStatus}? (ข้ามกฎ transition ปกติ — ใช้แก้เคสสถานะหลุด)`)) return
+    setError('')
+    setForcingStatus(true)
+    try {
+      const res = await fetch(`/api/admin/${id}/force-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setBooking(prev => prev ? { ...prev, status: data.booking.status } : prev)
+      showSaved(`✓ บังคับสถานะเป็น ${data.booking.status}`)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setForcingStatus(false)
     }
   }
 
@@ -618,6 +645,20 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           <CameraMicTag cameraCount={booking.cameraCount} micCount={booking.micCount} isBlockShot={booking.isBlockShot} size="md" />
         </div>
       </div>
+
+      {/* v1.108.x — admin status override (escape hatch for stuck bookings) */}
+      <details className="gf-card p-3 text-xs">
+        <summary className="cursor-pointer text-gray-500 select-none">⚙️ บังคับสถานะ (admin)</summary>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-gray-400">ตั้งเป็น:</span>
+          <button onClick={() => forceStatus('CONFIRMED')} disabled={forcingStatus}
+            className="px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50 disabled:opacity-50">→ CONFIRMED</button>
+          <button onClick={() => forceStatus('COMPLETED')} disabled={forcingStatus}
+            className="px-2 py-1 border border-blue-600 text-blue-700 rounded hover:bg-blue-50 disabled:opacity-50">→ COMPLETED</button>
+          {forcingStatus && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+        </div>
+        <div className="text-gray-400 mt-1.5">ข้ามกฎ transition + เช็ควันถ่าย · เขียน audit log · ใช้เมื่อสถานะหลุด (เช่น reassign วันงานแล้วเด้ง)</div>
+      </details>
 
       {/* v1.68 — incomplete-details warning, surfaced right on the card */}
       {missingDetails.length > 0 && (
@@ -1119,10 +1160,19 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               value={adminNotes} onChange={e => setAdminNotes(e.target.value)} />
           </div>
 
-          <button onClick={handleAssign} disabled={saving}
-            className="px-4 py-2 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors disabled:opacity-50">
-            {saving ? 'Saving…' : 'Save & Send Email'}
-          </button>
+          {/* v1.108.x — Save and Send-email split into two actions. "บันทึก" saves the
+              assignment + syncs the calendar without emailing; "บันทึก + ส่งเมล" also
+              sends the assignment emails. */}
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => handleAssign(false)} disabled={saving}
+              className="px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors disabled:opacity-50 inline-flex items-center gap-1">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
+            </button>
+            <button onClick={() => handleAssign(true)} disabled={saving}
+              className="px-4 py-2 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors disabled:opacity-50 inline-flex items-center gap-1">
+              {saving ? 'กำลังส่ง…' : <><Mail className="w-4 h-4" /> บันทึก + ส่งเมล</>}
+            </button>
+          </div>
         </div>
       )}
 

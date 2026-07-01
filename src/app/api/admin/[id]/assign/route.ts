@@ -39,7 +39,11 @@ export async function POST(
     const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
     const senderAccessToken = await getValidGoogleAccessToken(authToken)
     const accessTokenError = (authToken as any)?.accessTokenError as string | undefined
-    const { assignedEmails, adminNotes, mainVideographerEmail, freelancers } = await request.json()
+    const { assignedEmails, adminNotes, mainVideographerEmail, freelancers, sendEmail } = await request.json()
+    // v1.108.x — "Save" and "Send email" are separate actions now. The assignment
+    // + calendar guest sync always persist; assignment emails go out only when the
+    // admin explicitly asks (sendEmail !== false). "Save" passes sendEmail:false.
+    const shouldSendEmail = sendEmail !== false
     // v1.41.0 — freelancers arrive as a structured list (not appended text), so
     // re-saving can't duplicate names. Their emails join the staff emails as
     // calendar guests / mail recipients; names without an email still ride along
@@ -60,8 +64,13 @@ export async function POST(
       return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
     }
 
-    // Status logic: don't downgrade CONFIRMED bookings during re-assign.
-    const nextStatus = existing.status === 'CONFIRMED' ? 'CONFIRMED' : 'ASSIGNED'
+    // Status logic: don't downgrade a booking that's already progressed. Re-assigning
+    // crew on a CONFIRMED *or COMPLETED* booking (e.g. a shoot-day crew swap) must keep
+    // its status — only REQUESTED/ASSIGNED settle to ASSIGNED. (Bugfix: COMPLETED used to
+    // fall through to ASSIGNED, bouncing a finished shoot back a step.)
+    const nextStatus = (existing.status === 'CONFIRMED' || existing.status === 'COMPLETED')
+      ? existing.status
+      : 'ASSIGNED'
 
     const booking = await prisma.booking.update({
       where: { id: params.id },
@@ -248,7 +257,8 @@ export async function POST(
       : null
 
     // Send emails synchronously so the UI can show real per-recipient results.
-    const sendResults = await Promise.all(
+    // Skipped entirely when the admin clicked "Save" (sendEmail:false) — save-only.
+    const sendResults = !shouldSendEmail ? [] : await Promise.all(
       emailRecipients.map(async (email) => {
         try {
           await sendAssignmentEmail({
@@ -306,6 +316,7 @@ export async function POST(
         requested: emailRecipients.length,
         sent: sent.length,
         failed,
+        skipped: !shouldSendEmail,
       },
       calendar: calendarSync,
     })
