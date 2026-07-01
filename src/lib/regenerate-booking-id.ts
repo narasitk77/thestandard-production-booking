@@ -84,6 +84,9 @@ export type RegenerateOptions = {
   newBookingCode: string
   /** Episodes whose episodeId changes (usually [0] mirrors bookingCode for non-AGN). */
   episodeChanges?: Array<{ episodeDbId: string; newEpisodeId: string }>
+  /** v1.109 — episodes whose program (รายการ) is reassigned, applied in the same
+   *  DB transaction as the ID change (reprogram flow). */
+  programUpdates?: Array<{ episodeDbId: string; programId: string }>
   actorEmail: string
   /** Compute the plan + validate collisions but touch nothing. */
   dryRun?: boolean
@@ -126,8 +129,11 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
     }
   }
 
+  // Program (รายการ) reassignments applied in the same DB transaction (reprogram).
+  const programUpdates = (opts.programUpdates ?? []).filter(p => epById.has(p.episodeDbId))
+
   const codeChanged = !!newBookingCode && newBookingCode !== oldCode
-  if (!codeChanged && episodeChanges.length === 0) {
+  if (!codeChanged && episodeChanges.length === 0 && programUpdates.length === 0) {
     return { ok: true, bookingId, oldCode, newCode: newBookingCode, episodeChanges: [], dryRun, effects: { ...NOOP_EFFECTS }, error: 'No change' }
   }
 
@@ -283,6 +289,9 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
       }
       for (const c of episodeChanges) {
         await tx.episode.update({ where: { id: c.episodeDbId }, data: { episodeId: c.newEpisodeId } })
+      }
+      for (const p of programUpdates) {
+        await tx.episode.update({ where: { id: p.episodeDbId }, data: { programId: p.programId } })
       }
       if (codeChanged && oldCode) {
         const fl = await tx.footageLog.updateMany({ where: { bookingId }, data: { productionId: newBookingCode } })

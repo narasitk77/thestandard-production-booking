@@ -251,6 +251,11 @@ export function getProgram(outletCode: string, programCode: string): Program | u
   return outlet?.programs.find(p => p.code === programCode)
 }
 
+/** All programs (shows/รายการ) for an outlet — used by the admin reprogram picker. */
+export function programsForOutlet(outletCode: string): Program[] {
+  return OUTLET_MAP[outletCode]?.programs ?? []
+}
+
 // v1.53 — ordered to mirror the assign sections on /admin/[id]
 // (ROLE_ORDER in src/lib/team-roster.ts): Photographer + Switcher have
 // roster sections, so the form should let producers request them.

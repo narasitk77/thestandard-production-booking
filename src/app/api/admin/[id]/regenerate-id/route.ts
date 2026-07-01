@@ -2,17 +2,22 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { computeTypeDroppedId, regenerateBookingId } from '@/lib/regenerate-booking-id'
+import { planReprogram } from '@/lib/reprogram-booking'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 /**
- * POST /api/admin/[id]/regenerate-id   { dryRun?, notifyCalendar? }
+ * POST /api/admin/[id]/regenerate-id   { dryRun?, notifyCalendar?, programByEpisode? }
  *
- * Regenerate ONE booking's Production/Episode ID to the current-format (v1.109:
- * drop the legacy [TYPE] segment), cascading the rename to the Drive box + sheet
- * + calendar via the shared primitive. Admin-only. Returns { noChange:true } when
- * the code is already type-less, and 409 on a bookingCode collision.
+ * Two modes, both cascading the rename to Drive + sheet + calendar via the shared
+ * primitive. Admin-only.
+ *   - DEFAULT (no programByEpisode): regenerate to the current format (v1.109 —
+ *     drop the legacy [TYPE] segment). Returns { noChange:true } when already clean.
+ *   - REPROGRAM ({ programByEpisode: { <episodeDbId>: <programCode> } }): change an
+ *     episode's show/รายการ (or add a program code) and recompute its Episode ID
+ *     (fresh, collision-free sequence) — used for occasional admin fixes.
+ * Returns 409 on a bookingCode collision.
  */
 export async function POST(
   request: NextRequest,
@@ -25,6 +30,26 @@ export async function POST(
     const body = await request.json().catch(() => ({}))
     const dryRun = body?.dryRun === true
     const notifyCalendar = body?.notifyCalendar === true
+    const programByEpisode = (body?.programByEpisode && typeof body.programByEpisode === 'object')
+      ? body.programByEpisode as Record<string, string>
+      : null
+
+    // ── REPROGRAM mode: change an episode's show/program, recompute its ID ──
+    if (programByEpisode && Object.keys(programByEpisode).length > 0) {
+      const plan = await planReprogram(params.id, programByEpisode)
+      if (!plan.ok) return NextResponse.json({ error: plan.error }, { status: 400 })
+      const result = await regenerateBookingId({
+        bookingId: params.id,
+        newBookingCode: plan.newBookingCode,
+        episodeChanges: plan.episodeChanges.map(c => ({ episodeDbId: c.episodeDbId, newEpisodeId: c.newEpisodeId })),
+        programUpdates: plan.programUpdates.map(p => ({ episodeDbId: p.episodeDbId, programId: p.programId })),
+        actorEmail: session.email,
+        dryRun,
+        notifyCalendar,
+      })
+      if (!result.ok) return NextResponse.json({ error: result.error || 'Reprogram failed', result }, { status: 409 })
+      return NextResponse.json({ ok: true, mode: 'reprogram', result })
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },

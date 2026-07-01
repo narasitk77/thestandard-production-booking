@@ -4,6 +4,7 @@ import { bookingShowName } from '@/lib/display'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
+import { programsForOutlet } from '@/lib/data'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
@@ -125,6 +126,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [titleEdit, setTitleEdit] = useState(false)
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({})
   const [titleSaving, setTitleSaving] = useState(false)
+  // v1.109 — reprogram: change an episode's show/รายการ, then regen its ID.
+  const [progEdit, setProgEdit] = useState(false)
+  const [progDrafts, setProgDrafts] = useState<Record<string, string>>({})
+  const [progSaving, setProgSaving] = useState(false)
   // v1.95.0 — link EXISTING project episodes onto a (possibly confirmed) AGN
   // booking. Episodes are picked from the project Sheet (source of truth); the
   // app never mints IDs (see dashboard-episodes.ts).
@@ -559,6 +564,41 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // v1.109 — reprogram: pick a new show/รายการ per episode, then recompute the
+  // Episode ID (fresh sequence) + cascade rename via /regenerate-id.
+  const startProgEdit = () => {
+    const d: Record<string, string> = {}
+    booking.episodes.forEach(e => { d[e.id] = (e as Episode).program?.code || '' })
+    setProgDrafts(d)
+    setProgEdit(true)
+  }
+  const handleSaveProgram = async () => {
+    const changes: Record<string, string> = {}
+    booking.episodes.forEach(e => {
+      const cur = (e as Episode).program?.code || ''
+      const draft = progDrafts[e.id] || ''
+      if (draft && draft !== cur) changes[e.id] = draft
+    })
+    if (Object.keys(changes).length === 0) { setProgEdit(false); return }
+    if (!confirm('เปลี่ยนรายการของตอนที่เลือก แล้ว regenerate เลข ID ใหม่ (rename โฟลเดอร์ Drive + Sheet + Calendar ให้ตรงกัน)?')) return
+    setError('')
+    setProgSaving(true)
+    try {
+      const res = await fetch(`/api/admin/${id}/regenerate-id`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ programByEpisode: changes }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'เปลี่ยนรายการไม่สำเร็จ')
+      showSaved('✓ เปลี่ยนรายการ + regen ID แล้ว — กำลังรีเฟรช…')
+      setTimeout(() => window.location.reload(), 1200)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setProgSaving(false)
+    }
+  }
+
   // v1.95.0 — open the "link project episode" picker: fetch the project's
   // episodes (Sheet) and hide ones already on this booking.
   const openEpPicker = async () => {
@@ -779,6 +819,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 {titleSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} บันทึก
               </button>
             </div>
+          ) : progEdit ? (
+            <div className="flex gap-2">
+              <button onClick={() => setProgEdit(false)} disabled={progSaving}
+                className="text-xs px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">ยกเลิก</button>
+              <button onClick={handleSaveProgram} disabled={progSaving}
+                className="text-xs px-2.5 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1 disabled:opacity-50">
+                {progSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} บันทึก + regen ID
+              </button>
+            </div>
           ) : (
             <div className="flex gap-2">
               {/* v1.95.0 — AGN only: link more episodes from the project Sheet (incl. after approve) */}
@@ -786,6 +835,13 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 <button onClick={openEpPicker}
                   className="text-[11px] px-2.5 py-1 border border-[#0b8043] text-[#0b8043] rounded hover:bg-[#0b8043] hover:text-white inline-flex items-center gap-1">
                   <Plus className="w-3 h-3" /> เพิ่ม EP จาก project
+                </button>
+              )}
+              {/* v1.109 — reprogram (non-AGN): change the show/รายการ then regen the ID */}
+              {booking.outlet?.code !== 'AGN' && (
+                <button onClick={startProgEdit}
+                  className="text-[11px] px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+                  <RotateCcw className="w-3 h-3" /> แก้รายการ
                 </button>
               )}
               <button onClick={startTitleEdit}
@@ -809,6 +865,14 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               <input className="gf-input flex-1" placeholder="ชื่อตอน"
                 value={titleDrafts[ep.id] ?? (ep as Episode).title}
                 onChange={e => setTitleDrafts({ ...titleDrafts, [ep.id]: e.target.value })} />
+            ) : progEdit ? (
+              <select className="gf-input flex-1"
+                value={progDrafts[ep.id] ?? ((ep as Episode).program?.code || '')}
+                onChange={e => setProgDrafts({ ...progDrafts, [ep.id]: e.target.value })}>
+                {programsForOutlet(booking.outlet?.code || '').map(p => (
+                  <option key={p.code} value={p.code}>{p.code} · {p.name}</option>
+                ))}
+              </select>
             ) : (
               <span className="text-sm text-gray-700">{(ep as Episode).title || '—'}</span>
             )}
