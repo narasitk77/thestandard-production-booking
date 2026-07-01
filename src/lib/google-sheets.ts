@@ -41,6 +41,8 @@ const COL = {
   // ID-regeneration flow can rewrite a booking's Production ID in place. The
   // row is still LOCATED by the OLD code (col A) before col A is overwritten.
   productionId: 1,
+  shootDate: 6,
+  shootEndDate: 7,
   episodeIds: 17,
   assignedEmails: 21,
   status: 22,
@@ -263,6 +265,9 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
   productionId: string
   /** v1.109 — rewrite col Q (Episode IDs), comma-joined. */
   episodeIds: string
+  /** v1.109 — rewrite col F/G (Shoot Date / Shoot End Date), "YYYY-MM-DD". */
+  shootDate: string
+  shootEndDate: string
   assignedEmails: string
   status: string
   calendarEventId: string

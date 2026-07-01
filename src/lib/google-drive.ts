@@ -625,6 +625,41 @@ export async function renameDriveItem(fileId: string, newName: string, subject?:
   })
 }
 
+/** Read-only: direct child FILES (not folders) of a folder — id, name, size. */
+export async function listFilesInFolder(parentId: string): Promise<Array<{ id: string; name: string; size?: string | null }>> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const out: Array<{ id: string; name: string; size?: string | null }> = []
+  let pageToken: string | undefined
+  do {
+    const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      q: `'${parentId}' in parents and trashed = false and mimeType != '${FOLDER_MIME}'`,
+      fields: 'nextPageToken, files(id, name, size)', pageSize: 1000, pageToken,
+      supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+    })
+    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name, size: f.size ?? null })
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return out
+}
+
+/**
+ * v1.109 — MOVE a file to `targetFolderId`, detaching it from `removeParentId`
+ * (atomic relocate via addParents/removeParents — works across Shared Drives with
+ * supportsAllDrives). Used by the video-merge to pull NAS footage from the flat
+ * Production Team landing into the VIDEO 2026 box. Atomic: on failure the file
+ * stays put (no data loss), unlike copy-then-delete.
+ */
+export async function moveFileToFolder(fileId: string, targetFolderId: string, removeParentId: string, subject?: string): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
+  await drive.files.update({
+    fileId,
+    addParents: targetFolderId,
+    removeParents: removeParentId,
+    fields: 'id, parents',
+    supportsAllDrives: true,
+  })
+}
+
 /**
  * v1.88 — flat variant: <root>/<bookingFolderName>/<camera>/ with no
  * outlet/program layer. Used to pre-create the shoot folder in the "Production

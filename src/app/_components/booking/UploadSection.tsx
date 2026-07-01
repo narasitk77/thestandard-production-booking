@@ -167,6 +167,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [scanning, setScanning] = useState(false)
   const [scanMsg, setScanMsg] = useState<string | null>(null)
   const [mergingSound, setMergingSound] = useState(false)
+  const [mergingVideo, setMergingVideo] = useState(false)
   // v1.101 — "Detect": scan THIS booking's Drive folders for footage (incl. files
   // moved from NAS into the boxes, which have no Upload row).
   const [detecting, setDetecting] = useState(false)
@@ -264,6 +265,26 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       setScanMsg(e?.message || 'รวมเสียงไม่สำเร็จ')
     } finally {
       setMergingSound(false)
+    }
+  }
+
+  // v1.109 — admin: MOVE NAS footage from the flat Production Team landing into the
+  // VIDEO 2026 boxes now (system-wide, by Production ID). MOVE, not copy — confirm first.
+  const triggerVideoMerge = async () => {
+    if (!confirm('ย้ายไฟล์วิดีโอจาก Production Team (ที่ NAS ทิ้งไว้) เข้ากล่อง Video 2026 ตาม Production ID ทั้งระบบ?\n\nเป็นการ MOVE (ไฟล์จะหายจาก Production Team) — ทำเมื่อ NAS sync เสร็จแล้ว')) return
+    setMergingVideo(true)
+    setScanMsg(null)
+    try {
+      const r = await fetch('/api/internal/video-merge/run', { credentials: 'include' })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) setScanMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`)
+      else if (d.skipped) setScanMsg(`รวมไฟล์ยังไม่ทำงาน: ${d.reason || 'ตั้งค่ายังไม่ครบ'}`)
+      else setScanMsg(`รวมไฟล์วิดีโอ: ${d.bookings ?? 0} งาน · เจอ ${d.landed ?? 0} ไฟล์ · ย้ายเข้ากล่อง ${d.moved ?? 0} · error ${d.errors ?? 0}`)
+      detectFootage()
+    } catch (e: any) {
+      setScanMsg(e?.message || 'รวมไฟล์ไม่สำเร็จ')
+    } finally {
+      setMergingVideo(false)
     }
   }
 
@@ -749,6 +770,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
               <button onClick={triggerSoundMerge} disabled={mergingSound} title="รวมไฟล์เสียงจาก staging เข้าโฟลเดอร์ AUDIO ในกล่อง ตาม Production ID (ทั้งระบบ)"
                 className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50 inline-flex items-center gap-1 disabled:opacity-50">
                 {mergingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>🎙️</span>} รวมไฟล์เสียง
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={triggerVideoMerge} disabled={mergingVideo} title="ย้ายไฟล์วิดีโอจาก Production Team (NAS) เข้ากล่อง Video 2026 ตาม Production ID — MOVE, ทั้งระบบ"
+                className="text-xs px-2 py-1 border border-[#673ab7] text-[#673ab7] rounded hover:bg-purple-50 inline-flex items-center gap-1 disabled:opacity-50">
+                {mergingVideo ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>🎬</span>} รวมไฟล์วิดีโอ
               </button>
             )}
             <button onClick={fetchHistory} disabled={historyLoading}
