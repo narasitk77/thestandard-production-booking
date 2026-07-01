@@ -637,6 +637,20 @@ export async function findChildFolderByCode(parentId: string, bookingCode: strin
   return child?.id ?? null
 }
 
+/**
+ * v1.110 — Read-only: resolve <root>/<outlet>/<program> to the program folder id
+ * (fuzzy outlet + program match, ordering-prefix tolerant), or null if any level
+ * is missing. Bulk helper for the folder-rename sweep (list a program folder once,
+ * then match all its booking boxes) — avoids a per-booking tree walk.
+ */
+export async function findProgramFolderId(rootFolderId: string, outletCanonicalName: string, programFolderName: string): Promise<string | null> {
+  const want = (s: string) => stripOrderingPrefix(s).trim().toLowerCase()
+  const outletId = (await listChildFolders(rootFolderId)).find(f => stripOrderingPrefix(f.name).toLowerCase() === want(outletCanonicalName))?.id
+  if (!outletId) return null
+  const programId = (await listChildFolders(outletId)).find(f => stripOrderingPrefix(f.name).toLowerCase() === want(programFolderName))?.id
+  return programId ?? null
+}
+
 /** Read-only: current name of a Drive file/folder by id, or null. */
 export async function getFileName(fileId: string): Promise<string | null> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })

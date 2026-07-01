@@ -1,24 +1,24 @@
 /**
  * v1.110 — one-off: rename existing Drive folders from the legacy "<code> · <job>"
- * shape to the show-first "<show> · <job> (<code>)" shape, applying the same
- * job-name cleanup (strip the van/logistics parenthetical). Covers the per-booking
- * VIDEO box (non-AGN), the sound-staging folder, the photo-album folder, and the
- * flat Production Team landing folder. The AGN project box (shared, projectId-keyed)
- * is intentionally left alone.
+ * shape to the show-first "<show> · <job> (<code>)" shape (job cleaned of the van/
+ * logistics parenthetical). Covers the per-booking VIDEO box (non-AGN), the flat
+ * Production Team landing, the sound-staging folder, and the photo-album folder.
+ * The AGN project box (shared, projectId-keyed) is intentionally left alone.
  *
- * Idempotent + safe: each folder is looked up by its immutable Production ID
- * (findChildFolderByCode / findEpisodeFolderUrls with a legacy alt), and renamed
- * ONLY if its current name differs from the target — so re-running is a no-op.
- * dryRun reports the exact "old → new" changes without touching Drive.
+ * BULK + fast: each relevant parent (the 3 flat roots + each distinct program
+ * folder) is listed ONCE and its children matched to bookings by Production ID in
+ * memory — no per-booking Drive tree walk (which timed out on the full set). Each
+ * folder is renamed ONLY if its current name differs from the target, so re-running
+ * is a no-op. dryRun reports every "old → new" without touching Drive.
  */
 import { prisma } from './db'
 import {
-  findEpisodeFolderUrls, findChildFolder, findChildFolderByCode, getFileName, renameDriveItem,
+  listChildFolders, findChildFolder, findProgramFolderId, renameDriveItem,
   hasDriveCredentials, DRIVE_PHOTO_ROOT, SOUND_STAGING_DIR,
 } from './google-drive'
 import {
-  outletDriveFolderName, shootFolderLayers, buildBookingFolderName, legacyBookingFolderName,
-  isPhotoAlbumBooking, bookingNeedsSound,
+  outletDriveFolderName, shootFolderLayers, buildBookingFolderName,
+  folderNameMatchesCode, isPhotoAlbumBooking,
 } from './outlet-folders'
 import { bookingShowName } from './display'
 
@@ -35,83 +35,106 @@ export interface FolderRenameResult {
   results: Array<{ bookingCode: string | null; changes?: string[]; error?: string }>
 }
 
+type Meta = {
+  code: string
+  jobName: string | null
+  showName: string
+  isAgency: boolean
+  isPhoto: boolean
+  outletCode: string
+  category: string | null
+  projectId: string | null
+  projectName: string | null
+}
+
 export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<FolderRenameResult> {
   const base = { dryRun: !!opts.dryRun, bookings: 0, renamed: 0, alreadyOk: 0, errors: 0, results: [] as FolderRenameResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', ...base }
 
-  const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR) // may be null
-
   const bookings = await prisma.booking.findMany({
     where: { bookingCode: { not: null } },
     select: {
-      bookingCode: true, projectId: true, projectName: true, category: true, crewRequired: true,
+      bookingCode: true, projectId: true, projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { code: true, name: true } } } },
     },
   })
+  const metas: Meta[] = bookings.map(b => ({
+    code: b.bookingCode!,
+    jobName: b.projectName?.trim() || b.episodes[0]?.title?.trim() || null,
+    showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
+    isAgency: b.outlet.code === 'AGN',
+    isPhoto: isPhotoAlbumBooking(b.episodes),
+    outletCode: b.outlet.code,
+    category: b.category,
+    projectId: b.projectId,
+    projectName: b.projectName,
+  }))
+  base.bookings = metas.length
 
-  // Rename one folder (by id) to newName only if it currently differs.
-  const renameIfDiff = async (fileId: string, newName: string, label: string, changes: string[]): Promise<'renamed' | 'ok' | 'error'> => {
-    try {
-      const cur = await getFileName(fileId)
-      if (cur === newName) return 'ok'
-      changes.push(`${label}: "${cur}" → "${newName}"`)
-      if (!base.dryRun) await renameDriveItem(fileId, newName)
-      return 'renamed'
-    } catch (e: any) {
-      changes.push(`${label}: ERROR ${e?.message || e}`)
-      return 'error'
-    }
+  const changesByCode = new Map<string, string[]>()
+  const rememberChange = (code: string, s: string) => {
+    const a = changesByCode.get(code) || []
+    a.push(s)
+    changesByCode.set(code, a)
   }
-  const tally = (r: 'renamed' | 'ok' | 'error') => {
-    if (r === 'renamed') base.renamed++
-    else if (r === 'ok') base.alreadyOk++
-    else base.errors++
+  // Rename only when the CURRENT name (known from the bulk listing) differs.
+  const renameIfDiff = async (id: string, curName: string, newName: string, code: string, label: string) => {
+    if (curName === newName) { base.alreadyOk++; return }
+    rememberChange(code, `${label}: "${curName}" → "${newName}"`)
+    if (base.dryRun) { base.renamed++; return }
+    try { await renameDriveItem(id, newName); base.renamed++ }
+    catch (e: any) { base.errors++; rememberChange(code, `${label}: ERROR ${e?.message || e}`) }
   }
+  const newFlatName = (m: Meta) => buildBookingFolderName(m.code, m.jobName, m.showName)
 
-  for (const b of bookings) {
-    if (!b.bookingCode) continue
-    base.bookings++
-    const code = b.bookingCode
-    const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
-    const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
-    const isAgency = b.outlet.code === 'AGN'
-    const isPhoto = isPhotoAlbumBooking(b.episodes)
-    const changes: string[] = []
-    try {
-      // (a) main VIDEO box — non-AGN, non-photo (AGN's shared project box is left as-is).
-      if (!isAgency && !isPhoto) {
-        const { programFolderName, bookingFolderName: newName } = shootFolderLayers({
-          outletCode: b.outlet.code, showName, category: b.category,
-          projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
-        })
-        const resolved = await findEpisodeFolderUrls({
-          rootFolderId: root, outletCanonicalName: outletDriveFolderName(b.outlet.code), programFolderName,
-          bookingFolderName: newName, bookingFolderNameAlts: [legacyBookingFolderName(code, jobName)], episodeFolderNames: [],
-        })
-        if (resolved.bookingFolderId) tally(await renameIfDiff(resolved.bookingFolderId, newName, 'box', changes))
+  try {
+    // (A) flat parents — list once, match children to bookings by Production ID.
+    const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
+    const flatParents: Array<{ id: string | null; label: string; pool: Meta[] }> = [
+      { id: PRODUCTION_TEAM_ROOT, label: 'landing', pool: metas },
+      { id: DRIVE_PHOTO_ROOT, label: 'photo', pool: metas.filter(m => m.isPhoto) },
+      { id: stagingRoot, label: 'sound', pool: metas },
+    ]
+    for (const fp of flatParents) {
+      if (!fp.id) continue
+      for (const child of await listChildFolders(fp.id)) {
+        const m = fp.pool.find(x => folderNameMatchesCode(child.name, x.code))
+        if (m) await renameIfDiff(child.id, child.name, newFlatName(m), m.code, fp.label)
       }
-      // (b) sound-staging folder (any outlet with Sound crew).
-      if (stagingRoot && bookingNeedsSound(b.crewRequired)) {
-        const fid = await findChildFolderByCode(stagingRoot, code)
-        if (fid) tally(await renameIfDiff(fid, buildBookingFolderName(code, jobName, showName), 'sound', changes))
-      }
-      // (c) photo-album folder.
-      if (isPhoto) {
-        const fid = await findChildFolderByCode(DRIVE_PHOTO_ROOT, code)
-        if (fid) tally(await renameIfDiff(fid, buildBookingFolderName(code, jobName, showName), 'photo', changes))
-      }
-      // (d) flat Production Team landing folder (all outlets).
-      const landId = await findChildFolderByCode(PRODUCTION_TEAM_ROOT, code)
-      if (landId) tally(await renameIfDiff(landId, buildBookingFolderName(code, jobName, showName), 'landing', changes))
-
-      if (changes.length) base.results.push({ bookingCode: code, changes })
-    } catch (e: any) {
-      base.errors++
-      base.results.push({ bookingCode: code, error: e?.message || String(e) })
     }
+
+    // (B) VIDEO boxes — group non-AGN, non-photo bookings by their program folder,
+    //     list each program folder once, match boxes by Production ID.
+    const groups = new Map<string, { outletCanon: string; programFolderName: string; items: Meta[] }>()
+    for (const m of metas) {
+      if (m.isAgency || m.isPhoto) continue
+      const { programFolderName } = shootFolderLayers({
+        outletCode: m.outletCode, showName: m.showName, category: m.category,
+        projectId: m.projectId, projectName: m.projectName, bookingCode: m.code, jobName: m.jobName,
+      })
+      const outletCanon = outletDriveFolderName(m.outletCode)
+      const key = `${outletCanon}||${programFolderName}`
+      const g = groups.get(key) || { outletCanon, programFolderName, items: [] }
+      g.items.push(m)
+      groups.set(key, g)
+    }
+    for (const g of Array.from(groups.values())) {
+      const programId = await findProgramFolderId(root, g.outletCanon, g.programFolderName)
+      if (!programId) continue
+      const children = await listChildFolders(programId)
+      for (const m of g.items) {
+        const child = children.find(c => folderNameMatchesCode(c.name, m.code))
+        if (child) await renameIfDiff(child.id, child.name, newFlatName(m), m.code, 'box')
+      }
+    }
+
+    for (const [code, ch] of Array.from(changesByCode)) base.results.push({ bookingCode: code, changes: ch })
+  } catch (e: any) {
+    base.errors++
+    base.results.push({ bookingCode: null, error: e?.message || String(e) })
   }
 
   return { skipped: false, ...base }
