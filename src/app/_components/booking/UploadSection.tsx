@@ -169,7 +169,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // v1.101 — "Detect": scan THIS booking's Drive folders for footage (incl. files
   // moved from NAS into the boxes, which have no Upload row).
   const [detecting, setDetecting] = useState(false)
-  const [detected, setDetected] = useState<{ found: number; fileCount?: number; folders: Array<{ label: string; url: string; fileCount: number; totalBytes: number }>; bookingFolderUrl: string | null; soundStagingUrl?: string | null; error?: string } | null>(null)
+  const [detected, setDetected] = useState<{ found: number; fileCount?: number; folders: Array<{ label: string; url: string; fileCount: number; totalBytes: number }>; bookingFolderUrl: string | null; soundStagingUrl?: string | null; cached?: boolean; cachedAt?: string | null; error?: string } | null>(null)
   // v1.102.4 — "แจ้งทุกคนว่าไฟล์พร้อม"
   const [notifying, setNotifying] = useState(false)
   const [notifyMsg, setNotifyMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -249,12 +249,13 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   }
 
   // v1.101 — Detect footage in THIS booking's Drive folders (path-resolved, so it
-  // sees NAS-moved files too — not just app uploads).
-  const detectFootage = async () => {
+  // sees NAS-moved files too — not just app uploads). v1.111 — the result is cached
+  // server-side; on open we read the cache (instant) and only re-walk Drive when the
+  // user presses "ตรวจใหม่" (refresh=true). Keep the old list visible while refreshing.
+  const detectFootage = async (refresh = false) => {
     setDetecting(true)
-    setDetected(null)
     try {
-      const r = await fetch(`/api/bookings/${booking.id}/detect-footage`)
+      const r = await fetch(`/api/bookings/${booking.id}/detect-footage${refresh ? '?refresh=1' : ''}`)
       const d = await r.json().catch(() => ({}))
       if (!r.ok) setDetected({ found: 0, folders: [], bookingFolderUrl: null, error: d.error || `HTTP ${r.status}` })
       else setDetected(d)
@@ -266,9 +267,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   }
 
   // v1.102.3 — auto-detect on open so the footage folder list + links are ALWAYS
-  // there; ops shouldn't have to press Detect every visit. Button = manual refresh.
+  // there; ops shouldn't have to press Detect every visit. v1.111 — this hits the
+  // cache (fast); the "ตรวจใหม่" button forces a fresh Drive walk.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { detectFootage() }, [booking.id])
+  useEffect(() => { detectFootage(false) }, [booking.id])
 
   // v1.102.4 — email EVERYONE on the booking the footage links ("ไฟล์พร้อมแล้ว").
   // Preview first (who gets it) → confirm → send. Server resolves the links + list.
@@ -536,10 +538,18 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
           <div className="text-sm font-medium text-gray-700">
             🔍 ตรวจหา footage บน Drive <span className="text-[11px] text-gray-400 font-normal">(รวมไฟล์ที่ย้ายมาจาก NAS — ไม่ต้องอัปผ่านระบบ)</span>
           </div>
-          <button onClick={detectFootage} disabled={detecting}
-            className="text-xs px-3 py-1.5 rounded font-medium bg-[#673ab7] text-white hover:bg-[#5e35b1] disabled:opacity-50 inline-flex items-center gap-1">
-            {detecting && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {detecting ? 'กำลังตรวจ…' : '🔄 ตรวจใหม่'}
-          </button>
+          <div className="flex items-center gap-2">
+            {detected?.cachedAt && !detected.error && (
+              <span className="text-[10px] text-gray-400" title={new Date(detected.cachedAt).toLocaleString('th-TH')}>
+                อัปเดต {new Date(detected.cachedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+            <button onClick={() => detectFootage(true)} disabled={detecting}
+              title="สแกน Drive ใหม่ (ปกติใช้ลิงก์ที่บันทึกไว้ ไม่ต้องสแกนทุกครั้ง)"
+              className="text-xs px-3 py-1.5 rounded font-medium bg-[#673ab7] text-white hover:bg-[#5e35b1] disabled:opacity-50 inline-flex items-center gap-1">
+              {detecting && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {detecting ? 'กำลังตรวจ…' : '🔄 ตรวจใหม่'}
+            </button>
+          </div>
         </div>
         {detecting && !detected && (
           <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">

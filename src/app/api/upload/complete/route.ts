@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session'
 import { completeMultipart, verifyUpload, type CompletePart } from '@/lib/wasabi'
 import { getDriveFile } from '@/lib/google-drive'
 import { appendFootageRows } from '@/lib/footage-sheet'
+import { clearFootageCache } from '@/lib/footage-folders'
 
 export const dynamic = 'force-dynamic'
 
@@ -179,6 +180,10 @@ export async function POST(request: NextRequest) {
         // be picked up by the next footage scanner tick.
       }
     }
+
+    // v1.111 — a new file landed in the box → invalidate the detect-footage cache
+    // so the next scan (and notify-ready) reflect it. Fire-and-forget.
+    if (finalStatus === 'COMPLETE') clearFootageCache(upload.booking.id).catch(() => {})
 
     return NextResponse.json({
       ok: finalStatus === 'COMPLETE',

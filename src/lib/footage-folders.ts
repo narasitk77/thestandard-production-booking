@@ -1,6 +1,7 @@
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, bookingNeedsSound } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
-import { findEpisodeFolderUrls, listFilesRecursive, type DriveFile } from '@/lib/google-drive'
+import { findEpisodeFolderUrls, listFilesRecursive, findChildFolder, findChildFolderByCode, SOUND_STAGING_DIR, type DriveFile } from '@/lib/google-drive'
+import { prisma } from '@/lib/db'
 
 export interface FootageFolder {
   label: string
@@ -105,4 +106,67 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
   const folders = Array.from(folderMap.values()).sort((a, b) => a.label.localeCompare(b.label))
   const fileCount = folders.reduce((n, f) => n + f.fileCount, 0)
   return { folders, fileCount, bookingFolderUrl: resolved.bookingFolderUrl }
+}
+
+// ── Cached detect payload (v1.111) ──────────────────────────────────────────
+// The full "detect footage" payload = the resolved folders PLUS the sound-staging
+// link. Both the upload panel (every open) and notify-ready (preview + send) used
+// to recompute this recursive Drive walk each time — very slow for big shoots. We
+// now cache it on the booking (footageCache / footageCacheAt) and only re-walk on
+// an explicit refresh or after footage changes (upload / merge invalidate it).
+
+export interface FootagePayload {
+  found: number
+  fileCount: number
+  folders: FootageFolder[]
+  bookingFolderUrl: string | null
+  soundStagingUrl: string | null
+}
+
+export interface BookingForFootagePayload extends BookingForFootage {
+  id: string
+  crewRequired?: string[] | null
+}
+
+/** Fresh (uncached) full payload: folders + sound-staging link. */
+export async function computeFootagePayload(booking: BookingForFootagePayload): Promise<FootagePayload> {
+  const { folders, fileCount, bookingFolderUrl } = await resolveFootageFolders(booking)
+  let soundStagingUrl: string | null = null
+  const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+  if (root && booking.bookingCode && bookingNeedsSound(booking.crewRequired)) {
+    const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
+    if (stagingRoot) {
+      // match by Production ID (folder may be legacy "<code> · …" or "<show> · … (<code>)").
+      const id = await findChildFolderByCode(stagingRoot, booking.bookingCode)
+      if (id) soundStagingUrl = `https://drive.google.com/drive/folders/${id}`
+    }
+  }
+  return { found: folders.length, fileCount, folders, bookingFolderUrl, soundStagingUrl }
+}
+
+export interface CachedFootagePayload extends FootagePayload { cached: boolean; cachedAt: string | null }
+
+/**
+ * Return the cached payload if present (and not force-refreshed), else compute it
+ * fresh and store it. Cache is valid iff footageCacheAt is set — invalidating is a
+ * cheap `footageCacheAt = null` write (see clearFootageCache), no need to null the
+ * JSON blob itself.
+ */
+export async function getCachedFootagePayload(booking: BookingForFootagePayload, opts: { refresh?: boolean } = {}): Promise<CachedFootagePayload> {
+  if (!opts.refresh) {
+    const row = await prisma.booking.findUnique({ where: { id: booking.id }, select: { footageCache: true, footageCacheAt: true } })
+    const c = row?.footageCache as unknown as FootagePayload | null | undefined
+    if (row?.footageCacheAt && c && Array.isArray(c.folders)) {
+      return { ...c, cached: true, cachedAt: row.footageCacheAt.toISOString() }
+    }
+  }
+  const fresh = await computeFootagePayload(booking)
+  const now = new Date()
+  await prisma.booking.update({ where: { id: booking.id }, data: { footageCache: fresh as any, footageCacheAt: now } }).catch(() => {})
+  return { ...fresh, cached: false, cachedAt: now.toISOString() }
+}
+
+/** Invalidate the cache (footage changed) — next detect re-walks Drive. */
+export async function clearFootageCache(bookingId: string): Promise<void> {
+  await prisma.booking.update({ where: { id: bookingId }, data: { footageCacheAt: null } }).catch(() => {})
 }

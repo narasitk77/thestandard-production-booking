@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
 import { runBookingMerge, BOOKING_MERGE_SELECT } from '@/lib/booking-merge'
+import { clearFootageCache } from '@/lib/footage-folders'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // moving/copying this booking's files can take a bit
@@ -33,6 +34,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
 
     const result = await runBookingMerge(booking, { dryRun })
+    // Footage just moved/copied into the box → invalidate the detect cache so the
+    // next scan reflects it (the client re-runs detect right after this).
+    if (!dryRun) await clearFootageCache(params.id)
     return NextResponse.json(result)
   } catch (e: any) {
     console.error('POST /api/bookings/[id]/merge error:', e)

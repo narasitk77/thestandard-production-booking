@@ -4,7 +4,7 @@ import { getSession, canUploadToBooking } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { formatBytes } from '@/lib/footage-report'
-import { resolveFootageFolders } from '@/lib/footage-folders'
+import { getCachedFootagePayload } from '@/lib/footage-folders'
 import { bookingShowName } from '@/lib/display'
 
 export const dynamic = 'force-dynamic'
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       select: {
-        id: true, bookingCode: true, status: true, deletedAt: true,
+        id: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true,
         assignedEmails: true, createdByEmail: true, producer: true, producerEmail: true,
         projectId: true, projectName: true, category: true, callTime: true, shootDate: true,
         outlet: { select: { code: true, name: true } },
@@ -63,8 +63,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const code = booking.bookingCode || booking.id
 
     // Resolve the footage folders SERVER-SIDE (don't trust client-supplied links in
-    // an email that goes to many people).
-    const { folders, fileCount, bookingFolderUrl } = await resolveFootageFolders(booking)
+    // an email that goes to many people). v1.111 — reuse the cached detect payload
+    // the upload page just populated, so this is instant instead of re-walking Drive
+    // twice (preview + send).
+    const { folders, fileCount, bookingFolderUrl } = await getCachedFootagePayload(booking, { refresh: false })
     if (folders.length === 0) {
       return NextResponse.json({ error: 'ยังไม่เจอ footage ในโฟลเดอร์ Drive ของงานนี้ — ตรวจสอบก่อนแจ้ง' }, { status: 400 })
     }

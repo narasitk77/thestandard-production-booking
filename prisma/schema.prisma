@@ -276,6 +276,11 @@ model Booking {
   projectName      String?
   notes            String?
   adminNotes       String?
+  // v1.111 — cached "detect footage" result (folders + Drive links + counts) so
+  // the upload page + notify-ready don't re-walk Drive on every open. Refreshed
+  // by the "ตรวจใหม่" button (refresh=1) and invalidated on upload/merge.
+  footageCache     Json?
+  footageCacheAt   DateTime?
   status           BookingStatus @default(REQUESTED)
   createdByEmail   String?
   // Cancellation REQUEST (producer/owner asks; staff actually cancels). Keeps the
