@@ -83,8 +83,9 @@ function reportEmailTo(): string | null {
 /** Build the report. withDriveCounts = live Drive counting (button + digest). */
 export async function buildNasReport(manifest: NasManifest, opts: { withDriveCounts?: boolean; statuses?: any } = {}): Promise<NasSyncReport> {
   const st = opts.statuses || {}
-  const folders: FolderSyncReport[] = []
-  for (const nf of manifest.folders) {
+  // Live Drive counts run CONCURRENTLY — 15 folders serially blew past the 60s
+  // reverse proxy (504). Wall-clock ≈ the slowest folder, not the sum.
+  const folders: FolderSyncReport[] = await Promise.all(manifest.folders.map(async nf => {
     const code = codeOf(nf.name)
     const pendingBytes = nf.files.reduce((n, f) => n + (f.size || 0), 0)
     const prev = code ? st[code] : null
@@ -95,8 +96,8 @@ export async function buildNasReport(manifest: NasManifest, opts: { withDriveCou
     const everHadFiles = (prev?.maxSeen || 0) > 0 || nf.files.length > 0
     const state: FolderSyncReport['state'] = nf.files.length > 0 ? 'sending'
       : everHadFiles || (driveFiles ?? 0) > 0 ? 'sent' : 'empty'
-    folders.push({ name: nf.name, code, nasPending: nf.files.length, nasPendingBytes: pendingBytes, driveFiles, driveBytes, state })
-  }
+    return { name: nf.name, code, nasPending: nf.files.length, nasPendingBytes: pendingBytes, driveFiles, driveBytes, state }
+  }))
   return {
     nasAt: manifest.at ?? null,
     comparedAt: new Date().toISOString(),
