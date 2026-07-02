@@ -66,7 +66,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // an email that goes to many people). v1.111 — reuse the cached detect payload
     // the upload page just populated, so this is instant instead of re-walking Drive
     // twice (preview + send).
-    const { folders, fileCount, bookingFolderUrl } = await getCachedFootagePayload(booking, { refresh: false })
+    let payload = await getCachedFootagePayload(booking, { refresh: false })
+    // v1.111 — if the cache says empty, re-check with a FRESH walk before blocking:
+    // a stale/uninvalidated empty cache must never falsely block a real "ready" send.
+    if (payload.folders.length === 0) payload = await getCachedFootagePayload(booking, { refresh: true })
+    const { folders, fileCount, bookingFolderUrl } = payload
     if (folders.length === 0) {
       return NextResponse.json({ error: 'ยังไม่เจอ footage ในโฟลเดอร์ Drive ของงานนี้ — ตรวจสอบก่อนแจ้ง' }, { status: 400 })
     }

@@ -163,8 +163,10 @@ export async function getCachedFootagePayload(booking: BookingForFootagePayload,
         found: c.found,
         fileCount: c.fileCount,
         folders: c.folders,
-        bookingFolderUrl: c.bookingFolderUrl ?? null,
-        soundStagingUrl: c.soundStagingUrl ?? null,
+        // Coerce URL fields to string|null (a corrupt blob could hold an
+        // array/object; `?? null` wouldn't catch that → would render "[object Object]").
+        bookingFolderUrl: typeof c.bookingFolderUrl === 'string' ? c.bookingFolderUrl : null,
+        soundStagingUrl: typeof c.soundStagingUrl === 'string' ? c.soundStagingUrl : null,
         cached: true,
         cachedAt: row.footageCacheAt.toISOString(),
       }
@@ -178,5 +180,8 @@ export async function getCachedFootagePayload(booking: BookingForFootagePayload,
 
 /** Invalidate the cache (footage changed) — next detect re-walks Drive. */
 export async function clearFootageCache(bookingId: string): Promise<void> {
-  await prisma.booking.update({ where: { id: bookingId }, data: { footageCacheAt: null } }).catch(() => {})
+  // Log (don't silently swallow) so a failed invalidation that would leave a
+  // stale cache is at least visible; notify-ready also re-checks fresh on empty.
+  await prisma.booking.update({ where: { id: bookingId }, data: { footageCacheAt: null } })
+    .catch((e: any) => console.warn('[footage] clearFootageCache failed for', bookingId, e?.message || e))
 }

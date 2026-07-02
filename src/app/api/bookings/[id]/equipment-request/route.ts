@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 import { logAudit } from '@/lib/audit'
 import { cleanStr } from '@/lib/admin-parse'
 import { EquipmentCategory } from '@prisma/client'
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         loanCode,
         photographer: user?.nickname || user?.name || session.email,
         email: session.email,
-        jobName: bookingShowName(booking!),
+        jobName: bookingDisplayName(booking!),
         bookingId: booking!.id,
         eventDate: booking!.shootDate,
         dueDate: booking!.shootEndDate || booking!.shootDate,
