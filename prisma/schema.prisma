@@ -264,7 +264,8 @@ model Booking {
   // v1.41.0 — structured freelance crew (name · contract · email). Replaces the
   // old "append into adminNotes text" approach that duplicated names on every
   // re-save (the calendar description is rebuilt from this list, never appended).
-  // Shape: [{ name: string, contract?: string, email?: string }]
+  // Shape: [{ name: string, role?: string, phone?: string, contract?: string, email?: string }]
+  // (v1.111 added role = 'Photographer'|'Videographer'|'Sound'|'Other' + phone)
   freelancers      Json?
   assignedEmails   String[]
   mainVideographerEmail String?              // designated lead camera, picked at assign-time

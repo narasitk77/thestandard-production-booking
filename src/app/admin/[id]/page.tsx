@@ -8,7 +8,7 @@ import { programsForOutlet } from '@/lib/data'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
-import { normalizeFreelancers, splitLegacyFreelancers } from '@/lib/freelancers'
+import { normalizeFreelancers, splitLegacyFreelancers, freelancerRoleLabel } from '@/lib/freelancers'
 import { CameraMicTag } from '../_components/CameraMicTag'
 import NumberStepper from '@/app/_components/NumberStepper'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
@@ -33,7 +33,7 @@ interface BookingDetail {
   calendarLastSyncedAt?: string | null
 }
 
-interface Freelancer { id: string; name: string; contract: string; email: string }
+interface Freelancer { id: string; name: string; role: string; phone: string; contract: string; email: string }
 
 // Team distribution / group inboxes — quick-select alongside individual crew so
 // an admin can notify a whole team at once (e.g. the shared video / sound desk).
@@ -93,6 +93,8 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   // Freelancers
   const [freelancers, setFreelancers] = useState<Freelancer[]>([])
   const [flName, setFlName] = useState('')
+  const [flRole, setFlRole] = useState('')
+  const [flPhone, setFlPhone] = useState('')
   const [flContract, setFlContract] = useState('')
   const [flEmail, setFlEmail] = useState('')
 
@@ -257,11 +259,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         // so it can't be double-counted on the next save.
         const structured = normalizeFreelancers(d.booking.freelancers)
         if (structured.length > 0) {
-          setFreelancers(structured.map(f => ({ id: crypto.randomUUID(), name: f.name, contract: f.contract || '', email: f.email || '' })))
+          setFreelancers(structured.map(f => ({ id: crypto.randomUUID(), name: f.name, role: f.role || '', phone: f.phone || '', contract: f.contract || '', email: f.email || '' })))
           setAdminNotes(d.booking.adminNotes || '')
         } else {
           const split = splitLegacyFreelancers(d.booking.adminNotes)
-          setFreelancers(split.freelancers.map(f => ({ id: crypto.randomUUID(), name: f.name, contract: f.contract || '', email: f.email || '' })))
+          setFreelancers(split.freelancers.map(f => ({ id: crypto.randomUUID(), name: f.name, role: f.role || '', phone: f.phone || '', contract: f.contract || '', email: f.email || '' })))
           setAdminNotes(split.notes)
         }
         // Keep freelancer emails out of the staff "assigned" list so each crew
@@ -292,10 +294,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     setFreelancers(prev => [...prev, {
       id: crypto.randomUUID(),
       name: flName.trim(),
+      role: flRole.trim(),
+      phone: flPhone.trim(),
       contract: flContract.trim(),
       email: flEmail.trim(),
     }])
-    setFlName(''); setFlContract(''); setFlEmail('')
+    setFlName(''); setFlRole(''); setFlPhone(''); setFlContract(''); setFlEmail('')
   }
 
   const removeFreelancer = (id: string) =>
@@ -317,7 +321,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       // and rebuilds the calendar description from the structured list — so
       // re-saving never duplicates names (the old append-into-adminNotes bug).
       const freelancerPayload = freelancers
-        .map(f => ({ name: f.name.trim(), contract: f.contract.trim(), email: f.email.trim() }))
+        .map(f => ({ name: f.name.trim(), role: f.role.trim(), phone: f.phone.trim(), contract: f.contract.trim(), email: f.email.trim() }))
         .filter(f => f.name)
       const allEmails = [
         ...assignEmails,
@@ -1180,24 +1184,41 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
               <UserPlus className="w-3.5 h-3.5" /> Freelance
             </div>
+            {/* v1.111 — freelance crew by ประเภท + ชื่อ + เบอร์ (ช่างภาพ / sound
+                freelance ฯลฯ). Add multiple rows = จำนวน freelance. */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
-              <input className="gf-input" placeholder="Name *"
-                value={flName} onChange={e => setFlName(e.target.value)} />
-              <input className="gf-input" placeholder="Contract No."
+              <select className="gf-input" value={flRole} onChange={e => setFlRole(e.target.value)}>
+                <option value="">ประเภท (freelance)…</option>
+                <option value="Photographer">ช่างภาพ (freelance)</option>
+                <option value="Videographer">ช่างวิดีโอ (freelance)</option>
+                <option value="Sound">Sound (freelance)</option>
+                <option value="Other">อื่นๆ</option>
+              </select>
+              <input className="gf-input" placeholder="ชื่อ *"
+                value={flName} onChange={e => setFlName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addFreelancer())} />
+              <input className="gf-input" placeholder="เบอร์โทร"
+                value={flPhone} onChange={e => setFlPhone(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addFreelancer())} />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+              <input className="gf-input" placeholder="Contract No. (ถ้ามี)"
                 value={flContract} onChange={e => setFlContract(e.target.value)} />
-              <input className="gf-input" placeholder="Email (optional)"
+              <input className="gf-input" placeholder="Email (ถ้ามี — สำหรับเชิญเข้าปฏิทิน)"
                 value={flEmail} onChange={e => setFlEmail(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addFreelancer())} />
             </div>
             <button type="button" onClick={addFreelancer} disabled={!flName.trim()}
               className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40">
-              + Add Freelancer
+              + เพิ่ม freelance
             </button>
             {freelancers.length > 0 && (
               <div className="mt-2 space-y-1">
                 {freelancers.map(f => (
-                  <div key={f.id} className="flex items-center gap-2 text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                  <div key={f.id} className="flex items-center gap-2 text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1 flex-wrap">
+                    {f.role && <span className="px-1.5 py-0.5 rounded bg-orange-200 text-orange-900 text-[10px] font-medium">{freelancerRoleLabel(f.role)}</span>}
                     <span className="font-medium text-orange-800">{f.name}</span>
+                    {f.phone && <span className="text-orange-600">📞 {f.phone}</span>}
                     {f.contract && <span className="text-orange-600">#{f.contract}</span>}
                     {f.email && <span className="text-orange-500">{f.email}</span>}
                     <button onClick={() => removeFreelancer(f.id)} className="ml-auto text-orange-400 hover:text-red-500">

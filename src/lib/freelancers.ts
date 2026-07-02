@@ -14,6 +14,11 @@
 
 export interface Freelancer {
   name: string
+  // v1.111 — freelance category (canonical: 'Photographer' | 'Videographer' |
+  // 'Sound' | 'Other' | ''), so ops can log freelance ช่างภาพ / sound crew by role.
+  role?: string
+  // v1.111 — contact number (ops asked to record freelance crew by ชื่อ + เบอร์).
+  phone?: string
   contract?: string
   email?: string
 }
@@ -30,6 +35,8 @@ export function normalizeFreelancers(value: unknown): Freelancer[] {
     if (!name) continue
     out.push({
       name,
+      role: typeof r.role === 'string' ? r.role.trim() : '',
+      phone: typeof r.phone === 'string' ? r.phone.trim() : '',
       contract: typeof r.contract === 'string' ? r.contract.trim() : '',
       email: typeof r.email === 'string' ? r.email.trim() : '',
     })
@@ -43,13 +50,28 @@ export function freelancerEmails(list: Freelancer[]): string[] {
 }
 
 // One human-readable line per freelancer — used in the calendar description
-// and emails. e.g. "• Ken (Contract: 1500) <ken@x.com>"
+// and emails. e.g. "• [ช่างภาพ] Ken · โทร 081-234-5678 (Contract: 1500) <ken@x.com>"
 export function formatFreelancerLines(list: Freelancer[]): string {
   return list
     .map(f =>
-      `• ${f.name}${f.contract ? ` (Contract: ${f.contract})` : ''}${f.email ? ` <${f.email}>` : ''}`,
+      `• ${f.role ? `[${freelancerRoleLabel(f.role)}] ` : ''}${f.name}` +
+      `${f.phone ? ` · โทร ${f.phone}` : ''}` +
+      `${f.contract ? ` (Contract: ${f.contract})` : ''}` +
+      `${f.email ? ` <${f.email}>` : ''}`,
     )
     .join('\n')
+}
+
+// Thai display label for a freelance role (canonical English → Thai). Falls back
+// to the raw value for anything unrecognised.
+export function freelancerRoleLabel(role: string | null | undefined): string {
+  switch ((role || '').trim()) {
+    case 'Photographer': return 'ช่างภาพ'
+    case 'Videographer': return 'ช่างวิดีโอ'
+    case 'Sound': return 'Sound'
+    case 'Other': return 'อื่นๆ'
+    default: return (role || '').trim()
+  }
 }
 
 // ── Legacy migration ────────────────────────────────────────────────────────

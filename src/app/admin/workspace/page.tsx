@@ -119,7 +119,7 @@ export default function WorkspacePage() {
           (b.assignedEmails || []).join(' '),
           (b.crewRequired || []).join(' '),
           (b.episodes || []).map(e => e.episodeId).join(' '),
-          normalizeFreelancers(b.freelancers).map(f => `${f.name} ${f.email || ''}`).join(' '),
+          normalizeFreelancers(b.freelancers).map(f => `${f.name} ${f.role || ''} ${f.phone || ''} ${f.email || ''}`).join(' '),
         ].join(' ').toLowerCase()
         if (!hay.includes(q)) return false
       }
