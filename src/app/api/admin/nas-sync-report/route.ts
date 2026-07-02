@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
-import { compareNasToDrive, latestNasManifest } from '@/lib/nas-sync'
+import { buildNasReport, latestNasState } from '@/lib/nas-sync'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 /**
- * GET /api/admin/nas-sync-report — the "ตรวจ NAS ↔ Drive" button. Re-diffs the
- * LATEST stored NAS manifest (pushed by the Mac agent) against the Production
- * Team Drive folders right now. Includes the manifest timestamp so the UI can
- * show how fresh the NAS side is. Console access.
+ * GET /api/admin/nas-sync-report — the "ตรวจตอนนี้" button. Uses the LATEST NAS
+ * manifest (pushed by the Mac agent) and LIVE Drive counts per Production ID
+ * (global code search — survives ops hand-moves). NAS = a transfer queue
+ * (upload-then-delete), so: 🔄 = queue still draining, ✅ = queue drained &
+ * files on Drive, ⏳ = nothing yet. Console access.
  */
 export async function GET() {
   const me = await getSession()
@@ -18,11 +19,11 @@ export async function GET() {
     return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   }
   try {
-    const manifest = await latestNasManifest()
+    const { manifest, statuses } = await latestNasState()
     if (!manifest) {
       return NextResponse.json({ ok: false, reason: 'ยังไม่มีข้อมูลจาก NAS agent — ตรวจว่า agent บนเครื่อง admin ทำงานอยู่' }, { status: 200 })
     }
-    const report = await compareNasToDrive(manifest)
+    const report = await buildNasReport(manifest, { withDriveCounts: true, statuses })
     return NextResponse.json({ ok: true, ...report })
   } catch (e: any) {
     console.error('GET /api/admin/nas-sync-report error:', e)

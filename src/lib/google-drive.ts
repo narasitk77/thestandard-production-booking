@@ -513,11 +513,24 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
       if (bookingId) break
       if (alt && alt !== input.bookingFolderName) bookingId = await findExact(programId, alt)
     }
+    // v1.111 — last resort inside the right program folder: match by Production
+    // ID in ANY name shape (ops rename boxes freely; the code is immutable).
+    if (!bookingId && input.bookingCode) {
+      bookingId = (await listFolders(programId)).find(f => folderNameMatchesCode(f.name, input.bookingCode!))?.id ?? null
+    }
   }
   if (!bookingId) return empty
 
   const episodes = await Promise.all(input.episodeFolderNames.map(async n => {
-    const epId = await findExact(bookingId, n)
+    // Exact name first; v1.111 — fall back to the immutable lead segment
+    // ("EP01" / project EP id) so a retitled episode folder still resolves.
+    let epId = await findExact(bookingId, n)
+    if (!epId) {
+      const lead = n.split(' · ')[0]?.trim()
+      if (lead) {
+        epId = (await listFolders(bookingId)).find(f => f.name === lead || f.name.startsWith(`${lead} `))?.id ?? null
+      }
+    }
     return { episodeFolderName: n, folderId: epId, url: epId ? folderUrl(epId) : null }
   }))
   return { programFolderId: programId, bookingFolderId: bookingId, bookingFolderUrl: folderUrl(bookingId), episodes }
@@ -635,6 +648,38 @@ export async function listChildFolders(parentId: string): Promise<Array<{ id: st
 export async function findChildFolderByCode(parentId: string, bookingCode: string): Promise<string | null> {
   const child = (await listChildFolders(parentId)).find(f => folderNameMatchesCode(f.name, bookingCode))
   return child?.id ?? null
+}
+
+/**
+ * v1.111 — GLOBAL code search: find every folder (across all shared drives the
+ * service account can see) whose name carries this Production ID, regardless of
+ * where ops moved it. The deterministic path resolution breaks whenever a folder
+ * is hand-moved/renamed (ops do this routinely); matching by the immutable code
+ * finds the footage anyway. Precision comes from folderNameMatchesCode on the
+ * results — the Drive query is just the coarse net.
+ */
+export async function findFoldersByCode(bookingCode: string): Promise<Array<{ id: string; name: string; parents: string[] }>> {
+  const code = String(bookingCode || '').trim()
+  if (!code) return []
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const safe = code.replace(/'/g, "\\'")
+  const out: Array<{ id: string; name: string; parents: string[] }> = []
+  let pageToken: string | undefined
+  do {
+    const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      q: `name contains '${safe}' and trashed = false and mimeType = '${FOLDER_MIME}'`,
+      fields: 'nextPageToken, files(id, name, parents)',
+      pageSize: 100, pageToken,
+      supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+    })
+    for (const f of res.data.files ?? []) {
+      if (f.id && f.name && folderNameMatchesCode(f.name, code)) {
+        out.push({ id: f.id, name: f.name, parents: (f.parents ?? []) as string[] })
+      }
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return out
 }
 
 /**

@@ -1,6 +1,6 @@
 import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, bookingNeedsSound } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
-import { findEpisodeFolderUrls, listFilesRecursive, findChildFolder, findChildFolderByCode, SOUND_STAGING_DIR, type DriveFile } from '@/lib/google-drive'
+import { findEpisodeFolderUrls, findFoldersByCode, listFilesRecursive, findChildFolder, findChildFolderByCode, SOUND_STAGING_DIR, type DriveFile } from '@/lib/google-drive'
 import { prisma } from '@/lib/db'
 
 export interface FootageFolder {
@@ -110,9 +110,38 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     raw.filter(isFootage).forEach(f => add(f, label(f.folderPath[0] ?? '')))
   }
 
+  // v1.111 — GLOBAL code scan (non-AGN): ops hand-move/rename booking folders all
+  // the time, which breaks the deterministic path above and footage "vanishes".
+  // The Production ID in the folder name is immutable — sweep every code-bearing
+  // folder anywhere the service account can see, and aggregate files from the
+  // ones the deterministic pass didn't already cover. Landing/staging/photo trees
+  // are included on purpose: "ตรวจหา footage" should show files wherever they sit,
+  // labeled by which folder they're in.
+  let extraBoxUrl: string | null = null
+  if (!isAgency && booking.bookingCode) {
+    try {
+      const candidates = await findFoldersByCode(booking.bookingCode)
+      const seenRoots = new Set([resolved.bookingFolderId].filter(Boolean) as string[])
+      for (const c of candidates) {
+        if (seenRoots.has(c.id)) continue
+        seenRoots.add(c.id)
+        const raw = await listFilesRecursive(c.id, { maxFiles: 5000 })
+        const files = raw.filter(isFootage)
+        if (files.length === 0) continue
+        // Dedup vs the deterministic pass by top-folder id (add() keys on it) —
+        // nested/duplicate candidates can't double-count a folder row.
+        files.forEach(f => add(f, label(c.name, f.folderPath[0] ?? '')))
+        if (!extraBoxUrl) extraBoxUrl = `https://drive.google.com/drive/folders/${c.id}`
+      }
+    } catch (e: any) {
+      console.warn('[footage] global code scan failed (non-fatal):', e?.message || e)
+    }
+  }
+
   const folders = Array.from(folderMap.values()).sort((a, b) => a.label.localeCompare(b.label))
   const fileCount = folders.reduce((n, f) => n + f.fileCount, 0)
-  return { folders, fileCount, bookingFolderUrl: resolved.bookingFolderUrl }
+  // Prefer the canonical box link; fall back to wherever the code scan found files.
+  return { folders, fileCount, bookingFolderUrl: resolved.bookingFolderUrl || extraBoxUrl }
 }
 
 // ── Cached detect payload (v1.111) ──────────────────────────────────────────

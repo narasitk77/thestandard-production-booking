@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
         files: (f.files || []).map(x => ({ p: String(x.p || ''), size: Number(x.size) || 0 })),
       })),
     })
-    return NextResponse.json({ ok: true, completeCount: report.completeCount, totalFolders: report.totalFolders })
+    return NextResponse.json({ ok: true, sending: report.sendingCount, sent: report.sentCount, folders: report.folders.length })
   } catch (e: any) {
     console.error('POST /api/internal/nas-manifest error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
