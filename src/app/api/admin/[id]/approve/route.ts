@@ -208,8 +208,13 @@ export async function POST(
           // v1.54.1 — guarded persist: if the booking was cancelled or
           // deleted while the event was being created, drop the fresh event
           // instead of attaching it to a row nothing will ever reconcile.
+          // v1.111 — ALSO compare-and-swap on calendarEventId:null. Approve,
+          // assign's auto-recover, and the reconciler can all create while the
+          // id is still empty; without this CAS the later persist OVERWROTE the
+          // earlier id, leaving that event on the calendar as a duplicate
+          // (ops report 2026-07-02: two events per booking, created ~3s apart).
           const saved = await prisma.booking.updateMany({
-            where: { id: params.id, status: 'CONFIRMED', deletedAt: null },
+            where: { id: params.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: null },
             data: {
               calendarEventId,
               calendarSyncStatus: 'OK',
@@ -221,7 +226,7 @@ export async function POST(
             return null
           })
           if (saved && saved.count === 0) {
-            console.warn(`[approve] booking ${params.id} changed state mid-create — deleting orphan event ${calendarEventId}`)
+            console.warn(`[approve] booking ${params.id} changed state or already has an event — deleting duplicate event ${calendarEventId}`)
             deleteCalendarEvent(calendarEventId).catch(e =>
               console.warn(`[approve] orphan event delete failed: ${e}`))
           }

@@ -7,6 +7,7 @@ import { updateBookingRow } from '@/lib/google-sheets'
 import {
   buildEventDescription,
   createCalendarEvent,
+  deleteCalendarEvent,
   getCalendarImpersonateSubject,
   getCalendarEventLink,
   updateCalendarEventAttendees,
@@ -208,8 +209,13 @@ export async function POST(
           requireAttendees: emailRecipients.length > 0,
         })
         if (newEventId) {
-          await prisma.booking.update({
-            where: { id: params.id },
+          // v1.111 — compare-and-swap: only claim the slot if calendarEventId is
+          // STILL null. Approve's background create / the reconciler may have won
+          // meanwhile; blindly writing here overwrote their id and left their
+          // event as a calendar duplicate (ops report 2026-07-02). On lose,
+          // delete the event we just made and use the winner's.
+          const saved = await prisma.booking.updateMany({
+            where: { id: params.id, calendarEventId: null },
             data: {
               calendarEventId: newEventId,
               // v1.32.2 — record sync state on auto-recover create.
@@ -217,9 +223,17 @@ export async function POST(
               calendarSyncError: null,
               calendarLastSyncedAt: new Date(),
             },
-          }).catch(e => console.error('save recovered calendarEventId error:', e?.message || e))
-          resolvedCalendarEventId = newEventId
-          calendarSync = { ok: true, eventId: newEventId, action: 'created' }
+          }).catch(e => { console.error('save recovered calendarEventId error:', e?.message || e); return null })
+          if (saved && saved.count === 0) {
+            console.warn(`[assign] booking ${params.id} already got an event mid-create — deleting duplicate event ${newEventId}`)
+            deleteCalendarEvent(newEventId).catch(() => {})
+            const winner = await prisma.booking.findUnique({ where: { id: params.id }, select: { calendarEventId: true } }).catch(() => null)
+            resolvedCalendarEventId = winner?.calendarEventId ?? null
+            calendarSync = { ok: true, eventId: resolvedCalendarEventId, action: 'created' }
+          } else {
+            resolvedCalendarEventId = newEventId
+            calendarSync = { ok: true, eventId: newEventId, action: 'created' }
+          }
         } else {
           calendarSync = {
             ok: false,

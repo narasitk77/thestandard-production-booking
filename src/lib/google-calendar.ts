@@ -703,3 +703,47 @@ export async function getCalendarEventLink(eventId: string): Promise<string | nu
     return null
   }
 }
+
+/**
+ * v1.111 — list the app calendar's events in a window (paginated, singleEvents).
+ * Used by the calendar-dedupe sweep: a create race used to leave ORPHAN duplicate
+ * events (two creators both saw calendarEventId=null, both created, the later
+ * persist overwrote the earlier id). Returns just enough to match events back to
+ * bookings via the "Production ID: <code>" line the app bakes into descriptions.
+ */
+export async function listCalendarEvents(input: { timeMin: string; timeMax: string }): Promise<Array<{
+  id: string
+  summary: string
+  description: string
+  start: string | null
+  created: string | null
+}>> {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    return []
+  }
+  const calendar = google.calendar({ version: 'v3', auth: getAuth() })
+  const out: Array<{ id: string; summary: string; description: string; start: string | null; created: string | null }> = []
+  let pageToken: string | undefined
+  do {
+    const res = await calendar.events.list({
+      calendarId: CALENDAR_ID,
+      timeMin: input.timeMin,
+      timeMax: input.timeMax,
+      singleEvents: true,
+      showDeleted: false,
+      maxResults: 250,
+      pageToken,
+    })
+    for (const e of res.data.items ?? []) {
+      if (e.id) out.push({
+        id: e.id,
+        summary: e.summary || '',
+        description: e.description || '',
+        start: e.start?.dateTime || e.start?.date || null,
+        created: e.created || null,
+      })
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return out
+}

@@ -181,8 +181,11 @@ async function processBooking(
         notes: booking.notes,
         adminNotes: booking.adminNotes,
       })
-      await prisma.booking.update({
-        where: { id: booking.id },
+      // v1.111 — compare-and-swap: only claim if calendarEventId is STILL null.
+      // Approve/assign background creates can win this window; blindly writing
+      // overwrote their id and left their event as a calendar duplicate.
+      const saved = await prisma.booking.updateMany({
+        where: { id: booking.id, calendarEventId: null },
         data: {
           calendarEventId: eventId,
           // v1.32.2 — record sync state alongside the event id so UI
@@ -192,6 +195,14 @@ async function processBooking(
           calendarLastSyncedAt: new Date(),
         },
       })
+      if (saved.count === 0) {
+        console.warn(`[calendar-reconcile] booking ${booking.id} got an event mid-create — deleting duplicate ${eventId}`)
+        await deleteCalendarEvent(eventId).catch(() => {})
+        const winner = await prisma.booking.findUnique({ where: { id: booking.id }, select: { calendarEventId: true } })
+        item.action = 'ok'
+        item.eventId = winner?.calendarEventId ?? null
+        return item
+      }
       item.action = 'created'
       item.eventId = eventId
       item.htmlLink = htmlLink
@@ -238,8 +249,10 @@ async function processBooking(
         notes: booking.notes,
         adminNotes: booking.adminNotes,
       })
-      await prisma.booking.update({
-        where: { id: booking.id },
+      // v1.111 — compare-and-swap: replace ONLY if the id is still the vanished
+      // one. If something else re-pointed the booking meanwhile, drop ours.
+      const savedRe = await prisma.booking.updateMany({
+        where: { id: booking.id, calendarEventId: booking.calendarEventId },
         data: {
           calendarEventId: eventId,
           calendarSyncStatus: 'OK',
@@ -247,6 +260,14 @@ async function processBooking(
           calendarLastSyncedAt: new Date(),
         },
       })
+      if (savedRe.count === 0) {
+        console.warn(`[calendar-reconcile] booking ${booking.id} re-pointed mid-recreate — deleting duplicate ${eventId}`)
+        await deleteCalendarEvent(eventId).catch(() => {})
+        const winner = await prisma.booking.findUnique({ where: { id: booking.id }, select: { calendarEventId: true } })
+        item.action = 'ok'
+        item.eventId = winner?.calendarEventId ?? null
+        return item
+      }
       item.action = 'created'
       item.eventId = eventId
       item.htmlLink = htmlLink
