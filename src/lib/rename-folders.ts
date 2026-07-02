@@ -18,7 +18,7 @@ import {
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName,
-  folderNameMatchesCode, isPhotoAlbumBooking,
+  landingBookingFolderName, folderNameMatchesCode, isPhotoAlbumBooking,
 } from './outlet-folders'
 import { bookingShowName } from './display'
 
@@ -39,6 +39,9 @@ type Meta = {
   code: string
   jobName: string | null
   showName: string
+  // v1.111 — crew-facing landing name (display show, "-" job dropped); the
+  // landing pool renames toward this, NOT the box-style newFlatName.
+  landingName: string
   isAgency: boolean
   isPhoto: boolean
   outletCode: string
@@ -65,6 +68,7 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
     code: b.bookingCode!,
     jobName: b.projectName?.trim() || b.episodes[0]?.title?.trim() || null,
     showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
+    landingName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }),
     isAgency: b.outlet.code === 'AGN',
     isPhoto: isPhotoAlbumBooking(b.episodes),
     outletCode: b.outlet.code,
@@ -102,7 +106,9 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
       if (!fp.id) continue
       for (const child of await listChildFolders(fp.id)) {
         const m = fp.pool.find(x => folderNameMatchesCode(child.name, x.code))
-        if (m) await renameIfDiff(child.id, child.name, newFlatName(m), m.code, fp.label)
+        // v1.111 — landing uses the crew-facing display name; photo/sound keep
+        // the box-style name.
+        if (m) await renameIfDiff(child.id, child.name, fp.label === 'landing' ? m.landingName : newFlatName(m), m.code, fp.label)
       }
     }
 

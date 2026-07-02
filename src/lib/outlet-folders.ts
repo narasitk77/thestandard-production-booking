@@ -1,4 +1,5 @@
 import { OUTLETS } from './data'
+import { bookingDisplayName } from './display'
 
 /**
  * Outlet code → folder name mapping.
@@ -215,6 +216,28 @@ export function buildBookingFolderName(bookingCode: string, jobName?: string | n
   const show = sanitizeNameSegment(showName || '', 80)
   const lead = show && job && show !== job ? `${show} ${MIDDLE_DOT} ${job}` : (show || job)
   return lead ? `${lead} (${code})` : code
+}
+
+/**
+ * v1.111 — LANDING folder name (the flat "Production Team" shared drive, which
+ * mirrors to the office NAS). Same show-first shape as the box, but crew-facing:
+ *   - uses the DISPLAY show name (episode-title fallback when the program is a
+ *     generic universal Episode-Type — calendar-migrated bookings), so the NAS
+ *     reads "Now (NWS-…)" instead of "Long-form · รายการ · … · Now (NWS-…)".
+ *   - treats a "-" job title as empty ("Open Relationship · - (POD-…)" →
+ *     "Open Relationship (POD-…)").
+ * Landing lookups all match by Production ID (folderNameMatchesCode), so this
+ * name is presentation-only — safe to differ from the VIDEO 2026 box name.
+ */
+export function landingBookingFolderName(b: {
+  bookingCode: string
+  projectName?: string | null
+  program: { name: string }
+  episodes: Array<{ title?: string | null; program?: { name: string } | null }>
+}): string {
+  const rawJob = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+  const job = rawJob === '-' ? null : rawJob
+  return buildBookingFolderName(b.bookingCode, job, bookingDisplayName(b))
 }
 
 /**

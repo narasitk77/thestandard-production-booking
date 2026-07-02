@@ -4,6 +4,7 @@ import {
   outletDriveFolderName,
   programFolderName,
   buildBookingFolderName,
+  landingBookingFolderName,
   legacyBookingFolderName,
   cleanJobName,
   folderNameMatchesCode,
@@ -62,6 +63,39 @@ test('cleanJobName strips ONLY a trailing logistics parenthetical', () => {
   assert.equal(cleanJobName('โบนัสสุกี้'), 'โบนัสสุกี้')
   assert.equal(cleanJobName('EP.5 (พิเศษ)'), 'EP.5 (พิเศษ)') // no digits/keywords → kept
   assert.equal(cleanJobName(null), '')
+})
+
+// v1.111 — landing folders are crew-facing: real show name (episode-title
+// fallback for generic Episode-Type programs) and a "-" job title dropped.
+test('landingBookingFolderName: display show, no generic prefix, "-" job dropped', () => {
+  const generic = 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว'
+  // migrated booking: program generic, real show in the episode title → collapse
+  assert.equal(
+    landingBookingFolderName({
+      bookingCode: 'NWS-260702-01',
+      program: { name: generic },
+      episodes: [{ title: 'Now', program: { name: generic } }],
+    }),
+    'Now (NWS-260702-01)',
+  )
+  // "-" job title → dropped, show only
+  assert.equal(
+    landingBookingFolderName({
+      bookingCode: 'POD-OPR-260702-01',
+      program: { name: generic },
+      episodes: [{ title: '-', program: { name: 'Open Relationship' } }],
+    }),
+    'Open Relationship (POD-OPR-260702-01)',
+  )
+  // normal booking unchanged: "<show> · <job> (<code>)"
+  assert.equal(
+    landingBookingFolderName({
+      bookingCode: 'NWS-GLF-260702-01',
+      program: { name: generic },
+      episodes: [{ title: 'EP.185', program: { name: 'Global Focus' } }],
+    }),
+    `Global Focus ${DOT} EP.185 (NWS-GLF-260702-01)`,
+  )
 })
 
 // v1.111 — folder names must be SMB/NTFS-safe: the Production Team landing

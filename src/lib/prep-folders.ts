@@ -13,6 +13,7 @@ import {
   outletDriveFolderName,
   shootFolderLayers,
   buildBookingFolderName,
+  landingBookingFolderName,
   buildEpisodeFolderName,
   camerasToPreCreate,
   hasOutletFolderMapping,
@@ -146,7 +147,9 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       // 2) v1.88 — landing folder in Production Team (flat, ALWAYS named by
       //    Production ID — it's a NAS drop zone, identity = the shoot, not the
       //    project). Best-effort: a Production Team hiccup must not undo the box prep.
-      const landingFolderName = buildBookingFolderName(b.bookingCode!, jobName, showName)
+      //    v1.111 — crew-facing DISPLAY name (real show, no generic Episode-Type
+      //    prefix, "-" job dropped); landing matching is by Production ID.
+      const landingFolderName = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
       let prodTeam = 'ok'
       try {
         await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: landingFolderName, cameras, episodeFolderNames })
