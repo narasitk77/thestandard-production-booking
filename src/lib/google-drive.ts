@@ -801,19 +801,33 @@ export async function upsertTextFile(input: {
 }): Promise<string> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
   const safeName = input.name.replace(/'/g, "\\'")
-  const found = await drive.files.list({
-    q: `'${input.parentFolderId}' in parents and trashed = false and name = '${safeName}'`,
-    fields: 'files(id, name)',
-    pageSize: 5,
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-    corpora: 'allDrives',
-  })
+  // v1.111 — fetch ALL same-name files (paginated): a prior non-idempotent write /
+  // parallel-upload race could leave several, and we collapse them to 1 here.
+  const dupes: string[] = []
+  let pageToken: string | undefined
+  do {
+    const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      q: `'${input.parentFolderId}' in parents and trashed = false and name = '${safeName}'`,
+      fields: 'nextPageToken, files(id, name, createdTime)',
+      pageSize: 100, pageToken,
+      orderBy: 'createdTime', // ascending → the last one is the newest
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      corpora: 'allDrives',
+    })
+    for (const f of res.data.files ?? []) if (f.id) dupes.push(f.id)
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
   const media = { mimeType: 'text/plain', body: input.content }
-  const existingId = found.data.files?.[0]?.id
-  if (existingId) {
-    await drive.files.update({ fileId: existingId, media, supportsAllDrives: true })
-    return existingId
+  if (dupes.length > 0) {
+    // Keep the NEWEST id (then overwrite it with the current content), and trash
+    // the rest so it stays 1:1 (Drive trash is recoverable — never hard-delete).
+    const keepId = dupes[dupes.length - 1]
+    await drive.files.update({ fileId: keepId, media, supportsAllDrives: true })
+    for (const dupId of dupes.slice(0, -1)) {
+      await drive.files.update({ fileId: dupId, requestBody: { trashed: true }, supportsAllDrives: true }).catch(() => {})
+    }
+    return keepId
   }
   const created = await drive.files.create({
     requestBody: { name: input.name, mimeType: 'text/plain', parents: [input.parentFolderId] },
@@ -823,6 +837,50 @@ export async function upsertTextFile(input: {
   })
   if (!created.data.id) throw new Error(`Drive text-file create returned no id for "${input.name}"`)
   return created.data.id
+}
+
+/**
+ * v1.111 — collapse duplicate "_SHOOT*.txt" booking-info files in a folder to 1
+ * per name (a pre-fix non-idempotent write / parallel-upload race left several).
+ * Keeps the NEWEST of each name, TRASHES the rest (recoverable — never hard-delete).
+ * dryRun reports what would be trashed without touching Drive.
+ */
+export async function dedupeShootInfoFiles(
+  folderId: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ groups: Array<{ name: string; total: number; trashed: number }>; totalTrashed: number }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const all: Array<{ id: string; name: string }> = []
+  let pageToken: string | undefined
+  do {
+    const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false and name contains '_SHOOT'`,
+      fields: 'nextPageToken, files(id, name, createdTime)',
+      pageSize: 200, pageToken,
+      orderBy: 'createdTime', // ascending → last in a name-group is newest
+      supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+    })
+    for (const f of res.data.files ?? []) {
+      if (f.id && f.name && /^_SHOOT.*\.txt$/i.test(f.name)) all.push({ id: f.id, name: f.name })
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+
+  const byName = new Map<string, Array<{ id: string; name: string }>>()
+  for (const f of all) { const a = byName.get(f.name) || []; a.push(f); byName.set(f.name, a) }
+
+  const groups: Array<{ name: string; total: number; trashed: number }> = []
+  let totalTrashed = 0
+  for (const [name, list] of Array.from(byName)) {
+    const extras = list.slice(0, -1) // keep the last (newest), trash the earlier ones
+    if (!opts.dryRun) {
+      for (const dup of extras) {
+        await drive.files.update({ fileId: dup.id, requestBody: { trashed: true }, supportsAllDrives: true }).catch(() => {})
+      }
+    }
+    if (extras.length > 0) { groups.push({ name, total: list.length, trashed: extras.length }); totalTrashed += extras.length }
+  }
+  return { groups, totalTrashed }
 }
 
 /**

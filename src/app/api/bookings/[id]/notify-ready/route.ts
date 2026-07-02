@@ -5,7 +5,7 @@ import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { formatBytes } from '@/lib/footage-report'
 import { getCachedFootagePayload } from '@/lib/footage-folders'
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // resolving footage folders does a recursive Drive walk
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         .filter(Boolean).map(e => e!.trim().toLowerCase()).filter(e => e.includes('@')),
     ))
 
-    const show = bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
+    const show = bookingDisplayName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
     const code = booking.bookingCode || booking.id
 
     // Resolve the footage folders SERVER-SIDE (don't trust client-supplied links in

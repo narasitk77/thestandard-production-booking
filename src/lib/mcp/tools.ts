@@ -13,7 +13,7 @@ import { prisma } from '@/lib/db'
 import { OUTLETS } from '@/lib/data'
 import { listProjects } from '@/lib/projects'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 import { createBookingFromPayload } from '@/lib/create-booking'
 import { logAudit } from '@/lib/audit'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
@@ -33,7 +33,7 @@ const bookingInclude = {
 function compactBooking(b: any) {
   return {
     bookingCode: b.bookingCode,
-    show: bookingShowName(b),
+    show: bookingDisplayName(b),
     outlet: b.outlet.code,
     status: b.status,
     shootDate: (b.shootDate instanceof Date ? b.shootDate.toISOString() : String(b.shootDate)).slice(0, 10),

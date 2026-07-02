@@ -226,7 +226,7 @@ export const OUTLETS: Outlet[] = [
 // specific show codes (DTW, MNW, EVT, etc.) stay in the data for backward
 // compatibility with old bookings; they're hidden from the form by a
 // code.length === 1 filter on the picker.
-const EPISODE_TYPE_PROGRAMS: Program[] = [
+export const EPISODE_TYPE_PROGRAMS: Program[] = [
   { code: 'L', name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว', category: 'Long-form' },
   { code: 'S', name: 'Vertical Short · Reel · TikTok · Short clip', category: 'Short-form' },
   { code: 'A', name: 'Photo Album · ภาพถ่ายชุด', category: 'Album' },

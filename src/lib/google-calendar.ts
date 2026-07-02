@@ -3,7 +3,7 @@ import { format } from 'date-fns'
 import { logAudit } from './audit'
 import { isEmailConfigured, sendEmail } from './email'
 import { normalizeFreelancers, formatFreelancerLines, type Freelancer } from './freelancers'
-import { bookingShowName } from './display'
+import { bookingDisplayName } from './display'
 
 // v1.41.0 — prefix added to the calendar event title when a booking needs a
 // company van (off-site shoots). Surfaced on both the web calendar and Google
@@ -235,7 +235,7 @@ export function buildEventTitle(booking: {
   episodes: Array<{ episodeId: string; title: string; program?: { name: string } | null }>
 }): string {
   const epCount = booking.episodes.length
-  const showName = bookingShowName(booking)
+  const showName = bookingDisplayName(booking)
   const firstEpTitle = booking.episodes[0]?.title?.trim()
   const core = epCount === 1
     ? (firstEpTitle && firstEpTitle !== showName

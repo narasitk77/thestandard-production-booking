@@ -1,6 +1,6 @@
 'use client'
 
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
@@ -371,7 +371,7 @@ function BookingList({ items }: { items: Booking[] }) {
             <div className="flex-1 min-w-0">
               <div className="text-sm text-gray-900 font-medium truncate">
                 <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
-                {bookingShowName(b)}
+                {bookingDisplayName(b)}
                 {b.episodes[0]?.title ? <span className="text-gray-500 font-normal"> — {b.episodes[0].title}</span> : null}
               </div>
               <div className="text-xs text-gray-500 truncate">

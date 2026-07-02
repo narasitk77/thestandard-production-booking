@@ -4,7 +4,7 @@ import { getSession, canUploadToBooking } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { buildFootageReport, renderReportText, formatBytes } from '@/lib/footage-report'
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       [producerEmail, session.email].filter(Boolean).map(e => e.toLowerCase()),
     ))
 
-    const show = bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
+    const show = bookingDisplayName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
     const code = booking.bookingCode || booking.id
     const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
     const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'

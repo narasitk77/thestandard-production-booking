@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import BackButton from '@/app/_components/BackButton'
 import { Loader2, ArrowLeft, Save } from 'lucide-react'
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 import { shootTypeLabel } from '@/lib/utils'
 import NumberStepper from '@/app/_components/NumberStepper'
 
@@ -157,7 +157,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
       {/* Locked identity — read-only */}
       <div className="ops-card ops-card-pad mb-3">
         <div className="text-sm font-medium text-gray-900">
-          <span className="text-gray-500 font-normal mr-1">[{booking.outlet.code}]</span>{bookingShowName(booking)}
+          <span className="text-gray-500 font-normal mr-1">[{booking.outlet.code}]</span>{bookingDisplayName(booking)}
         </div>
         <div className="text-xs text-gray-500 mt-1">
           {shootDate} · {booking.episodes.map(e => e.episodeId).join(' · ')}

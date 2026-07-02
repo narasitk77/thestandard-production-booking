@@ -1,6 +1,6 @@
 'use client'
 
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
@@ -704,7 +704,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           )}
         </div>
         <h1 className="text-2xl font-normal text-gray-800">
-          {booking.outlet.name} · {bookingShowName(booking)}
+          {booking.outlet.name} · {bookingDisplayName(booking)}
         </h1>
         {booking.bookingCode && (
           <div className="flex items-center gap-2 mt-1.5">

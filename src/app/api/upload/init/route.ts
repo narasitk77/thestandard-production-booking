@@ -22,9 +22,7 @@ import {
   ensureUploadFolderPath,
   createResumableUploadSession,
   deleteDriveFile,
-  upsertTextFile,
 } from '@/lib/google-drive'
-import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 import { isDriveAccessError } from '@/lib/drive-access'
 
 export const dynamic = 'force-dynamic'
@@ -311,7 +309,7 @@ export async function POST(request: NextRequest) {
       || undefined
 
     const setupDrive = async (subject?: string) => {
-      const { bookingFolderId, cameraFolderId } = await ensureUploadFolderPath({
+      const { cameraFolderId } = await ensureUploadFolderPath({
         rootFolderId: process.env.DRIVE_FOOTAGE_ROOT!.trim(),
         outletCanonicalName: outletDriveFolderName(booking.outlet.code),
         programFolderName: driveProgramFolder,
@@ -322,19 +320,9 @@ export async function POST(request: NextRequest) {
         camera,
         subject,
       })
-      // Best-effort _SHOOT.txt — never let an info-file hiccup block the upload.
-      // v1.94 — for AGN, bookingFolderId is the shared Project box, so name the
-      // info file per-booking to avoid one booking overwriting another's.
-      try {
-        await upsertTextFile({
-          parentFolderId: bookingFolderId,
-          name: isAgency ? `_SHOOT-${booking.bookingCode}.txt` : '_SHOOT.txt',
-          content: renderBookingInfo(bookingInfoInput(booking)),
-          subject,
-        })
-      } catch (infoErr: any) {
-        console.error('_SHOOT.txt write failed (non-fatal):', infoErr?.message || infoErr)
-      }
+      // v1.111 — _SHOOT.txt is written ONCE by the approve flow (the canonical
+      // writer). Writing it here per-file made bulk uploads fire many parallel
+      // writes that raced into duplicate _SHOOT files, so it's removed.
       return createResumableUploadSession({
         parentFolderId: cameraFolderId, filename, mimeType, size, origin: browserOrigin, subject,
       })

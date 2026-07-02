@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bookingShowName } from '../display'
+import { bookingShowName, bookingDisplayName } from '../display'
 
 test('Content Agency booking shows the project name', () => {
   assert.equal(
@@ -64,5 +64,48 @@ test('projectName wins even when EP programs exist', () => {
       episodes: [{ program: { name: 'Long Form (project)' } }],
     }),
     'KEY MESSAGES x DMHT',
+  )
+})
+
+// v1.111 — bookingDisplayName: DISPLAY-only fallback to the episode title when the
+// resolved show is a generic universal Episode-Type (migrated bookings).
+test('bookingDisplayName: generic Episode-Type booking shows the episode title', () => {
+  assert.equal(
+    bookingDisplayName({
+      program: { name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว' },
+      episodes: [{ program: { name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว' }, title: 'Now' }],
+    }),
+    'Now',
+  )
+})
+
+test('bookingDisplayName: real show is unchanged (not a generic type)', () => {
+  assert.equal(
+    bookingDisplayName({
+      program: { name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว' },
+      episodes: [{ program: { name: 'Global Focus' }, title: 'EP.185' }],
+    }),
+    'Global Focus',
+  )
+})
+
+test('bookingDisplayName: projectName still wins', () => {
+  assert.equal(
+    bookingDisplayName({
+      projectName: 'Awesome Skills Project',
+      program: { name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว' },
+      episodes: [{ title: 'EP.1' }],
+    }),
+    'Awesome Skills Project',
+  )
+})
+
+test('bookingDisplayName: generic type with no usable title keeps the type name', () => {
+  assert.equal(
+    bookingDisplayName({
+      program: { name: 'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว' },
+      episodes: [{ title: '-' }],
+    }),
+    'Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว',
   )
 })

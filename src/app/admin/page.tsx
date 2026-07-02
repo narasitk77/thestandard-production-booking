@@ -1,6 +1,6 @@
 'use client'
 
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
@@ -362,7 +362,7 @@ export default function AdminPage() {
                     )}
                   </div>
                   <div className="font-medium text-gray-800 text-sm sm:text-base">
-                    {b.outlet.name} · {bookingShowName(b)}
+                    {b.outlet.name} · {bookingDisplayName(b)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producer}

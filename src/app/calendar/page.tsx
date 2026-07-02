@@ -1,6 +1,6 @@
 'use client'
 
-import { bookingShowName } from '@/lib/display'
+import { bookingDisplayName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Loader2, X, MapPin, User, Tag, Copy, Check, ExternalLink, CalendarPlus } from 'lucide-react'
@@ -32,7 +32,7 @@ interface Booking {
 
 // The show the crew is shooting — shared rule (src/lib/display.ts), same
 // as the Google Calendar event title (v1.45.0).
-const showName = bookingShowName
+const showName = bookingDisplayName
 
 type ViewMode = 'month' | 'agenda'
 type CalSource = 'app' | 'google'
