@@ -37,7 +37,7 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
   const isAgency = booking.outlet.code === 'AGN'
   const jobName = booking.projectName?.trim() || booking.episodes[0]?.title?.trim() || null
   const showName = bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
-  const { programFolderName, bookingFolderName } = shootFolderLayers({
+  const layers = shootFolderLayers({
     outletCode: booking.outlet.code,
     showName,
     category: booking.category,
@@ -46,19 +46,26 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     bookingCode: booking.bookingCode,
     jobName,
   })
+  const programFolderName = layers.programFolderName
   const epNames = booking.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency }))
+
+  // v1.111 — for AGN, PREFER the per-booking box named by the AGN booking code
+  // (so a booking's footage is found by its own booking ID), and fall back to the
+  // shared "<projectId> · <project>" box. Ordering matters: findEpisodeFolderUrls
+  // returns the FIRST matching name, so a per-booking box must be tried before the
+  // shared one. Non-AGN is unchanged (show-first primary, legacy alt).
+  const bookingCodeName = legacyBookingFolderName(booking.bookingCode, jobName)
+  const bookingFolderName = isAgency ? bookingCodeName : layers.bookingFolderName
+  const bookingFolderNameAlts = isAgency
+    ? [layers.bookingFolderName, buildBookingFolderName(booking.bookingCode, jobName, showName)]
+    : [bookingCodeName]
 
   const resolved = await findEpisodeFolderUrls({
     rootFolderId: root,
     outletCanonicalName: outletDriveFolderName(booking.outlet.code),
     programFolderName,
     bookingFolderName,
-    // v1.110 — also accept the pre-rename legacy "<code> · <job>" box (until folders
-    // are renamed) + AGN's Production-ID box (new shape, what ops sometimes use).
-    bookingFolderNameAlts: [
-      legacyBookingFolderName(booking.bookingCode, jobName),
-      ...(isAgency ? [buildBookingFolderName(booking.bookingCode, jobName, showName)] : []),
-    ],
+    bookingFolderNameAlts,
     episodeFolderNames: epNames,
   })
 
