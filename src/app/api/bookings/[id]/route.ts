@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession, requireConsole } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { canViewBooking } from '@/lib/booking-access'
+import { resolveBookingCrew } from '@/lib/crew-names'
 import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
@@ -76,6 +77,9 @@ export async function GET(
         ...u,
         fileSize: u.fileSize === null ? null : u.fileSize.toString(),
       })),
+      // v1.111 — resolved crew names (team label / nickname / first name) so the
+      // detail page shows WHO is assigned, not just raw emails.
+      assignedCrew: await resolveBookingCrew(booking.assignedEmails || [], (booking as any).mainVideographerEmail),
     }
 
     return NextResponse.json({ booking: safeBooking })

@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { createBookingFromPayload } from '@/lib/create-booking'
+import { makeCrewNameResolver } from '@/lib/crew-names'
 
 export async function GET(request: NextRequest) {
   try {
@@ -100,21 +101,16 @@ export async function GET(request: NextRequest) {
       prisma.booking.count({ where }),
     ])
 
-    // v1.111 — attach resolved crew names (nickname → thaiName → name → email
-    // local-part) so cards can show "who's on the shoot". One batched user query.
+    // v1.111 — attach resolved crew names so cards can show "who's on the shoot".
+    // One batched user query; SHORT names (team label / nickname / Thai first
+    // name) — full legal names read terribly at card size (ops feedback).
     let outBookings: any[] = bookings
     if (withCrew) {
-      const emails = Array.from(new Set(
+      const resolve = await makeCrewNameResolver(
         bookings
           .flatMap(b => [...((b as any).assignedEmails || []), (b as any).mainVideographerEmail])
-          .filter((e): e is string => typeof e === 'string' && e.includes('@'))
-          .map(e => e.toLowerCase()),
-      ))
-      const users = emails.length
-        ? await prisma.user.findMany({ where: { email: { in: emails } }, select: { email: true, nickname: true, thaiName: true, name: true } })
-        : []
-      const nameByEmail = new Map(users.map(u => [u.email.toLowerCase(), (u.nickname || u.thaiName || u.name || '').trim()]))
-      const resolve = (e: string) => nameByEmail.get(e.toLowerCase()) || e.split('@')[0]
+          .filter((e): e is string => typeof e === 'string'),
+      )
       outBookings = bookings.map(b => {
         const assigned: string[] = (b as any).assignedEmails || []
         const mainVdo = (b as any).mainVideographerEmail as string | null

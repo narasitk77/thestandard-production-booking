@@ -29,6 +29,7 @@ interface UploadRecord {
 }
 
 interface BookingDetail {
+  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string
   shootDate: string
   shootEndDate?: string | null
@@ -255,6 +256,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div><div className="text-gray-400">Producer</div><div className="font-medium text-gray-800">{booking.producer}</div></div>
           <div><div className="text-gray-400">Creative/Host</div><div className="font-medium text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
           <div><div className="text-gray-400">Crew</div><div className="font-medium text-gray-800">{booking.crewRequired.join(', ') || '—'}</div></div>
+          <div className="col-span-2 sm:col-span-4"><div className="text-gray-400">ทีมงาน (assigned)</div><div className="font-medium text-gray-800">{booking.assignedCrew && booking.assignedCrew.length > 0 ? booking.assignedCrew.map(c => `${c.name}${c.isLead ? ' ⭐' : ''}`).join(' · ') : '— ยังไม่ได้ assign —'}</div></div>
           <div><div className="text-gray-400">Agency Ref</div><div className="font-medium text-gray-800">{booking.agencyRef || '—'}</div></div>
         </div>
       </div>

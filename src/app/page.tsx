@@ -1,6 +1,7 @@
 'use client'
 
 import { bookingDisplayName } from '@/lib/display'
+import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
@@ -11,6 +12,7 @@ import { resolveTier, tierAllows } from '@/lib/tiers'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
+  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string
   shootDate: string
   shootEndDate?: string | null
@@ -46,14 +48,14 @@ export default function HomeOverview() {
   useEffect(() => {
     // Pull a generous slice — the API caps at 500. Enough to populate
     // "today / this week / attention" without paging.
-    fetch('/api/bookings?limit=200')
+    fetch('/api/bookings?limit=200&withCrew=1')
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(d => setAllBookings(d.bookings || []))
       .catch(e => setError(String(e)))
     // v1.50 — console tiers now get the full corpus from the default scope,
     // so "My upcoming" asks for scope=mine explicitly (created-by or assigned)
     // instead of relying on the implicit plain-USER filter.
-    fetch('/api/bookings?limit=200&scope=mine')
+    fetch('/api/bookings?limit=200&scope=mine&withCrew=1')
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(d => setMyBookings(d.bookings || []))
       .catch(() => setMyBookings([]))
@@ -379,6 +381,7 @@ function BookingList({ items }: { items: Booking[] }) {
                 {b.episodes.length > 2 && ` +${b.episodes.length - 2}`}
                 {b.producer && <> · {b.producer}</>}
               </div>
+              <CrewLine crew={b.assignedCrew} />
             </div>
             <StatusPill status={b.status} />
           </Link>

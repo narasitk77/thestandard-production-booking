@@ -7,6 +7,7 @@ import { Loader2, Plus, Search, Inbox } from 'lucide-react'
 import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
 import StatusPill from '@/app/_components/StatusPill'
+import CrewLine from '@/app/_components/CrewLine'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -228,19 +229,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
             {b.locationName && <> · {b.locationName}</>}
           </div>
           <div className="text-xs text-gray-400 truncate mt-0.5">Producer: {b.producer}</div>
-          {b.assignedCrew && b.assignedCrew.length > 0 && (
-            <div className="text-xs text-gray-400 truncate mt-0.5">
-              <span className="text-gray-500">ทีม:</span>{' '}
-              {b.assignedCrew.map((c, i) => {
-                const isMe = !!meEmail && c.email.toLowerCase() === meEmail
-                return (
-                  <span key={c.email + i} className={isMe ? 'text-[#673ab7] font-medium' : ''}>
-                    {c.name}{c.isLead ? ' ⭐' : ''}{isMe ? ' (คุณ)' : ''}{i < b.assignedCrew!.length - 1 ? ', ' : ''}
-                  </span>
-                )
-              })}
-            </div>
-          )}
+          <CrewLine crew={b.assignedCrew} meEmail={meEmail} />
         </div>
         <StatusPill status={b.status} />
       </Link>

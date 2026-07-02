@@ -1,11 +1,13 @@
 'use client'
 
 import { bookingDisplayName } from '@/lib/display'
+import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useState, useCallback } from 'react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
+  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string
   bookingCode: string | null
   shootDate: string
@@ -49,7 +51,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
 
   const load = useCallback(async () => {
     setLoading(true)
-    const res = await fetch('/api/bookings?scope=producer&limit=100')
+    const res = await fetch('/api/bookings?scope=producer&limit=100&withCrew=1')
     const data = await res.json()
     setBookings(data.bookings || [])
     setLoading(false)
@@ -144,6 +146,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
                     {b.episodes[0]?.title ? ` — ${b.episodes[0].title}` : ''}
                     {b.projectId ? ` · ${b.projectId}` : ''}
                   </div>
+                  <CrewLine crew={b.assignedCrew} />
                   <div className="text-xs text-gray-500 mt-0.5">
                     {formatDisplayDate(b.shootDate)} · {b.callTime}{b.estimatedWrap ? ` → ${b.estimatedWrap}` : ''}
                     {/* v1.36.1 — assignment hint must respect status: a CANCELLED

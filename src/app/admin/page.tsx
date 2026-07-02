@@ -1,6 +1,7 @@
 'use client'
 
 import { bookingDisplayName } from '@/lib/display'
+import CrewLine from '@/app/_components/CrewLine'
 import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
@@ -12,6 +13,7 @@ interface Episode { episodeId: string; title: string; program?: { code?: string;
 interface Booking {
   id: string; shootDate: string; callTime: string; status: string
   producer: string; assignedEmails: string[]
+  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   cancelRequestedAt?: string | null; cancelReason?: string | null; cancelRequestedBy?: string | null
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean
   projectName?: string | null
@@ -122,6 +124,7 @@ export default function AdminPage() {
           : filter === 'CANCEL_REQ'
             ? new URLSearchParams({ limit: '200', cancelRequested: '1' })
             : new URLSearchParams({ limit: '200', routine: 'exclude', ...(filter && { status: filter }) })
+      params.set('withCrew', '1')
       const res = await fetch(`/api/bookings?${params}`)
       const data = await res.json()
       if (seq !== fetchSeq.current) return // stale response — a newer tab fetch won
@@ -366,11 +369,7 @@ export default function AdminPage() {
                   </div>
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producer}
-                    {b.assignedEmails.length > 0 && (
-                      <div className="mt-0.5 text-blue-600 break-all">
-                        → {b.assignedEmails.join(', ')}
-                      </div>
-                    )}
+                    <CrewLine crew={b.assignedCrew} className="mt-0.5 text-[12px] text-blue-700" />
                   </div>
                   {b.cancelRequestedAt && (
                     <div className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 flex items-center justify-between gap-2">

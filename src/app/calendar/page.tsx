@@ -1,6 +1,7 @@
 'use client'
 
 import { bookingDisplayName } from '@/lib/display'
+import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Loader2, X, MapPin, User, Tag, Copy, Check, ExternalLink, CalendarPlus } from 'lucide-react'
@@ -12,6 +13,7 @@ import StatusPill, { statusDotClass } from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
+  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string
   shootDate: string
   callTime: string
@@ -71,7 +73,7 @@ export default function CalendarPage() {
 
   useEffect(() => {
     setLoading(true)
-    fetch('/api/bookings?limit=500')
+    fetch('/api/bookings?limit=500&withCrew=1')
       .then(r => r.json())
       .then(d => setBookings(d.bookings || []))
       .finally(() => setLoading(false))
@@ -535,6 +537,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking | null | undefin
               <User className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
               <span>Producer: {b.producer || '—'}</span>
             </div>
+            <CrewLine crew={b.assignedCrew} className="text-[12px] text-gray-600 mt-1 ml-5" />
           </div>
 
           <div>

@@ -6,11 +6,13 @@ import BackButton from '@/app/_components/BackButton'
 import { ChevronLeft, ChevronRight, Loader2, Check } from 'lucide-react'
 import { startOfWeek, addDays, addWeeks, format, parseISO, isSameDay } from 'date-fns'
 import { bookingDisplayName } from '@/lib/display'
+import CrewLine from '@/app/_components/CrewLine'
 
 type Camera = { id: string; name: string; serialNumber: string | null; status: string }
 type Episode = { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 type Booking = {
   id: string
+  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   shootDate: string
   callTime: string
   status: string
@@ -49,7 +51,7 @@ export default function WeekPlanClient() {
       const fromD = format(weekStart, 'yyyy-MM-dd')
       const toD = format(addDays(weekStart, 7), 'yyyy-MM-dd')
       const [b, c] = await Promise.all([
-        fetch(`/api/bookings?status=CONFIRMED&from=${fromD}&to=${toD}&limit=200`),
+        fetch(`/api/bookings?status=CONFIRMED&from=${fromD}&to=${toD}&limit=200&withCrew=1`),
         fetch('/api/admin/equipment?category=CAMERA'),
       ])
       if (!b.ok) throw new Error(`โหลดงานไม่สำเร็จ (HTTP ${b.status})`)
@@ -162,6 +164,7 @@ export default function WeekPlanClient() {
                             <div className="text-sm">
                               <Link href={`/admin/${b.id}`} className="text-[#673ab7] hover:underline font-medium">{b.outlet.code} · {bookingDisplayName(b)}</Link>
                               <span className="text-gray-500 ml-2 text-xs">{b.callTime}</span>
+                              <CrewLine crew={b.assignedCrew} className="text-[11px] text-gray-500 mt-0.5" />
                             </div>
                             <div className="text-xs flex items-center gap-2">
                               <span className={assigned.size >= (b.cameraCount || 0) ? 'text-green-700' : 'text-amber-700'}>
