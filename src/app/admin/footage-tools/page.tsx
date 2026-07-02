@@ -2,6 +2,7 @@ import BackButton from '@/app/_components/BackButton'
 import { redirect } from 'next/navigation'
 import { requireAdmin } from '@/lib/session'
 import SystemMergeTools from '@/app/_components/admin/SystemMergeTools'
+import NasSyncPanel from '@/app/_components/admin/NasSyncPanel'
 
 // v1.111 — ADMIN-only home for the system-wide footage sweeps (moved off the
 // per-booking upload page). MOVE NAS footage into boxes / fold staged sound /
@@ -21,6 +22,7 @@ export default async function FootageToolsPage() {
           และสแกน Drive หา footage — ตาม Production ID ทั้งระบบ (worker รายชั่วโมงก็ทำให้อัตโนมัติ).
         </p>
       </div>
+      <NasSyncPanel />
       <SystemMergeTools />
     </div>
   )

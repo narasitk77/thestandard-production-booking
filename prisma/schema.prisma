@@ -817,3 +817,18 @@ model SystemHeartbeat {
 
   @@map("system_heartbeats")
 }
+
+// v1.111 — NAS ↔ Production Team sync verification. A tiny agent on the admin's
+// Mac (launchd, every 10 min) scans the SMB-mounted NAS and POSTs a manifest
+// (per-folder relative paths + sizes); the server diffs it against the Drive
+// landing folders. `manifest` = latest NAS snapshot; `status` = per-folder
+// last-known result (complete flags + emailedAt) so "just became 100% synced"
+// fires ONE email per folder, plus a daily digest.
+model NasSyncState {
+  key       String   @id // 'latest'
+  manifest  Json
+  status    Json?
+  updatedAt DateTime @updatedAt
+
+  @@map("nas_sync_state")
+}
