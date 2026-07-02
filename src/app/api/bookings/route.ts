@@ -58,17 +58,32 @@ export async function GET(request: NextRequest) {
     // that aren't already cancelled.
     const cancelRequested = searchParams.get('cancelRequested') === '1'
 
-    // v1.109 — unified search box (admin queue): one field that matches EITHER a
-    // Production/Episode ID (bookingCode or any episode's episodeId, substring,
-    // case-insensitive) OR the internal booking id (exact cuid). AND-wrapped so it
-    // composes with the userFilter OR (restricted users) without clobbering it.
+    // v1.109 — unified search box. v1.111 — GLOBAL: one field matches ANYTHING on
+    // the booking — Production/Episode ID, internal id, episode title, project,
+    // producer, location, notes, crew emails, outlet/program name. AND-wrapped so
+    // it composes with the userFilter OR (restricted users) without clobbering it.
     const search = (searchParams.get('search') || '').trim()
+    const ci = { contains: search, mode: 'insensitive' as const }
     const searchClause = search
       ? {
           OR: [
-            { bookingCode: { contains: search, mode: 'insensitive' as const } },
+            { bookingCode: ci },
             { id: search },
-            { episodes: { some: { episodeId: { contains: search, mode: 'insensitive' as const } } } },
+            { episodes: { some: { episodeId: ci } } },
+            { episodes: { some: { title: ci } } },
+            { episodes: { some: { program: { name: ci } } } },
+            { projectName: ci },
+            { projectId: ci },
+            { producer: ci },
+            { producerEmail: ci },
+            { locationName: ci },
+            { notes: ci },
+            { adminNotes: ci },
+            { agencyRef: ci },
+            { assignedEmails: { has: search.toLowerCase() } },
+            { outlet: { name: ci } },
+            { outlet: { code: ci } },
+            { program: { name: ci } },
           ],
         }
       : null

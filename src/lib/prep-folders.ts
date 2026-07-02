@@ -8,7 +8,7 @@
  * moving, no _SHOOT.txt — approve handles that).
  */
 import { prisma } from '@/lib/db'
-import { ensureShootCameraFolders, ensureFlatShootFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, hasDriveCredentials } from '@/lib/google-drive'
+import { ensureShootCameraFolders, ensureFlatShootFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, findFoldersByCode, listFilesRecursive, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
   shootFolderLayers,
@@ -82,6 +82,26 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
     // v1.110 — show-first folder names ("<show> · <job> (<code>)").
     const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
+    // v1.111 — a booking whose footage ALREADY EXISTS somewhere (matched by its
+    // immutable Production ID, wherever ops moved it) is done being prepped:
+    // recreating empty skeletons after ops file the delivered footage away just
+    // resurrects "ghost" folders (observed loop 2026-07-02: ops move → next
+    // prep tick recreates empty landing/box/generic-program trees).
+    if (!opts.dryRun && b.bookingCode) {
+      try {
+        let hasFiles = false
+        for (const c of await findFoldersByCode(b.bookingCode)) {
+          const some = await listFilesRecursive(c.id, { maxFiles: 4 })
+          if (some.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) { hasFiles = true; break }
+        }
+        if (hasFiles) {
+          results.push({ bookingCode: b.bookingCode, skipped: 'footage already delivered — skip empty re-prep' })
+          continue
+        }
+      } catch (e: any) {
+        console.warn('[prep] delivered-check failed (continuing with prep):', b.bookingCode, e?.message || e)
+      }
+    }
     // v1.108 — Sound-crew bookings: keep a staging tree outside the video project
     // folder (additive, best-effort, in addition to whatever video/photo prep runs).
     if (!opts.dryRun && bookingNeedsSound(b.crewRequired)) {
