@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
     // Default (unset) includes both, so calendar/dashboard/home are unchanged;
     // /admin uses 'exclude' for status tabs and 'only' for its Routine tab.
     const routine = searchParams.get('routine')
+    // v1.111 — opt-in: resolve assignedEmails → crew names for the card/list. Off by
+    // default so other consumers (dashboard/calendar) don't pay the extra query.
+    const withCrew = searchParams.get('withCrew') === '1'
 
     // scope=producer → only shoots where this user is the Producer (their own
     // email — safe, no leak). Otherwise plain USERs are restricted to their own
@@ -97,7 +100,32 @@ export async function GET(request: NextRequest) {
       prisma.booking.count({ where }),
     ])
 
-    return NextResponse.json({ bookings, total, page, limit })
+    // v1.111 — attach resolved crew names (nickname → thaiName → name → email
+    // local-part) so cards can show "who's on the shoot". One batched user query.
+    let outBookings: any[] = bookings
+    if (withCrew) {
+      const emails = Array.from(new Set(
+        bookings
+          .flatMap(b => [...((b as any).assignedEmails || []), (b as any).mainVideographerEmail])
+          .filter((e): e is string => typeof e === 'string' && e.includes('@'))
+          .map(e => e.toLowerCase()),
+      ))
+      const users = emails.length
+        ? await prisma.user.findMany({ where: { email: { in: emails } }, select: { email: true, nickname: true, thaiName: true, name: true } })
+        : []
+      const nameByEmail = new Map(users.map(u => [u.email.toLowerCase(), (u.nickname || u.thaiName || u.name || '').trim()]))
+      const resolve = (e: string) => nameByEmail.get(e.toLowerCase()) || e.split('@')[0]
+      outBookings = bookings.map(b => {
+        const assigned: string[] = (b as any).assignedEmails || []
+        const mainVdo = (b as any).mainVideographerEmail as string | null
+        return {
+          ...b,
+          assignedCrew: assigned.map(e => ({ email: e, name: resolve(e), isLead: !!mainVdo && e.toLowerCase() === mainVdo.toLowerCase() })),
+        }
+      })
+    }
+
+    return NextResponse.json({ bookings: outBookings, total, page, limit })
   } catch (error) {
     console.error('GET /api/bookings error:', error)
     return NextResponse.json({ error: 'Failed to fetch bookings' }, { status: 500 })

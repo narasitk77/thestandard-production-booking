@@ -25,6 +25,8 @@ interface Booking {
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
+  // v1.111 — resolved crew (from ?withCrew=1): who's on the shoot with you.
+  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
 }
 
 type TabKey = 'upcoming' | 'REQUESTED' | 'ASSIGNED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED'
@@ -58,7 +60,7 @@ export default function MyBookingsPage() {
   // user-owned/assigned set across all statuses.
   useEffect(() => {
     setBookings(null)
-    fetch('/api/bookings?scope=mine&limit=200')
+    fetch('/api/bookings?scope=mine&limit=200&withCrew=1')
       .then(r => r.json())
       .then(d => setBookings(d.bookings || []))
       .catch(() => setBookings([]))
@@ -226,6 +228,19 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
             {b.locationName && <> · {b.locationName}</>}
           </div>
           <div className="text-xs text-gray-400 truncate mt-0.5">Producer: {b.producer}</div>
+          {b.assignedCrew && b.assignedCrew.length > 0 && (
+            <div className="text-xs text-gray-400 truncate mt-0.5">
+              <span className="text-gray-500">ทีม:</span>{' '}
+              {b.assignedCrew.map((c, i) => {
+                const isMe = !!meEmail && c.email.toLowerCase() === meEmail
+                return (
+                  <span key={c.email + i} className={isMe ? 'text-[#673ab7] font-medium' : ''}>
+                    {c.name}{c.isLead ? ' ⭐' : ''}{isMe ? ' (คุณ)' : ''}{i < b.assignedCrew!.length - 1 ? ', ' : ''}
+                  </span>
+                )
+              })}
+            </div>
+          )}
         </div>
         <StatusPill status={b.status} />
       </Link>
