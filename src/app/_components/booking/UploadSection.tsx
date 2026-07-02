@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
+import { X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
 import { uploadToDrive as driveUpload, uploadToWasabi as wasabiUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
 import { cameraUploadOptions } from '@/lib/outlet-folders'
 
@@ -134,6 +134,8 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // on the DOM node directly; this input's `files` is every file in the picked
   // folder (recursive).
   const folderInputRef = useRef<HTMLInputElement | null>(null)
+  // v1.111 — monotonic id so out-of-order detect-footage responses are ignored.
+  const detectSeqRef = useRef(0)
   useEffect(() => {
     const el = folderInputRef.current
     if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', '') }
@@ -253,16 +255,21 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // server-side; on open we read the cache (instant) and only re-walk Drive when the
   // user presses "ตรวจใหม่" (refresh=true). Keep the old list visible while refreshing.
   const detectFootage = async (refresh = false) => {
+    // Guard against out-of-order responses: if a newer detect (e.g. a manual
+    // "ตรวจใหม่") starts before this one resolves, ignore this stale result so a
+    // slow cached mount-fetch can't overwrite a fresh refresh.
+    const seq = ++detectSeqRef.current
     setDetecting(true)
     try {
       const r = await fetch(`/api/bookings/${booking.id}/detect-footage${refresh ? '?refresh=1' : ''}`)
       const d = await r.json().catch(() => ({}))
+      if (seq !== detectSeqRef.current) return
       if (!r.ok) setDetected({ found: 0, folders: [], bookingFolderUrl: null, error: d.error || `HTTP ${r.status}` })
       else setDetected(d)
     } catch (e: any) {
-      setDetected({ found: 0, folders: [], bookingFolderUrl: null, error: e?.message || 'ตรวจหาไม่สำเร็จ' })
+      if (seq === detectSeqRef.current) setDetected({ found: 0, folders: [], bookingFolderUrl: null, error: e?.message || 'ตรวจหาไม่สำเร็จ' })
     } finally {
-      setDetecting(false)
+      if (seq === detectSeqRef.current) setDetecting(false)
     }
   }
 

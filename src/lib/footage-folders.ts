@@ -155,9 +155,19 @@ export interface CachedFootagePayload extends FootagePayload { cached: boolean; 
 export async function getCachedFootagePayload(booking: BookingForFootagePayload, opts: { refresh?: boolean } = {}): Promise<CachedFootagePayload> {
   if (!opts.refresh) {
     const row = await prisma.booking.findUnique({ where: { id: booking.id }, select: { footageCache: true, footageCacheAt: true } })
-    const c = row?.footageCache as unknown as FootagePayload | null | undefined
-    if (row?.footageCacheAt && c && Array.isArray(c.folders)) {
-      return { ...c, cached: true, cachedAt: row.footageCacheAt.toISOString() }
+    const c = row?.footageCache as unknown as Partial<FootagePayload> | null | undefined
+    // Only trust a cache that's fully shaped — a partial/corrupt blob falls through
+    // to a fresh recompute rather than leaking undefined fields to callers.
+    if (row?.footageCacheAt && c && Array.isArray(c.folders) && typeof c.found === 'number' && typeof c.fileCount === 'number') {
+      return {
+        found: c.found,
+        fileCount: c.fileCount,
+        folders: c.folders,
+        bookingFolderUrl: c.bookingFolderUrl ?? null,
+        soundStagingUrl: c.soundStagingUrl ?? null,
+        cached: true,
+        cachedAt: row.footageCacheAt.toISOString(),
+      }
     }
   }
   const fresh = await computeFootagePayload(booking)

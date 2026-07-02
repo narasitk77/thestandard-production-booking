@@ -182,8 +182,9 @@ export async function POST(request: NextRequest) {
     }
 
     // v1.111 — a new file landed in the box → invalidate the detect-footage cache
-    // so the next scan (and notify-ready) reflect it. Fire-and-forget.
-    if (finalStatus === 'COMPLETE') clearFootageCache(upload.booking.id).catch(() => {})
+    // so the next scan (and notify-ready) reflect it. Awaited so the invalidation
+    // is durable before we respond (clearFootageCache swallows its own errors).
+    if (finalStatus === 'COMPLETE') await clearFootageCache(upload.booking.id)
 
     return NextResponse.json({
       ok: finalStatus === 'COMPLETE',
