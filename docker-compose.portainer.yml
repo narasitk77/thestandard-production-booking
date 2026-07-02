@@ -163,6 +163,13 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       BACKUP_SECRET: ${BACKUP_SECRET:-${NEXTAUTH_SECRET}}
 
+      # v1.111 — NAS ↔ Production Team sync verification. The Mac agent
+      # (scripts/nas-manifest-agent.sh) POSTs NAS manifests with x-nas-secret;
+      # sync-complete + daily digest emails go to NAS_REPORT_EMAIL
+      # (falls back to REMINDER_ADMIN_EMAIL).
+      NAS_MANIFEST_SECRET: ${NAS_MANIFEST_SECRET:-}
+      NAS_REPORT_EMAIL: ${NAS_REPORT_EMAIL:-}
+
       # --- Wasabi S3 archive (dual-cloud upload, v1.35.x) ---
       # Required for outlets with storagePolicy=DUAL_WRITE (AGN, TSS, NWS). The
       # booking upload UI presigns multipart PUT URLs from these so the browser
