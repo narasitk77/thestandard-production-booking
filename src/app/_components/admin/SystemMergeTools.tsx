@@ -71,6 +71,12 @@ export default function SystemMergeTools() {
           className="text-xs px-3 py-1.5 border border-green-600 text-green-700 rounded hover:bg-green-50 inline-flex items-center gap-1 disabled:opacity-50">
           {mergingSound ? <Loader2 className="w-3 h-3 animate-spin" /> : <span>🎙️</span>} รวมไฟล์เสียง (ทั้งระบบ)
         </button>
+        {/* v1.111 — footage-sync worker stays off; export the footage log on demand as CSV instead. */}
+        <a href="/api/admin/footage-export" download
+          title="ดาวน์โหลด footage log ทั้งหมด (ทุกไฟล์ที่ detect ได้ รวม NAS) เป็น .csv"
+          className="text-xs px-3 py-1.5 border border-gray-400 text-gray-700 rounded hover:bg-gray-50 inline-flex items-center gap-1">
+          <span>⬇️</span> Export footage (.csv)
+        </a>
       </div>
       {msg && <div className="text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded p-2">{msg}</div>}
       <p className="text-[11px] text-gray-500">
