@@ -64,6 +64,20 @@ test('cleanJobName strips ONLY a trailing logistics parenthetical', () => {
   assert.equal(cleanJobName(null), '')
 })
 
+// v1.111 — folder names must be SMB/NTFS-safe: the Production Team landing
+// folders mirror to the office NAS, and a ":" in a job title made the folder
+// silently fail to sync (existed on Drive, never appeared on the NAS).
+test('folder names strip SMB-illegal characters (: * ? " < > |)', () => {
+  assert.equal(
+    buildBookingFolderName('TSS-260702-01', 'TSS: Interview Adver: กกพ. EP.2', 'Long-form'),
+    `Long-form ${DOT} TSS Interview Adver กกพ. EP.2 (TSS-260702-01)`,
+  )
+  assert.equal(
+    buildEpisodeFolderName({ sequence: 1, title: 'TSS: Interview Adver: BCG' }),
+    `EP01 ${DOT} TSS Interview Adver BCG`,
+  )
+})
+
 test('legacyBookingFolderName keeps the pre-v1.110 "<code> · <job>" shape', () => {
   assert.equal(legacyBookingFolderName('TSS-EXE-260826-L-01', 'งานทดสอบ'), `TSS-EXE-260826-L-01 ${DOT} งานทดสอบ`)
   assert.equal(legacyBookingFolderName('TSS-EXE-260826-L-01', null), 'TSS-EXE-260826-L-01')

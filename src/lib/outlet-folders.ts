@@ -161,6 +161,11 @@ export function cameraUploadOptions(cameraCount?: number | null, micCount?: numb
 export function sanitizeNameSegment(raw: string, maxLen = 120): string {
   const cleaned = String(raw || '')
     .replace(/[\\/]+/g, ' ')      // no path separators
+    // v1.111 — no SMB/NTFS-illegal chars: the Production Team landing folders
+    // mirror to the office NAS over SMB, and a name with ":" (e.g. a job titled
+    // "TSS: Interview Adver …") silently failed to sync — the folder existed on
+    // Drive but never appeared on the NAS, so the crew had nowhere to dump.
+    .replace(/[:*?"<>|]+/g, ' ')
     .replace(/[\r\n\t]+/g, ' ')   // no line breaks
     .replace(/\s+/g, ' ')         // collapse whitespace
     .trim()
