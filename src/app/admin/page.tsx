@@ -2,6 +2,7 @@
 
 import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
+import FootageBadge from '@/app/_components/FootageBadge'
 import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
@@ -14,6 +15,8 @@ interface Booking {
   id: string; shootDate: string; callTime: string; status: string
   producer: string; assignedEmails: string[]
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
+  footageFiles?: number | null
+  footageSent?: boolean
   cancelRequestedAt?: string | null; cancelReason?: string | null; cancelRequestedBy?: string | null
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean
   projectName?: string | null
@@ -49,6 +52,8 @@ export default function AdminPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('REQUESTED')
+  // v1.111 — โหมดดู: ทั้งหมด / วันนี้ / สัปดาห์นี้ (กรองตามวันถ่าย)
+  const [range, setRange] = useState<'all' | 'day' | 'week'>('all')
   // v1.35.2 — only show the "Upload" shortcut on cards to crew that can use it.
   const [canUpload, setCanUpload] = useState(false)
   // v1.51 — soft delete (hide test queues) is an ADMIN power; the Deleted tab
@@ -91,6 +96,12 @@ export default function AdminPage() {
     let list = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
     if (crewIncompleteOnly) list = list.filter(b => crewGaps[b.id])
     if (monthFilter !== 'all') list = list.filter(b => (b.shootDate || '').slice(0, 7) === monthFilter)
+    // v1.111 — daily/weekly view: window on shootDate.
+    if (range !== 'all') {
+      const t0 = new Date(); t0.setHours(0, 0, 0, 0)
+      const end = new Date(t0); end.setDate(end.getDate() + (range === 'day' ? 1 : 7))
+      list = list.filter(b => { const d = new Date(b.shootDate); return !isNaN(d.getTime()) && d >= t0 && d < end })
+    }
     return [...list].sort((a, b) => {
       const cmp = (a.shootDate || '').localeCompare(b.shootDate || '')
       return sortAsc ? cmp : -cmp
@@ -198,7 +209,7 @@ export default function AdminPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 ค้นหาเลข EP ID / Production ID / Booking ID…"
+          placeholder="🔍 ค้นหาทุกอย่าง — ID / ชื่อรายการ / ชื่อตอน / โปรดิวเซอร์ / สถานที่ / ทีม…"
           className="flex-1 max-w-md px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#673ab7]/40"
         />
         <button type="submit" className="px-3 py-2 text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">ค้นหา</button>
@@ -293,6 +304,13 @@ export default function AdminPage() {
       {!showingDeleted && months.length > 0 && (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
           <div className="flex gap-1 flex-wrap">
+            {([['all', 'ทั้งหมด'], ['day', 'วันนี้'], ['week', 'สัปดาห์นี้']] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setRange(k)}
+                className={`px-2.5 py-1 text-xs rounded-full border ${range === k ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-900'}`}>
+                {label}
+              </button>
+            ))}
+            <span className="w-px bg-gray-200 mx-1" />
             <button onClick={() => setMonthFilter('all')}
               className={`px-2.5 py-1 text-xs rounded-full border ${monthFilter === 'all' ? 'bg-[#673ab7] text-white border-[#673ab7]' : 'border-gray-300 text-gray-600 hover:border-[#673ab7]'}`}>
               ทุกเดือน
@@ -370,6 +388,7 @@ export default function AdminPage() {
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producer}
                     <CrewLine crew={b.assignedCrew} className="mt-0.5 text-[12px] text-blue-700" />
+                    <div className="mt-1"><FootageBadge files={b.footageFiles} sent={b.footageSent} /></div>
                   </div>
                   {b.cancelRequestedAt && (
                     <div className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 flex items-center justify-between gap-2">

@@ -126,12 +126,23 @@ export async function GET(request: NextRequest) {
           .flatMap(b => [...((b as any).assignedEmails || []), (b as any).mainVideographerEmail])
           .filter((e): e is string => typeof e === 'string'),
       )
+      // v1.111 — footage state for the cards' "ไฟล์ครบแล้ว" badge:
+      //   footageFiles = files last detected in the booking's Drive folders,
+      //   footageSent  = the NAS upload queue for this code fully drained.
+      const nasState = await prisma.nasSyncState.findUnique({ where: { key: 'latest' } }).catch(() => null)
+      const drained: Record<string, boolean> = {}
+      const nasFolders = ((nasState?.status as any) || {}).folders || {}
+      for (const [code, st] of Object.entries<any>(nasFolders)) drained[code] = !!st?.drainedAt
       outBookings = bookings.map(b => {
         const assigned: string[] = (b as any).assignedEmails || []
         const mainVdo = (b as any).mainVideographerEmail as string | null
+        const cache = (b as any).footageCache as any
         return {
           ...b,
+          footageCache: undefined, // don't ship the whole blob to the list
           assignedCrew: assigned.map(e => ({ email: e, name: resolve(e), isLead: !!mainVdo && e.toLowerCase() === mainVdo.toLowerCase() })),
+          footageFiles: typeof cache?.fileCount === 'number' ? cache.fileCount : null,
+          footageSent: (b as any).bookingCode ? !!drained[(b as any).bookingCode] : false,
         }
       })
     }

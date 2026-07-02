@@ -8,6 +8,7 @@ import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
 import StatusPill from '@/app/_components/StatusPill'
 import CrewLine from '@/app/_components/CrewLine'
+import FootageBadge from '@/app/_components/FootageBadge'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -28,6 +29,8 @@ interface Booking {
   episodes: Episode[]
   // v1.111 — resolved crew (from ?withCrew=1): who's on the shoot with you.
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
+  footageFiles?: number | null
+  footageSent?: boolean
 }
 
 type TabKey = 'upcoming' | 'REQUESTED' | 'ASSIGNED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED'
@@ -45,6 +48,8 @@ export default function MyBookingsPage() {
   const [bookings, setBookings] = useState<Booking[] | null>(null)
   const [tab, setTab] = useState<TabKey>('upcoming')
   const [search, setSearch] = useState('')
+  // v1.111 — โหมดดู: ทั้งหมด / วันนี้ / สัปดาห์นี้
+  const [range, setRange] = useState<'all' | 'day' | 'week'>('all')
   // v1.35.3 — whether to render Upload buttons next to CONFIRMED/COMPLETED rows
   const [canUpload, setCanUpload] = useState(false)
   // v1.63 — current user email, used to show the Edit button only to the owner
@@ -92,8 +97,17 @@ export default function MyBookingsPage() {
     const b = bookings || []
     const today0 = startOfToday()
     let list = b
+    // v1.111 — daily/weekly view: filter by shootDate window before tab logic.
+    if (range !== 'all') {
+      const end = new Date(today0)
+      end.setDate(end.getDate() + (range === 'day' ? 1 : 7))
+      list = list.filter(x => {
+        const d = parseISO(x.shootDate)
+        return !isNaN(d.getTime()) && d >= today0 && d < end
+      })
+    }
     if (tab === 'upcoming') {
-      list = b.filter(x => {
+      list = list.filter(x => {
         const d = parseISO(x.shootDate)
         if (isNaN(d.getTime())) return false
         if (x.status === 'CANCELLED') return false
@@ -102,7 +116,7 @@ export default function MyBookingsPage() {
       // Upcoming sorts ascending — soonest first — opposite the API default.
       list = [...list].sort((a, b) => a.shootDate.localeCompare(b.shootDate))
     } else {
-      list = b.filter(x => x.status === tab)
+      list = list.filter(x => x.status === tab)
       // Sort by shoot date: forward-looking tabs ascending (soonest first),
       // historical tabs (done/cancelled) descending (most recent first).
       const desc = tab === 'COMPLETED' || tab === 'CANCELLED'
@@ -121,7 +135,7 @@ export default function MyBookingsPage() {
       })
     }
     return list
-  }, [bookings, tab, search])
+  }, [bookings, tab, search, range])
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
@@ -160,6 +174,16 @@ export default function MyBookingsPage() {
             </button>
           )
         })}
+      </div>
+
+      {/* v1.111 — daily/weekly view chips */}
+      <div className="flex items-center gap-1 mb-2">
+        {([['all', 'ทั้งหมด'], ['day', 'วันนี้'], ['week', 'สัปดาห์นี้']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setRange(k)}
+            className={`text-xs px-3 py-1 rounded-full border ${range === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-500'}`}>
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Search */}
@@ -231,7 +255,10 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
           <div className="text-xs text-gray-400 truncate mt-0.5">Producer: {b.producer}</div>
           <CrewLine crew={b.assignedCrew} meEmail={meEmail} />
         </div>
-        <StatusPill status={b.status} />
+        <div className="flex flex-col items-end gap-1">
+          <StatusPill status={b.status} />
+          <FootageBadge files={b.footageFiles} sent={b.footageSent} />
+        </div>
       </Link>
       {canEdit && (
         <Link
