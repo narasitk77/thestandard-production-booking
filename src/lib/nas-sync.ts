@@ -80,24 +80,42 @@ function reportEmailTo(): string | null {
   return process.env.NAS_REPORT_EMAIL?.trim() || process.env.REMINDER_ADMIN_EMAIL?.trim() || null
 }
 
-/** Build the report. withDriveCounts = live Drive counting (button + digest). */
+/**
+ * Build the report. withDriveCounts pulls per-booking file counts from the
+ * DETECT CACHE in the DB (Booking.footageCache — same source as the card badge):
+ * live Drive counting for 15 folders blew past the 60s reverse proxy even in
+ * parallel. The cache refreshes whenever anyone detects/uploads/merges; the
+ * queue-drain email still does ONE live count for its folder.
+ */
 export async function buildNasReport(manifest: NasManifest, opts: { withDriveCounts?: boolean; statuses?: any } = {}): Promise<NasSyncReport> {
   const st = opts.statuses || {}
-  // Live Drive counts run CONCURRENTLY — 15 folders serially blew past the 60s
-  // reverse proxy (504). Wall-clock ≈ the slowest folder, not the sum.
-  const folders: FolderSyncReport[] = await Promise.all(manifest.folders.map(async nf => {
+  const codes = manifest.folders.map(nf => codeOf(nf.name)).filter((v): v is string => !!v)
+  const cacheByCode = new Map<string, { files: number | null; bytes: number | null }>()
+  if (opts.withDriveCounts && codes.length) {
+    const rows = await prisma.booking.findMany({
+      where: { bookingCode: { in: codes } },
+      select: { bookingCode: true, footageCache: true },
+    })
+    for (const r of rows) {
+      const c = r.footageCache as any
+      cacheByCode.set(r.bookingCode!, {
+        files: typeof c?.fileCount === 'number' ? c.fileCount : null,
+        bytes: Array.isArray(c?.folders) ? c.folders.reduce((n: number, f: any) => n + (f?.totalBytes || 0), 0) : null,
+      })
+    }
+  }
+  const folders: FolderSyncReport[] = manifest.folders.map(nf => {
     const code = codeOf(nf.name)
     const pendingBytes = nf.files.reduce((n, f) => n + (f.size || 0), 0)
     const prev = code ? st[code] : null
-    let driveFiles: number | null = null, driveBytes: number | null = null
-    if (opts.withDriveCounts && code) {
-      try { const c = await countDriveFilesByCode(code); driveFiles = c.files; driveBytes = c.bytes } catch { /* non-fatal */ }
-    }
+    const cached = code ? cacheByCode.get(code) : undefined
+    const driveFiles = cached?.files ?? null
+    const driveBytes = cached?.bytes ?? null
     const everHadFiles = (prev?.maxSeen || 0) > 0 || nf.files.length > 0
     const state: FolderSyncReport['state'] = nf.files.length > 0 ? 'sending'
       : everHadFiles || (driveFiles ?? 0) > 0 ? 'sent' : 'empty'
     return { name: nf.name, code, nasPending: nf.files.length, nasPendingBytes: pendingBytes, driveFiles, driveBytes, state }
-  }))
+  })
   return {
     nasAt: manifest.at ?? null,
     comparedAt: new Date().toISOString(),
