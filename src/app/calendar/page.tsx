@@ -454,7 +454,7 @@ function BookingRow({ b, onOpen }: { b: Booking; onOpen: () => void }) {
           <div className="text-sm text-gray-900 font-medium truncate">
             <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
             {b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}
-            {showName(b)}
+            {b.isBlockShot ? '🧱 ' : ''}{showName(b)}
           </div>
           <div className="text-xs text-gray-500 truncate">
             {b.episodes.slice(0, 2).map(e => e.episodeId).join(' · ')}

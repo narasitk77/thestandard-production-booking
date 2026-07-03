@@ -7,7 +7,7 @@ import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
 import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, landingBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 
@@ -147,7 +147,7 @@ export async function POST(
       if (!root) return
       try {
         const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
-        await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: updated.bookingCode, bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName, bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes })) })
+        await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: updated.bookingCode, bookingFolderName: landingBookingFolderName({ bookingCode: updated.bookingCode, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }) })
       } catch (e: any) {
         console.error('[approve] sound staging pre-create failed (non-fatal):', e?.message || e)
       }

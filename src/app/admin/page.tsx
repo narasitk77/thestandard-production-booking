@@ -96,11 +96,14 @@ export default function AdminPage() {
     let list = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
     if (crewIncompleteOnly) list = list.filter(b => crewGaps[b.id])
     if (monthFilter !== 'all') list = list.filter(b => (b.shootDate || '').slice(0, 7) === monthFilter)
-    // v1.111 — daily/weekly view: window on shootDate.
+    // v1.111 — daily/weekly view: วันนี้ = today's calendar day; สัปดาห์นี้ = the
+    // CURRENT week Mon–Sun including past days (so the Completed tab filters too).
     if (range !== 'all') {
       const t0 = new Date(); t0.setHours(0, 0, 0, 0)
-      const end = new Date(t0); end.setDate(end.getDate() + (range === 'day' ? 1 : 7))
-      list = list.filter(b => { const d = new Date(b.shootDate); return !isNaN(d.getTime()) && d >= t0 && d < end })
+      let start = new Date(t0), end = new Date(t0)
+      if (range === 'day') { end.setDate(end.getDate() + 1) }
+      else { const dow = (start.getDay() + 6) % 7; start.setDate(start.getDate() - dow); end = new Date(start); end.setDate(end.getDate() + 7) }
+      list = list.filter(b => { const d = new Date(b.shootDate); return !isNaN(d.getTime()) && d >= start && d < end })
     }
     return [...list].sort((a, b) => {
       const cmp = (a.shootDate || '').localeCompare(b.shootDate || '')
@@ -383,7 +386,7 @@ export default function AdminPage() {
                     )}
                   </div>
                   <div className="font-medium text-gray-800 text-sm sm:text-base">
-                    {b.outlet.name} · {bookingDisplayName(b)}
+                    {b.isBlockShot ? '🧱 ' : ''}{b.outlet.name} · {bookingDisplayName(b)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producer}

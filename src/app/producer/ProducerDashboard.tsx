@@ -7,6 +7,7 @@ import { formatDisplayDate, statusLabel } from '@/lib/utils'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
+  isBlockShot?: boolean
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string
   bookingCode: string | null
@@ -142,7 +143,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
                     </span>
                   </div>
                   <div className="text-sm text-gray-600 mt-1">
-                    {b.outlet.name} · {bookingDisplayName(b)}
+                    {b.isBlockShot ? '🧱 ' : ''}{b.outlet.name} · {bookingDisplayName(b)}
                     {b.episodes[0]?.title ? ` — ${b.episodes[0].title}` : ''}
                     {b.projectId ? ` · ${b.projectId}` : ''}
                   </div>

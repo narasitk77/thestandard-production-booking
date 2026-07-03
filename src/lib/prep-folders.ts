@@ -105,7 +105,9 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     // v1.108 — Sound-crew bookings: keep a staging tree outside the video project
     // folder (additive, best-effort, in addition to whatever video/photo prep runs).
     if (!opts.dryRun && bookingNeedsSound(b.crewRequired)) {
-      try { await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: b.bookingCode!, bookingFolderName: buildBookingFolderName(b.bookingCode!, jobName, showName) }) }
+      // v1.111 — staging is crew-facing (sound team drops files there): use the
+      // display-format name, same as the landing folder. Lookups are by code.
+      try { await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: b.bookingCode!, bookingFolderName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }) }) }
       catch (e: any) { console.error('[prep] sound staging failed (non-fatal):', b.bookingCode, e?.message || e) }
     }
     // v1.102.8 — Photo album jobs → one flat folder in the Photographer Shared

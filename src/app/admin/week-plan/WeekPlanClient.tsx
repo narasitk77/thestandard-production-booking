@@ -12,6 +12,7 @@ type Camera = { id: string; name: string; serialNumber: string | null; status: s
 type Episode = { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 type Booking = {
   id: string
+  isBlockShot?: boolean
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   shootDate: string
   callTime: string
@@ -162,7 +163,7 @@ export default function WeekPlanClient() {
                         <div key={b.id} className="px-3 py-3">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="text-sm">
-                              <Link href={`/admin/${b.id}`} className="text-[#673ab7] hover:underline font-medium">{b.outlet.code} · {bookingDisplayName(b)}</Link>
+                              <Link href={`/admin/${b.id}`} className="text-[#673ab7] hover:underline font-medium">{b.isBlockShot ? '🧱 ' : ''}{b.outlet.code} · {bookingDisplayName(b)}</Link>
                               <span className="text-gray-500 ml-2 text-xs">{b.callTime}</span>
                               <CrewLine crew={b.assignedCrew} className="text-[11px] text-gray-500 mt-0.5" />
                             </div>

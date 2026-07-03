@@ -106,9 +106,9 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
       if (!fp.id) continue
       for (const child of await listChildFolders(fp.id)) {
         const m = fp.pool.find(x => folderNameMatchesCode(child.name, x.code))
-        // v1.111 — landing uses the crew-facing display name; photo/sound keep
-        // the box-style name.
-        if (m) await renameIfDiff(child.id, child.name, fp.label === 'landing' ? m.landingName : newFlatName(m), m.code, fp.label)
+        // v1.111 — landing AND sound-staging are crew-facing → display name;
+        // photo keeps the box-style name.
+        if (m) await renameIfDiff(child.id, child.name, fp.label === 'photo' ? newFlatName(m) : m.landingName, m.code, fp.label)
       }
     }
 

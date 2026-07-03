@@ -12,6 +12,7 @@ import FootageBadge from '@/app/_components/FootageBadge'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
+  isBlockShot?: boolean
   id: string
   shootDate: string
   shootEndDate?: string | null
@@ -97,13 +98,17 @@ export default function MyBookingsPage() {
     const b = bookings || []
     const today0 = startOfToday()
     let list = b
-    // v1.111 — daily/weekly view: filter by shootDate window before tab logic.
+    // v1.111 — daily/weekly view: วันนี้ = today's calendar day; สัปดาห์นี้ = the
+    // CURRENT week Mon–Sun INCLUDING past days (a Completed job shot on Tuesday
+    // must show under สัปดาห์นี้ — the first cut only looked forward, so the
+    // Completed tab appeared unfiltered/empty).
     if (range !== 'all') {
-      const end = new Date(today0)
-      end.setDate(end.getDate() + (range === 'day' ? 1 : 7))
+      let start = new Date(today0), end = new Date(today0)
+      if (range === 'day') { end.setDate(end.getDate() + 1) }
+      else { const dow = (start.getDay() + 6) % 7; start.setDate(start.getDate() - dow); end = new Date(start); end.setDate(end.getDate() + 7) }
       list = list.filter(x => {
         const d = parseISO(x.shootDate)
-        return !isNaN(d.getTime()) && d >= today0 && d < end
+        return !isNaN(d.getTime()) && d >= start && d < end
       })
     }
     if (tab === 'upcoming') {
@@ -244,7 +249,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
         <div className="flex-1 min-w-0">
           <div className="text-sm text-gray-900 font-medium truncate">
             <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
-            {bookingDisplayName(b)}
+            {b.isBlockShot ? '🧱 ' : ''}{bookingDisplayName(b)}
             {b.episodes[0]?.title ? <span className="text-gray-500 font-normal"> — {b.episodes[0].title}</span> : null}
           </div>
           <div className="text-xs text-gray-500 truncate mt-0.5">

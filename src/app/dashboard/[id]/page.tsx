@@ -29,6 +29,7 @@ interface UploadRecord {
 }
 
 interface BookingDetail {
+  isBlockShot?: boolean
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string
   shootDate: string
@@ -224,7 +225,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               )}
             </div>
             <h1 className="text-2xl font-normal text-gray-800 mb-1">
-              {booking.outlet.name} · {bookingDisplayName(booking)}
+              {booking.isBlockShot ? '🧱 ' : ''}{booking.outlet.name} · {bookingDisplayName(booking)}
             </h1>
             <p className="text-sm text-gray-500">
               {formatDateRange(booking.shootDate, booking.shootEndDate)} · {booking.callTime}

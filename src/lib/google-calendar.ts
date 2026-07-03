@@ -229,6 +229,7 @@ export function buildEventTitle(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  isBlockShot?: boolean | null
   projectName?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -252,7 +253,9 @@ export function buildEventTitle(booking: {
   if (equip) segments.push(equip)
 
   const titleBody = segments.length ? `${core} · ${segments.join(' · ')}` : core
-  return booking.needsVan ? `${VAN_EMOJI} ${titleBody}` : titleBody
+  // v1.111 — 🧱 marks a Block Shot at a glance (ops ask); van emoji leads as before.
+  const withBlock = booking.isBlockShot ? `🧱 ${titleBody}` : titleBody
+  return booking.needsVan ? `${VAN_EMOJI} ${withBlock}` : withBlock
 }
 
 export function buildEventDescription(booking: {

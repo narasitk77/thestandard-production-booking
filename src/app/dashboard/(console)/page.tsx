@@ -13,6 +13,7 @@ import type { ProjectMonitorRow } from '@/app/api/projects/monitor/route'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
+  isBlockShot?: boolean
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string; shootDate: string; callTime: string; estimatedWrap?: string; status: string
   shootType: string; producer: string; category: string
@@ -531,7 +532,7 @@ export default function DashboardPage() {
                     </td>
                     <td>
                       <div className="text-gray-800">{b.outlet.name}</div>
-                      <div className="text-xs text-gray-500">{bookingDisplayName(b)}</div>
+                      <div className="text-xs text-gray-500">{b.isBlockShot ? '🧱 ' : ''}{bookingDisplayName(b)}</div>
                       <CrewLine crew={b.assignedCrew} className="text-[11px] text-gray-400 truncate mt-0.5" />
                     </td>
                     <td>
