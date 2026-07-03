@@ -17,6 +17,7 @@ export const maxDuration = 300 // walking + moving footage across folders can ta
 function expectedSecret(): string | undefined {
   return process.env.VIDEO_MERGE_SECRET?.trim()
     || process.env.SOUND_MERGE_SECRET?.trim()
+    || process.env.NAS_MANIFEST_SECRET?.trim() // v1.113.4 — the NAS agent's shared secret may trigger merges (same trust domain: the admin Mac)
     || process.env.NEXTAUTH_SECRET?.trim()
     || process.env.AUTH_SECRET?.trim()
 }
