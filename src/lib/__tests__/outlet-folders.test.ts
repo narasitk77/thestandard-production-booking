@@ -155,6 +155,8 @@ test('shootFolderLayers: AGN nests Project under the category box; others use sh
   })
   assert.equal(agnAd.programFolderName, 'Advertorial')
   assert.equal(agnAd.bookingFolderName, `PP-26-008 ${DOT} พีพี โปรเจค`)
+  // v1.112 — per-booking layer inside the project box: "<job> (<code>)"
+  assert.equal(agnAd.bookingSubfolderName, 'job (AGN-260529-STD-01)')
   // Content Agency Event → category box "Event / Forum" (matches PMC's pre-created folder)
   const agnEv = shootFolderLayers({
     outletCode: 'AGN', showName: 'ignored', category: 'EVENT',
@@ -162,6 +164,7 @@ test('shootFolderLayers: AGN nests Project under the category box; others use sh
   })
   assert.equal(agnEv.programFolderName, 'Event / Forum')
   assert.equal(agnEv.bookingFolderName, `PP-26-020 ${DOT} อีเวนต์`)
+  assert.equal(agnEv.bookingSubfolderName, 'AGN-260529-EVT-01') // no job → bare code
   // Other outlets → show name + "<Production ID · job>"
   const nws = shootFolderLayers({
     outletCode: 'NWS', showName: 'Key Message', category: null,
@@ -169,6 +172,7 @@ test('shootFolderLayers: AGN nests Project under the category box; others use sh
   })
   assert.equal(nws.programFolderName, 'Key Message')
   assert.equal(nws.bookingFolderName, `Key Message ${DOT} Morning (NWS-KYM-260616-L-01)`) // v1.110 show-first
+  assert.equal(nws.bookingSubfolderName, undefined) // non-AGN: no extra layer
   // AGN with no projectId (shouldn't happen) → falls back to the normal layout
   const agnNoProj = shootFolderLayers({
     outletCode: 'AGN', showName: '', category: 'ADVERTORIAL',
@@ -176,6 +180,7 @@ test('shootFolderLayers: AGN nests Project under the category box; others use sh
   })
   assert.equal(agnNoProj.programFolderName, 'Advertorial')
   assert.equal(agnNoProj.bookingFolderName, 'AGN-260529-STD-01')
+  assert.equal(agnNoProj.bookingSubfolderName, undefined) // no project box → no layer
 })
 
 test('buildStoragePath: EP segment is inserted between bookingCode and camera (Wasabi collision guard)', () => {

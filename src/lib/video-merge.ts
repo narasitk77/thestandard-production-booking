@@ -13,8 +13,8 @@
  *
  * - Skips a file already present in the box (same name + size) — leaves it in the
  *   landing folder for manual review rather than creating a duplicate.
- * - AGN is skipped: its box is a shared Project folder (per-EP keyed), so a flat
- *   per-booking merge would misplace footage.
+ * - v1.112 — AGN merges into the per-booking layer INSIDE its shared project box
+ *   ("<job> (<code>)"), created on demand; no more misplacement, no more skip.
  * - Bounded to recent shoots (45 days) to keep per-run Drive calls bounded.
  */
 import { prisma } from './db'
@@ -102,9 +102,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<Vi
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
     const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
     try {
-      // AGN shares ONE project box across bookings (per-EP keyed) → a flat
-      // per-booking merge would misplace footage. Skip (landing kept).
-      if (b.outlet.code === 'AGN') { base.results.push({ bookingCode: code, skipped: 'AGN project box shared — merge skipped' }); continue }
+      const isAgency = b.outlet.code === 'AGN'
 
       // v1.110 — match the landing folder by Production ID (legacy "<code> · …" OR
       // new "<show> · … (<code>)" shape).
@@ -112,7 +110,9 @@ export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<Vi
       if (!flatId) { base.results.push({ bookingCode: code, skipped: 'no landing folder' }); continue }
 
       // Resolve the box (read-only). If it hasn't landed yet → skip (try next run).
-      const { programFolderName } = shootFolderLayers({
+      // v1.112 — AGN merges too: the per-booking layer inside the project box is
+      // the destination, so a flat merge can't misplace footage anymore.
+      const layers = shootFolderLayers({
         outletCode: b.outlet.code,
         showName,
         category: b.category, projectId: b.projectId, projectName: b.projectName,
@@ -121,15 +121,25 @@ export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<Vi
       const resolved = await findEpisodeFolderUrls({
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
-        programFolderName,
-        bookingFolderName: buildBookingFolderName(code, jobName, showName),
-        bookingFolderNameAlts: [legacyBookingFolderName(code, jobName)], // pre-v1.110 box
-        episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, {})),
+        programFolderName: layers.programFolderName,
+        bookingFolderName: layers.bookingFolderName,
+        // strict destination for AGN (project box only); others accept the pre-v1.110 box
+        bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+        bookingSubfolderName: layers.bookingSubfolderName,
+        bookingSubfolderCode: code,
+        episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
       })
       if (!resolved.bookingFolderId) { base.results.push({ bookingCode: code, skipped: 'box not found (not prepped yet)' }); continue }
 
+      // AGN: box exists but the booking layer doesn't yet → create it (merge is a
+      // write op). In dryRun leave dest null (mirrorMove counts all as would-move).
+      let destId: string | null = resolved.bookingFolderId
+      if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder) {
+        destId = opts.dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+      }
+
       const stats: Stats = { seen: 0, moved: 0, dup: 0, err: 0 }
-      await mirrorMove(flatId, resolved.bookingFolderId, code, stats, !!opts.dryRun)
+      await mirrorMove(flatId, destId, code, stats, !!opts.dryRun)
       base.landed += stats.seen; base.moved += stats.moved; base.errors += stats.err
       base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, dup: stats.dup, err: stats.err })
     } catch (e: any) {
@@ -175,7 +185,7 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'ยังไม่ได้ตั้งค่า Drive', ...zero }
   const code = b.bookingCode
   if (!code) return { skipped: true, reason: 'ไม่มี Production ID', ...zero }
-  if (b.outlet.code === 'AGN') return { skipped: true, reason: 'AGN ใช้กล่องโปรเจกต์ร่วมกัน — ข้ามการรวมวิดีโอ', ...zero }
+  const isAgency = b.outlet.code === 'AGN'
 
   const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
   const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
@@ -184,21 +194,29 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   const flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
   if (!flatId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์ใน Production Team (NAS ยังไม่ sync?)', ...zero }
 
-  const { programFolderName } = shootFolderLayers({
+  // v1.112 — AGN merges too (destination = per-booking layer inside the project box).
+  const layers = shootFolderLayers({
     outletCode: b.outlet.code, showName, category: b.category,
     projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
   })
   const resolved = await findEpisodeFolderUrls({
     rootFolderId: root,
     outletCanonicalName: outletDriveFolderName(b.outlet.code),
-    programFolderName,
-    bookingFolderName: buildBookingFolderName(code, jobName, showName),
-    bookingFolderNameAlts: [legacyBookingFolderName(code, jobName)],
-    episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, {})),
+    programFolderName: layers.programFolderName,
+    bookingFolderName: layers.bookingFolderName,
+    bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+    bookingSubfolderName: layers.bookingSubfolderName,
+    bookingSubfolderCode: code,
+    episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
   })
   if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง Video 2026 (ยังไม่ถูก prep?)', ...zero }
 
+  let destId: string | null = resolved.bookingFolderId
+  if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder) {
+    destId = dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+  }
+
   const stats: Stats = { seen: 0, moved: 0, dup: 0, err: 0 }
-  await mirrorMove(flatId, resolved.bookingFolderId, code, stats, dryRun)
-  return { ...stats, boxFolderUrl: resolved.bookingFolderUrl ?? null }
+  await mirrorMove(flatId, destId, code, stats, dryRun)
+  return { ...stats, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : (resolved.bookingFolderUrl ?? null) }
 }

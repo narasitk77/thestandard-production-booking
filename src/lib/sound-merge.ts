@@ -69,10 +69,6 @@ export async function runSoundMerge(opts: { dryRun?: boolean } = {}): Promise<So
     const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
     const bookingFolderName = buildBookingFolderName(b.bookingCode, jobName, showName)
     try {
-      // AGN shares ONE project box across bookings → a box-level AUDIO would mix
-      // bookings' audio. Skip AGN for now (staging still kept; merge deferred).
-      if (b.outlet.code === 'AGN') { base.results.push({ bookingCode: b.bookingCode, skipped: 'AGN project box shared — merge skipped' }); continue }
-
       // v1.110 — match by immutable Production ID, tolerating both the legacy
       // "<code> · …" and the new "<show> · … (<code>)" folder shapes.
       const code = b.bookingCode
@@ -83,30 +79,40 @@ export async function runSoundMerge(opts: { dryRun?: boolean } = {}): Promise<So
       if (stagingFiles.length === 0) { base.results.push({ bookingCode: b.bookingCode, staged: 0 }); continue }
 
       // Resolve the video box (read-only). If it hasn't landed yet → skip (try next run).
-      const { programFolderName } = shootFolderLayers({
+      // v1.112 — AGN merges too: AUDIO goes inside the per-booking layer of the
+      // project box, so bookings' audio can't mix anymore.
+      const layers = shootFolderLayers({
         outletCode: b.outlet.code,
         showName,
         category: b.category, projectId: b.projectId, projectName: b.projectName,
         bookingCode: b.bookingCode, jobName,
       })
+      const isAgency = b.outlet.code === 'AGN'
       const resolved = await findEpisodeFolderUrls({
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
-        programFolderName, bookingFolderName,
-        bookingFolderNameAlts: [legacyBookingFolderName(b.bookingCode, jobName)], // pre-v1.110 box
-        episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, {})),
+        programFolderName: layers.programFolderName,
+        bookingFolderName: layers.bookingSubfolderName ? layers.bookingFolderName : bookingFolderName,
+        bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(b.bookingCode, jobName)], // pre-v1.110 box
+        bookingSubfolderName: layers.bookingSubfolderName,
+        bookingSubfolderCode: code,
+        episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
       })
       if (!resolved.bookingFolderId) { base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, skipped: 'box not found (video not landed yet)' }); continue }
+      let boxTargetId = resolved.bookingFolderId
+      if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder && !opts.dryRun) {
+        boxTargetId = await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+      }
 
       // Dedup against the box's AUDIO folder (by name + size). May not exist yet.
-      const existingAudio = await findChildFolder(resolved.bookingFolderId, 'AUDIO')
+      const existingAudio = await findChildFolder(boxTargetId, 'AUDIO')
       const have = new Set(existingAudio ? (await listFilesRecursive(existingAudio, { maxFiles: 2000 })).map(f => `${f.name}|${f.size ?? ''}`) : [])
       const toCopy = stagingFiles.filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
 
       if (opts.dryRun) { base.merged += toCopy.length; base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied: toCopy.length }); continue }
       if (toCopy.length === 0) { base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied: 0 }); continue }
 
-      const audioId = existingAudio || await ensureFolderPath(resolved.bookingFolderId, ['AUDIO'])
+      const audioId = existingAudio || await ensureFolderPath(boxTargetId, ['AUDIO'])
       let copied = 0
       for (const f of toCopy) {
         try { await copyFileToFolder(f.id, audioId, f.name); copied++ }
@@ -156,8 +162,6 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   const code = b.bookingCode
   if (!code) return { skipped: true, reason: 'ไม่มี Production ID', ...zero }
   if (!bookingNeedsSound(b.crewRequired)) return { skipped: true, reason: 'งานนี้ไม่มีทีมเสียง', ...zero }
-  if (b.outlet.code === 'AGN') return { skipped: true, reason: 'AGN ใช้กล่องโปรเจกต์ร่วมกัน — ข้ามการรวมเสียง', ...zero }
-
   const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
   if (!stagingRoot) return { skipped: true, reason: 'ยังไม่มี _SOUND-STAGING', ...zero }
   const stagingChildren = await listChildFolders(stagingRoot)
@@ -168,27 +172,35 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
 
   const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
   const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
-  const { programFolderName } = shootFolderLayers({
+  // v1.112 — AGN merges too (AUDIO inside the per-booking layer of the project box).
+  const isAgency = b.outlet.code === 'AGN'
+  const layers = shootFolderLayers({
     outletCode: b.outlet.code, showName, category: b.category,
     projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
   })
   const resolved = await findEpisodeFolderUrls({
     rootFolderId: root,
     outletCanonicalName: outletDriveFolderName(b.outlet.code),
-    programFolderName,
-    bookingFolderName: buildBookingFolderName(code, jobName, showName),
-    bookingFolderNameAlts: [legacyBookingFolderName(code, jobName)],
-    episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, {})),
+    programFolderName: layers.programFolderName,
+    bookingFolderName: layers.bookingFolderName,
+    bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+    bookingSubfolderName: layers.bookingSubfolderName,
+    bookingSubfolderCode: code,
+    episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
   })
   if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง (วิดีโอยังไม่ลง?)', staged: stagingFiles.length, copied: 0, err: 0 }
+  let boxTargetId = resolved.bookingFolderId
+  if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder && !dryRun) {
+    boxTargetId = await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+  }
 
-  const existingAudio = await findChildFolder(resolved.bookingFolderId, 'AUDIO')
+  const existingAudio = await findChildFolder(boxTargetId, 'AUDIO')
   const have = new Set(existingAudio ? (await listFilesRecursive(existingAudio, { maxFiles: 2000 })).map(f => `${f.name}|${f.size ?? ''}`) : [])
   const toCopy = stagingFiles.filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
   if (dryRun) return { staged: stagingFiles.length, copied: toCopy.length, err: 0, boxFolderUrl: resolved.bookingFolderUrl ?? null }
   if (toCopy.length === 0) return { staged: stagingFiles.length, copied: 0, err: 0, boxFolderUrl: resolved.bookingFolderUrl ?? null }
 
-  const audioId = existingAudio || await ensureFolderPath(resolved.bookingFolderId, ['AUDIO'])
+  const audioId = existingAudio || await ensureFolderPath(boxTargetId, ['AUDIO'])
   let copied = 0, err = 0
   for (const f of toCopy) {
     try { await copyFileToFolder(f.id, audioId, f.name); copied++ }

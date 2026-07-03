@@ -87,6 +87,7 @@ async function createVerifiedCalendarEvent(booking: {
   id: string
   bookingCode?: string | null
   shootDate: Date | string
+  shootEndDate?: Date | string | null
   callTime: string
   estimatedWrap?: string | null
   shootType: string
@@ -162,6 +163,7 @@ async function processBooking(
         id: booking.id,
         bookingCode: booking.bookingCode,
         shootDate: booking.shootDate,
+        shootEndDate: booking.shootEndDate,
         callTime: booking.callTime,
         estimatedWrap: booking.estimatedWrap,
         shootType: booking.shootType,
@@ -230,6 +232,7 @@ async function processBooking(
         id: booking.id,
         bookingCode: booking.bookingCode,
         shootDate: booking.shootDate,
+        shootEndDate: booking.shootEndDate,
         callTime: booking.callTime,
         estimatedWrap: booking.estimatedWrap,
         shootType: booking.shootType,
@@ -311,6 +314,7 @@ async function processBooking(
           id: booking.id,
           bookingCode: booking.bookingCode,
           shootDate: booking.shootDate,
+          shootEndDate: booking.shootEndDate,
           callTime: booking.callTime,
           estimatedWrap: booking.estimatedWrap,
           shootType: booking.shootType,

@@ -187,6 +187,35 @@ function addHoursInBangkok(dateTime: string, hours: number): string {
 }
 
 /**
+ * v1.112 — a booking's calendar start/end datetimes, CORRECT across the day
+ * boundary. Both callsites previously built the end on the START date, so an
+ * overnight or multi-day shoot got end ≤ start and Google rejected the create
+ * ("The specified time range is empty" — reported for TSS-TSL-260709-01, a
+ * Thu 22:00 → Sun 09:00 On-Location shoot). Now:
+ *   - end uses shootEndDate when the shoot spans days (the real wrap date);
+ *   - else if estimatedWrap ≤ callTime (overnight single-day), end rolls to the
+ *     next day so 22:00 → 09:00 is a 11-hour event, not an empty range.
+ */
+export function computeEventTimes(booking: {
+  shootDate: Date | string
+  shootEndDate?: Date | string | null
+  callTime: string
+  estimatedWrap?: string | null
+}): { startTime: string; endTime: string } {
+  const shootDate = new Date(booking.shootDate)
+  const startTime = parseBangkokDateTime(shootDate, booking.callTime)
+  if (!booking.estimatedWrap) return { startTime, endTime: addHoursInBangkok(startTime, 4) }
+  const endBaseDate = booking.shootEndDate ? new Date(booking.shootEndDate) : shootDate
+  let endTime = parseBangkokDateTime(endBaseDate, booking.estimatedWrap)
+  // No explicit end date but the wrap is at/before call time → it wraps past
+  // midnight → the end is the NEXT calendar day.
+  if (!booking.shootEndDate && new Date(endTime).getTime() <= new Date(startTime).getTime()) {
+    endTime = addHoursInBangkok(endTime, 24)
+  }
+  return { startTime, endTime }
+}
+
+/**
  * Build the calendar event's description text. Shared by createCalendarEvent
  * and the assign route's attendee patch so the freelance contacts + admin
  * notes that admins add stay in sync on the event — not just in the email.
@@ -315,6 +344,7 @@ export async function createCalendarEvent(booking: {
   id: string
   bookingCode?: string | null
   shootDate: Date | string
+  shootEndDate?: Date | string | null
   callTime: string
   estimatedWrap?: string | null
   shootType: string
@@ -354,11 +384,7 @@ export async function createCalendarEvent(booking: {
     const auth = getAuth()
     const calendar = google.calendar({ version: 'v3', auth })
 
-    const shootDate = new Date(booking.shootDate)
-    const startTime = parseBangkokDateTime(shootDate, booking.callTime)
-    const endTime = booking.estimatedWrap
-      ? parseBangkokDateTime(shootDate, booking.estimatedWrap)
-      : addHoursInBangkok(startTime, 4)
+    const { startTime, endTime } = computeEventTimes(booking)
 
     // Location = the actual room/venue (independent of Shoot Type)
     const location = booking.locationName || '—'
@@ -579,6 +605,7 @@ export async function updateCalendarEventDetails(
     id: string
     bookingCode?: string | null
     shootDate: Date | string
+    shootEndDate?: Date | string | null
     callTime: string
     estimatedWrap?: string | null
     shootType: string
@@ -611,11 +638,7 @@ export async function updateCalendarEventDetails(
   }
   try {
     const calendar = google.calendar({ version: 'v3', auth: getAuth() })
-    const shootDate = new Date(booking.shootDate)
-    const startTime = parseBangkokDateTime(shootDate, booking.callTime)
-    const endTime = booking.estimatedWrap
-      ? parseBangkokDateTime(shootDate, booking.estimatedWrap)
-      : addHoursInBangkok(startTime, 4)
+    const { startTime, endTime } = computeEventTimes(booking)
 
     await calendar.events.patch({
       calendarId: CALENDAR_ID,

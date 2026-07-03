@@ -66,6 +66,9 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     programFolderName,
     bookingFolderName,
     bookingFolderNameAlts,
+    // v1.112 — AGN: descend into the per-booking layer when it exists.
+    bookingSubfolderName: layers.bookingSubfolderName,
+    bookingSubfolderCode: booking.bookingCode,
     episodeFolderNames: epNames,
   })
 
@@ -86,8 +89,13 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     folderMap.set(fid, cur)
   }
 
-  if (isAgency) {
-    // shared Project box. Scan THIS booking's EP folders (root = the EP folder)…
+  if (isAgency && resolved.viaBookingSubfolder && resolved.bookingFolderId) {
+    // v1.112 — the booking has its own layer inside the project box: everything
+    // in it belongs to THIS booking → scan it whole, like a non-AGN box.
+    const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 5000 })
+    raw.filter(isFootage).forEach(f => add(f, label(f.folderPath[0] ?? '')))
+  } else if (isAgency) {
+    // legacy layout — shared Project box. Scan THIS booking's EP folders (root = the EP folder)…
     const epFolders = resolved.episodes.filter(e => e.folderId)
     await Promise.all(epFolders.map(async e => {
       const raw = await listFilesRecursive(e.folderId!, { maxFiles: 5000 })
@@ -117,8 +125,10 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
   // ones the deterministic pass didn't already cover. Landing/staging/photo trees
   // are included on purpose: "ตรวจหา footage" should show files wherever they sit,
   // labeled by which folder they're in.
+  // v1.112 — AGN included: the per-booking layer's name embeds the booking code,
+  // so the global sweep finds it (and the landing/staging trees) like any outlet.
   let extraBoxUrl: string | null = null
-  if (!isAgency && booking.bookingCode) {
+  if (booking.bookingCode) {
     try {
       const candidates = await findFoldersByCode(booking.bookingCode)
       const seenRoots = new Set([resolved.bookingFolderId].filter(Boolean) as string[])

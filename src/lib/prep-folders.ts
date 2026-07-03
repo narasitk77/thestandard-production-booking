@@ -146,7 +146,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       // folders by project EP ID; empty for bookings with no episodes.
       const episodeFolderNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined
       // v1.94 — AGN groups by Project (no per-booking folder); others by show + ID.
-      const { programFolderName, bookingFolderName } = shootFolderLayers({
+      const layers = shootFolderLayers({
         outletCode: b.outlet.code,
         showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
         category: b.category,
@@ -155,12 +155,16 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
         bookingCode: b.bookingCode!,
         jobName,
       })
-      // 1) destination boxes in VIDEO 2026 (AGN: outlet/<Project>/…; others: outlet/program/<ID·job>/<EP>/CAM-..)
+      // 1) destination boxes in VIDEO 2026 (AGN: outlet/<Project>/<job (code)>/…;
+      //    others: outlet/program/<show · job (code)>/<EP>/CAM-..)
       await ensureShootCameraFolders({
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
-        programFolderName,
-        bookingFolderName,
+        programFolderName: layers.programFolderName,
+        bookingFolderName: layers.bookingFolderName,
+        // v1.112 — AGN: per-booking layer inside the project box.
+        bookingSubfolderName: layers.bookingSubfolderName,
+        bookingSubfolderCode: b.bookingCode!,
         // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
         bookingCode: b.outlet.code === 'AGN' ? undefined : b.bookingCode!,
         cameras,

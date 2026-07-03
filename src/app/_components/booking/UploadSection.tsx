@@ -527,10 +527,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             {' '}<code className="text-gray-700">{(() => {
               const ep = episodes.find(e => e.id === episodeRowId)
               const epSeg = ep ? `/${epLabel(ep)}` : ''
-              // v1.94 — AGN: category box (Advertorial/Event · Forum) → Project box
-              // (no Production-ID folder); other outlets keep show + Production ID.
+              // v1.112 — AGN: category box → Project box → per-booking layer
+              // "<ชื่องาน> (AGN-…)"; other outlets keep show + Production ID.
               return isAgency
-                ? `[outlet]/[Advertorial·Event]/[Project ID · โปรเจค]${epSeg}/${camera}/`
+                ? `[outlet]/[Advertorial·Event]/[Project ID · โปรเจค]/[ชื่องาน (${booking.bookingCode})]${epSeg}/${camera}/`
                 : `[outlet]/[program]/${booking.bookingCode} · [ชื่องาน]${epSeg}/${camera}/`
             })()}</code>
             {' · '}

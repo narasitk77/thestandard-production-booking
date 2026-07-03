@@ -253,7 +253,7 @@ export async function POST(request: NextRequest) {
 
     // 4. Compute paths.
     //   Wasabi: stable ASCII key — <prefix>/<OUTLET>/<bookingCode>/[EP01/]<camera>/<file>
-    //   Drive : AGN → <outlet>/<Project ID · name>/<EP ID · title>/<camera>/;
+    //   Drive : AGN → <outlet>/<Project ID · name>/<job (AGN-…)>/<EP ID · title>/<camera>/;
     //           others → <outlet>/<show>/<Production ID · job>/<EP01 · title>/<camera>/.
     const segments = buildStoragePath(booking.outlet.code, booking.bookingCode, camera, filename, episodeKeySegment)
     const wasabiKey = buildKey(getWasabiKeyPrefix(), segments)
@@ -262,9 +262,9 @@ export async function POST(request: NextRequest) {
       (booking.projectName && booking.projectName.trim()) ||
       (booking.episodes[0]?.title && booking.episodes[0].title.trim()) ||
       null
-    // v1.94 — the program + per-booking layers, AGN-aware. AGN groups by Project
-    // (no per-booking folder → bookingFolderName === '').
-    const { programFolderName: driveProgramFolder, bookingFolderName } = shootFolderLayers({
+    // v1.94 — the program + per-booking layers, AGN-aware. v1.112 — AGN nests a
+    // per-booking "<job> (<code>)" layer inside the shared project box.
+    const { programFolderName: driveProgramFolder, bookingFolderName, bookingSubfolderName: driveBookingSubfolder } = shootFolderLayers({
       outletCode: booking.outlet.code,
       showName: bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes }),
       category: booking.category,
@@ -314,6 +314,9 @@ export async function POST(request: NextRequest) {
         outletCanonicalName: outletDriveFolderName(booking.outlet.code),
         programFolderName: driveProgramFolder,
         bookingFolderName,
+        // v1.112 — AGN: uploads land inside the per-booking layer of the project box.
+        bookingSubfolderName: driveBookingSubfolder,
+        bookingSubfolderCode: booking.bookingCode ?? undefined,
         // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
         bookingCode: booking.outlet.code === 'AGN' ? undefined : (booking.bookingCode ?? undefined),
         episodeFolderName,

@@ -405,6 +405,12 @@ interface ShootFolderInput {
    *  by CODE (either legacy "<code> · …" or new "<show> · … (<code>)" shape) and
    *  REUSED, so a pre-rename folder is never duplicated by the show-first name. */
   bookingCode?: string
+  /** v1.112 — AGN: per-BOOKING layer INSIDE the shared project box
+   *  ("<job> (<code>)"). When set, it is resolved/created under bookingFolderName
+   *  and treated as THE booking folder (EP/CAM/_SHOOT nest inside), so each คิว's
+   *  footage stays separable. Matched by bookingSubfolderCode (immutable ID). */
+  bookingSubfolderName?: string
+  bookingSubfolderCode?: string
 }
 
 /**
@@ -444,6 +450,14 @@ async function resolveShootFolder(
     : input.bookingCode
       ? await ensureBookingFolder(drive, programFolderId, input.bookingCode, input.bookingFolderName)
       : await ensureChildFolder(drive, programFolderId, input.bookingFolderName)
+  // v1.112 — AGN per-booking layer inside the project box: find by code (reuse,
+  // never duplicate) or create, and hand IT back as the booking folder.
+  if (input.bookingSubfolderName) {
+    const subId = input.bookingSubfolderCode
+      ? await ensureBookingFolder(drive, bookingFolderId, input.bookingSubfolderCode, input.bookingSubfolderName)
+      : await ensureChildFolder(drive, bookingFolderId, input.bookingSubfolderName)
+    return { bookingFolderId: subId }
+  }
   return { bookingFolderId }
 }
 
@@ -476,7 +490,7 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
    * the booking they see rather than the canonical "<projectId> · <project>".
    */
   bookingFolderNameAlts?: string[]
-}): Promise<{ programFolderId: string | null; bookingFolderId: string | null; bookingFolderUrl: string | null; episodes: Array<{ episodeFolderName: string; folderId: string | null; url: string | null }> }> {
+}): Promise<{ programFolderId: string | null; bookingFolderId: string | null; bookingFolderUrl: string | null; viaBookingSubfolder: boolean; episodes: Array<{ episodeFolderName: string; folderId: string | null; url: string | null }> }> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() }) // read-only: never creates
   const folderUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`
   const listFolders = async (parentId: string): Promise<Array<{ id: string; name: string }>> => {
@@ -501,7 +515,7 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   const findExact = async (parentId: string, name: string) =>
     (await listFolders(parentId)).find(f => f.name === name)?.id ?? null
 
-  const empty = { programFolderId: null, bookingFolderId: null, bookingFolderUrl: null, episodes: input.episodeFolderNames.map(n => ({ episodeFolderName: n, folderId: null, url: null })) }
+  const empty = { programFolderId: null, bookingFolderId: null, bookingFolderUrl: null, viaBookingSubfolder: false, episodes: input.episodeFolderNames.map(n => ({ episodeFolderName: n, folderId: null, url: null })) }
   const outletId = await findFuzzy(input.rootFolderId, input.outletCanonicalName)
   if (!outletId) return empty
   const programId = await findFuzzy(outletId, input.programFolderName)
@@ -521,6 +535,17 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
   }
   if (!bookingId) return empty
 
+  // v1.112 — AGN per-booking layer inside the project box: prefer it when it
+  // exists (EP folders live one level deeper); legacy bookings whose EPs sit
+  // directly in the box keep resolving at the old depth (no descent).
+  let viaBookingSubfolder = false
+  if (input.bookingSubfolderName) {
+    const kids = await listFolders(bookingId)
+    const sub = kids.find(f => f.name === input.bookingSubfolderName)
+      ?? (input.bookingSubfolderCode ? kids.find(f => folderNameMatchesCode(f.name, input.bookingSubfolderCode!)) : undefined)
+    if (sub) { bookingId = sub.id; viaBookingSubfolder = true }
+  }
+
   const episodes = await Promise.all(input.episodeFolderNames.map(async n => {
     // Exact name first; v1.111 — fall back to the immutable lead segment
     // ("EP01" / project EP id) so a retitled episode folder still resolves.
@@ -533,7 +558,7 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
     }
     return { episodeFolderName: n, folderId: epId, url: epId ? folderUrl(epId) : null }
   }))
-  return { programFolderId: programId, bookingFolderId: bookingId, bookingFolderUrl: folderUrl(bookingId), episodes }
+  return { programFolderId: programId, bookingFolderId: bookingId, bookingFolderUrl: folderUrl(bookingId), viaBookingSubfolder, episodes }
 }
 
 /**

@@ -332,7 +332,7 @@ export function shootFolderLayers(input: {
   projectName?: string | null
   bookingCode: string
   jobName?: string | null
-}): { programFolderName: string; bookingFolderName: string } {
+}): { programFolderName: string; bookingFolderName: string; bookingSubfolderName?: string } {
   if (input.outletCode.toUpperCase() === 'AGN' && input.projectId) {
     return {
       // category box (Advertorial / Event · Forum) — pass category ONLY so the
@@ -342,6 +342,10 @@ export function shootFolderLayers(input: {
       // keep the legacy "<projectId> · <projectName>" shape; the v1.110 show-first
       // rename targets the per-booking/landing folders, not this shared box.
       bookingFolderName: legacyBookingFolderName(input.projectId, input.projectName),
+      // v1.112 — per-BOOKING layer INSIDE the project box ("<job> (<code>)"):
+      // a project runs many คิว whose EP folders used to sit as siblings in the
+      // box, so nobody could tell which queue shot what. EP folders nest here.
+      bookingSubfolderName: buildBookingFolderName(input.bookingCode, input.jobName),
     }
   }
   return {

@@ -182,6 +182,7 @@ export async function POST(
           id: booking.id,
           bookingCode: booking.bookingCode,
           shootDate: booking.shootDate,
+          shootEndDate: booking.shootEndDate,
           callTime: booking.callTime,
           estimatedWrap: booking.estimatedWrap,
           shootType: booking.shootType,

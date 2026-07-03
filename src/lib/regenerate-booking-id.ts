@@ -240,7 +240,33 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
       // A reprogram that changes the show also changes the program-layer folder,
       // so the box must MOVE (not just rename) into the new show's folder.
       const samePlace = oldLayers.programFolderName === newLayers.programFolderName
-      if (oldLayers.bookingFolderName === newLayers.bookingFolderName && samePlace) {
+      // v1.112 — AGN: the shared project box name is code-agnostic (old === new),
+      // but the per-booking layer INSIDE it embeds the code → rename THAT child,
+      // or detection/merge would keep matching the dead code.
+      if (oldLayers.bookingSubfolderName || newLayers.bookingSubfolderName) {
+        try {
+          const resolved = await findEpisodeFolderUrls({
+            rootFolderId: root,
+            outletCanonicalName: outletCanon,
+            programFolderName: oldLayers.programFolderName,
+            bookingFolderName: oldLayers.bookingFolderName,
+            bookingSubfolderName: oldLayers.bookingSubfolderName,
+            bookingSubfolderCode: oldCode,
+            episodeFolderNames: [],
+          })
+          if (resolved.viaBookingSubfolder && resolved.bookingFolderId && newLayers.bookingSubfolderName) {
+            await renameDriveItem(resolved.bookingFolderId, newLayers.bookingSubfolderName)
+            effects.driveBookingFolder = 'renamed'
+          } else {
+            // No booking layer yet (legacy/never-prepped) — nothing to rename.
+            effects.driveBookingFolder = 'not-found'
+          }
+        } catch (e: any) {
+          console.error('[regenerate] AGN booking-layer rename failed:', e?.message || e)
+          effects.driveBookingFolder = 'error'
+          return abort('Drive booking-folder rename')
+        }
+      } else if (oldLayers.bookingFolderName === newLayers.bookingFolderName && samePlace) {
         effects.driveBookingFolder = 'skipped'
       } else {
         try {

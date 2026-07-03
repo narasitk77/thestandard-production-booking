@@ -45,7 +45,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     const isAgency = booking.outlet.code === 'AGN'
     const jobName = booking.projectName?.trim() || booking.episodes[0]?.title?.trim() || null
     const showName = bookingShowName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
-    const { programFolderName, bookingFolderName } = shootFolderLayers({
+    const { programFolderName, bookingFolderName, bookingSubfolderName } = shootFolderLayers({
       outletCode: booking.outlet.code,
       showName,
       category: booking.category,
@@ -66,6 +66,9 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
         legacyBookingFolderName(booking.bookingCode, jobName),
         ...(isAgency ? [buildBookingFolderName(booking.bookingCode, jobName, showName)] : []),
       ],
+      // v1.112 — AGN: EP folders live inside the per-booking layer when it exists.
+      bookingSubfolderName,
+      bookingSubfolderCode: booking.bookingCode,
       episodeFolderNames: epNames,
     })
 

@@ -106,7 +106,7 @@ export async function POST(
         // v1.94 — AGN groups footage by Project (no per-booking folder; EP folders
         // keyed by project EP ID); every other outlet keeps <show>/<Production ID>.
         const isAgency = updated.outlet.code === 'AGN'
-        const { programFolderName, bookingFolderName } = shootFolderLayers({
+        const layers = shootFolderLayers({
           outletCode: updated.outlet.code,
           showName: bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
           category: updated.category,
@@ -118,8 +118,11 @@ export async function POST(
         const { bookingFolderId } = await ensureShootCameraFolders({
           rootFolderId: root,
           outletCanonicalName: outletDriveFolderName(updated.outlet.code),
-          programFolderName,
-          bookingFolderName,
+          programFolderName: layers.programFolderName,
+          bookingFolderName: layers.bookingFolderName,
+          // v1.112 — AGN: per-booking layer inside the project box (EP/CAM nest there).
+          bookingSubfolderName: layers.bookingSubfolderName,
+          bookingSubfolderCode: updated.bookingCode,
           // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
           bookingCode: updated.outlet.code === 'AGN' ? undefined : updated.bookingCode,
           cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
@@ -128,8 +131,9 @@ export async function POST(
         })
         await upsertTextFile({
           parentFolderId: bookingFolderId,
-          // v1.94 — AGN shares the Project box across bookings → name per-booking.
-          name: isAgency ? `_SHOOT-${updated.bookingCode}.txt` : '_SHOOT.txt',
+          // v1.112 — AGN now gets its own booking layer, so a plain _SHOOT.txt
+          // inside it is unambiguous (the old _SHOOT-<code>.txt sat box-level).
+          name: '_SHOOT.txt',
           content: renderBookingInfo(bookingInfoInput(updated)),
         })
       } catch (e: any) {
@@ -181,6 +185,7 @@ export async function POST(
           id: booking.id,
           bookingCode: booking.bookingCode,
           shootDate: booking.shootDate,
+          shootEndDate: booking.shootEndDate,
           callTime: booking.callTime,
           estimatedWrap: booking.estimatedWrap,
           shootType: booking.shootType,
