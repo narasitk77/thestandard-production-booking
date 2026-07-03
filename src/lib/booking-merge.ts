@@ -57,3 +57,58 @@ export async function runBookingMerge(booking: MergeBooking, opts: { dryRun?: bo
     boxFolderUrl: video.boxFolderUrl ?? sound.boxFolderUrl ?? null,
   }
 }
+
+// ── v1.113.4 — background merge jobs ────────────────────────────────────────
+// A big landing (hundreds of camera-card files) takes several MINUTES to move
+// file-by-file; the reverse proxy cuts the request at 60s, so the UI showed
+// "รวมไฟล์ไม่สำเร็จ (HTTP 504)" while the move actually kept running server-side.
+// So: POST now STARTS a detached job and returns at once; the UI polls GET for
+// status. In-memory registry — a container restart forgets (and kills) the job;
+// the button simply starts a fresh one (merge is idempotent/resumable: moved
+// files are gone from the landing, a re-run handles the remainder).
+
+export interface MergeJobStatus {
+  running: boolean
+  done: boolean
+  startedAt: string | null
+  finishedAt: string | null
+  result?: BookingMergeResult
+  error?: string
+}
+
+type MergeJob = {
+  startedAt: string
+  finishedAt: string | null
+  done: boolean
+  result?: BookingMergeResult
+  error?: string
+}
+
+const mergeJobs = new Map<string, MergeJob>()
+
+export function getMergeJobStatus(bookingId: string): MergeJobStatus {
+  const j = mergeJobs.get(bookingId)
+  if (!j) return { running: false, done: false, startedAt: null, finishedAt: null }
+  return { running: !j.done, done: j.done, startedAt: j.startedAt, finishedAt: j.finishedAt, result: j.result, error: j.error }
+}
+
+/** Start (or join, when one is already running) the background merge. */
+export function startMergeJob(bookingId: string, booking: MergeBooking, onDone?: () => Promise<void>): MergeJobStatus {
+  const existing = mergeJobs.get(bookingId)
+  if (existing && !existing.done) return getMergeJobStatus(bookingId) // running — join
+  const job: MergeJob = { startedAt: new Date().toISOString(), finishedAt: null, done: false }
+  mergeJobs.set(bookingId, job)
+  ;(async () => {
+    try {
+      job.result = await runBookingMerge(booking)
+      if (onDone) await onDone().catch(() => {})
+    } catch (e: any) {
+      job.error = e?.message || String(e)
+      console.error('[booking-merge] background job failed:', bookingId, job.error)
+    } finally {
+      job.done = true
+      job.finishedAt = new Date().toISOString()
+    }
+  })()
+  return getMergeJobStatus(bookingId)
+}

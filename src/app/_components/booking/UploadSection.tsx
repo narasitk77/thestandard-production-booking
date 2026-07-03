@@ -228,7 +228,17 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   useEffect(() => { fetchHistory() }, [booking.id])
 
   // v1.111 — per-booking consolidate: MOVE this job's NAS footage into the box,
-  // then fold its staged sound into AUDIO. One booking → fast (no 60s timeout).
+  // then fold its staged sound into AUDIO.
+  // v1.113.4 — the server runs it as a BACKGROUND job (a big landing takes
+  // minutes; the reverse proxy cut the old synchronous call at 60s so the UI
+  // said 504 while the move kept going). POST starts/joins the job; poll GET
+  // every 5s until it lands, then render the same summary as before.
+  const renderMergeResult = (res: any) => {
+    const v = res?.video || {}, s = res?.sound || {}
+    const vTxt = v.skipped ? `ข้าม (${v.reason || ''})` : `ย้าย ${v.moved ?? 0}/${v.seen ?? 0}${v.err ? ` · error ${v.err}` : ''}`
+    const sTxt = s.skipped ? `ข้าม (${s.reason || ''})` : `รวม ${s.copied ?? 0}/${s.staged ?? 0}${s.err ? ` · error ${s.err}` : ''}`
+    setScanMsg(`วิดีโอ: ${vTxt} · เสียง: ${sTxt}`)
+  }
   const triggerMerge = async () => {
     if (!confirm('รวมไฟล์เข้ากล่องของงานนี้?\n\n• ย้ายวิดีโอจาก Production Team (NAS) เข้ากล่อง — เป็นการ MOVE (ไฟล์จะหายจาก Production Team)\n• รวมไฟล์เสียงจาก Staging เข้าโฟลเดอร์ AUDIO\n\nทำเมื่อ NAS sync เสร็จแล้ว')) return
     setMerging(true)
@@ -236,11 +246,22 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     try {
       const r = await fetch(`/api/bookings/${booking.id}/merge`, { method: 'POST', credentials: 'include' })
       const d = await r.json().catch(() => ({}))
-      if (!r.ok) { setScanMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`); return }
-      const v = d.video || {}, s = d.sound || {}
-      const vTxt = v.skipped ? `ข้าม (${v.reason || ''})` : `ย้าย ${v.moved ?? 0}/${v.seen ?? 0}${v.err ? ` · error ${v.err}` : ''}`
-      const sTxt = s.skipped ? `ข้าม (${s.reason || ''})` : `รวม ${s.copied ?? 0}/${s.staged ?? 0}${s.err ? ` · error ${s.err}` : ''}`
-      setScanMsg(`วิดีโอ: ${vTxt} · เสียง: ${sTxt}`)
+      if (!r.ok && r.status !== 202) { setScanMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`); return }
+      // Poll the background job (up to ~15 min for a huge landing).
+      for (let i = 1; i <= 180; i++) {
+        setScanMsg(`⏳ กำลังย้ายไฟล์อยู่เบื้องหลัง… ${i > 12 ? `(~${Math.round((i * 5) / 60)} นาที) ` : ''}— ปิดหน้านี้ได้ งานไม่หยุด`)
+        await new Promise(res => setTimeout(res, 5000))
+        const sr = await fetch(`/api/bookings/${booking.id}/merge`, { credentials: 'include' })
+        const sd = await sr.json().catch(() => ({}))
+        const job = sd.job || {}
+        if (job.done) {
+          if (job.error) setScanMsg(`รวมไฟล์ไม่สำเร็จ: ${job.error}`)
+          else renderMergeResult(job.result)
+          return
+        }
+        if (!job.running) { setScanMsg('งานย้ายถูกรีเซ็ต (ระบบรีสตาร์ทระหว่างทาง) — กดปุ่มอีกครั้งเพื่อย้ายส่วนที่เหลือ'); return }
+      }
+      setScanMsg('งานใหญ่มาก ยังย้ายอยู่เบื้องหลัง — กด Refresh ภายหลังเพื่อดูไฟล์ที่เข้าแล้ว')
     } catch (e: any) {
       setScanMsg(e?.message || 'รวมไฟล์ไม่สำเร็จ')
     } finally {
