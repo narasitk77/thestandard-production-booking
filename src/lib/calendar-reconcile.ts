@@ -66,6 +66,7 @@ type BookingForReconcile = {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  isBlockShot?: boolean | null
   freelancers?: unknown
   assignedEmails: string[]
   crewRequired: string[]
@@ -97,6 +98,7 @@ async function createVerifiedCalendarEvent(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  isBlockShot?: boolean | null
   freelancers?: unknown
   assignedEmails: string[]
   outlet: { code: string; name: string }
@@ -173,6 +175,7 @@ async function processBooking(
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
         needsVan: booking.needsVan,
+        isBlockShot: booking.isBlockShot,
         freelancers: booking.freelancers,
         assignedEmails,
         outlet: booking.outlet,
@@ -242,6 +245,7 @@ async function processBooking(
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
         needsVan: booking.needsVan,
+        isBlockShot: booking.isBlockShot,
         freelancers: booking.freelancers,
         assignedEmails,
         outlet: booking.outlet,
@@ -318,8 +322,16 @@ async function processBooking(
           callTime: booking.callTime,
           estimatedWrap: booking.estimatedWrap,
           shootType: booking.shootType,
+          // v1.113.1 — this re-create path (attendees-patch failure) used to drop
+          // these fields, so the replacement event lost 🚐/🧱 and equipment info.
+          videoType: booking.videoType,
           locationName: booking.locationName,
           producer: booking.producer,
+          cameraCount: booking.cameraCount,
+          micCount: booking.micCount,
+          needsVan: booking.needsVan,
+          isBlockShot: booking.isBlockShot,
+          freelancers: booking.freelancers,
           assignedEmails,
           outlet: booking.outlet,
           program: booking.program,
@@ -327,6 +339,7 @@ async function processBooking(
           crewRequired: booking.crewRequired,
           agencyRef: booking.agencyRef,
           notes: booking.notes,
+          adminNotes: booking.adminNotes,
         })
         await prisma.booking.update({
           where: { id: booking.id },

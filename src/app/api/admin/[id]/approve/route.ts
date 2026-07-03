@@ -195,6 +195,7 @@ export async function POST(
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           needsVan: booking.needsVan,
+          isBlockShot: booking.isBlockShot,
           specialEquipment: booking.specialEquipment,
           projectName: booking.projectName,
           freelancers: booking.freelancers,

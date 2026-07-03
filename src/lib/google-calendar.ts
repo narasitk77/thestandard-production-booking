@@ -297,6 +297,7 @@ export function buildEventDescription(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  isBlockShot?: boolean | null
   specialEquipment?: string[] | null
   freelancers?: unknown
   outlet: { code: string; name: string }
@@ -354,6 +355,7 @@ export async function createCalendarEvent(booking: {
   cameraCount?: number | null
   micCount?: number | null
   needsVan?: boolean | null
+  isBlockShot?: boolean | null
   specialEquipment?: string[] | null
   projectName?: string | null
   freelancers?: unknown
@@ -615,6 +617,7 @@ export async function updateCalendarEventDetails(
     cameraCount?: number | null
     micCount?: number | null
     needsVan?: boolean | null
+    isBlockShot?: boolean | null
     specialEquipment?: string[] | null
     projectName?: string | null
     freelancers?: unknown
