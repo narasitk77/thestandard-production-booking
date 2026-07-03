@@ -772,6 +772,21 @@ export async function renameDriveItem(fileId: string, newName: string, subject?:
   })
 }
 
+/**
+ * v1.112 — move a Drive item to the Shared Drive trash (recoverable ~30 days).
+ * Used by the AGN restructure sweep to clear VERIFIED-EMPTY duplicate folders
+ * (worker re-creations); callers must confirm emptiness first.
+ */
+export async function trashDriveItem(fileId: string, subject?: string): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
+  await drive.files.update({
+    fileId,
+    requestBody: { trashed: true },
+    fields: 'id',
+    supportsAllDrives: true,
+  })
+}
+
 /** Read-only: direct child FILES (not folders) of a folder — id, name, size. */
 export async function listFilesInFolder(parentId: string): Promise<Array<{ id: string; name: string; size?: string | null }>> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })

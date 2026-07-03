@@ -8,16 +8,20 @@
  *     episodes include that EP ID and MOVES it into "<job> (<bookingCode>)"
  *     (created on demand, matched by code so re-runs reuse it),
  *   - moves each box-level "_SHOOT-<code>.txt" into its booking folder,
- *   - reports (but does NOT touch) items it can't attribute: EP folders booked
- *     by SEVERAL active bookings, and ops-made folders with no EP-ID lead.
+ *   - TRASHES verified-empty folders (worker re-creations / duplicate skeletons
+ *     with zero real files anywhere inside) and stale _SHOOT txts of unknown
+ *     bookings — Shared Drive trash, recoverable ~30 days,
+ *   - reports (but does NOT touch) items it can't attribute that HOLD files,
+ *   - applies caller-provided extraMoves ({id, toCode}) for manual attribution
+ *     of ops folders (e.g. a "(For Editor)" export tree).
  *
  * Default is a dry run (full move plan, zero writes). Idempotent: a folder that
  * already matches a booking code is left alone, moves reuse existing targets.
  */
 import { prisma } from './db'
 import {
-  listChildFolders, listFilesInFolder, moveFileToFolder, findProgramFolderId,
-  ensureFolderPath, hasDriveCredentials,
+  listChildFolders, listFilesInFolder, listFilesRecursive, moveFileToFolder,
+  findProgramFolderId, ensureFolderPath, trashDriveItem, hasDriveCredentials,
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName, folderNameMatchesCode,
@@ -29,6 +33,7 @@ export interface AgnRestructureResult {
   dryRun: boolean
   projects: number
   moved: number
+  trashed: number
   errors: number
   results: Array<{
     projectId: string
@@ -36,13 +41,14 @@ export interface AgnRestructureResult {
     boxUrl?: string
     skipped?: string
     moves?: string[]      // '"<name>" → "<booking folder>"'
+    trashes?: string[]    // verified-empty folders / stale _SHOOT txts
     ambiguous?: string[]  // EP booked by several active bookings — user decides
-    unmapped?: string[]   // ops folders / unknown files — left alone
+    unmapped?: string[]   // folders WITH files we can't attribute — left alone
   }>
 }
 
-export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: string } = {}): Promise<AgnRestructureResult> {
-  const base: AgnRestructureResult = { skipped: false, dryRun: !!opts.dryRun, projects: 0, moved: 0, errors: 0, results: [] }
+export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: string; extraMoves?: Array<{ id: string; toCode: string }> } = {}): Promise<AgnRestructureResult> {
+  const base: AgnRestructureResult = { skipped: false, dryRun: !!opts.dryRun, projects: 0, moved: 0, trashed: 0, errors: 0, results: [] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { ...base, skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials' }
 
@@ -106,24 +112,36 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
       const kids = await listChildFolders(boxId)
       const boxFiles = await listFilesInFolder(boxId)
       const plan: Array<{ id: string; name: string; toCode: string }> = []
+      const toTrash: Array<{ id: string; name: string }> = []
       const ambiguous: string[] = []
       const unmapped: string[] = []
 
       for (const k of kids) {
         // already a per-booking folder → leave (it IS the new layout)
         if (codes.some(c => folderNameMatchesCode(k.name, c))) continue
+        // VERIFIED-EMPTY (no real file anywhere inside — _SHOOT txts don't count)
+        // → duplicate/worker skeleton → trash. Emptiness is re-checked here on
+        // the server at execution time, never assumed from an earlier listing.
+        const inside = (await listFilesRecursive(k.id, { maxFiles: 4 })).filter(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))
+        if (inside.length === 0) { toTrash.push({ id: k.id, name: k.name }); continue }
         const lead = (k.name.split(' · ')[0] || '').trim().toLowerCase()
         const own = owners.get(lead) || []
         if (own.length === 1) plan.push({ id: k.id, name: k.name, toCode: own[0] })
         else if (own.length > 1) ambiguous.push(`${k.name} → จองโดย ${own.join(', ')}`)
-        else unmapped.push(k.name)
+        else unmapped.push(`${k.name} (มีไฟล์ — ไม่แตะ)`)
       }
       for (const f of boxFiles) {
         const m = f.name.match(/^_SHOOT-([A-Z0-9-]+)\.txt$/i)
         if (!m) continue // other box-level files: leave alone
         const code = codes.find(c => c.toUpperCase() === m[1].toUpperCase())
         if (code) plan.push({ id: f.id, name: f.name, toCode: code })
-        else unmapped.push(f.name)
+        // stale info txt of a renamed/dead booking — regenerable → trash
+        else toTrash.push({ id: f.id, name: f.name })
+      }
+      // caller-supplied manual attributions (ops folders like "(For Editor)")
+      for (const em of opts.extraMoves || []) {
+        const k = kids.find(x => x.id === em.id)
+        if (k && codes.includes(em.toCode)) plan.push({ id: k.id, name: k.name, toCode: em.toCode })
       }
 
       const moves: string[] = []
@@ -143,9 +161,17 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
         catch (e: any) { base.errors++; moves.push(`ERROR "${mv.name}": ${e?.message || e}`) }
       }
 
+      const trashes: string[] = []
+      for (const t of toTrash) {
+        trashes.push(`\"${t.name}\"`)
+        if (base.dryRun) { base.trashed++; continue }
+        try { await trashDriveItem(t.id); base.trashed++ }
+        catch (e: any) { base.errors++; trashes.push(`ERROR \"${t.name}\": ${e?.message || e}`) }
+      }
+
       base.results.push({
         projectId, box: boxName, boxUrl: `https://drive.google.com/drive/folders/${boxId}`,
-        moves, ambiguous, unmapped,
+        moves, trashes, ambiguous, unmapped,
       })
     } catch (e: any) {
       base.errors++

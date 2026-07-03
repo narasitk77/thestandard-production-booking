@@ -20,7 +20,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}))
     const apply = body?.apply === true
     const projectId = typeof body?.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined
-    const result = await runAgnRestructure({ dryRun: !apply, projectId })
+    const extraMoves = Array.isArray(body?.extraMoves)
+      ? body.extraMoves.filter((m: any) => m && typeof m.id === 'string' && typeof m.toCode === 'string')
+      : undefined
+    const result = await runAgnRestructure({ dryRun: !apply, projectId, extraMoves })
     return NextResponse.json(result)
   } catch (e: any) {
     console.error('POST /api/admin/agn-restructure error:', e)
