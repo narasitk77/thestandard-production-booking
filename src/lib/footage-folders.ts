@@ -132,11 +132,18 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     try {
       const candidates = await findFoldersByCode(booking.bookingCode)
       const seenRoots = new Set([resolved.bookingFolderId].filter(Boolean) as string[])
-      for (const c of candidates) {
-        if (seenRoots.has(c.id)) continue
+      // v1.113.3 — walk candidates in PARALLEL (each is its own tree; the
+      // sequential walk stacked multi-tree latencies past the 60s proxy).
+      const fresh = candidates.filter(c => {
+        if (seenRoots.has(c.id)) return false
         seenRoots.add(c.id)
-        const raw = await listFilesRecursive(c.id, { maxFiles: 5000 })
-        const files = raw.filter(isFootage)
+        return true
+      })
+      const walked = await Promise.all(fresh.map(async c => ({
+        c,
+        files: (await listFilesRecursive(c.id, { maxFiles: 5000 })).filter(isFootage),
+      })))
+      for (const { c, files } of walked) {
         if (files.length === 0) continue
         // Dedup vs the deterministic pass by top-folder id (add() keys on it) —
         // nested/duplicate candidates can't double-count a folder row.

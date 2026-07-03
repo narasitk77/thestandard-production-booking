@@ -183,11 +183,12 @@ export async function listFilesRecursive(
   const queue: WalkEntry[] = [{ folderId: rootFolderId, path: [], topId: null }]
   const visited = new Set<string>()
 
-  while (queue.length > 0 && out.length < maxFiles) {
-    const { folderId: parentId, path, topId } = queue.shift()!
-    if (visited.has(parentId)) continue
-    visited.add(parentId)
-
+  // v1.113.3 — walk up to WALK_CONCURRENCY folders per round instead of one:
+  // a camera-card dump is DOZENS of small nested folders (DCIM/PRIVATE/M4ROOT/…)
+  // and one Drive list call each; the sequential walk blew past the 60s reverse
+  // proxy on big landings (observed: POP Q&A 667 files → detect 504).
+  const WALK_CONCURRENCY = 6
+  const walkOne = async ({ folderId: parentId, path, topId }: WalkEntry): Promise<void> => {
     let pageToken: string | undefined = undefined
     do {
       const baseQ = `'${parentId}' in parents and trashed = false`
@@ -235,6 +236,18 @@ export async function listFilesRecursive(
       }
       pageToken = res.data.nextPageToken ?? undefined
     } while (pageToken && out.length < maxFiles)
+  }
+
+  while (queue.length > 0 && out.length < maxFiles) {
+    const batch: WalkEntry[] = []
+    while (batch.length < WALK_CONCURRENCY && queue.length > 0) {
+      const e = queue.shift()!
+      if (visited.has(e.folderId)) continue
+      visited.add(e.folderId)
+      batch.push(e)
+    }
+    if (batch.length === 0) continue
+    await Promise.all(batch.map(walkOne))
   }
 
   if (out.length >= maxFiles) {
