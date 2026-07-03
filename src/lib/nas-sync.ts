@@ -205,3 +205,81 @@ export async function latestNasState(): Promise<{ manifest: NasManifest | null; 
   const row = await prisma.nasSyncState.findUnique({ where: { key: 'latest' } })
   return { manifest: (row?.manifest as unknown as NasManifest) || null, statuses: ((row?.status as any) || {}).folders || {} }
 }
+
+// ── v1.113.2 — EXACT per-file mirror verification ───────────────────────────
+// "ตรวจว่าไฟล์เหมือนกัน 100%": for every folder in the NAS manifest, list the
+// matching Production Team LANDING folder on Drive and diff by (basename, size).
+// Answers "is every file currently on the NAS already on Drive?" — independent
+// of the queue heuristic (which can't tell 'uploaded but not yet deleted' from
+// 'not uploaded'). Files the merge already MOVED into the box also count as
+// present: the fallback checks the booking's global code-matched folders.
+
+export interface MirrorFolderResult {
+  name: string
+  nasFiles: number
+  driveFiles: number
+  matched: number
+  missingOnDrive: number
+  missingSample: string[]   // up to 8 relative paths
+  state: 'match' | 'partial' | 'no-landing'
+}
+
+const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
+
+export async function verifyNasMirror(manifest: NasManifest): Promise<{ folders: MirrorFolderResult[]; allMatch: boolean }> {
+  const { listChildFolders } = await import('./google-drive')
+  const landingKids = await listChildFolders(PRODUCTION_TEAM_ROOT)
+  const results: MirrorFolderResult[] = []
+
+  for (const nf of manifest.folders) {
+    const nasList = nf.files.filter(f => !IGNORE_RE.test(f.p.split('/').pop() || ''))
+    if (nasList.length === 0) continue // empty NAS folder — nothing to verify
+    const code = codeOf(nf.name)
+
+    // landing folder: exact name first, then Production-ID match
+    const landing = landingKids.find(k => k.name === nf.name)
+      ?? (code ? landingKids.find(k => k.name.includes(`(${code})`) || k.name.startsWith(`${code} `)) : undefined)
+
+    // Presence multiset = landing tree + every code-matched folder anywhere.
+    const have = new Map<string, number>() // "name|size" -> count
+    const addTree = async (rootId: string) => {
+      const files = await listFilesRecursive(rootId, { maxFiles: 8000 })
+      for (const f of files) {
+        const k = `${f.name}|${f.size ?? ''}`
+        have.set(k, (have.get(k) || 0) + 1)
+      }
+    }
+    if (landing) await addTree(landing.id)
+    if (code) {
+      for (const c of await findFoldersByCode(code)) {
+        if (landing && c.id === landing.id) continue
+        await addTree(c.id)
+      }
+    }
+    if (!landing && have.size === 0) {
+      results.push({ name: nf.name, nasFiles: nasList.length, driveFiles: 0, matched: 0, missingOnDrive: nasList.length, missingSample: nasList.slice(0, 8).map(f => f.p), state: 'no-landing' })
+      continue
+    }
+
+    let matched = 0
+    const missing: string[] = []
+    for (const f of nasList) {
+      const base = f.p.split('/').pop() || f.p
+      const k = `${base}|${f.size ?? ''}`
+      const n = have.get(k) || 0
+      if (n > 0) { have.set(k, n - 1); matched++ }
+      else missing.push(f.p)
+    }
+    results.push({
+      name: nf.name,
+      nasFiles: nasList.length,
+      driveFiles: Array.from(have.values()).reduce((a, b) => a + b, 0) + matched,
+      matched,
+      missingOnDrive: missing.length,
+      missingSample: missing.slice(0, 8),
+      state: missing.length === 0 ? 'match' : 'partial',
+    })
+  }
+
+  return { folders: results, allMatch: results.every(r => r.state === 'match') }
+}
