@@ -127,6 +127,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
         bookingFolderName: layers.bookingFolderName,
         // strict destination for AGN (project box only); others accept the pre-v1.110 box
         bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+        bookingCode: code, // v1.113.6 — last-resort box match by Production ID (sanitized names drift)
         bookingSubfolderName: layers.bookingSubfolderName,
         bookingSubfolderCode: code,
         episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
@@ -207,6 +208,7 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
     programFolderName: layers.programFolderName,
     bookingFolderName: layers.bookingFolderName,
     bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+    bookingCode: code, // v1.113.6 — last-resort box match by Production ID
     bookingSubfolderName: layers.bookingSubfolderName,
     bookingSubfolderCode: code,
     episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),

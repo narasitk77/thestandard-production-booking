@@ -95,6 +95,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
         programFolderName: layers.programFolderName,
         bookingFolderName: layers.bookingSubfolderName ? layers.bookingFolderName : bookingFolderName,
         bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(b.bookingCode, jobName)], // pre-v1.110 box
+        bookingCode: code, // v1.113.6 — last-resort box match by Production ID
         bookingSubfolderName: layers.bookingSubfolderName,
         bookingSubfolderCode: code,
         episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
@@ -185,6 +186,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
     programFolderName: layers.programFolderName,
     bookingFolderName: layers.bookingFolderName,
     bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+    bookingCode: code, // v1.113.6 — last-resort box match by Production ID
     bookingSubfolderName: layers.bookingSubfolderName,
     bookingSubfolderCode: code,
     episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
