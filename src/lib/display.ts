@@ -19,12 +19,12 @@
  *                               names are joined for mixed bookings.
  *   3. program name           — legacy bookings with no per-EP program.
  */
-import { EPISODE_TYPE_PROGRAMS } from './data'
+import { EPISODE_TYPE_PROGRAMS, UNIVERSAL_SHOW_TYPES } from './data'
 
 // v1.111 — the universal Episode-Type program names (L/S/A/T). A booking whose
 // program is one of these has no real show in `program` — the real show lives in
 // the episode title (e.g. calendar-migrated bookings).
-const GENERIC_TYPE_NAMES = new Set(EPISODE_TYPE_PROGRAMS.map(p => p.name))
+const GENERIC_TYPE_NAMES = new Set([...EPISODE_TYPE_PROGRAMS, ...UNIVERSAL_SHOW_TYPES].map(p => p.name))
 
 export function bookingShowName(b: {
   projectName?: string | null

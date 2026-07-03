@@ -232,8 +232,21 @@ export const EPISODE_TYPE_PROGRAMS: Program[] = [
   { code: 'A', name: 'Photo Album · ภาพถ่ายชุด', category: 'Album' },
   { code: 'T', name: 'Spot · Bumper · Promo · โฆษณา', category: 'Short-form' },
 ]
+
+// v1.113 — universal SHOW types (Event / Special / Interview / Other) for jobs
+// with no recurring show, injected into every outlet like the Episode Types.
+// Multi-char codes on purpose: they flow into the EP/Production ID as a program
+// segment ("TSS-EVT-260716-01") and the per-EP show picker lists codes with
+// length > 1 automatically. An outlet that already defines the code keeps its
+// own entry (e.g. AGN's EVT "Event / Forum" — same meaning, skip-injected).
+export const UNIVERSAL_SHOW_TYPES: Program[] = [
+  { code: 'EVT', name: 'Event · งานอีเวนต์', category: 'One-off/Event' },
+  { code: 'SPC', name: 'Special · รายการพิเศษ', category: 'One-off/Event' },
+  { code: 'ITV', name: 'Interview · สัมภาษณ์เดี่ยว', category: 'One-off/Event' },
+  { code: 'OTH', name: 'Other · อื่นๆ', category: 'One-off/Event' },
+]
 for (const outlet of OUTLETS) {
-  for (const ep of EPISODE_TYPE_PROGRAMS) {
+  for (const ep of [...EPISODE_TYPE_PROGRAMS, ...UNIVERSAL_SHOW_TYPES]) {
     if (!outlet.programs.find(p => p.code === ep.code)) {
       outlet.programs.push({ ...ep })
     }

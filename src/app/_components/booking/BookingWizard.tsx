@@ -511,7 +511,8 @@ export default function BookingWizard() {
       if (!outletCode) errs.outletCode = 'กรุณาเลือก Outlet'
       if (!programCode) errs.programCode = 'กรุณาเลือก Episode Type'
       if (!category) errs.category = 'กรุณาเลือก Category'
-      if (!videoType) errs.videoType = 'กรุณาเลือก Video Type'
+      // v1.113 — Video Type field removed from the form (carried no info; the
+      // ID is generated from the EP/show). Old bookings keep their stored value.
     } else if (s === 2) {
       if (!shootDate) errs.shootDate = 'กรุณาเลือก Shoot Date'
       if (!shootEndDate) errs.shootEndDate = 'กรุณาเลือก Shoot End Date'
@@ -902,25 +903,6 @@ export default function BookingWizard() {
                 </div>
                 )}
 
-                <div>
-                  <Label required>Video Type</Label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {VIDEO_TYPES.map(v => (
-                      <label key={v} className={`ops-choice ${videoType === v ? 'ops-choice-selected' : ''}`}>
-                        <input
-                          type="radio"
-                          name="videoType"
-                          value={v}
-                          checked={videoType === v}
-                          onChange={() => setVideoType(v)}
-                          className="accent-brand-primary mt-0.5"
-                        />
-                        <span className="text-xs text-gray-700">{v}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <FieldError message={fieldErrors.videoType} />
-                </div>
               </div>
             </div>
           )}
@@ -1632,7 +1614,6 @@ export default function BookingWizard() {
                   <ReviewRow label="Outlet" value={summary.outlet} />
                   <ReviewRow label="Episode Type" value={summary.episodeType} />
                   {isContentAgency && <ReviewRow label="Category" value={summary.category} />}
-                  <ReviewRow label="Video Type" value={summary.videoType} />
                 </ReviewBlock>
                 <ReviewBlock title="Schedule" onEdit={() => jumpTo(2)}>
                   <ReviewRow label="Shoot Date" value={summary.dateRange} />
@@ -1699,7 +1680,6 @@ export default function BookingWizard() {
                 <KV k="Outlet" v={summary.outlet} />
                 <KV k="Episode Type" v={summary.episodeType} />
                 {isContentAgency && <KV k="Category" v={summary.category} />}
-                <KV k="Video Type" v={summary.videoType} />
               </SummaryBlock>
               <SummaryBlock title="Schedule" filled={!!shootDate}>
                 <KV k="Date" v={summary.dateRange} />
