@@ -74,7 +74,7 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
   }
 }
 
-export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<VideoMergeResult> {
+export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
   const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, errors: 0, results: [] as VideoMergeResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', ...base }
@@ -97,6 +97,8 @@ export async function runVideoMerge(opts: { dryRun?: boolean } = {}): Promise<Vi
 
   for (const b of bookings) {
     if (!b.bookingCode) continue
+    // v1.113.5 — scoped run ("เทสกับโฟลเดอร์เดียว"): only the requested booking.
+    if (opts.onlyCode && b.bookingCode.toUpperCase() !== opts.onlyCode.toUpperCase()) continue
     base.bookings++
     const code = b.bookingCode
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null

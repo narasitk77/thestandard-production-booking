@@ -36,8 +36,9 @@ export async function GET(request: NextRequest) {
   }
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
+  const onlyCode = searchParams.get('code')?.trim() || undefined
   try {
-    const result = await runSoundMerge({ dryRun })
+    const result = await runSoundMerge({ dryRun, onlyCode })
     if (!dryRun) await recordHeartbeat('sound-merge')
     return NextResponse.json(result)
   } catch (e: any) {

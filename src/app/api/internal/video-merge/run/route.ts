@@ -37,8 +37,9 @@ export async function GET(request: NextRequest) {
   }
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
+  const onlyCode = searchParams.get('code')?.trim() || undefined
   try {
-    const result = await runVideoMerge({ dryRun })
+    const result = await runVideoMerge({ dryRun, onlyCode })
     if (!dryRun) await recordHeartbeat('video-merge').catch(() => {})
     return NextResponse.json(result)
   } catch (e: any) {

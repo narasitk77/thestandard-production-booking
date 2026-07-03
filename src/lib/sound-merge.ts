@@ -35,7 +35,7 @@ export interface SoundMergeResult {
 // `_SHOOT.txt` / `_SHOOT-<id>.txt` are booking-info files, not footage.
 const isAudio = (name: string) => !/^_SHOOT\b.*\.txt$/i.test(name)
 
-export async function runSoundMerge(opts: { dryRun?: boolean } = {}): Promise<SoundMergeResult> {
+export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<SoundMergeResult> {
   const base = { dryRun: !!opts.dryRun, bookings: 0, staged: 0, merged: 0, errors: 0, results: [] as SoundMergeResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', ...base }
@@ -64,6 +64,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean } = {}): Promise<So
 
   for (const b of bookings) {
     if (!b.bookingCode || !bookingNeedsSound(b.crewRequired)) continue
+    if (opts.onlyCode && b.bookingCode.toUpperCase() !== opts.onlyCode.toUpperCase()) continue
     base.bookings++
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
     const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
