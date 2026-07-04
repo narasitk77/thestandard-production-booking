@@ -37,7 +37,15 @@ type ProjectEpisode = {
 }
 
 const CATEGORIES = ['Original Content', 'Advertorial', 'Event', 'Internal']
-const SHOOT_TYPES = ['Studio', 'On Location', 'Event']
+// v1.117 — the "อีเวนต์นอกบริษัท?" checkbox is folded into the Shoot Type radio
+// as its own option, so it's one choice instead of pick-Event-then-tick-a-box.
+// 'EventExternal' is UI-only → maps to shootType='Event' + eventExternal=true.
+const SHOOT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'Studio', label: 'Studio' },
+  { value: 'On Location', label: 'On Location' },
+  { value: 'Event', label: 'Event (ในออฟฟิศ)' },
+  { value: 'EventExternal', label: 'Event (นอกบริษัท)' },
+]
 const SHOOT_TYPE_VALUES: Record<string, string> = {
   'Studio': 'STUDIO',
   'On Location': 'ON_LOCATION',
@@ -988,58 +996,41 @@ export default function BookingWizard() {
               <div className="space-y-4">
                 <div>
                   <Label required>Shoot Type</Label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {SHOOT_TYPES.map(t => (
-                      <label key={t} className={`ops-choice ${shootType === t ? 'ops-choice-selected' : ''}`}>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {SHOOT_TYPE_OPTIONS.map(opt => {
+                      // v1.117 — 'EventExternal' is the external-venue Event; both
+                      // Event options store shootType='Event' (eventExternal differs).
+                      const selected = opt.value === 'Event'
+                        ? shootType === 'Event' && !eventExternal
+                        : opt.value === 'EventExternal'
+                          ? shootType === 'Event' && eventExternal
+                          : shootType === opt.value
+                      return (
+                      <label key={opt.value} className={`ops-choice ${selected ? 'ops-choice-selected' : ''}`}>
                         <input
                           type="radio"
                           name="shootType"
-                          value={t}
-                          checked={shootType === t}
+                          checked={selected}
                           onChange={() => {
-                            setShootType(t)
-                            // v1.58 — keep the two location modes from carrying
-                            // stale values across a switch, and van is off-site only.
-                            // v1.101 — a fresh shoot-type starts "office"; clear the
-                            // Event-external flag too.
-                            setEventExternal(false)
-                            if (t === 'On Location') {
-                              setLocationId(''); setLocationCustom('')
+                            // keep the two location modes from carrying stale values
+                            // across a switch; van is off-site only.
+                            if (opt.value === 'EventExternal') {
+                              setShootType('Event'); setEventExternal(true)
+                              setLocationId(''); setLocationCustom('')   // external → Map location + van
                             } else {
-                              setMapLocation(''); setNeedsVan(false)
+                              setShootType(opt.value); setEventExternal(false)
+                              if (opt.value === 'On Location') { setLocationId(''); setLocationCustom('') }
+                              else { setMapLocation(''); setNeedsVan(false) }  // Studio / office Event
                             }
                           }}
                           className="accent-brand-primary mt-0.5"
                         />
-                        <span className="text-xs text-gray-700">{t}</span>
+                        <span className="text-xs text-gray-700">{opt.label}</span>
                       </label>
-                    ))}
+                    )})}
                   </div>
                   <FieldHelp>ประเภทการผลิต — ไม่ใช่ห้อง/สถานที่ ใส่ตรงข้างล่าง</FieldHelp>
                 </div>
-
-                {/* v1.101 — Event at an external venue → behaves like On Location
-                    (Map location + van). Office events keep the room picker. */}
-                {shootType === 'Event' && (
-                  <div>
-                    <Label>สถานที่จัดงาน</Label>
-                    <label className={`ops-choice ${eventExternal ? 'ops-choice-selected' : ''} cursor-pointer`}>
-                      <input
-                        type="checkbox"
-                        checked={eventExternal}
-                        onChange={e => {
-                          const ext = e.target.checked
-                          setEventExternal(ext)
-                          if (ext) { setLocationId(''); setLocationCustom('') }   // → external: drop room
-                          else { setMapLocation(''); setNeedsVan(false) }          // → office: drop map + van
-                        }}
-                        className="accent-brand-primary mt-0.5"
-                      />
-                      <span className="text-sm text-gray-700">📍 สถานที่ภายนอก (จัดงานนอกบริษัท)</span>
-                    </label>
-                    <FieldHelp>อีเวนต์นอกบริษัท — เลือกข้อนี้เพื่อใส่ Map location + ขอรถตู้</FieldHelp>
-                  </div>
-                )}
 
                 {/* v1.41.0 — van request, v1.58 — off-site only. Adds 🚐 to the
                     calendar event title (web + Google) so logistics see it. */}
