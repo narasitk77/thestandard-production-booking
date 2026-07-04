@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, Loader2, Check } from 'lucide-react'
 import { startOfWeek, addDays, addWeeks, format, parseISO, isSameDay } from 'date-fns'
 import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
+import { effectiveWrap, timeWindowsOverlap } from '@/lib/shoot-window'
 
 type Camera = { id: string; name: string; serialNumber: string | null; status: string }
 type Episode = { episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -16,6 +17,7 @@ type Booking = {
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   shootDate: string
   callTime: string
+  estimatedWrap?: string | null
   status: string
   cameraCount: number | null
   assignedEquipmentIds: string[]
@@ -65,14 +67,70 @@ export default function WeekPlanClient() {
   }, [weekStart])
   useEffect(() => { load() }, [load])
 
-  // bookings on a given day (by shootDate)
-  const bookingsOn = (day: Date) => bookings.filter(b => { const d = parseISO(b.shootDate); return !isNaN(d.getTime()) && isSameDay(d, day) })
+  // bookings on a given day (by shootDate), earliest call time first
+  const bookingsOn = (day: Date) =>
+    bookings
+      .filter(b => { const d = parseISO(b.shootDate); return !isNaN(d.getTime()) && isSameDay(d, day) })
+      .sort((a, b) => (a.callTime || '').localeCompare(b.callTime || ''))
 
-  // camera id → how many of THIS day's bookings hold it (>1 = double-booked)
-  const conflictMap = (day: Date) => {
-    const m = new Map<string, number>()
-    for (const b of bookingsOn(day)) for (const id of (b.assignedEquipmentIds || [])) if (cameraIds.has(id)) m.set(id, (m.get(id) || 0) + 1)
-    return m
+  // v1.118 — the shoot's time window "09:00 → 18:00" (wrap computed when blank).
+  const windowOf = (b: Booking) => {
+    const { end, estimated } = effectiveWrap(b.callTime, b.estimatedWrap)
+    return { start: b.callTime, end, estimated }
+  }
+  const overlaps = (a: Booking, b: Booking) => {
+    const wa = windowOf(a), wb = windowOf(b)
+    return timeWindowsOverlap(wa.start, wa.end, wb.start, wb.end)
+  }
+  const camsOf = (b: Booking) => (b.assignedEquipmentIds || []).filter(id => cameraIds.has(id))
+
+  // v1.118 — a camera is a CLASH for a booking only when another booking on the
+  // same day holds the SAME unit AND their time windows overlap (not just same
+  // day). Returns the set of "<bookingId>|<camId>" pairs that clash.
+  const clashPairs = (day: Date): Set<string> => {
+    const dayB = bookingsOn(day)
+    const holders = new Map<string, Booking[]>()
+    for (const b of dayB) for (const id of camsOf(b)) (holders.get(id) ?? holders.set(id, []).get(id)!).push(b)
+    const out = new Set<string>()
+    for (const [camId, hs] of Array.from(holders.entries())) {
+      for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) {
+        if (overlaps(hs[i], hs[j])) { out.add(`${hs[i].id}|${camId}`); out.add(`${hs[j].id}|${camId}`) }
+      }
+    }
+    return out
+  }
+
+  // v1.118 — one-click "fill every under-allocated shoot with cameras that are
+  // FREE during its window". Additive (keeps what's already assigned); reuses a
+  // unit across non-overlapping shoots. Zero clashes by construction.
+  const autoAssignDay = async (day: Date) => {
+    const dayB = bookingsOn(day) // earliest first
+    // occupancy: camId → windows already taken today (from current assignments)
+    const occ = new Map<string, Array<{ start: string; end: string }>>()
+    for (const b of dayB) { const w = windowOf(b); for (const id of camsOf(b)) (occ.get(id) ?? occ.set(id, []).get(id)!).push(w) }
+    const patches: Array<{ b: Booking; add: string[] }> = []
+    for (const b of dayB) {
+      const need = (b.cameraCount || 0) - camsOf(b).length
+      if (need <= 0) continue
+      const w = windowOf(b)
+      const add: string[] = []
+      for (const c of cameras) {
+        if (add.length >= need) break
+        if (camsOf(b).includes(c.id)) continue
+        const busy = (occ.get(c.id) || []).some(x => timeWindowsOverlap(w.start, w.end, x.start, x.end))
+        if (!busy) { add.push(c.id); (occ.get(c.id) ?? occ.set(c.id, []).get(c.id)!).push(w) }
+      }
+      if (add.length) patches.push({ b, add })
+    }
+    if (!patches.length) return
+    // optimistic UI + one debounced save per booking (reuse the existing path)
+    for (const { b, add } of patches) {
+      const next = [...(b.assignedEquipmentIds || []), ...add]
+      setBookings(prev => prev.map(x => x.id === b.id ? { ...x, assignedEquipmentIds: next } : x))
+      pendingRef.current[b.id] = next
+      setSavingId(b.id)
+      saveBooking(b.id)
+    }
   }
 
   const toggleCamera = (b: Booking, camId: string) => {
@@ -116,7 +174,7 @@ export default function WeekPlanClient() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-medium text-gray-800">📅 Week Plan · จัดสรรกล้อง</h1>
-          <p className="text-sm text-gray-500">เลือกกล้องให้งานที่ Confirmed แล้ว — กล้องที่ชนกันในวันเดียวจะขึ้นสีแดง</p>
+          <p className="text-sm text-gray-500">กด <b>⚡ จัดกล้องอัตโนมัติ</b> ให้ระบบเลือกกล้องให้ทั้งวัน · กล้องจะแดงเมื่อ<b>ชนเวลากันจริง</b> (คนละเวลาใช้ตัวเดียวกันได้)</p>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setWeekStart(w => addWeeks(w, -1))} className="p-1.5 border border-gray-300 rounded hover:bg-gray-50"><ChevronLeft className="w-4 h-4" /></button>
@@ -139,18 +197,28 @@ export default function WeekPlanClient() {
         <div className="space-y-3">
           {days.map(day => {
             const dayBookings = bookingsOn(day)
-            const conflicts = conflictMap(day)
+            const clashes = clashPairs(day)
             const needed = dayBookings.reduce((s, b) => s + (b.cameraCount || 0), 0)
-            const allocated = dayBookings.reduce((s, b) => s + (b.assignedEquipmentIds || []).filter(id => cameraIds.has(id)).length, 0)
-            const hasConflict = Array.from(conflicts.values()).some(n => n > 1)
+            const allocated = dayBookings.reduce((s, b) => s + camsOf(b).length, 0)
+            const hasConflict = clashes.size > 0
+            // fully allocated = every booking has all the cameras it needs
+            const fullyDone = dayBookings.length > 0 && dayBookings.every(b => camsOf(b).length >= (b.cameraCount || 0))
             return (
               <div key={day.toISOString()} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100">
+                <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100 gap-2 flex-wrap">
                   <div className="text-sm font-medium text-gray-700">{TH_DAY[day.getDay()]} {format(day, 'd MMM')}</div>
-                  <div className="text-xs text-gray-500 flex items-center gap-2">
+                  <div className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
                     <span>{dayBookings.length} งาน</span>
                     {needed > 0 && <span>· 📷 จัดแล้ว {allocated}/{needed}</span>}
-                    {hasConflict && <span className="text-red-600 font-medium">· ⚠️ กล้องชนกัน</span>}
+                    {hasConflict && <span className="text-red-600 font-medium">· ⚠️ กล้องชนเวลากัน</span>}
+                    {needed > 0 && !fullyDone && (
+                      <button
+                        onClick={() => autoAssignDay(day)}
+                        className="ml-1 px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-medium">
+                        ⚡ จัดกล้องอัตโนมัติ
+                      </button>
+                    )}
+                    {fullyDone && !hasConflict && <span className="text-green-600 font-medium">· ✓ จัดครบ</span>}
                   </div>
                 </div>
                 {dayBookings.length === 0 ? (
@@ -164,7 +232,11 @@ export default function WeekPlanClient() {
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="text-sm">
                               <Link href={`/admin/${b.id}`} className="text-[#673ab7] hover:underline font-medium">{b.isBlockShot ? '🧱 ' : ''}{b.outlet.code} · {bookingDisplayName(b)}</Link>
-                              <span className="text-gray-500 ml-2 text-xs">{b.callTime}</span>
+                              {(() => { const w = windowOf(b); return (
+                                <span className="text-gray-500 ml-2 text-xs tabular-nums" title={w.estimated ? 'เวลาเลิกกองโดยประมาณ (ไม่ได้กรอก) — call + 8 ชม.' : 'call → เวลาเลิกกอง'}>
+                                  🕐 {w.start} → {w.end}{w.estimated ? ' ~' : ''}
+                                </span>
+                              )})()}
                               <CrewLine crew={b.assignedCrew} className="text-[11px] text-gray-500 mt-0.5" />
                             </div>
                             <div className="text-xs flex items-center gap-2">
@@ -178,7 +250,8 @@ export default function WeekPlanClient() {
                           <div className="flex flex-wrap gap-1.5 mt-2">
                             {cameras.map(c => {
                               const on = assigned.has(c.id)
-                              const conflict = on && (conflicts.get(c.id) || 0) > 1
+                              // v1.118 — red only when THIS unit clashes IN TIME with another booking.
+                              const conflict = on && clashes.has(`${b.id}|${c.id}`)
                               // No disable during the 700ms debounce — rapid toggles must collapse
                               // into one PATCH (the optimistic update + reschedule keep it consistent).
                               return (
