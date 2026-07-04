@@ -18,6 +18,8 @@ import { mergeBookingSound, type BookingSoundMergeResult } from './sound-merge'
 // Prisma select for a booking passed to runBookingMerge: the fields both merge
 // steps need, plus the access fields the route uses for canViewBooking().
 export const BOOKING_MERGE_SELECT = {
+  id: true,
+  driveFolders: true,
   bookingCode: true,
   projectId: true,
   projectName: true,

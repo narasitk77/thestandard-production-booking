@@ -2,6 +2,9 @@ import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, build
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls, findFoldersByCode, listFilesRecursive, findChildFolder, findChildFolderByCode, SOUND_STAGING_DIR, type DriveFile } from '@/lib/google-drive'
 import { prisma } from '@/lib/db'
+// v1.114 — id-first: a stored box ID skips the whole name-resolution walk.
+import { getDriveLink } from '@/lib/drive-links'
+import { isFolderAlive } from '@/lib/google-drive'
 
 export interface FootageFolder {
   label: string
@@ -12,6 +15,7 @@ export interface FootageFolder {
 
 /** The booking shape needed to resolve footage folders (read-only path resolution). */
 export interface BookingForFootage {
+  driveFolders?: unknown
   bookingCode: string | null
   projectId: string | null
   projectName: string | null
@@ -60,17 +64,25 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     ? [layers.bookingFolderName, buildBookingFolderName(booking.bookingCode, jobName, showName)]
     : [bookingCodeName]
 
-  const resolved = await findEpisodeFolderUrls({
-    rootFolderId: root,
-    outletCanonicalName: outletDriveFolderName(booking.outlet.code),
-    programFolderName,
-    bookingFolderName,
-    bookingFolderNameAlts,
-    // v1.112 — AGN: descend into the per-booking layer when it exists.
-    bookingSubfolderName: layers.bookingSubfolderName,
-    bookingSubfolderCode: booking.bookingCode,
-    episodeFolderNames: epNames,
-  })
+  // v1.114 — id-first: when the booking already knows its box ID (and it's
+  // alive), skip the outlet→program→box name walk entirely. For AGN the stored
+  // box IS the per-booking layer, so a whole-tree scan is per-booking safe.
+  const boxLink = getDriveLink(booking.driveFolders, 'box')
+  const liveBoxId = boxLink && await isFolderAlive(boxLink) ? boxLink : null
+
+  const resolved = liveBoxId
+    ? { programFolderId: null, bookingFolderId: liveBoxId, bookingFolderUrl: `https://drive.google.com/drive/folders/${liveBoxId}`, viaBookingSubfolder: true, episodes: [] as Array<{ episodeFolderName: string; folderId: string | null; url: string | null }> }
+    : await findEpisodeFolderUrls({
+        rootFolderId: root,
+        outletCanonicalName: outletDriveFolderName(booking.outlet.code),
+        programFolderName,
+        bookingFolderName,
+        bookingFolderNameAlts,
+        // v1.112 — AGN: descend into the per-booking layer when it exists.
+        bookingSubfolderName: layers.bookingSubfolderName,
+        bookingSubfolderCode: booking.bookingCode,
+        episodeFolderNames: epNames,
+      })
 
   // `_SHOOT.txt` / `_SHOOT-<id>.txt` are booking-info files, not footage.
   const isFootage = (f: DriveFile) => !/^_SHOOT\b.*\.txt$/i.test(f.name)

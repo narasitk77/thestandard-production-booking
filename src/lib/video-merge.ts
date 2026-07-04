@@ -26,6 +26,9 @@ import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode,
 } from './outlet-folders'
 import { bookingShowName } from './display'
+// v1.114 — id-first: trust stored folder IDs before any name matching.
+import { getDriveLink, rememberDriveLinks } from './drive-links'
+import { isFolderAlive } from './google-drive'
 
 // "Production Team" landing Shared Drive (NAS drop zone) — mirrors prep-folders.ts.
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
@@ -88,6 +91,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
   const bookings = await prisma.booking.findMany({
     where: { status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, bookingCode: { not: null }, shootDate: { gte: since } },
     select: {
+      id: true, driveFolders: true,
       bookingCode: true, projectId: true, projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
@@ -106,40 +110,52 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
     try {
       const isAgency = b.outlet.code === 'AGN'
 
+      // v1.114 — id-first: stored landing ID wins; name match is the fallback.
+      const landingLink = getDriveLink(b.driveFolders, 'landing')
+      let flatId: string | null = landingLink && await isFolderAlive(landingLink) ? landingLink : null
       // v1.110 — match the landing folder by Production ID (legacy "<code> · …" OR
       // new "<show> · … (<code>)" shape).
-      const flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+      if (!flatId) flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
       if (!flatId) { base.results.push({ bookingCode: code, skipped: 'no landing folder' }); continue }
 
       // Resolve the box (read-only). If it hasn't landed yet → skip (try next run).
       // v1.112 — AGN merges too: the per-booking layer inside the project box is
       // the destination, so a flat merge can't misplace footage anymore.
-      const layers = shootFolderLayers({
-        outletCode: b.outlet.code,
-        showName,
-        category: b.category, projectId: b.projectId, projectName: b.projectName,
-        bookingCode: code, jobName,
-      })
-      const resolved = await findEpisodeFolderUrls({
-        rootFolderId: root,
-        outletCanonicalName: outletDriveFolderName(b.outlet.code),
-        programFolderName: layers.programFolderName,
-        bookingFolderName: layers.bookingFolderName,
-        // strict destination for AGN (project box only); others accept the pre-v1.110 box
-        bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
-        bookingCode: code, // v1.113.6 — last-resort box match by Production ID (sanitized names drift)
-        bookingSubfolderName: layers.bookingSubfolderName,
-        bookingSubfolderCode: code,
-        episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
-      })
-      if (!resolved.bookingFolderId) { base.results.push({ bookingCode: code, skipped: 'box not found (not prepped yet)' }); continue }
+      // v1.114 — id-first: a stored box ID (for AGN = the booking layer) skips
+      // the whole outlet→program→box name walk.
+      let destId: string | null = null
+      const boxLink = getDriveLink(b.driveFolders, 'box')
+      if (boxLink && await isFolderAlive(boxLink)) destId = boxLink
+      if (!destId) {
+        const layers = shootFolderLayers({
+          outletCode: b.outlet.code,
+          showName,
+          category: b.category, projectId: b.projectId, projectName: b.projectName,
+          bookingCode: code, jobName,
+        })
+        const resolved = await findEpisodeFolderUrls({
+          rootFolderId: root,
+          outletCanonicalName: outletDriveFolderName(b.outlet.code),
+          programFolderName: layers.programFolderName,
+          bookingFolderName: layers.bookingFolderName,
+          // strict destination for AGN (project box only); others accept the pre-v1.110 box
+          bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+          bookingCode: code, // v1.113.6 — last-resort box match by Production ID (sanitized names drift)
+          bookingSubfolderName: layers.bookingSubfolderName,
+          bookingSubfolderCode: code,
+          episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
+        })
+        if (!resolved.bookingFolderId) { base.results.push({ bookingCode: code, skipped: 'box not found (not prepped yet)' }); continue }
 
-      // AGN: box exists but the booking layer doesn't yet → create it (merge is a
-      // write op). In dryRun leave dest null (mirrorMove counts all as would-move).
-      let destId: string | null = resolved.bookingFolderId
-      if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder) {
-        destId = opts.dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+        // AGN: box exists but the booking layer doesn't yet → create it (merge is a
+        // write op). In dryRun leave dest null (mirrorMove counts all as would-move).
+        destId = resolved.bookingFolderId
+        if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder) {
+          destId = opts.dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+        }
       }
+      // self-heal: remember what we just resolved so next time skips the walk.
+      if (!opts.dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
       const stats: Stats = { seen: 0, moved: 0, dup: 0, err: 0 }
       await mirrorMove(flatId, destId, code, stats, !!opts.dryRun)
@@ -161,6 +177,8 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
 // the loop body above, scoped to a single booking.
 
 export interface VideoMergeBooking {
+  id?: string
+  driveFolders?: unknown
   bookingCode: string | null
   projectId: string | null
   projectName: string | null
@@ -193,34 +211,45 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
   const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
 
-  const flatChildren = await listChildFolders(PRODUCTION_TEAM_ROOT)
-  const flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+  // v1.114 — id-first for both sides; names are the fallback.
+  const landingLink = getDriveLink(b.driveFolders, 'landing')
+  let flatId: string | null = landingLink && await isFolderAlive(landingLink) ? landingLink : null
+  if (!flatId) {
+    const flatChildren = await listChildFolders(PRODUCTION_TEAM_ROOT)
+    flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+  }
   if (!flatId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์ใน Production Team (NAS ยังไม่ sync?)', ...zero }
 
-  // v1.112 — AGN merges too (destination = per-booking layer inside the project box).
-  const layers = shootFolderLayers({
-    outletCode: b.outlet.code, showName, category: b.category,
-    projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
-  })
-  const resolved = await findEpisodeFolderUrls({
-    rootFolderId: root,
-    outletCanonicalName: outletDriveFolderName(b.outlet.code),
-    programFolderName: layers.programFolderName,
-    bookingFolderName: layers.bookingFolderName,
-    bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
-    bookingCode: code, // v1.113.6 — last-resort box match by Production ID
-    bookingSubfolderName: layers.bookingSubfolderName,
-    bookingSubfolderCode: code,
-    episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
-  })
-  if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง Video 2026 (ยังไม่ถูก prep?)', ...zero }
+  let destId: string | null = null
+  const boxLink = getDriveLink(b.driveFolders, 'box')
+  if (boxLink && await isFolderAlive(boxLink)) destId = boxLink
+  if (!destId) {
+    // v1.112 — AGN merges too (destination = per-booking layer inside the project box).
+    const layers = shootFolderLayers({
+      outletCode: b.outlet.code, showName, category: b.category,
+      projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
+    })
+    const resolved = await findEpisodeFolderUrls({
+      rootFolderId: root,
+      outletCanonicalName: outletDriveFolderName(b.outlet.code),
+      programFolderName: layers.programFolderName,
+      bookingFolderName: layers.bookingFolderName,
+      bookingFolderNameAlts: layers.bookingSubfolderName ? [] : [legacyBookingFolderName(code, jobName)],
+      bookingCode: code, // v1.113.6 — last-resort box match by Production ID
+      bookingSubfolderName: layers.bookingSubfolderName,
+      bookingSubfolderCode: code,
+      episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
+    })
+    if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง Video 2026 (ยังไม่ถูก prep?)', ...zero }
 
-  let destId: string | null = resolved.bookingFolderId
-  if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder) {
-    destId = dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+    destId = resolved.bookingFolderId
+    if (layers.bookingSubfolderName && !resolved.viaBookingSubfolder) {
+      destId = dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
+    }
   }
+  if (!dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
   const stats: Stats = { seen: 0, moved: 0, dup: 0, err: 0 }
   await mirrorMove(flatId, destId, code, stats, dryRun)
-  return { ...stats, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : (resolved.bookingFolderUrl ?? null) }
+  return { ...stats, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
 }

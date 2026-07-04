@@ -21,6 +21,8 @@ import {
   bookingNeedsSound,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
+// v1.114 — id-first Drive linkage.
+import { rememberDriveLinks } from '@/lib/drive-links'
 
 /** Half-open range matching bookings whose **Bangkok** shoot-day is today.
  *  `Booking.shootDate` is `@db.Date` (date-only) — Prisma returns/compares it as
@@ -107,7 +109,10 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     if (!opts.dryRun && bookingNeedsSound(b.crewRequired)) {
       // v1.111 — staging is crew-facing (sound team drops files there): use the
       // display-format name, same as the landing folder. Lookups are by code.
-      try { await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: b.bookingCode!, bookingFolderName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }) }) }
+      try {
+        const { stagingFolderId } = await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: b.bookingCode!, bookingFolderName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }) })
+        await rememberDriveLinks(b.id, { staging: stagingFolderId })
+      }
       catch (e: any) { console.error('[prep] sound staging failed (non-fatal):', b.bookingCode, e?.message || e) }
     }
     // v1.102.8 — Photo album jobs → one flat folder in the Photographer Shared
@@ -117,7 +122,8 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       const photoName = buildBookingFolderName(b.bookingCode!, jobName, showName)
       if (opts.dryRun) { results.push({ bookingCode: b.bookingCode, wouldCreate: [`(photo) ${photoName}`] }); prepared++; continue }
       try {
-        await ensurePhotoAlbumFolder({ bookingCode: b.bookingCode!, bookingFolderName: photoName })
+        const { bookingFolderId: photoId } = await ensurePhotoAlbumFolder({ bookingCode: b.bookingCode!, bookingFolderName: photoName })
+        await rememberDriveLinks(b.id, { photo: photoId })
         results.push({ bookingCode: b.bookingCode, created: [`(photo) ${photoName}`] })
         prepared++
       } catch (e: any) {
@@ -157,7 +163,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       })
       // 1) destination boxes in VIDEO 2026 (AGN: outlet/<Project>/<job (code)>/…;
       //    others: outlet/program/<show · job (code)>/<EP>/CAM-..)
-      await ensureShootCameraFolders({
+      const { bookingFolderId: boxId } = await ensureShootCameraFolders({
         rootFolderId: root,
         outletCanonicalName: outletDriveFolderName(b.outlet.code),
         programFolderName: layers.programFolderName,
@@ -177,12 +183,14 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       //    prefix, "-" job dropped); landing matching is by Production ID.
       const landingFolderName = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
       let prodTeam = 'ok'
+      let landingId: string | null = null
       try {
-        await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: landingFolderName, cameras, episodeFolderNames })
+        landingId = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: landingFolderName, cameras, episodeFolderNames })).bookingFolderId
       } catch (ptErr: any) {
         prodTeam = `error: ${ptErr?.message || ptErr}`
         prodTeamErrors++ // v1.92.1 — count it so a total Production Team outage shows in the headline log
       }
+      await rememberDriveLinks(b.id, { box: boxId, landing: landingId ?? undefined })
       results.push({ bookingCode: b.bookingCode, created: cameras, prodTeam })
       prepared++
     } catch (e: any) {

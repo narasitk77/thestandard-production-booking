@@ -282,6 +282,11 @@ model Booking {
   // by the "ตรวจใหม่" button (refresh=1) and invalidated on upload/merge.
   footageCache     Json?
   footageCacheAt   DateTime?
+  // v1.114 — id-first Drive linkage: the folder IDs the system created/resolved
+  // for this booking ({ box, landing, staging, photo }). Names on Drive become
+  // cosmetic — renames/moves can't break detection/merges once an ID is stored.
+  // Backward compatible: null → every reader falls back to name resolution.
+  driveFolders     Json?
   status           BookingStatus @default(REQUESTED)
   createdByEmail   String?
   // Cancellation REQUEST (producer/owner asks; staff actually cancels). Keeps the

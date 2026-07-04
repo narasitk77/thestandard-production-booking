@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       select: {
-        id: true,
+        id: true, driveFolders: true,
         bookingCode: true, projectId: true, projectName: true, category: true, crewRequired: true,
         createdByEmail: true, producerEmail: true, assignedEmails: true,
         outlet: { select: { code: true } },

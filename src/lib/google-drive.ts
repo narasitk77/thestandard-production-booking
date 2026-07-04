@@ -786,6 +786,21 @@ export async function renameDriveItem(fileId: string, newName: string, subject?:
 }
 
 /**
+ * v1.114 — is this folder id still usable? (exists, not trashed). Used by the
+ * id-first readers before trusting a stored Booking.driveFolders link; a dead
+ * id falls back to the legacy name walk.
+ */
+export async function isFolderAlive(folderId: string): Promise<boolean> {
+  try {
+    const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+    const res = await drive.files.get({ fileId: folderId, fields: 'id, trashed, mimeType', supportsAllDrives: true })
+    return !res.data.trashed && res.data.mimeType === FOLDER_MIME
+  } catch {
+    return false
+  }
+}
+
+/**
  * v1.112 — move a Drive item to the Shared Drive trash (recoverable ~30 days).
  * Used by the AGN restructure sweep to clear VERIFIED-EMPTY duplicate folders
  * (worker re-creations); callers must confirm emptiness first.

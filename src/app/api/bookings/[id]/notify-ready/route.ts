@@ -31,7 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       select: {
-        id: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true,
+        id: true, driveFolders: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true,
         assignedEmails: true, createdByEmail: true, producer: true, producerEmail: true,
         projectId: true, projectName: true, category: true, callTime: true, shootDate: true,
         outlet: { select: { code: true, name: true } },

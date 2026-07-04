@@ -10,6 +10,8 @@ import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFol
 import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, landingBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
+// v1.114 — id-first Drive linkage: remember created folder IDs on the booking.
+import { rememberDriveLinks } from '@/lib/drive-links'
 
 export async function POST(
   _request: NextRequest,
@@ -98,6 +100,7 @@ export async function POST(
         // the photos inside; no camera/EP layers.
         if (isPhotoAlbumBooking(updated.episodes)) {
           const { bookingFolderId } = await ensurePhotoAlbumFolder({ bookingCode: updated.bookingCode, bookingFolderName: buildBookingFolderName(updated.bookingCode, jobName, bookingShowName({ projectName: updated.projectName, program: updated.program, episodes: updated.episodes })) })
+          await rememberDriveLinks(updated.id, { photo: bookingFolderId })
           await upsertTextFile({ parentFolderId: bookingFolderId, name: '_SHOOT.txt', content: renderBookingInfo(bookingInfoInput(updated)) })
           return
         }
@@ -129,6 +132,7 @@ export async function POST(
           // v1.93 — one folder per episode; empty for no-episode bookings.
           episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,
         })
+        await rememberDriveLinks(updated.id, { box: bookingFolderId })
         await upsertTextFile({
           parentFolderId: bookingFolderId,
           // v1.112 — AGN now gets its own booking layer, so a plain _SHOOT.txt
@@ -151,7 +155,8 @@ export async function POST(
       if (!root) return
       try {
         const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
-        await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: updated.bookingCode, bookingFolderName: landingBookingFolderName({ bookingCode: updated.bookingCode, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }) })
+        const { stagingFolderId } = await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: updated.bookingCode, bookingFolderName: landingBookingFolderName({ bookingCode: updated.bookingCode, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }) })
+        await rememberDriveLinks(updated.id, { staging: stagingFolderId })
       } catch (e: any) {
         console.error('[approve] sound staging pre-create failed (non-fatal):', e?.message || e)
       }
