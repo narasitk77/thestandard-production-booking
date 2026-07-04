@@ -3,6 +3,7 @@
 import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
+import CardFootageActions from '@/app/_components/CardFootageActions'
 import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
@@ -13,7 +14,7 @@ import { formatDisplayDate, statusLabel } from '@/lib/utils'
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string; shootDate: string; callTime: string; status: string
-  producer: string; assignedEmails: string[]
+  producer: string; producerNick?: string; assignedEmails: string[]
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   footageFiles?: number | null
   footageSent?: boolean
@@ -389,7 +390,7 @@ export default function AdminPage() {
                     {b.isBlockShot ? '🧱 ' : ''}{b.outlet.name} · {bookingDisplayName(b)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
-                    Producer: {b.producer}
+                    Producer: {b.producerNick || b.producer}
                     <CrewLine crew={b.assignedCrew} className="mt-0.5 text-[12px] text-blue-700" />
                     <div className="mt-1"><FootageBadge files={b.footageFiles} sent={b.footageSent} /></div>
                   </div>
@@ -458,6 +459,10 @@ export default function AdminPage() {
                           📹 Upload
                         </Link>
                       )}
+                      {/* v1.115 — CONFIRMED shoots that already have footage can be
+                          consolidated + announced inline too (files often land before
+                          the booking is flipped to COMPLETED). */}
+                      <CardFootageActions bookingId={b.id} canMerge={canUpload} onChanged={fetch_} />
                       <Link href={`/admin/${b.id}`}
                         className="px-3 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
                         EDIT
@@ -470,6 +475,8 @@ export default function AdminPage() {
                   )}
                   {!showingDeleted && b.status === 'COMPLETED' && (
                     <>
+                      {/* v1.115 — consolidate + notify right here, no page hop. */}
+                      <CardFootageActions bookingId={b.id} canMerge={canUpload} onChanged={fetch_} />
                       {canUpload && (
                         <Link href={`/upload?bookingId=${b.id}`}
                           title="Upload footage — opens the dedicated upload page"

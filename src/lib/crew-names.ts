@@ -19,7 +19,7 @@ const TEAM_LABELS: Record<string, string> = {
 }
 
 // "นายรัชชานนท์ คงเนตร" → "รัชชานนท์" · "Chai Yaphat THE STANDARD" → "Chai"
-function shortPersonName(nickname?: string | null, thaiName?: string | null, name?: string | null): string {
+export function shortPersonName(nickname?: string | null, thaiName?: string | null, name?: string | null): string {
   const nick = (nickname || '').trim()
   if (nick) return nick
   const thai = (thaiName || '').replace(/^(นาย|นางสาว|นาง|ดร\.?|ด\.ช\.|ด\.ญ\.)\s*/, '').trim()
@@ -27,6 +27,28 @@ function shortPersonName(nickname?: string | null, thaiName?: string | null, nam
   const en = (name || '').replace(/\bTHE STANDARD\b/gi, '').trim()
   if (en) return en.split(/\s+/)[0]
   return ''
+}
+
+/**
+ * v1.115 — producer nickname for cards. The Booking.producer STRING is
+ * inconsistent (some are nicknames, some full legal names), so prefer the real
+ * user record via producerEmail (nickname → Thai first name), and only fall
+ * back to cleaning the stored string. Returns a resolver: email → nickname, or
+ * null when the email isn't a known user (caller falls back to the string).
+ */
+export async function makeProducerNickResolver(emails: Array<string | null | undefined>): Promise<(email?: string | null) => string | null> {
+  const clean = Array.from(new Set(
+    emails.filter((e): e is string => typeof e === 'string' && e.includes('@')).map(e => e.toLowerCase()),
+  ))
+  const users = clean.length
+    ? await prisma.user.findMany({ where: { email: { in: clean } }, select: { email: true, nickname: true, thaiName: true, name: true } })
+    : []
+  const byEmail = new Map(users.map(u => [u.email.toLowerCase(), shortPersonName(u.nickname, u.thaiName, u.name)]))
+  return (email?: string | null) => {
+    const e = (email || '').toLowerCase()
+    const v = e ? byEmail.get(e) : undefined
+    return v || null
+  }
 }
 
 /**

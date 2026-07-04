@@ -4,7 +4,7 @@ import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { createBookingFromPayload } from '@/lib/create-booking'
-import { makeCrewNameResolver } from '@/lib/crew-names'
+import { makeCrewNameResolver, makeProducerNickResolver, shortPersonName } from '@/lib/crew-names'
 
 export async function GET(request: NextRequest) {
   try {
@@ -129,6 +129,8 @@ export async function GET(request: NextRequest) {
       // v1.111 — footage state for the cards' "ไฟล์ครบแล้ว" badge:
       //   footageFiles = files last detected in the booking's Drive folders,
       //   footageSent  = the NAS upload queue for this code fully drained.
+      // v1.115 — producer nickname (real user record → clean the stored string).
+      const producerNick = await makeProducerNickResolver(bookings.map(b => (b as any).producerEmail))
       const nasState = await prisma.nasSyncState.findUnique({ where: { key: 'latest' } }).catch(() => null)
       const drained: Record<string, boolean> = {}
       const nasFolders = ((nasState?.status as any) || {}).folders || {}
@@ -141,6 +143,7 @@ export async function GET(request: NextRequest) {
           ...b,
           footageCache: undefined, // don't ship the whole blob to the list
           assignedCrew: assigned.map(e => ({ email: e, name: resolve(e), isLead: !!mainVdo && e.toLowerCase() === mainVdo.toLowerCase() })),
+          producerNick: producerNick((b as any).producerEmail) || shortPersonName(null, (b as any).producer, (b as any).producer) || (b as any).producer,
           footageFiles: typeof cache?.fileCount === 'number' ? cache.fileCount : null,
           footageSent: (b as any).bookingCode ? !!drained[(b as any).bookingCode] : false,
         }
