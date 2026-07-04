@@ -399,7 +399,7 @@ export default function AdminPage() {
           <p className="text-xs text-gray-400 mb-2">🎙️ เฉพาะงานที่ต้องการเสียง/ไมค์ — {visibleBookings.length} จาก {bookings.length} ในแท็บนี้</p>
         ) : total > bookings.length ? (
           <p className="text-xs text-gray-400 mb-2">
-            แสดง {bookings.length} จาก {total} รายการ (เรียงตามวันถ่ายล่าสุด)
+            แสดง {bookings.length} จาก {total} รายการ (เรียงตาม{sortBy === 'request' ? 'ลำดับที่จอง' : 'วันถ่าย'})
           </p>
         ) : null}
         <div className="space-y-3">

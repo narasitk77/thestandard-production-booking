@@ -79,6 +79,10 @@ export default function WeekPlanClient() {
     return { start: b.callTime, end, estimated }
   }
   const overlaps = (a: Booking, b: Booking) => {
+    // v1.121 — a booking with no call time has an unknowable window, so we can't
+    // prove two same-day holders DON'T overlap → flag it (conservative), matching
+    // the pre-v1.118 same-day clash. Only skip the red flag when both times exist.
+    if (!a.callTime || !b.callTime) return true
     const wa = windowOf(a), wb = windowOf(b)
     return timeWindowsOverlap(wa.start, wa.end, wb.start, wb.end)
   }
@@ -108,13 +112,19 @@ export default function WeekPlanClient() {
     // occupancy: camId → windows already taken today (from current assignments)
     const occ = new Map<string, Array<{ start: string; end: string }>>()
     for (const b of dayB) { const w = windowOf(b); for (const id of camsOf(b)) (occ.get(id) ?? occ.set(id, []).get(id)!).push(w) }
+    // v1.121 — auto-assign ONLY units that are physically AVAILABLE (a bulk,
+    // no-look commit must not hand out a camera that's ON_LOAN or IN_REPAIR;
+    // manual per-unit toggling still allows the whole non-retired set on purpose).
+    const assignable = cameras.filter(c => c.status === 'AVAILABLE')
     const patches: Array<{ b: Booking; add: string[] }> = []
     for (const b of dayB) {
+      // no call time = unknowable window → don't auto-place (needs manual).
+      if (!b.callTime) continue
       const need = (b.cameraCount || 0) - camsOf(b).length
       if (need <= 0) continue
       const w = windowOf(b)
       const add: string[] = []
-      for (const c of cameras) {
+      for (const c of assignable) {
         if (add.length >= need) break
         if (camsOf(b).includes(c.id)) continue
         const busy = (occ.get(c.id) || []).some(x => timeWindowsOverlap(w.start, w.end, x.start, x.end))
