@@ -379,7 +379,6 @@ export default function AdminPage() {
                     <span className="text-xs text-gray-400">
                       {formatDisplayDate(b.shootDate)} · {b.callTime}
                     </span>
-                    <span className="text-xs text-gray-400">· 📝 ขอเมื่อ {formatDisplayDate(b.createdAt)}</span>
                     {crewGaps[b.id] && (
                       <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-200 font-medium">
                         ⚠️ ขาด: {crewGaps[b.id].missingTh.join(', ')}
@@ -593,88 +592,51 @@ function CalendarStatus({
   // Google Calendar event if there is one.
   const effectiveStatus = syncStatus ?? (effectiveEventId ? 'OK' : null)
 
+  // v1.116 — the queue card only needs the AT-A-GLANCE calendar state: one chip
+  // when it's fine, and the Re-sync affordance ONLY when it actually needs
+  // attention (FAILED / no event). The 10-min reconciler auto-retries and the
+  // detail page (BookingConfirmedCard) keeps the full timestamp/link/result UI.
+  const needsAttention = effectiveStatus === 'FAILED' || effectiveStatus === null
+
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-      {/* Sync-state chip */}
       {effectiveStatus === 'PENDING' && (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
-          <Loader2 className="w-3 h-3 animate-spin" /> Calendar sync pending…
+          <Loader2 className="w-3 h-3 animate-spin" /> ปฏิทิน: กำลังซิงค์…
         </span>
       )}
-      {effectiveStatus === 'FAILED' && (
-        <span
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
-          title={syncError || 'Calendar sync failed — click Re-sync to retry'}
-        >
-          <AlertTriangle className="w-3 h-3" /> Calendar sync FAILED
-        </span>
-      )}
-      {effectiveStatus === null && (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
-          <AlertTriangle className="w-3 h-3" /> No calendar event
-        </span>
-      )}
-
-      {/* Calendar event link chip — only when an event id exists, regardless of sync state */}
-      {effectiveEventId && (
+      {effectiveStatus === 'OK' && effectiveEventId && (
         link ? (
-          <a
-            href={link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-            title={`Calendar event: ${effectiveEventId}`}
-          >
-            📅 Open in Calendar <ExternalLink className="w-3 h-3" />
+          <a href={link} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+            title={`Calendar event: ${effectiveEventId}`}>
+            📅 ปฏิทิน OK <ExternalLink className="w-3 h-3" />
           </a>
         ) : (
-          <span
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200"
-            title={`Calendar event: ${effectiveEventId} — click Re-sync to fetch the public link`}
-          >
-            📅 Calendar event linked
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200"
+            title={`Calendar event: ${effectiveEventId}`}>
+            📅 ปฏิทิน OK
           </span>
         )
       )}
-
-      {/* Last synced timestamp — small relative-time hint */}
-      {lastSyncedAt && (
-        <span className="text-[10px] text-gray-400" title={new Date(lastSyncedAt).toLocaleString()}>
-          last checked {relativeTime(lastSyncedAt)}
-        </span>
-      )}
-
-      <button
-        onClick={handleResync}
-        disabled={syncing}
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-        title="Force a calendar guest sync now (don't wait for the 10-min worker tick)"
-      >
-        {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-        {syncing ? 'Syncing…' : 'Re-sync'}
-      </button>
-
-      {result && !syncing && (
-        <span
-          className={`px-2 py-0.5 rounded-full ${
-            result.ok
-              ? result.action === 'created' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-              : result.action === 'patched' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-              : 'bg-gray-100 text-gray-600 border border-gray-200'
-              : 'bg-red-50 text-red-700 border border-red-200'
-          }`}
-          title={result.error || ''}
-        >
-          {result.ok
-            ? result.action === 'created'
-              ? `✓ event created with ${(result.assignedEmails || []).length} guest${(result.assignedEmails || []).length === 1 ? '' : 's'}`
-              : result.action === 'patched'
-                ? `✓ guests updated (${(result.assignedEmails || []).length})`
-                : result.action === 'ok'
-                  ? '✓ already in sync'
-                  : `✓ ${result.action}`
-            : `⚠ ${result.error || 'sync failed'}`}
-        </span>
+      {needsAttention && (
+        <>
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
+            title={syncError || 'Calendar sync failed / no event — Re-sync to retry'}>
+            <AlertTriangle className="w-3 h-3" /> {effectiveStatus === 'FAILED' ? 'ปฏิทินซิงค์ล้มเหลว' : 'ยังไม่มี event'}
+          </span>
+          <button onClick={handleResync} disabled={syncing}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            title="Force a calendar sync now">
+            {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            {syncing ? 'กำลังซิงค์…' : 'Re-sync'}
+          </button>
+          {result && !syncing && (
+            <span className={`px-2 py-0.5 rounded-full ${result.ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`} title={result.error || ''}>
+              {result.ok ? `✓ ${result.action}` : `⚠ ${result.error || 'sync failed'}`}
+            </span>
+          )}
+        </>
       )}
     </div>
   )

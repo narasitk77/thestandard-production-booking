@@ -82,10 +82,10 @@ test('Outlet booking with the Episode-Type bucket as program: per-EP program lea
 })
 
 test('descriptor segments and van prefix still wrap the new core', () => {
+  // v1.116 — Video Type dropped from the form + the title (carried no signal).
   const title = buildEventTitle({
     ...base,
     needsVan: true,
-    videoType: 'Teaser / Highlight',
     cameraCount: 2,
     micCount: 1,
     projectName: 'KEY MESSAGES x DMHT',
@@ -93,7 +93,7 @@ test('descriptor segments and van prefix still wrap the new core', () => {
     program: { code: 'AGN-LF', name: 'Long Form (project)' },
     episodes: [{ episodeId: 'PP-26-010-L01', title: 'Pre EP.1 - BKK' }],
   })
-  assert.equal(title, '🚐 [AGN] KEY MESSAGES x DMHT — Pre EP.1 - BKK · Teaser / Highlight · 🎥 2 · 🎙 1')
+  assert.equal(title, '🚐 [AGN] KEY MESSAGES x DMHT — Pre EP.1 - BKK · 🎥 2 · 🎙 1')
 })
 
 test('blank projectName falls back to the program name', () => {

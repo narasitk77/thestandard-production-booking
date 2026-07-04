@@ -277,7 +277,6 @@ export function buildEventTitle(booking: {
   // (ops feedback: the title didn't say what the item was). Video Type first
   // (the content descriptor), then the equipment counts.
   const segments: string[] = []
-  if (booking.videoType && booking.videoType.trim()) segments.push(booking.videoType.trim())
   const equip = formatEquipment(booking.cameraCount, booking.micCount)
   if (equip) segments.push(equip)
 
@@ -321,7 +320,6 @@ ${epList}
 
 Outlet: ${booking.outlet.name} (${booking.outlet.code})
 Program: ${booking.program.name} (${booking.program.code})
-Video Type: ${booking.videoType || '—'}
 Shoot Type: ${shootTypeLabel}
 Location / Room: ${location}
 Producer: ${booking.producer}

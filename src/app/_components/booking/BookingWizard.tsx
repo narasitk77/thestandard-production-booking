@@ -37,15 +37,6 @@ type ProjectEpisode = {
 }
 
 const CATEGORIES = ['Original Content', 'Advertorial', 'Event', 'Internal']
-const VIDEO_TYPES = [
-  'Teaser / Highlight',
-  'Vlog / On Location',
-  'Report (Host + Insert)',
-  'Interview',
-  'Documentary',
-  'Commercial',
-  'Others',
-]
 const SHOOT_TYPES = ['Studio', 'On Location', 'Event']
 const SHOOT_TYPE_VALUES: Record<string, string> = {
   'Studio': 'STUDIO',
@@ -163,8 +154,10 @@ export default function BookingWizard() {
   const [programCode, setProgramCode] = useState('')
   const [shootDate, setShootDate] = useState('')
   const [shootEndDate, setShootEndDate] = useState('')
+  // v1.116 — single-day is the common case, so the end date hides behind a
+  // "ถ่ายหลายวัน" toggle instead of being a required field on every booking.
+  const [multiDay, setMultiDay] = useState(false)
   const [category, setCategory] = useState('Original Content')
-  const [videoType, setVideoType] = useState('')
   const [shootType, setShootType] = useState('Studio')
   const [locationId, setLocationId] = useState('')
   const [locationCustom, setLocationCustom] = useState('')
@@ -360,7 +353,7 @@ export default function BookingWizard() {
   /* ---- draft autosave / resume (v1.78) ---- */
   const DRAFT_KEY = 'booking-draft-v1'
   const draftSnapshot = () => ({
-    outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType,
+    outletCode, programCode, shootDate, shootEndDate, category, shootType,
     locationId, locationCustom, mapLocation, callTime, estimatedWrap,
     producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
     creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal,
@@ -383,7 +376,7 @@ export default function BookingWizard() {
     }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, videoType, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
 
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
   const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
@@ -395,9 +388,8 @@ export default function BookingWizard() {
       if (d.outletCode != null) setOutletCode(d.outletCode)
       if (d.programCode != null) setProgramCode(d.programCode)
       if (d.shootDate != null) setShootDate(d.shootDate)
-      if (d.shootEndDate != null) setShootEndDate(d.shootEndDate)
+      if (d.shootEndDate != null) { setShootEndDate(d.shootEndDate); if (d.shootDate && d.shootEndDate && d.shootEndDate !== d.shootDate) setMultiDay(true) }
       if (d.category != null) setCategory(d.category)
-      if (d.videoType != null) setVideoType(d.videoType)
       if (d.shootType != null) setShootType(d.shootType)
       if (d.locationId != null) setLocationId(d.locationId)
       if (d.locationCustom != null) setLocationCustom(d.locationCustom)
@@ -510,12 +502,14 @@ export default function BookingWizard() {
     if (s === 1) {
       if (!outletCode) errs.outletCode = 'กรุณาเลือก Outlet'
       if (!programCode) errs.programCode = 'กรุณาเลือก Episode Type'
-      if (!category) errs.category = 'กรุณาเลือก Category'
+      if (isContentAgency && !category) errs.category = 'กรุณาเลือก Category'
       // v1.113 — Video Type field removed from the form (carried no info; the
       // ID is generated from the EP/show). Old bookings keep their stored value.
     } else if (s === 2) {
       if (!shootDate) errs.shootDate = 'กรุณาเลือก Shoot Date'
-      if (!shootEndDate) errs.shootEndDate = 'กรุณาเลือก Shoot End Date'
+      // v1.116 — end date only required for a multi-day shoot; single-day mirrors
+      // the start date (set on the shootDate onChange / multiDay toggle).
+      if (multiDay && !shootEndDate) errs.shootEndDate = 'กรุณาเลือกวันจบ (ถ่ายหลายวัน)'
       if (shootDate && shootEndDate && shootEndDate < shootDate) {
         errs.shootEndDate = 'Shoot End Date ต้องไม่อยู่ก่อน Shoot Date'
       }
@@ -557,7 +551,6 @@ export default function BookingWizard() {
         if (missing.length > 0) errs.epRows = `กรุณากรอก: ${missing.join(', ')}`
       } else {
         if (!producerName.trim()) errs.producerName = 'กรุณากรอกชื่อ Producer'
-        if (!producerPhone.trim()) errs.producerPhone = 'กรุณากรอกเบอร์โทร Producer'
         if (!producerEmailText.trim()) errs.producerEmailText = 'กรุณากรอกอีเมล Producer'
         const missing: string[] = []
         epRows.forEach((r, i) => {
@@ -596,7 +589,7 @@ export default function BookingWizard() {
     5: false,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
-    outletCode, programCode, category, videoType,
+    outletCode, programCode, category,
     shootDate, shootEndDate, callTime, estimatedWrap,
     locationId, locationCustom, needsCustomText, shootType, mapLocation,
     isContentAgency, producerEmail, directorEmail, projectId, selectedEpisodeIds,
@@ -662,7 +655,6 @@ export default function BookingWizard() {
           shootDate,
           shootEndDate: shootEndDate || null,
           category: CATEGORY_VALUES[category],
-          videoType,
           shootType: SHOOT_TYPE_VALUES[shootType],
           locationName: resolvedLocationName,
           callTime,
@@ -684,7 +676,6 @@ export default function BookingWizard() {
           directorEmail: isContentAgency ? directorEmail : null,
           // v1.59 — Co-Producer (non-AGN dropdown only)
           coProducer: useProducerDropdown ? effCoProducer : null,
-          coProducerEmail: useProducerDropdown ? effCoProducerEmail : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           videographerCount: crew.includes('Videographer') ? Math.max(1, parseInt(videographerCount, 10) || 1) : 1,
@@ -735,7 +726,6 @@ export default function BookingWizard() {
     outlet: selectedOutlet ? `${selectedOutlet.name} (${selectedOutlet.code})` : '',
     episodeType: selectedProgram ? `${selectedProgram.code} · ${selectedProgram.name}` : '',
     category,
-    videoType,
     dateRange: shootDate && shootEndDate
       ? (shootDate === shootEndDate ? shootDate : `${shootDate} → ${shootEndDate}`)
       : (shootDate || ''),
@@ -922,7 +912,8 @@ export default function BookingWizard() {
                     onChange={e => {
                       const v = e.target.value
                       setShootDate(v)
-                      if (!shootEndDate || shootEndDate < v) setShootEndDate(v)
+                      // single-day → end mirrors start; multi-day → only bump if end is now before start
+                      if (!multiDay || !shootEndDate || shootEndDate < v) setShootEndDate(v)
                     }}
                     min={new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
                     aria-invalid={!!fieldErrors.shootDate}
@@ -930,18 +921,36 @@ export default function BookingWizard() {
                   <FieldError message={fieldErrors.shootDate} />
                 </div>
                 <div>
-                  <Label htmlFor="shootEndDate" required>Shoot End Date</Label>
-                  <input
-                    id="shootEndDate"
-                    type="date"
-                    className={`ops-input ${fieldErrors.shootEndDate ? 'ops-input-invalid' : ''}`}
-                    value={shootEndDate}
-                    onChange={e => setShootEndDate(e.target.value)}
-                    min={shootDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
-                    aria-invalid={!!fieldErrors.shootEndDate}
-                  />
-                  <FieldHelp>ถ่ายวันเดียว = วันเดียวกับวันเริ่ม (เติมให้อัตโนมัติ)</FieldHelp>
-                  <FieldError message={fieldErrors.shootEndDate} />
+                  {/* v1.116 — single-day is the default; the end date only appears
+                      when the shoot spans days, so it's not a gate on every booking. */}
+                  <label className="flex items-center gap-2 cursor-pointer select-none py-1.5">
+                    <input
+                      type="checkbox"
+                      checked={multiDay}
+                      onChange={e => {
+                        const on = e.target.checked
+                        setMultiDay(on)
+                        if (!on) setShootEndDate(shootDate) // collapse back to single-day
+                      }}
+                      className="accent-brand-primary"
+                    />
+                    <span className="text-sm text-gray-700">ถ่ายหลายวัน / ข้ามคืน</span>
+                  </label>
+                  {multiDay && (
+                    <>
+                      <Label htmlFor="shootEndDate" required>Shoot End Date</Label>
+                      <input
+                        id="shootEndDate"
+                        type="date"
+                        className={`ops-input ${fieldErrors.shootEndDate ? 'ops-input-invalid' : ''}`}
+                        value={shootEndDate}
+                        onChange={e => setShootEndDate(e.target.value)}
+                        min={shootDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]}
+                        aria-invalid={!!fieldErrors.shootEndDate}
+                      />
+                      <FieldError message={fieldErrors.shootEndDate} />
+                    </>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="callTime" required>Call Time</Label>
@@ -1212,7 +1221,7 @@ export default function BookingWizard() {
                         <FieldError message={fieldErrors.producerName} />
                       </div>
                       <div>
-                        <Label htmlFor="producerPhone" required>Phone</Label>
+                        <Label htmlFor="producerPhone">Phone <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></Label>
                         <input
                           id="producerPhone"
                           type="tel"

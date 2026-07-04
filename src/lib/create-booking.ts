@@ -271,7 +271,6 @@ export async function createBookingFromPayload(
       director: director || null,
       directorEmail: directorEmail || null,
       coProducer: coProducer || null,
-      coProducerEmail: coProducerEmail || null,
       creative: creative || [],
       crewRequired: crewRequired || [],
       videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)),
