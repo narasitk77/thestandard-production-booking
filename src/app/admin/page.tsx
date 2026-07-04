@@ -70,6 +70,9 @@ export default function AdminPage() {
   // v1.105.3 — filter the queue by shoot month + sort by date (default earliest→latest).
   const [monthFilter, setMonthFilter] = useState('all') // 'all' | 'YYYY-MM'
   const [sortAsc, setSortAsc] = useState(true)
+  // v1.119 — sort field: by shoot date, or by REQUEST ORDER (createdAt = who
+  // booked first). Ops need "ใครจองมาก่อน" for fair first-come crew/gear calls.
+  const [sortBy, setSortBy] = useState<'shoot' | 'request'>('shoot')
   // v1.109 — unified ID search (Episode ID / Production ID / internal id).
   // `search` is the input box; `searchApplied` is what the query actually uses
   // (set on Enter / button) so we don't refetch on every keystroke.
@@ -107,7 +110,9 @@ export default function AdminPage() {
       list = list.filter(b => { const d = new Date(b.shootDate); return !isNaN(d.getTime()) && d >= start && d < end })
     }
     return [...list].sort((a, b) => {
-      const cmp = (a.shootDate || '').localeCompare(b.shootDate || '')
+      const cmp = sortBy === 'request'
+        ? (a.createdAt || '').localeCompare(b.createdAt || '')   // request order (createdAt ISO sorts lexically)
+        : (a.shootDate || '').localeCompare(b.shootDate || '')
       return sortAsc ? cmp : -cmp
     })
   })()
@@ -326,11 +331,21 @@ export default function AdminPage() {
               </button>
             ))}
           </div>
-          <button onClick={() => setSortAsc(s => !s)}
-            title="สลับการเรียงตามวันถ่าย"
-            className="ml-auto px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1">
-            {sortAsc ? '↑ วันน้อย→มาก' : '↓ วันมาก→น้อย'}
-          </button>
+          <div className="ml-auto flex items-center gap-1">
+            {/* v1.119 — sort field: วันถ่าย ↔ ลำดับที่จอง (createdAt) */}
+            <button onClick={() => setSortBy(s => s === 'shoot' ? 'request' : 'shoot')}
+              title="สลับ: เรียงตามวันถ่าย / เรียงตามลำดับที่จอง"
+              className="px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1">
+              {sortBy === 'shoot' ? '📅 วันถ่าย' : '🕐 ลำดับที่จอง'}
+            </button>
+            <button onClick={() => setSortAsc(s => !s)}
+              title="สลับทิศทางการเรียง"
+              className="px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1">
+              {sortBy === 'request'
+                ? (sortAsc ? '↑ จองก่อน→หลัง' : '↓ จองหลัง→ก่อน')
+                : (sortAsc ? '↑ วันน้อย→มาก' : '↓ วันมาก→น้อย')}
+            </button>
+          </div>
         </div>
       )}
 
@@ -358,7 +373,7 @@ export default function AdminPage() {
             lastMonth = m
             return (
             <Fragment key={b.id}>
-            {monthFilter === 'all' && showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
+            {sortBy === 'shoot' && monthFilter === 'all' && showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
                 <div className="flex-1 min-w-0 w-full">
@@ -379,6 +394,14 @@ export default function AdminPage() {
                     <span className="text-xs text-gray-400">
                       {formatDisplayDate(b.shootDate)} · {b.callTime}
                     </span>
+                    {/* v1.119 — request time (date + HH:MM) so "ใครจองมาก่อน" is
+                        visible at a glance; emphasised when sorting by request order. */}
+                    {b.createdAt && (
+                      <span className={`text-[11px] ${sortBy === 'request' ? 'text-[#673ab7] font-medium' : 'text-gray-400'}`}
+                        title="เวลาที่จองเข้ามา (createdAt)">
+                        · 📝 จอง {new Date(b.createdAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
                     {crewGaps[b.id] && (
                       <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-200 font-medium">
                         ⚠️ ขาด: {crewGaps[b.id].missingTh.join(', ')}
