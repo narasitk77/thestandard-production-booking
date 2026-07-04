@@ -4,6 +4,7 @@ import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
 import CardFootageActions from '@/app/_components/CardFootageActions'
+import MiniMonthCalendar from '@/app/_components/MiniMonthCalendar'
 import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
@@ -73,6 +74,10 @@ export default function AdminPage() {
   // v1.119 — sort field: by shoot date, or by REQUEST ORDER (createdAt = who
   // booked first). Ops need "ใครจองมาก่อน" for fair first-come crew/gear calls.
   const [sortBy, setSortBy] = useState<'shoot' | 'request'>('shoot')
+  // v1.120 — pick a single day off a mini calendar to filter the queue to that
+  // day (much faster than the วันนี้/สัปดาห์นี้ chips for browsing any date).
+  const [selectedDate, setSelectedDate] = useState<string | null>(null) // 'yyyy-MM-dd'
+  const [showCal, setShowCal] = useState(false)
   // v1.109 — unified ID search (Episode ID / Production ID / internal id).
   // `search` is the input box; `searchApplied` is what the query actually uses
   // (set on Enter / button) so we don't refetch on every keystroke.
@@ -90,6 +95,8 @@ export default function AdminPage() {
 
   // Months present in the current tab's bookings (ascending, e.g. Jul→Dec).
   const months = Array.from(new Set(bookings.map(b => (b.shootDate || '').slice(0, 7)).filter(Boolean))).sort()
+  // v1.120 — days (yyyy-MM-dd) that have a booking in this tab → dotted on the picker.
+  const markedDates = new Set(bookings.map(b => (b.shootDate || '').slice(0, 10)).filter(Boolean))
   const monthLabel = (ym: string) => {
     const d = new Date(ym + '-01')
     return isNaN(d.getTime()) ? ym : d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
@@ -99,6 +106,14 @@ export default function AdminPage() {
   const visibleBookings = (() => {
     let list = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
     if (crewIncompleteOnly) list = list.filter(b => crewGaps[b.id])
+    // v1.120 — a picked calendar day wins over the month/range filters.
+    if (selectedDate) {
+      list = list.filter(b => (b.shootDate || '').slice(0, 10) === selectedDate)
+      return [...list].sort((a, b) => {
+        const cmp = (a.callTime || '').localeCompare(b.callTime || '')
+        return cmp
+      })
+    }
     if (monthFilter !== 'all') list = list.filter(b => (b.shootDate || '').slice(0, 7) === monthFilter)
     // v1.111 — daily/weekly view: วันนี้ = today's calendar day; สัปดาห์นี้ = the
     // CURRENT week Mon–Sun including past days (so the Completed tab filters too).
@@ -309,13 +324,36 @@ export default function AdminPage() {
         </label>
       )}
 
+      {/* v1.120 — pick a day off a calendar to filter the queue (or a chip for the
+          common today/this-week views). */}
+      {!showingDeleted && (
+        <div className="mb-3">
+          <button onClick={() => setShowCal(s => !s)}
+            className={`px-2.5 py-1 text-xs rounded-full border inline-flex items-center gap-1 ${selectedDate ? 'bg-[#673ab7] text-white border-[#673ab7]' : 'border-gray-300 text-gray-600 hover:border-[#673ab7]'}`}>
+            📅 {selectedDate
+              ? new Date(selectedDate).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' })
+              : 'เลือกวันจากปฏิทิน'}
+            {selectedDate && <span onClick={e => { e.stopPropagation(); setSelectedDate(null) }} className="ml-1 hover:text-gray-200">✕</span>}
+          </button>
+          {showCal && (
+            <div className="mt-2">
+              <MiniMonthCalendar
+                markedDates={markedDates}
+                selected={selectedDate}
+                onSelect={d => { setSelectedDate(d); if (d) { setRange('all'); setMonthFilter('all') } }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* v1.105.3 — month filter tabs (ascending) + sort toggle */}
       {!showingDeleted && months.length > 0 && (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
           <div className="flex gap-1 flex-wrap">
             {([['all', 'ทั้งหมด'], ['day', 'วันนี้'], ['week', 'สัปดาห์นี้']] as const).map(([k, label]) => (
-              <button key={k} onClick={() => setRange(k)}
-                className={`px-2.5 py-1 text-xs rounded-full border ${range === k ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-900'}`}>
+              <button key={k} onClick={() => { setRange(k); setSelectedDate(null) }}
+                className={`px-2.5 py-1 text-xs rounded-full border ${!selectedDate && range === k ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-900'}`}>
                 {label}
               </button>
             ))}
@@ -373,7 +411,7 @@ export default function AdminPage() {
             lastMonth = m
             return (
             <Fragment key={b.id}>
-            {sortBy === 'shoot' && monthFilter === 'all' && showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
+            {!selectedDate && sortBy === 'shoot' && monthFilter === 'all' && showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
                 <div className="flex-1 min-w-0 w-full">

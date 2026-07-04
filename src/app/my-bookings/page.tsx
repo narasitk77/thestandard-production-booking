@@ -2,6 +2,7 @@
 
 import { bookingDisplayName } from '@/lib/display'
 import { useEffect, useMemo, useState } from 'react'
+import MiniMonthCalendar from '@/app/_components/MiniMonthCalendar'
 import Link from 'next/link'
 import { Loader2, Plus, Search, Inbox } from 'lucide-react'
 import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
@@ -51,6 +52,9 @@ export default function MyBookingsPage() {
   const [search, setSearch] = useState('')
   // v1.111 — โหมดดู: ทั้งหมด / วันนี้ / สัปดาห์นี้
   const [range, setRange] = useState<'all' | 'day' | 'week'>('all')
+  // v1.120 — pick a day off a mini calendar to filter to that date.
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [showCal, setShowCal] = useState(false)
   // v1.35.3 — whether to render Upload buttons next to CONFIRMED/COMPLETED rows
   const [canUpload, setCanUpload] = useState(false)
   // v1.63 — current user email, used to show the Edit button only to the owner
@@ -94,10 +98,25 @@ export default function MyBookingsPage() {
     } as Record<TabKey, number>
   }, [bookings])
 
+  // v1.120 — days with a booking → dot on the picker.
+  const markedDates = useMemo(() => new Set((bookings||[]).map(b => (b.shootDate||'').slice(0,10)).filter(Boolean)), [bookings])
+
   const filtered = useMemo(() => {
     const b = bookings || []
     const today0 = startOfToday()
     let list = b
+    // v1.120 — a picked calendar day wins over range + tab-status filtering, but
+    // still respects the current tab's status so "my Completed on 5 Jul" works.
+    if (selectedDate) {
+      list = list.filter(x => (x.shootDate || '').slice(0, 10) === selectedDate)
+      if (tab === 'upcoming') list = list.filter(x => x.status !== 'CANCELLED')
+      else list = list.filter(x => x.status === tab)
+      if (search.trim()) {
+        const q = search.trim().toLowerCase()
+        list = list.filter(x => [x.outlet.name, x.outlet.code, x.program.name, x.projectName || '', x.producer, x.locationName || '', ...x.episodes.map(e => `${e.episodeId} ${e.title}`)].join(' ').toLowerCase().includes(q))
+      }
+      return [...list].sort((a, b) => (a.callTime || '').localeCompare(b.callTime || ''))
+    }
     // v1.111 — daily/weekly view: วันนี้ = today's calendar day; สัปดาห์นี้ = the
     // CURRENT week Mon–Sun INCLUDING past days (a Completed job shot on Tuesday
     // must show under สัปดาห์นี้ — the first cut only looked forward, so the
@@ -140,7 +159,7 @@ export default function MyBookingsPage() {
       })
     }
     return list
-  }, [bookings, tab, search, range])
+  }, [bookings, tab, search, range, selectedDate])
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
@@ -181,11 +200,25 @@ export default function MyBookingsPage() {
         })}
       </div>
 
+      {/* v1.120 — pick a day off a calendar */}
+      <div className="mb-2">
+        <button onClick={() => setShowCal(s => !s)}
+          className={`text-xs px-3 py-1 rounded-full border inline-flex items-center gap-1 ${selectedDate ? 'bg-[#673ab7] text-white border-[#673ab7]' : 'bg-white text-gray-600 border-gray-300 hover:border-[#673ab7]'}`}>
+          📅 {selectedDate ? new Date(selectedDate).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' }) : 'เลือกวันจากปฏิทิน'}
+          {selectedDate && <span onClick={e => { e.stopPropagation(); setSelectedDate(null) }} className="ml-1 hover:text-gray-200">✕</span>}
+        </button>
+        {showCal && (
+          <div className="mt-2">
+            <MiniMonthCalendar markedDates={markedDates} selected={selectedDate} onSelect={d => { setSelectedDate(d); if (d) setRange('all') }} />
+          </div>
+        )}
+      </div>
+
       {/* v1.111 — daily/weekly view chips */}
       <div className="flex items-center gap-1 mb-2">
         {([['all', 'ทั้งหมด'], ['day', 'วันนี้'], ['week', 'สัปดาห์นี้']] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setRange(k)}
-            className={`text-xs px-3 py-1 rounded-full border ${range === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-500'}`}>
+          <button key={k} onClick={() => { setRange(k); setSelectedDate(null) }}
+            className={`text-xs px-3 py-1 rounded-full border ${!selectedDate && range === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-500'}`}>
             {label}
           </button>
         ))}
