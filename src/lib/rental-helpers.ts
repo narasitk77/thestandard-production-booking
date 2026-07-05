@@ -11,6 +11,10 @@ import { getOutlet } from '@/lib/data'
 export async function resolveOutletId(codeOrId?: unknown): Promise<string | null> {
   const v = cleanStr(codeOrId)
   if (!v) return null
+  // Already a row id? (an edit round-tripping the stored FK) — keep it as-is
+  // rather than silently nulling the link because it isn't a known code.
+  const byId = await prisma.outlet.findUnique({ where: { id: v }, select: { id: true } })
+  if (byId) return byId.id
   const o = getOutlet(v)
   if (!o) return null
   const db = await prisma.outlet.upsert({

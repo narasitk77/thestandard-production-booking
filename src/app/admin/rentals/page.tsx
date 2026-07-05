@@ -222,7 +222,12 @@ const emptyForm = (): Partial<Rental> => ({ paymentStatus: 'PENDING', status: 'A
 function RentalForm({ initial, vendors, onClose, onSaved }: {
   initial: Partial<Rental> | null; vendors: Vendor[]; onClose: () => void; onSaved: () => void
 }) {
-  const [f, setF] = useState<Partial<Rental>>(initial?.id ? { ...initial } : emptyForm())
+  // Editing: the stored outletId is a DB cuid but the select's options are
+  // outlet CODES — map it back to the code so the current outlet shows selected
+  // (and an untouched save round-trips the code, not an unknown id).
+  const [f, setF] = useState<Partial<Rental>>(initial?.id
+    ? { ...initial, outletId: initial.outlet?.code ?? initial.outletId }
+    : emptyForm())
   const [bookingCode, setBookingCode] = useState<string | null>(initial?.booking?.bookingCode ?? null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
