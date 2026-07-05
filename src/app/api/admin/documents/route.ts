@@ -76,6 +76,31 @@ async function resolveDocsFolder(ownerType: string, ownerId: string): Promise<st
     if (!r) throw new Error('ไม่พบรายการจัดซื้อ')
     return ensurePurchaseItemFolder(r.batch.month, r.item, ownerId)
   }
+  // Rentals nest by month → booking (เช่า/<YYYY-MM>/<bookingCode · job · id>/):
+  // a month's rental paperwork lives together, and every doc for one rental sits
+  // in its own folder. The folder id is resolved once and stored on the rental,
+  // so it never moves even if the booking link or rentalDate changes later, and
+  // the short id suffix keeps two rentals from ever sharing a folder.
+  if (ownerType === 'rental') {
+    const r = await prisma.rentalJob.findUnique({
+      where: { id: ownerId },
+      select: { jobName: true, quoteNo: true, rentalDate: true, createdAt: true, driveFolderId: true, booking: { select: { bookingCode: true, shootDate: true } } },
+    })
+    if (!r) throw new Error('ไม่พบงานเช่า')
+    if (r.driveFolderId) return r.driveFolderId
+    // Month in Asia/Bangkok (UTC+7): @db.Date sources sit at UTC midnight so +7h
+    // stays on the same day, while a createdAt timestamp gets its true local month.
+    const d = r.rentalDate || r.booking?.shootDate || r.createdAt
+    const bkk = new Date(d.getTime() + 7 * 60 * 60 * 1000)
+    const month = `${bkk.getUTCFullYear()}-${String(bkk.getUTCMonth() + 1).padStart(2, '0')}`
+    const base = r.booking?.bookingCode
+      ? [r.booking.bookingCode, r.jobName].filter(Boolean).join(' · ')
+      : (r.jobName || r.quoteNo || '')
+    const label = safeFolderName(`${base} · ${ownerId.slice(-4)}`.trim(), ownerId)
+    const folderId = await ensureFolderPath(root, [CATEGORY_FOLDER.rental, month, label])
+    await prisma.rentalJob.update({ where: { id: ownerId }, data: { driveFolderId: folderId } }).catch(() => {})
+    return folderId
+  }
   const label = await ownerFolderLabel(ownerType, ownerId)
   return ensureFolderPath(root, [CATEGORY_FOLDER[ownerType], label])
 }

@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { PaymentStatus, RentalStatus } from '@prisma/client'
+import { resolveOutletId } from '@/lib/rental-helpers'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,12 @@ export async function GET(request: NextRequest) {
   const rentals = await prisma.rentalJob.findMany({
     where,
     orderBy: [{ rentalDate: 'desc' }],
-    include: { vendor: { select: { id: true, name: true } }, outlet: { select: { code: true, name: true } }, documents: true },
+    include: {
+      vendor: { select: { id: true, name: true } },
+      outlet: { select: { code: true, name: true } },
+      booking: { select: { id: true, bookingCode: true, shootDate: true } },
+      documents: true,
+    },
   })
   return NextResponse.json({ rentals })
 }
@@ -55,7 +61,7 @@ export async function POST(request: NextRequest) {
         adType: cleanStr(b.adType),
         jobName: cleanStr(b.jobName),
         bookingId: cleanStr(b.bookingId),
-        outletId: cleanStr(b.outletId),
+        outletId: await resolveOutletId(b.outletId),
         vendorId: cleanStr(b.vendorId),
         rentalDate: dateOrNull(b.rentalDate),
         returnDueDate: dateOrNull(b.returnDueDate),

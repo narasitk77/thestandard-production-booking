@@ -684,6 +684,10 @@ model RentalJob {
   amount        Decimal?      @db.Decimal(12, 2)
   status        RentalStatus  @default(ACTIVE)
   remark        String?
+  // Resolved once on first document upload and reused, so a rental's Drive
+  // folder is stable even if its booking link or rentalDate later changes
+  // (mirrors Purchase.driveFolderId). Also keeps two rentals from colliding.
+  driveFolderId String?
 
   documents DocumentRef[]
   createdAt DateTime      @default(now())

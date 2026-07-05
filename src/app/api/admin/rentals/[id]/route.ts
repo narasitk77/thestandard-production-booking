@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
 import { PaymentStatus, RentalStatus } from '@prisma/client'
+import { resolveOutletId } from '@/lib/rental-helpers'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,7 +25,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if ('adType' in b) data.adType = cleanStr(b.adType)
     if ('jobName' in b) data.jobName = cleanStr(b.jobName)
     if ('bookingId' in b) data.bookingId = cleanStr(b.bookingId)
-    if ('outletId' in b) data.outletId = cleanStr(b.outletId)
+    if ('outletId' in b) data.outletId = await resolveOutletId(b.outletId)
     if ('vendorId' in b) data.vendorId = cleanStr(b.vendorId)
     if ('rentalDate' in b) data.rentalDate = dateOrNull(b.rentalDate)
     if ('returnDueDate' in b) data.returnDueDate = dateOrNull(b.returnDueDate)
