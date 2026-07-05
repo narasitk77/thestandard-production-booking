@@ -412,7 +412,7 @@ export default function RentalsPage() {
   // filters
   const [q, setQ] = useState('')
   const [fOutlet, setFOutlet] = useState('all')
-  const [fStatus, setFStatus] = useState('all')
+  const [fStatus, setFStatus] = useState('live') // 'live' = hide ARCHIVED (fresh view); archived stay recoverable behind the filter
   const [fPay, setFPay] = useState('all')
   const [onlyIncomplete, setOnlyIncomplete] = useState(false)
 
@@ -460,7 +460,8 @@ export default function RentalsPage() {
       if (r.rentalDate) { if (!monthKeyOf(r.rentalDate).startsWith(yr)) return false }
       else if (year !== THIS_YEAR) return false
       if (fOutlet !== 'all' && r.outlet?.code !== fOutlet) return false
-      if (fStatus !== 'all' && r.status !== fStatus) return false
+      if (fStatus === 'live') { if (r.status === 'ARCHIVED') return false }
+      else if (fStatus !== 'all' && r.status !== fStatus) return false
       if (fPay !== 'all' && r.paymentStatus !== fPay) return false
       if (onlyIncomplete && missingSlots(r).length === 0) return false
       if (needle) {
@@ -524,7 +525,7 @@ export default function RentalsPage() {
         </div>
         <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={selCls}>{YEARS.map((y) => <option key={y} value={y}>ปี {y}</option>)}</select>
         <select value={fOutlet} onChange={(e) => setFOutlet(e.target.value)} className={selCls}><option value="all">ทุก Outlet</option>{OUTLETS.map((o) => <option key={o.code} value={o.code}>{o.code}</option>)}</select>
-        <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={selCls}><option value="all">ทุกสถานะ</option>{RSTATUS.map((s) => <option key={s} value={s}>{RENTAL_STATUS[s]?.th || s}</option>)}</select>
+        <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={selCls}><option value="live">กำลังใช้ (ซ่อนที่เก็บ)</option><option value="all">ทั้งหมด (รวมที่เก็บ)</option>{RSTATUS.map((s) => <option key={s} value={s}>{RENTAL_STATUS[s]?.th || s}</option>)}</select>
         <select value={fPay} onChange={(e) => setFPay(e.target.value)} className={selCls}><option value="all">การจ่ายทั้งหมด</option>{PAY.map((s) => <option key={s} value={s}>{PAYMENT_STATUS[s]?.th || s}</option>)}</select>
         <button onClick={() => setOnlyIncomplete((v) => !v)} className={`text-sm rounded-md px-2.5 py-1.5 border ${onlyIncomplete ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-white border-gray-300 text-gray-600'}`}>เอกสารไม่ครบ</button>
         <button onClick={load} title="โหลดใหม่" className="p-2 text-gray-400 hover:text-gray-700"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
