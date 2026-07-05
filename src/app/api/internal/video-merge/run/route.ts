@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { runVideoMerge } from '@/lib/video-merge'
 import { recordHeartbeat } from '@/lib/heartbeat'
+import { internalSecretAllowed } from '@/lib/internal-auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // walking + moving footage across folders can take a while
@@ -12,21 +13,15 @@ export const maxDuration = 300 // walking + moving footage across folders can ta
  * mirroring the camera/EP subfolder tree. Auth: shared secret header
  * (x-video-merge-secret) or admin session — same pattern as sound-merge.
  *
+ * v1.123 — accept ANY configured secret (internalSecretAllowed), same fix as
+ * sound-merge: first-set-env-wins equality breaks whichever caller sends a
+ * lower-precedence (but equally trusted) secret.
+ *
  * GET /api/internal/video-merge/run[?dryRun=1]
  */
-function expectedSecret(): string | undefined {
-  return process.env.VIDEO_MERGE_SECRET?.trim()
-    || process.env.SOUND_MERGE_SECRET?.trim()
-    || process.env.NAS_MANIFEST_SECRET?.trim() // v1.113.4 — the NAS agent's shared secret may trigger merges (same trust domain: the admin Mac)
-    || process.env.NEXTAUTH_SECRET?.trim()
-    || process.env.AUTH_SECRET?.trim()
-}
-
 async function isAllowed(request: NextRequest): Promise<boolean> {
-  const secret = expectedSecret()
-  const headerSecret = request.headers.get('x-video-merge-secret')?.trim()
-  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim()
-  if (secret && (headerSecret === secret || bearer === secret)) return true
+  if (internalSecretAllowed(request, 'x-video-merge-secret',
+    ['VIDEO_MERGE_SECRET', 'SOUND_MERGE_SECRET', 'NAS_MANIFEST_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) return true
   const session = await getSession()
   return session?.role === 'ADMIN'
 }

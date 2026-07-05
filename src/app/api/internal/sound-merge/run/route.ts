@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { runSoundMerge } from '@/lib/sound-merge'
 import { recordHeartbeat } from '@/lib/heartbeat'
+import { internalSecretAllowed } from '@/lib/internal-auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // copying audio across folders can take a while
@@ -12,20 +13,16 @@ export const maxDuration = 120 // copying audio across folders can take a while
  * box AUDIO folder. Auth: shared secret header (x-sound-merge-secret) or admin
  * session — same pattern as /api/internal/footage/sync.
  *
+ * v1.123 — accept ANY configured secret (internalSecretAllowed): the old
+ * first-set-env-wins equality broke against the worker after v1.113.4 put
+ * NAS_MANIFEST_SECRET ahead of the NEXTAUTH_SECRET the worker sends → the
+ * hourly merge 401'd silently.
+ *
  * GET /api/internal/sound-merge/run[?dryRun=1]
  */
-function expectedSecret(): string | undefined {
-  return process.env.SOUND_MERGE_SECRET?.trim()
-    || process.env.NAS_MANIFEST_SECRET?.trim() // v1.113.4 — the NAS agent's shared secret may trigger merges (same trust domain: the admin Mac)
-    || process.env.NEXTAUTH_SECRET?.trim()
-    || process.env.AUTH_SECRET?.trim()
-}
-
 async function isAllowed(request: NextRequest): Promise<boolean> {
-  const secret = expectedSecret()
-  const headerSecret = request.headers.get('x-sound-merge-secret')?.trim()
-  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim()
-  if (secret && (headerSecret === secret || bearer === secret)) return true
+  if (internalSecretAllowed(request, 'x-sound-merge-secret',
+    ['SOUND_MERGE_SECRET', 'NAS_MANIFEST_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) return true
   const session = await getSession()
   return session?.role === 'ADMIN'
 }
