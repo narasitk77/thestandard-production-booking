@@ -527,7 +527,9 @@ export default function AdminPage() {
                   )}
                 </div>
 
-                <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto justify-end flex-wrap">
+                {/* items-start: CardFootageActions is two rows tall (button + "ส่งแล้ว N คน"
+                    note) — without it the default stretch inflates every sibling button. */}
+                <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto justify-end flex-wrap items-start">
                   {showingDeleted && (
                     <>
                       <UndeleteButton bookingId={b.id} onDone={fetch_} />
