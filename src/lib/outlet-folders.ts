@@ -342,8 +342,12 @@ export function soundStagingCategoryName(b: {
     const s = sanitizeNameSegment(raw || '')
     return s && !PRODUCTION_ID_IN_NAME_RE.test(s) ? s : null
   }
-  const project = ok(b.projectName)
-  if (project) return project
+  const isAgency = b.outletCode === 'AGN'
+  // Content Agency groups by PROJECT (a client project IS its "show"). Every
+  // other outlet groups by the actual show/program — projectName there is the
+  // episode title, so preferring it would split one show across title/casing
+  // variants (e.g. 'THE WORLD DIALOGUE' vs the program's 'The World Dialogue').
+  if (isAgency) { const p = ok(b.projectName); if (p) return p }
   const real = (b.episodes || []).map(e => e.program)
     .find(p => p && p.code.trim().length > 1 && p.code !== b.program.code)
   const realName = real ? ok(real.name) : null
@@ -352,6 +356,8 @@ export function soundStagingCategoryName(b: {
     const progName = ok(b.program.name)
     if (progName) return progName
   }
+  const project = ok(b.projectName) // last resort (e.g. AGN with no real show)
+  if (project) return project
   const outlet = OUTLETS.find(o => o.code === b.outletCode)
   return ok(outlet?.name) || ok(b.outletCode) || 'อื่นๆ'
 }
