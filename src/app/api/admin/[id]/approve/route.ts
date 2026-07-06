@@ -159,7 +159,8 @@ export async function POST(
           rootFolderId: root,
           bookingCode: updated.bookingCode,
           bookingFolderName: landingBookingFolderName({ bookingCode: updated.bookingCode, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
-          // v1.123 — staging is organized by show: _SOUND-STAGING/<รายการ>/<booking>/
+          // v1.125 — mirrors VIDEO 2026's outlet layer: _SOUND-STAGING/<NN · Outlet>/<รายการ>/<booking>/
+          outletFolderName: outletDriveFolderName(updated.outlet.code),
           categoryName: soundStagingCategoryName({ outletCode: updated.outlet.code, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
         })
         await rememberDriveLinks(updated.id, { staging: stagingFolderId })

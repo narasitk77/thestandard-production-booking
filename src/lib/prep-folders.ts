@@ -115,7 +115,8 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
           rootFolderId: root,
           bookingCode: b.bookingCode!,
           bookingFolderName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }),
-          // v1.123 — staging is organized by show: _SOUND-STAGING/<รายการ>/<booking>/
+          // v1.125 — mirrors VIDEO 2026's outlet layer: _SOUND-STAGING/<NN · Outlet>/<รายการ>/<booking>/
+          outletFolderName: outletDriveFolderName(b.outlet.code),
           categoryName: soundStagingCategoryName({ outletCode: b.outlet.code, projectName: b.projectName, program: b.program, episodes: b.episodes }),
         })
         await rememberDriveLinks(b.id, { staging: stagingFolderId })

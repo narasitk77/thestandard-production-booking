@@ -648,40 +648,78 @@ export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string;
  */
 export const SOUND_STAGING_DIR = '_SOUND-STAGING'
 
+export interface StagingBookingFolder { id: string; name: string; parentId: string; pathNames: string[] }
+export interface StagingTree { bookings: StagingBookingFolder[]; containerIds: string[] }
+
 /**
- * v1.123 — staging is organized by show category, one level deep. List every
- * booking folder across BOTH shapes (flat legacy children + nested under a
- * category), so matching keeps working during and after the reorganization.
- * (The booking-vs-category split is PRODUCTION_ID_IN_NAME_RE on the name.)
+ * v1.125 — staging nests up to two container layers deep
+ * (`_SOUND-STAGING/<NN · Outlet>/<รายการ>/<booking>/`). A single bounded BFS
+ * finds every booking folder regardless of depth — flat (pre-v1.123), one
+ * level (v1.123 category-only), or two levels (v1.125 outlet/category) — so
+ * matching keeps working during and after either reorganization. A folder is a
+ * booking iff its name matches PRODUCTION_ID_IN_NAME_RE; anything else is a
+ * container to descend into. `pathNames` is the container-name chain from the
+ * staging root down to the booking's immediate parent (empty when flat).
  */
-export async function listSoundStagingBookingFolders(stagingRootId: string): Promise<Array<{ id: string; name: string; parentId: string }>> {
-  const top = await listChildFolders(stagingRootId)
-  const out: Array<{ id: string; name: string; parentId: string }> = []
-  const categories: Array<{ id: string; name: string }> = []
-  for (const f of top) {
-    if (PRODUCTION_ID_IN_NAME_RE.test(f.name)) out.push({ ...f, parentId: stagingRootId })
-    else categories.push(f)
+export async function listSoundStagingTree(stagingRootId: string, maxDepth = 3): Promise<StagingTree> {
+  const bookings: StagingBookingFolder[] = []
+  const containerIds: string[] = []
+  let frontier: Array<{ id: string; depth: number; pathNames: string[] }> = [{ id: stagingRootId, depth: 0, pathNames: [] }]
+  while (frontier.length) {
+    const kidsPerNode = await Promise.all(frontier.map(f => listChildFolders(f.id)))
+    const next: typeof frontier = []
+    frontier.forEach((node, i) => {
+      for (const k of kidsPerNode[i]) {
+        if (PRODUCTION_ID_IN_NAME_RE.test(k.name)) {
+          bookings.push({ id: k.id, name: k.name, parentId: node.id, pathNames: node.pathNames })
+        } else if (node.depth + 1 < maxDepth) {
+          containerIds.push(k.id)
+          next.push({ id: k.id, depth: node.depth + 1, pathNames: [...node.pathNames, k.name] })
+        }
+      }
+    })
+    frontier = next
   }
-  const kidsPerCategory = await Promise.all(categories.map(c => listChildFolders(c.id)))
-  categories.forEach((c, i) => { for (const k of kidsPerCategory[i]) out.push({ ...k, parentId: c.id }) })
-  return out
+  return { bookings, containerIds }
 }
 
-/** Find one staging booking folder by Production ID across flat + category shapes. */
+/** Back-compat shape used by callers that only need the flat booking-folder list. */
+export async function listSoundStagingBookingFolders(stagingRootId: string): Promise<Array<{ id: string; name: string; parentId: string }>> {
+  return (await listSoundStagingTree(stagingRootId)).bookings
+}
+
+/** Find one staging booking folder by Production ID at any nesting depth. */
 export async function findSoundStagingFolderByCode(stagingRootId: string, bookingCode: string): Promise<string | null> {
   const all = await listSoundStagingBookingFolders(stagingRootId)
   return all.find(f => folderNameMatchesCode(f.name, bookingCode))?.id ?? null
 }
 
-export async function ensureSoundStagingFolder(input: { rootFolderId: string; bookingFolderName: string; bookingCode?: string; categoryName?: string; subject?: string }): Promise<{ stagingFolderId: string }> {
-  const layers = [SOUND_STAGING_DIR, ...(input.categoryName?.trim() ? [input.categoryName.trim()] : []), input.bookingFolderName]
+/** True iff a folder has zero children of ANY kind (files or subfolders). */
+export async function isFolderEmpty(folderId: string): Promise<boolean> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: 'files(id)', pageSize: 1,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+  })
+  return !(res.data.files && res.data.files.length > 0)
+}
+
+export async function ensureSoundStagingFolder(input: { rootFolderId: string; bookingFolderName: string; bookingCode?: string; outletFolderName?: string; categoryName?: string; subject?: string }): Promise<{ stagingFolderId: string }> {
+  const layers = [
+    SOUND_STAGING_DIR,
+    ...(input.outletFolderName?.trim() ? [input.outletFolderName.trim()] : []),
+    ...(input.categoryName?.trim() ? [input.categoryName.trim()] : []),
+    input.bookingFolderName,
+  ]
   if (!input.bookingCode) {
     const stagingFolderId = await ensureFolderPath(input.rootFolderId, layers)
     return { stagingFolderId }
   }
-  // v1.110 — reuse an existing staging folder matched by Production ID; v1.123 —
-  // the match spans flat AND category-nested shapes so a reorganized (or not-yet-
-  // reorganized) folder is never duplicated. New folders go under the category.
+  // v1.110 — reuse an existing staging folder matched by Production ID; the
+  // match spans every nesting shape (flat / category / outlet+category) so a
+  // reorganized (or not-yet-reorganized) folder is never duplicated. New
+  // folders go straight under outlet/category.
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
   const stagingRoot = await ensureChildFolder(drive, input.rootFolderId, SOUND_STAGING_DIR)
   const existing = (await listSoundStagingBookingFolders(stagingRoot)).find(f => folderNameMatchesCode(f.name, input.bookingCode!))
