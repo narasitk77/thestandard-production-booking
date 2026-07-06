@@ -1,6 +1,6 @@
 import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, bookingNeedsSound } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
-import { findEpisodeFolderUrls, findFoldersByCode, listFilesRecursive, findChildFolder, findChildFolderByCode, SOUND_STAGING_DIR, type DriveFile } from '@/lib/google-drive'
+import { findEpisodeFolderUrls, findFoldersByCode, listFilesRecursive, findChildFolder, findSoundStagingFolderByCode, SOUND_STAGING_DIR, type DriveFile } from '@/lib/google-drive'
 import { prisma } from '@/lib/db'
 // v1.114 — id-first: a stored box ID skips the whole name-resolution walk.
 import { getDriveLink } from '@/lib/drive-links'
@@ -202,7 +202,7 @@ export async function computeFootagePayload(booking: BookingForFootagePayload): 
     const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
     if (stagingRoot) {
       // match by Production ID (folder may be legacy "<code> · …" or "<show> · … (<code>)").
-      const id = await findChildFolderByCode(stagingRoot, booking.bookingCode)
+      const id = await findSoundStagingFolderByCode(stagingRoot, booking.bookingCode)
       if (id) soundStagingUrl = `https://drive.google.com/drive/folders/${id}`
     }
   }

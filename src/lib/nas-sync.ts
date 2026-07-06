@@ -17,7 +17,7 @@
  */
 import { prisma } from './db'
 import { sendEmail, isEmailConfigured } from './email'
-import { findFoldersByCode, listFilesRecursive, findChildFolder, SOUND_STAGING_DIR } from './google-drive'
+import { findFoldersByCode, listFilesRecursive, findChildFolder, listChildFolders, SOUND_STAGING_DIR, PRODUCTION_ID_IN_NAME_RE } from './google-drive'
 
 const IGNORE_RE = /^_SHOOT\b.*\.txt$/i
 
@@ -56,13 +56,22 @@ export function codeOf(name: string): string | null {
 export async function countDriveFilesByCode(code: string): Promise<{ files: number; bytes: number }> {
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   const stagingRoot = root ? await findChildFolder(root, SOUND_STAGING_DIR).catch(() => null) : null
+  // v1.123 — staging booking folders may sit under a show-category layer, so the
+  // exclusion set is the staging root PLUS its category subfolders.
+  const stagingContainers = new Set<string>()
+  if (stagingRoot) {
+    stagingContainers.add(stagingRoot)
+    for (const f of await listChildFolders(stagingRoot).catch(() => [] as Array<{ id: string; name: string }>)) {
+      if (!PRODUCTION_ID_IN_NAME_RE.test(f.name)) stagingContainers.add(f.id)
+    }
+  }
   const candidates = await findFoldersByCode(code)
   let files = 0, bytes = 0
   const seen = new Set<string>()
   for (const c of candidates) {
     if (seen.has(c.id)) continue
     seen.add(c.id)
-    if (stagingRoot && (c.parents || []).includes(stagingRoot)) continue
+    if ((c.parents || []).some(p => stagingContainers.has(p))) continue
     const raw = await listFilesRecursive(c.id, { maxFiles: 6000 })
     for (const f of raw) {
       if (IGNORE_RE.test(f.name)) continue

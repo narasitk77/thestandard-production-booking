@@ -14,7 +14,7 @@
 import { prisma } from './db'
 import {
   listChildFolders, findChildFolder, findProgramFolderId, renameDriveItem,
-  hasDriveCredentials, DRIVE_PHOTO_ROOT, SOUND_STAGING_DIR,
+  hasDriveCredentials, DRIVE_PHOTO_ROOT, SOUND_STAGING_DIR, listSoundStagingBookingFolders,
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName,
@@ -104,7 +104,9 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
     ]
     for (const fp of flatParents) {
       if (!fp.id) continue
-      for (const child of await listChildFolders(fp.id)) {
+      // v1.123 — sound staging is nested by show category; walk both shapes.
+      const children = fp.label === 'sound' ? await listSoundStagingBookingFolders(fp.id) : await listChildFolders(fp.id)
+      for (const child of children) {
         const m = fp.pool.find(x => folderNameMatchesCode(child.name, x.code))
         // v1.111 — landing AND sound-staging are crew-facing → display name;
         // photo keeps the box-style name.

@@ -25,6 +25,7 @@ import {
   findEpisodeFolderUrls,
   findChildFolder,
   findChildFolderByCode,
+  findSoundStagingFolderByCode,
   renameDriveItem,
   moveAndRenameFile,
   ensureProgramPath,
@@ -312,7 +313,7 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
       try {
         const newName = buildBookingFolderName(newBookingCode, jobName, newShowName)
         const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
-        const fid = stagingRoot ? await findChildFolderByCode(stagingRoot, oldCode) : null
+        const fid = stagingRoot ? await findSoundStagingFolderByCode(stagingRoot, oldCode) : null
         if (fid) {
           await renameDriveItem(fid, newName)
           effects.driveSoundFolder = 'renamed'

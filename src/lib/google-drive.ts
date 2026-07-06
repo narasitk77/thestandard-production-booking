@@ -18,7 +18,8 @@
 import { Readable } from 'stream'
 import { google, drive_v3 } from 'googleapis'
 import { getCalendarImpersonateSubject } from './google-calendar'
-import { folderNameMatchesCode } from './outlet-folders'
+import { folderNameMatchesCode, PRODUCTION_ID_IN_NAME_RE } from './outlet-folders'
+export { PRODUCTION_ID_IN_NAME_RE }
 
 // v1.36.0 — read path uses the SAME full `drive` scope as the write path.
 // Domain-Wide Delegation authorizes scopes EXACTLY, not hierarchically: the
@@ -647,15 +648,45 @@ export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string;
  */
 export const SOUND_STAGING_DIR = '_SOUND-STAGING'
 
-export async function ensureSoundStagingFolder(input: { rootFolderId: string; bookingFolderName: string; bookingCode?: string; subject?: string }): Promise<{ stagingFolderId: string }> {
+/**
+ * v1.123 — staging is organized by show category, one level deep. List every
+ * booking folder across BOTH shapes (flat legacy children + nested under a
+ * category), so matching keeps working during and after the reorganization.
+ * (The booking-vs-category split is PRODUCTION_ID_IN_NAME_RE on the name.)
+ */
+export async function listSoundStagingBookingFolders(stagingRootId: string): Promise<Array<{ id: string; name: string; parentId: string }>> {
+  const top = await listChildFolders(stagingRootId)
+  const out: Array<{ id: string; name: string; parentId: string }> = []
+  const categories: Array<{ id: string; name: string }> = []
+  for (const f of top) {
+    if (PRODUCTION_ID_IN_NAME_RE.test(f.name)) out.push({ ...f, parentId: stagingRootId })
+    else categories.push(f)
+  }
+  const kidsPerCategory = await Promise.all(categories.map(c => listChildFolders(c.id)))
+  categories.forEach((c, i) => { for (const k of kidsPerCategory[i]) out.push({ ...k, parentId: c.id }) })
+  return out
+}
+
+/** Find one staging booking folder by Production ID across flat + category shapes. */
+export async function findSoundStagingFolderByCode(stagingRootId: string, bookingCode: string): Promise<string | null> {
+  const all = await listSoundStagingBookingFolders(stagingRootId)
+  return all.find(f => folderNameMatchesCode(f.name, bookingCode))?.id ?? null
+}
+
+export async function ensureSoundStagingFolder(input: { rootFolderId: string; bookingFolderName: string; bookingCode?: string; categoryName?: string; subject?: string }): Promise<{ stagingFolderId: string }> {
+  const layers = [SOUND_STAGING_DIR, ...(input.categoryName?.trim() ? [input.categoryName.trim()] : []), input.bookingFolderName]
   if (!input.bookingCode) {
-    const stagingFolderId = await ensureFolderPath(input.rootFolderId, [SOUND_STAGING_DIR, input.bookingFolderName])
+    const stagingFolderId = await ensureFolderPath(input.rootFolderId, layers)
     return { stagingFolderId }
   }
-  // v1.110 — reuse an existing staging folder matched by Production ID (either shape).
+  // v1.110 — reuse an existing staging folder matched by Production ID; v1.123 —
+  // the match spans flat AND category-nested shapes so a reorganized (or not-yet-
+  // reorganized) folder is never duplicated. New folders go under the category.
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
   const stagingRoot = await ensureChildFolder(drive, input.rootFolderId, SOUND_STAGING_DIR)
-  const stagingFolderId = await ensureBookingFolder(drive, stagingRoot, input.bookingCode, input.bookingFolderName)
+  const existing = (await listSoundStagingBookingFolders(stagingRoot)).find(f => folderNameMatchesCode(f.name, input.bookingCode!))
+  if (existing) return { stagingFolderId: existing.id }
+  const stagingFolderId = await ensureFolderPath(input.rootFolderId, layers)
   return { stagingFolderId }
 }
 

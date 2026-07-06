@@ -93,6 +93,40 @@ export default function AdminPage() {
     }).catch(() => {})
   }, [])
 
+  // v1.124 — filters live in the URL so they survive opening a booking and
+  // coming Back (and a filtered view can be shared as a link). Read once on
+  // mount; write via history.replaceState (no navigation, no router churn).
+  // Params that equal their default are omitted so a plain /admin stays clean.
+  const [urlHydrated, setUrlHydrated] = useState(false)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    const st = p.get('st'); if (st) setFilter(st)
+    const rg = p.get('rg'); if (rg === 'day' || rg === 'week') setRange(rg)
+    const m = p.get('m'); if (m) setMonthFilter(m)
+    const d = p.get('d'); if (d) { setSelectedDate(d); setShowCal(true) }
+    const sb = p.get('sb'); if (sb === 'request') setSortBy('request')
+    if (p.get('sa') === '0') setSortAsc(false)
+    if (p.get('snd') === '1') setSoundOnly(true)
+    if (p.get('gap') === '1') setCrewIncompleteOnly(true)
+    const q = p.get('q'); if (q) { setSearch(q); setSearchApplied(q) }
+    setUrlHydrated(true)
+  }, [])
+  useEffect(() => {
+    if (!urlHydrated) return
+    const p = new URLSearchParams()
+    if (filter !== 'REQUESTED') p.set('st', filter)
+    if (range !== 'all') p.set('rg', range)
+    if (monthFilter !== 'all') p.set('m', monthFilter)
+    if (selectedDate) p.set('d', selectedDate)
+    if (sortBy !== 'shoot') p.set('sb', sortBy)
+    if (!sortAsc) p.set('sa', '0')
+    if (soundOnly) p.set('snd', '1')
+    if (crewIncompleteOnly) p.set('gap', '1')
+    if (searchApplied) p.set('q', searchApplied)
+    const qs = p.toString()
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''))
+  }, [urlHydrated, filter, range, monthFilter, selectedDate, sortBy, sortAsc, soundOnly, crewIncompleteOnly, searchApplied])
+
   // Months present in the current tab's bookings (ascending, e.g. Jul→Dec).
   const months = Array.from(new Set(bookings.map(b => (b.shootDate || '').slice(0, 7)).filter(Boolean))).sort()
   // v1.120 — days (yyyy-MM-dd) that have a booking in this tab → dotted on the picker.

@@ -19,6 +19,7 @@ import {
   hasOutletFolderMapping,
   isPhotoAlbumBooking,
   bookingNeedsSound,
+  soundStagingCategoryName,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 // v1.114 — id-first Drive linkage.
@@ -70,7 +71,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       id: true, bookingCode: true, cameraCount: true, micCount: true,
       projectId: true, projectName: true, category: true, crewRequired: true,
       outlet: { select: { code: true } },
-      program: { select: { name: true } },
+      program: { select: { code: true, name: true } },
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
     },
   })
@@ -110,7 +111,13 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       // v1.111 — staging is crew-facing (sound team drops files there): use the
       // display-format name, same as the landing folder. Lookups are by code.
       try {
-        const { stagingFolderId } = await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: b.bookingCode!, bookingFolderName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }) })
+        const { stagingFolderId } = await ensureSoundStagingFolder({
+          rootFolderId: root,
+          bookingCode: b.bookingCode!,
+          bookingFolderName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }),
+          // v1.123 — staging is organized by show: _SOUND-STAGING/<รายการ>/<booking>/
+          categoryName: soundStagingCategoryName({ outletCode: b.outlet.code, projectName: b.projectName, program: b.program, episodes: b.episodes }),
+        })
         await rememberDriveLinks(b.id, { staging: stagingFolderId })
       }
       catch (e: any) { console.error('[prep] sound staging failed (non-fatal):', b.bookingCode, e?.message || e) }

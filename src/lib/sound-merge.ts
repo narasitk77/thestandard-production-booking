@@ -13,8 +13,8 @@
  */
 import { prisma } from '@/lib/db'
 import {
-  findChildFolder, listChildFolders, copyFileToFolder, listFilesRecursive, findEpisodeFolderUrls,
-  ensureFolderPath, hasDriveCredentials, SOUND_STAGING_DIR,
+  findChildFolder, copyFileToFolder, listFilesRecursive, findEpisodeFolderUrls,
+  ensureFolderPath, hasDriveCredentials, SOUND_STAGING_DIR, listSoundStagingBookingFolders,
 } from '@/lib/google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode, bookingNeedsSound,
@@ -46,10 +46,10 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
   // The staging tree only exists once a Sound booking has been approved. No tree → nothing to do.
   const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
   if (!stagingRoot) return { skipped: true, reason: 'no _SOUND-STAGING tree yet', ...base }
-  // List the staging folders ONCE (one Drive call) and match each booking to its
-  // folder by the IMMUTABLE Production-ID prefix — not the full name, which embeds
-  // the (editable) job/episode title and would drift after a post-approval rename.
-  const stagingChildren = await listChildFolders(stagingRoot)
+  // List the staging folders ONCE and match each booking by the IMMUTABLE
+  // Production-ID prefix — not the full name, which embeds the (editable) job
+  // title. v1.123: spans flat + show-category nested shapes.
+  const stagingChildren = await listSoundStagingBookingFolders(stagingRoot)
 
   // Bound to recent shoots: the self-heal (re-copy after a box re-overwrite) only
   // matters while a shoot is actively being uploaded, so old jobs needn't be
@@ -183,7 +183,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   if (!stagingId) {
     const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
     if (!stagingRoot) return { skipped: true, reason: 'ยังไม่มี _SOUND-STAGING', ...zero }
-    const stagingChildren = await listChildFolders(stagingRoot)
+    const stagingChildren = await listSoundStagingBookingFolders(stagingRoot)
     stagingId = stagingChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
   }
   if (!stagingId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์เสียงใน staging', ...zero }

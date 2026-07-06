@@ -7,7 +7,7 @@ import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
 import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, landingBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, landingBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound, soundStagingCategoryName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 // v1.114 — id-first Drive linkage: remember created folder IDs on the booking.
@@ -155,7 +155,13 @@ export async function POST(
       if (!root) return
       try {
         const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
-        const { stagingFolderId } = await ensureSoundStagingFolder({ rootFolderId: root, bookingCode: updated.bookingCode, bookingFolderName: landingBookingFolderName({ bookingCode: updated.bookingCode, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }) })
+        const { stagingFolderId } = await ensureSoundStagingFolder({
+          rootFolderId: root,
+          bookingCode: updated.bookingCode,
+          bookingFolderName: landingBookingFolderName({ bookingCode: updated.bookingCode, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
+          // v1.123 — staging is organized by show: _SOUND-STAGING/<รายการ>/<booking>/
+          categoryName: soundStagingCategoryName({ outletCode: updated.outlet.code, projectName: updated.projectName, program: updated.program, episodes: updated.episodes }),
+        })
         await rememberDriveLinks(updated.id, { staging: stagingFolderId })
       } catch (e: any) {
         console.error('[approve] sound staging pre-create failed (non-fatal):', e?.message || e)

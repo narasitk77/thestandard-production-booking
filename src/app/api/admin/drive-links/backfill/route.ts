@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/session'
 import { mergeDriveLinks } from '@/lib/drive-links'
 import {
   findEpisodeFolderUrls, listChildFolders, findChildFolder, hasDriveCredentials, SOUND_STAGING_DIR,
+  listSoundStagingBookingFolders,
 } from '@/lib/google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName, legacyBookingFolderName,
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
     // Landing + staging roots listed ONCE for the whole run.
     const landingKids = await listChildFolders(PRODUCTION_TEAM_ROOT)
     const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR).catch(() => null)
-    const stagingKids = stagingRoot ? await listChildFolders(stagingRoot) : []
+    const stagingKids = stagingRoot ? await listSoundStagingBookingFolders(stagingRoot) : []
 
     const results: Array<{ code: string | null; links?: Record<string, string>; note?: string }> = []
     let stored = 0

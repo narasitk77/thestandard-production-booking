@@ -313,6 +313,50 @@ export function bookingNeedsSound(crewRequired?: string[] | null): boolean {
 }
 
 /**
+ * A folder name that embeds a Production ID (POP-7TG-260706-01, EVT-260723-01,
+ * AGN-260706-LOC-01, and the legacy kept-collision NWS-260701-L-01 shape — the
+ * optional segments are {1,4} chars exactly so single-letter [TYPE] codes match).
+ * Staging children that DON'T match are show-category folders.
+ */
+export const PRODUCTION_ID_IN_NAME_RE = /[A-Z]{2,4}(?:-[A-Z0-9]{1,4})?-\d{6}(?:-[A-Z0-9]{1,4})?-\d{2}/
+
+/**
+ * v1.123 — the show-category layer inside _SOUND-STAGING
+ * (`_SOUND-STAGING/<หมวดรายการ>/<booking>/`). Prefers a REAL show:
+ *   1. the project name (Content Agency / client jobs),
+ *   2. a per-episode show whose code is a real program (multi-char, ≠ booking-level),
+ *   3. the booking-level program when it's a real show,
+ *   4. the outlet display name — so a universal Episode-Type booking (program 'L'
+ *      etc.) files under "News"/"Event" instead of a "Long-form · …" pseudo-show.
+ * Every candidate is sanitized and must NOT itself look like a Production ID —
+ * a category that matches the ID regex would be classified as a booking folder
+ * by the staging lister and hide everything inside it.
+ */
+export function soundStagingCategoryName(b: {
+  outletCode: string
+  projectName?: string | null
+  program: { code: string; name: string }
+  episodes?: Array<{ program?: { code: string; name: string } | null }> | null
+}): string {
+  const ok = (raw?: string | null): string | null => {
+    const s = sanitizeNameSegment(raw || '')
+    return s && !PRODUCTION_ID_IN_NAME_RE.test(s) ? s : null
+  }
+  const project = ok(b.projectName)
+  if (project) return project
+  const real = (b.episodes || []).map(e => e.program)
+    .find(p => p && p.code.trim().length > 1 && p.code !== b.program.code)
+  const realName = real ? ok(real.name) : null
+  if (realName) return realName
+  if (b.program.code.trim().length > 1) {
+    const progName = ok(b.program.name)
+    if (progName) return progName
+  }
+  const outlet = OUTLETS.find(o => o.code === b.outletCode)
+  return ok(outlet?.name) || ok(b.outletCode) || 'อื่นๆ'
+}
+
+/**
  * v1.94 — the two folder layers between `<NN · Outlet>` and the EP folders.
  * They differ by outlet kind:
  *   Content Agency (AGN): footage is organised by category → PROJECT. The
