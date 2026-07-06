@@ -649,7 +649,8 @@ export async function ensurePhotoAlbumFolder(input: { bookingFolderName: string;
 export const SOUND_STAGING_DIR = '_SOUND-STAGING'
 
 export interface StagingBookingFolder { id: string; name: string; parentId: string; pathNames: string[] }
-export interface StagingTree { bookings: StagingBookingFolder[]; containerIds: string[] }
+export interface StagingContainer { id: string; name: string; parentId: string; depth: number }
+export interface StagingTree { bookings: StagingBookingFolder[]; containers: StagingContainer[]; containerIds: string[] }
 
 /**
  * v1.125 — staging nests up to two container layers deep
@@ -660,10 +661,16 @@ export interface StagingTree { bookings: StagingBookingFolder[]; containerIds: s
  * booking iff its name matches PRODUCTION_ID_IN_NAME_RE; anything else is a
  * container to descend into. `pathNames` is the container-name chain from the
  * staging root down to the booking's immediate parent (empty when flat).
+ * `containers` carries full detail (name/parent/depth) so a caller can resolve
+ * an existing container by a NORMALIZED name match instead of Drive's
+ * exact-string `ensureChildFolder` — a case/whitespace drift between a freshly
+ * computed target name and what's already live on Drive must reuse the
+ * existing folder, never silently fork a duplicate that empties (and gets
+ * hard-deleted) the real one.
  */
 export async function listSoundStagingTree(stagingRootId: string, maxDepth = 3): Promise<StagingTree> {
   const bookings: StagingBookingFolder[] = []
-  const containerIds: string[] = []
+  const containers: StagingContainer[] = []
   let frontier: Array<{ id: string; depth: number; pathNames: string[] }> = [{ id: stagingRootId, depth: 0, pathNames: [] }]
   while (frontier.length) {
     const kidsPerNode = await Promise.all(frontier.map(f => listChildFolders(f.id)))
@@ -673,14 +680,14 @@ export async function listSoundStagingTree(stagingRootId: string, maxDepth = 3):
         if (PRODUCTION_ID_IN_NAME_RE.test(k.name)) {
           bookings.push({ id: k.id, name: k.name, parentId: node.id, pathNames: node.pathNames })
         } else if (node.depth + 1 < maxDepth) {
-          containerIds.push(k.id)
+          containers.push({ id: k.id, name: k.name, parentId: node.id, depth: node.depth + 1 })
           next.push({ id: k.id, depth: node.depth + 1, pathNames: [...node.pathNames, k.name] })
         }
       }
     })
     frontier = next
   }
-  return { bookings, containerIds }
+  return { bookings, containers, containerIds: containers.map(c => c.id) }
 }
 
 /** Back-compat shape used by callers that only need the flat booking-folder list. */
