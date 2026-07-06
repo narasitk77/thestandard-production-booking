@@ -155,6 +155,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // (no top-level error banner — per-queue-item errors render inline below)
   const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
   const [history, setHistory] = useState<UploadItem[]>([])
+  // v1.126 — the history table used to render every row ("ยาวเป็นพรืด" on a
+  // 100-file shoot). Collapsed to the first rows + an expand toggle.
+  const HISTORY_PREVIEW = 20
+  const [showAllHistory, setShowAllHistory] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   // v1.82 — per-camera Drive folder links for cameras with completed uploads.
   const [folders, setFolders] = useState<Array<{ camera: string; count: number; folderUrl: string | null }>>([])
@@ -754,7 +758,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       <div className="gf-card p-4">
         <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <div className="text-sm font-medium text-gray-700">
-            ไฟล์ที่ upload แล้ว ({history.length})
+            ไฟล์ที่ upload แล้ว{' '}
+            <span className="tabular-nums">
+              ({!showAllHistory && history.length > HISTORY_PREVIEW ? `${HISTORY_PREVIEW}/${history.length}` : history.length})
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {/* v1.111 — per-booking consolidate: MOVE this job's NAS footage into
@@ -790,7 +797,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {history.map(u => (
+                {(showAllHistory ? history : history.slice(0, HISTORY_PREVIEW)).map(u => (
                   <tr key={u.id}>
                     <td className="py-1.5 pr-2 font-mono text-gray-800 truncate max-w-[280px]">{u.fileName}</td>
                     <td className="py-1.5 pr-2 text-gray-600">{u.camera}</td>
@@ -809,6 +816,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
                 ))}
               </tbody>
             </table>
+            {history.length > HISTORY_PREVIEW && (
+              <button onClick={() => setShowAllHistory(v => !v)}
+                className="mt-2 w-full text-xs text-[#673ab7] hover:bg-purple-50 border border-purple-100 rounded py-1.5">
+                {showAllHistory ? '▲ ย่อรายการ' : `▼ แสดงทั้งหมด ${history.length} ไฟล์`}
+              </button>
+            )}
           </div>
         )}
       </div>
