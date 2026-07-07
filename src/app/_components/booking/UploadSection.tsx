@@ -239,7 +239,9 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // every 5s until it lands, then render the same summary as before.
   const renderMergeResult = (res: any) => {
     const v = res?.video || {}, s = res?.sound || {}
-    const vTxt = v.skipped ? `ข้าม (${v.reason || ''})` : `ย้าย ${v.moved ?? 0}/${v.seen ?? 0}${v.err ? ` · error ${v.err}` : ''}`
+    // v1.127 — fast path relocates whole subfolders in one call (their files are
+    // never listed), so report files + folders instead of the old moved/seen pair.
+    const vTxt = v.skipped ? `ข้าม (${v.reason || ''})` : `ย้าย ${v.moved ?? 0} ไฟล์${(v.movedFolders ?? 0) > 0 ? ` + ${v.movedFolders} โฟลเดอร์` : ''}${v.err ? ` · error ${v.err}` : ''}`
     const sTxt = s.skipped ? `ข้าม (${s.reason || ''})` : `รวม ${s.copied ?? 0}/${s.staged ?? 0}${s.err ? ` · error ${s.err}` : ''}`
     setScanMsg(`วิดีโอ: ${vTxt} · เสียง: ${sTxt}`)
   }

@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.127.0] — 2026-07-07
+
+### Changed — video-merge ลีนขึ้นมาก: ย้ายทั้งโฟลเดอร์ + auto-run เมื่อ NAS sync เขียว
+- **Fast path ย้ายทั้งโฟลเดอร์ (1 API call ต่อ subtree)**: โฟลเดอร์ย่อยใน landing (EP/กล้อง) ที่ฝั่งกล่องยังไม่มีชื่อซ้ำ — หรือมีแต่เป็น skeleton เปล่าจาก prep (ระบบ trash ตัวเปล่าแล้วเอาของจริงเข้าแทน) — ถูกย้ายทั้งก้อนด้วย `files.update` ครั้งเดียว แทนการย้ายทีละไฟล์ (งาน 300 ไฟล์: ~316 calls → ~10 calls). ทดสอบจริงข้าม Shared Drive (Production Team → Video 2026) ผ่านแล้ว; ถ้า Google ปฏิเสธเมื่อไหร่ fallback กลับ per-file mirror เดิมอัตโนมัติ (dedup ชื่อ+ขนาดยังทำงานใน path นั้น).
+- **เก็บกวาด landing shell**: หลัง merge ที่ย้ายของจริงสำเร็จ (ไม่มี error) โฟลเดอร์ landing ที่เหลือแต่ `_SHOOT*.txt` กับโฟลเดอร์เปล่าจะถูก **trash** (กู้คืนได้ ~30 วัน) — เลิกสะสมโครงเปล่าใน Production Team. gate ด้วย "ต้องมีของย้ายในรอบนั้น" กันไปกิน skeleton ที่ prep เพิ่งสร้างรอ NAS.
+- **worker ใหม่ `video-merge`** (supervised ใน start.sh, ON by default, heartbeat-monitored): ตั้ง `NAS_DSM_URL/USER/PASS` → poll สถานะ Synology Cloud Sync (SYNO.CloudSync) แล้วสั่ง merge อัตโนมัติทันทีที่ sync เปลี่ยนเป็นเขียว (uptodate) + แจ้งผลเข้า Discord (`?notify=1`, เงียบเมื่อไม่มีอะไรย้าย); ไม่ตั้ง → รันตาม interval รายชั่วโมงแบบ sound-merge. เดิม sweep วิดีโอทั้งระบบรันเฉพาะตอนกดปุ่ม admin เท่านั้น.
+- ผล merge รายงาน `movedFolders` เพิ่ม (UI ทั้ง 3 จุดอัปเดตเป็น "ย้าย X ไฟล์ + Y โฟลเดอร์").
+- baseline: tsc 0 · 217 tests pass · live E2E บน Drive จริง 10/10 assertions (fast-path, swap skeleton, per-file fallback, shell cleanup).
+
+---
+
 ## [1.108.1] — 2026-06-30
 
 ### Fixed — QA sweep (20-agent audit): back-nav / redirect / feature-gate correctness

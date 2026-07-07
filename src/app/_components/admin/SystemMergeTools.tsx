@@ -50,7 +50,7 @@ export default function SystemMergeTools() {
       const d = await r.json().catch(() => ({}))
       if (!r.ok) setMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`)
       else if (d.skipped) setMsg(`รวมไฟล์ยังไม่ทำงาน: ${d.reason || 'ตั้งค่ายังไม่ครบ'}`)
-      else setMsg(`รวมไฟล์วิดีโอ: ${d.bookings ?? 0} งาน · เจอ ${d.landed ?? 0} ไฟล์ · ย้ายเข้ากล่อง ${d.moved ?? 0} · error ${d.errors ?? 0}`)
+      else setMsg(`รวมไฟล์วิดีโอ: ${d.bookings ?? 0} งาน · ย้ายเข้ากล่อง ${d.moved ?? 0} ไฟล์ + ${d.movedFolders ?? 0} โฟลเดอร์ · error ${d.errors ?? 0}`)
     } catch (e: any) {
       setMsg(e?.message || 'รวมไฟล์ไม่สำเร็จ')
     } finally { setMergingVideo(false) }

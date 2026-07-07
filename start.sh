@@ -367,5 +367,18 @@ echo "==> Starting sound-merge worker (supervised)..."
   done
 ) &
 
+# v1.127 — video-merge worker. ON BY DEFAULT (idempotent MOVE; re-runs only handle
+# the remainder). With NAS_DSM_URL/USER/PASS set it fires the merge the moment the
+# NAS Cloud Sync turns green (uptodate); without them it falls back to a plain
+# hourly interval. Set VIDEO_MERGE_WORKER_ENABLED=0 to disable.
+echo "==> Starting video-merge worker (supervised)..."
+(
+  while true; do
+    node scripts/video-merge-worker.js
+    echo "[video-merge] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start

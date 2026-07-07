@@ -30,6 +30,12 @@ export function workerSpecs(): WorkerSpec[] {
     // v1.108 — sound-merge is ON by default (off only when explicitly disabled).
     { key: 'sound-merge', label: 'Sound merge', enabled: !['0', 'false', 'no'].includes(String(process.env.SOUND_MERGE_WORKER_ENABLED || '').toLowerCase()),
       intervalMs: posInt(process.env.SOUND_MERGE_INTERVAL_MS, HOUR) },
+    // v1.127 — video-merge is ON by default. Expected cadence = the worst case of
+    // both worker modes: gated mode is bounded by the fallback re-run (default 6h),
+    // plain mode by the hourly interval — so a stale heartbeat also catches a
+    // wedged NAS gate (DSM unreachable → no runs at all).
+    { key: 'video-merge', label: 'Video merge', enabled: !['0', 'false', 'no'].includes(String(process.env.VIDEO_MERGE_WORKER_ENABLED || '').toLowerCase()),
+      intervalMs: posInt(process.env.VIDEO_MERGE_FALLBACK_MS, 6 * HOUR) },
     { key: 'backup', label: 'DB backup', enabled: enabled(process.env.BACKUP_WORKER_ENABLED),
       intervalMs: posInt(process.env.BACKUP_INTERVAL_MS, 24 * HOUR) },
   ]

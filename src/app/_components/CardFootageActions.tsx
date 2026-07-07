@@ -37,7 +37,7 @@ export default function CardFootageActions({
           if (job.error) { setMsg(`❌ ${job.error}`); return }
           const v = job.result?.video || {}, s = job.result?.sound || {}
           const parts: string[] = []
-          if (!v.skipped) parts.push(`วิดีโอ ${v.moved ?? 0}/${v.seen ?? 0}`)
+          if (!v.skipped) parts.push(`วิดีโอ ${v.moved ?? 0} ไฟล์${(v.movedFolders ?? 0) > 0 ? ` +${v.movedFolders} โฟลเดอร์` : ''}`)
           if (!s.skipped && (s.staged ?? 0) > 0) parts.push(`เสียง ${s.copied ?? 0}/${s.staged ?? 0}`)
           setMsg(`✓ ${parts.join(' · ') || 'ไม่มีไฟล์ให้ย้าย'}`)
           onChanged?.()

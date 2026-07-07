@@ -16,11 +16,20 @@
  * - v1.112 — AGN merges into the per-booking layer INSIDE its shared project box
  *   ("<job> (<code>)"), created on demand; no more misplacement, no more skip.
  * - Bounded to recent shoots (45 days) to keep per-run Drive calls bounded.
+ * - v1.127 — FAST PATH: a landing subfolder whose box twin is absent (or is an
+ *   empty prep skeleton, which gets trashed and swapped out) is relocated as a
+ *   WHOLE folder — one files.update for the entire subtree instead of one per
+ *   file. Confirmed working across our two Shared Drives by a live test
+ *   (2026-07-07), even though Google's docs still say folder moves across
+ *   shared drives are unsupported — so every folder move falls back to the
+ *   per-file mirror on any error. After a clean move, the emptied landing
+ *   shell (only _SHOOT stubs / empty folders left) is trashed (recoverable).
  */
 import { prisma } from './db'
 import {
   findChildFolder, listChildFolders, listFilesInFolder, moveFileToFolder,
   findEpisodeFolderUrls, ensureFolderPath, hasDriveCredentials,
+  isFolderEmpty, trashDriveItem,
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode,
@@ -40,14 +49,15 @@ export interface VideoMergeResult {
   skipped: boolean
   reason?: string
   dryRun: boolean
-  bookings: number   // bookings considered
-  landed: number     // footage files seen in landing folders
-  moved: number      // files moved into a box (or would-move in dryRun)
+  bookings: number      // bookings considered
+  landed: number        // footage files seen in landing folders (fast-path folders are NOT listed, so not counted here)
+  moved: number         // files moved into a box (or would-move in dryRun)
+  movedFolders: number  // v1.127 — whole subfolders relocated in one call (contents uncounted)
   errors: number
-  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; dup?: number; err?: number; skipped?: string }>
+  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; landingCleaned?: boolean; skipped?: string }>
 }
 
-type Stats = { seen: number; moved: number; dup: number; err: number }
+type Stats = { seen: number; moved: number; movedFolders: number; dup: number; err: number }
 
 /**
  * Recursively mirror-MOVE files from a landing subtree into the matching box
@@ -68,17 +78,66 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
       catch (e: any) { stats.err++; console.error('[video-merge] move failed:', code, f.name, e?.message || e) }
     }
   }
-  // Recurse into subfolders, mirroring each into the box (camera / EP layers).
+  // Subfolders (camera / EP layers). v1.127 fast path: when the box has no
+  // same-name twin — or only an EMPTY prep-skeleton twin, which we trash first
+  // so the incoming folder takes its place — relocate the WHOLE subtree in one
+  // files.update. Per-file dedup is vacuous in both cases (dest has no files),
+  // so semantics match the old mirror. Any refusal (e.g. Google re-blocking
+  // cross-drive folder moves) falls back to the per-file mirror unchanged.
   const subs = await listChildFolders(srcId)
   for (const s of subs) {
     let destSub: string | null = destId ? await findChildFolder(destId, s.name) : null
-    if (!destSub && destId && !dryRun) destSub = await ensureFolderPath(destId, [s.name])
+    if (destId && !dryRun) {
+      if (destSub && await isFolderEmpty(destSub)) {
+        // trash-BEFORE-move: if the trash fails we still have the twin and just
+        // mirror into it; move-before-trash could leave two same-name folders.
+        try { await trashDriveItem(destSub); destSub = null } catch { /* keep twin, mirror into it */ }
+      }
+      if (!destSub) {
+        try { await moveFileToFolder(s.id, destId, srcId); stats.movedFolders++; continue }
+        catch (e: any) { console.warn('[video-merge] folder move → per-file fallback:', code, s.name, e?.message || e) }
+        destSub = await ensureFolderPath(destId, [s.name])
+      }
+    }
     await mirrorMove(s.id, destSub, code, stats, dryRun)
   }
 }
 
+/**
+ * v1.127 — true when the landing tree holds nothing but _SHOOT stubs and empty
+ * folders (i.e. everything real has moved to the box). Depth-capped; anything
+ * unexpected keeps the folder.
+ */
+async function isLandingShell(folderId: string, depth = 0): Promise<boolean> {
+  if (depth > 4) return false
+  const files = await listFilesInFolder(folderId)
+  if (files.some(f => !isShootInfo(f.name))) return false
+  for (const s of await listChildFolders(folderId)) {
+    if (!(await isLandingShell(s.id, depth + 1))) return false
+  }
+  return true
+}
+
+/**
+ * Trash the emptied landing shell after a merge that actually moved something
+ * (the "moved something" gate keeps us from eating a freshly prepped skeleton
+ * that's still waiting for the NAS dump). Trash — recoverable ~30 days.
+ * Exported for the live e2e check alongside mirrorMove.
+ */
+export async function cleanupLandingShell(flatId: string, stats: Stats): Promise<boolean> {
+  if (stats.err > 0 || stats.moved + stats.movedFolders === 0) return false
+  try {
+    if (!(await isLandingShell(flatId))) return false
+    await trashDriveItem(flatId)
+    return true
+  } catch (e: any) {
+    console.warn('[video-merge] landing cleanup skipped:', e?.message || e)
+    return false
+  }
+}
+
 export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
-  const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, errors: 0, results: [] as VideoMergeResult['results'] }
+  const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, results: [] as VideoMergeResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', ...base }
 
@@ -157,10 +216,11 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // self-heal: remember what we just resolved so next time skips the walk.
       if (!opts.dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
-      const stats: Stats = { seen: 0, moved: 0, dup: 0, err: 0 }
+      const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
       await mirrorMove(flatId, destId, code, stats, !!opts.dryRun)
-      base.landed += stats.seen; base.moved += stats.moved; base.errors += stats.err
-      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, dup: stats.dup, err: stats.err })
+      const landingCleaned = !opts.dryRun && await cleanupLandingShell(flatId, stats)
+      base.landed += stats.seen; base.moved += stats.moved; base.movedFolders += stats.movedFolders; base.errors += stats.err
+      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, movedFolders: stats.movedFolders, dup: stats.dup, err: stats.err, landingCleaned })
     } catch (e: any) {
       base.errors++
       base.results.push({ bookingCode: code, skipped: `error: ${e?.message || String(e)}` })
@@ -193,15 +253,17 @@ export interface BookingVideoMergeResult {
   reason?: string
   seen: number
   moved: number
+  movedFolders: number
   dup: number
   err: number
+  landingCleaned?: boolean
   boxFolderUrl?: string | null
 }
 
 /** MOVE this ONE booking's NAS landing footage into its VIDEO 2026 box. */
 export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: boolean } = {}): Promise<BookingVideoMergeResult> {
   const dryRun = !!opts.dryRun
-  const zero = { seen: 0, moved: 0, dup: 0, err: 0 }
+  const zero = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'ยังไม่ได้ตั้งค่า Drive', ...zero }
   const code = b.bookingCode
@@ -249,7 +311,8 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   }
   if (!dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
-  const stats: Stats = { seen: 0, moved: 0, dup: 0, err: 0 }
+  const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
   await mirrorMove(flatId, destId, code, stats, dryRun)
-  return { ...stats, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
+  const landingCleaned = !dryRun && await cleanupLandingShell(flatId, stats)
+  return { ...stats, landingCleaned, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
 }

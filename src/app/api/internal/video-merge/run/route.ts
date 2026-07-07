@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session'
 import { runVideoMerge } from '@/lib/video-merge'
 import { recordHeartbeat } from '@/lib/heartbeat'
 import { internalSecretAllowed } from '@/lib/internal-auth'
+import { notifyDiscord } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // walking + moving footage across folders can take a while
@@ -17,7 +18,7 @@ export const maxDuration = 300 // walking + moving footage across folders can ta
  * sound-merge: first-set-env-wins equality breaks whichever caller sends a
  * lower-precedence (but equally trusted) secret.
  *
- * GET /api/internal/video-merge/run[?dryRun=1]
+ * GET /api/internal/video-merge/run[?dryRun=1][&code=<ProductionID>][&notify=1]
  */
 async function isAllowed(request: NextRequest): Promise<boolean> {
   if (internalSecretAllowed(request, 'x-video-merge-secret',
@@ -33,9 +34,18 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
   const onlyCode = searchParams.get('code')?.trim() || undefined
+  // v1.127 — ?notify=1 (the NAS-sync-gated worker sends this): Discord-ping the
+  // result, but only when something actually moved or failed — no-op runs stay quiet.
+  const notify = searchParams.get('notify') === '1'
   try {
     const result = await runVideoMerge({ dryRun, onlyCode })
     if (!dryRun) await recordHeartbeat('video-merge').catch(() => {})
+    if (notify && !dryRun && !result.skipped && (result.moved + result.movedFolders > 0 || result.errors > 0)) {
+      await notifyDiscord(
+        `🎬 NAS sync เขียวแล้ว → รวมไฟล์วิดีโอ: ย้าย ${result.moved} ไฟล์ + ${result.movedFolders} โฟลเดอร์` +
+        ` (${result.bookings} งาน${result.errors ? ` · ⚠️ error ${result.errors}` : ''})`,
+      ).catch(() => {})
+    }
     return NextResponse.json(result)
   } catch (e: any) {
     console.error('GET /api/internal/video-merge/run error:', e)
