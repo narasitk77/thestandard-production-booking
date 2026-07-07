@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added — แก้ไข booking จากหน้า Calendar (sidebar ขวา) สำหรับ Coordinator ขึ้นไป
 - คลิกงานในปฏิทิน → drawer เดิมมีปุ่ม **แก้ไข** (เห็นเฉพาะ role ระดับ Coordinator ขึ้นไป — gate เดียวกับ `requireConsole` ฝั่ง server): แก้เวลา call/wrap, สถานที่, ประเภทถ่าย, โปรดิวเซอร์, จำนวนกล้อง/ไมค์, รถตู้, อุปกรณ์พิเศษ, notes ได้ในที่เดียวโดยไม่ต้องออกจากปฏิทิน (PATCH `/api/bookings/[id]` ตัวเดิม) — ฟิลด์ identity (outlet/รายการ/วันถ่าย/EP) ยังแก้ที่หน้า admin เท่านั้น.
+- **กด "วัน" ก็เป็น side window ขวาเหมือนกัน**: รายการงานของวันนั้นเลิกโผล่เป็นการ์ดใต้ปฏิทิน — เปิดเป็น drawer ด้านขวา (มือถือ = bottom sheet), กดงานในรายการเพื่อดู/แก้ไขต่อได้เลย พร้อมปุ่ม ← กลับไปรายการของวัน.
 
 ### Added — Projector ในอุปกรณ์พิเศษ + รวมรายการอุปกรณ์เป็นชุดเดียว
 - เพิ่ม **Projector** ใน "อุปกรณ์พิเศษ" และย้าย list ที่เคย copy ซ้ำ 3 ที่ (Wizard / producer edit / admin edit) มาเป็น `SPECIAL_EQUIPMENT_OPTIONS` ใน `src/lib/data.ts` ที่เดียว.

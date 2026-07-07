@@ -222,28 +222,75 @@ export default function CalendarPage() {
         />
       ))}
 
-      {/* Selected-day list — only meaningful in month view. */}
-      {source === 'app' && view === 'month' && selected && (
-        <div className="mt-4 ops-card">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">{format(selected, 'EEEE, d MMMM yyyy')}</h2>
-            <button onClick={() => setSelected(null)} className="text-xs text-gray-500 hover:text-gray-900">Close</button>
+      {/* v1.128 — clicking a day opens its list as a right-side drawer (was a
+          card below the grid); picking a booking stacks the detail/edit drawer
+          on top, with "←" back to the day list. */}
+      <DayDrawer
+        date={openId ? null : selected}
+        bookings={selectedBookings}
+        onClose={() => setSelected(null)}
+        onOpenBooking={id => setOpenId(id)}
+      />
+      <BookingDrawer
+        booking={openBooking}
+        onClose={() => { setOpenId(null); setSelected(null) }}
+        onBack={selected ? () => setOpenId(null) : undefined}
+        canEdit={canEdit}
+        onSaved={refresh}
+      />
+    </div>
+  )
+}
+
+/* ---------- Day drawer: a whole day's bookings as a right slide-over ---------- */
+
+function DayDrawer({ date, bookings, onClose, onOpenBooking }: {
+  date: Date | null
+  bookings: Booking[]
+  onClose: () => void
+  onOpenBooking: (id: string) => void
+}) {
+  useEffect(() => {
+    if (!date) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [date, onClose])
+
+  if (!date) return null
+  return (
+    <>
+      <button aria-label="Close drawer" onClick={onClose} className="fixed inset-0 bg-black/30 z-40" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed z-50 bg-white shadow-xl flex flex-col
+                   inset-x-0 bottom-0 max-h-[90vh] rounded-t-2xl
+                   sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[420px] sm:max-h-none sm:rounded-none sm:rounded-l-2xl"
+      >
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2 flex-shrink-0">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-gray-900">{format(date, 'EEEE, d MMMM yyyy')}</div>
+            <div className="text-xs text-gray-500 mt-0.5">{bookings.length} booking{bookings.length === 1 ? '' : 's'} · กดงานเพื่อดู/แก้ไข</div>
           </div>
-          {selectedBookings.length === 0 ? (
+          <button onClick={onClose} className="p-1.5 -mr-1 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100" aria-label="Close">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {bookings.length === 0 ? (
             <div className="ops-empty">No bookings on this day.</div>
           ) : (
             <ul className="divide-y divide-gray-100">
-              {selectedBookings.map(b => (
-                <BookingRow key={b.id} b={b} onOpen={() => setOpenId(b.id)} />
-              ))}
+              {bookings.map(b => <BookingRow key={b.id} b={b} onOpen={() => onOpenBooking(b.id)} />)}
             </ul>
           )}
         </div>
-      )}
-
-      {/* Booking detail drawer */}
-      <BookingDrawer booking={openBooking} onClose={() => setOpenId(null)} canEdit={canEdit} onSaved={refresh} />
-    </div>
+        <div className="px-4 py-3 border-t border-gray-100 flex-shrink-0">
+          <button onClick={onClose} className="ops-btn-ghost ops-btn-sm">Close</button>
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -386,7 +433,7 @@ function MonthGrid({
                   {dayBookings.slice(0, 3).map(b => (
                     <div
                       key={b.id}
-                      onClick={e => { e.stopPropagation(); onOpenBooking(b.id) }}
+                      onClick={e => { e.stopPropagation(); onSelectDay(day); onOpenBooking(b.id) }}
                       className={`flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded cursor-pointer leading-tight border border-gray-100 hover:border-gray-400 transition-colors`}
                     >
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(b.status)}`} aria-hidden />
@@ -505,9 +552,11 @@ type DrawerForm = {
   specialEquipment: string[]; producer: string; notes: string
 }
 
-function BookingDrawer({ booking, onClose, canEdit, onSaved }: {
+function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved }: {
   booking: Booking | null | undefined
   onClose: () => void
+  /** Present when opened from the day drawer — "←" returns to the day list. */
+  onBack?: () => void
   canEdit: boolean
   onSaved: () => void
 }) {
@@ -597,7 +646,12 @@ function BookingDrawer({ booking, onClose, canEdit, onSaved }: {
                    sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[420px] sm:max-h-none sm:rounded-none sm:rounded-l-2xl"
       >
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2 flex-shrink-0">
-          <div className="min-w-0">
+          {onBack && (
+            <button onClick={onBack} className="p-1.5 -ml-1 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100 flex-shrink-0" aria-label="กลับไปรายการของวันนี้">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-0.5">
               <StatusPill status={b.status} />
               <span className="text-xs text-gray-500 tabular-nums">{b.callTime}{b.estimatedWrap && ` → ${b.estimatedWrap}`}</span>
