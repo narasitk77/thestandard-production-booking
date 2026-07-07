@@ -54,13 +54,13 @@ export async function POST(
       changes: { message: message || null, requestedTime: requestedTime || null },
     })
 
-    // Email the active admins (best-effort).
+    // Email the producer-update inbox (best-effort).
+    // v1.128 — per ops (2026-07-07): producer updates no longer fan out to every
+    // active admin — one inbox only. Override with PRODUCER_UPDATE_NOTIFY_EMAIL.
     let emailed = 0
     if (isEmailConfigured()) {
-      const admins = await prisma.user.findMany({
-        where: { role: 'ADMIN', active: true },
-        select: { email: true },
-      })
+      const admins = (process.env.PRODUCER_UPDATE_NOTIFY_EMAIL || 'narasit.k@thestandard.co')
+        .split(',').map(s => ({ email: s.trim() })).filter(a => a.email)
       if (admins.length > 0) {
         const appUrl =
           process.env.NEXTAUTH_URL ||

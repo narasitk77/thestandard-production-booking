@@ -111,13 +111,14 @@ export async function PATCH(
         changes: { ...fieldChanges, ...(titleChanges.length ? { episodeTitles: titleChanges } : {}) },
       })
 
-      // Email the queue-manager team (best-effort — never fails the save).
+      // Email the producer-update inbox (best-effort — never fails the save).
+      // v1.128 — per ops (2026-07-07): these used to fan out to EVERY active
+      // coordinator/manager/support/admin; now they go to one inbox only.
+      // Override with PRODUCER_UPDATE_NOTIFY_EMAIL (comma-separated).
       if (isEmailConfigured()) {
         try {
-          const recipients = await prisma.user.findMany({
-            where: { role: { in: ['COORDINATOR', 'MANAGER', 'SUPPORT', 'ADMIN'] }, active: true },
-            select: { email: true },
-          })
+          const recipients = (process.env.PRODUCER_UPDATE_NOTIFY_EMAIL || 'narasit.k@thestandard.co')
+            .split(',').map(s => ({ email: s.trim() })).filter(r => r.email)
           if (recipients.length > 0) {
             const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
             const code = booking.bookingCode || booking.id

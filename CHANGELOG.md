@@ -13,6 +13,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added — Projector ในอุปกรณ์พิเศษ + รวมรายการอุปกรณ์เป็นชุดเดียว
 - เพิ่ม **Projector** ใน "อุปกรณ์พิเศษ" และย้าย list ที่เคย copy ซ้ำ 3 ที่ (Wizard / producer edit / admin edit) มาเป็น `SPECIAL_EQUIPMENT_OPTIONS` ใน `src/lib/data.ts` ที่เดียว.
 
+### Changed — อีเมล "อัปเดตจาก Producer" ส่งเข้า inbox เดียว
+- เมลแจ้ง **Producer แก้ไขรายละเอียดงาน** (producer-edit) และ **ข้อความ/ขอแก้เวลาจาก Producer** (producer-message) เลิกส่งหา admin/queue ทุกคน — ส่งหา **narasit.k คนเดียว** (override ได้ด้วย env `PRODUCER_UPDATE_NOTIFY_EMAIL`, ใส่หลายคนคั่น comma). เมลขอยกเลิกงาน (request-cancel) ไม่เปลี่ยน — ยังไปตาม `CANCEL_NOTIFY_EMAIL`/Manager เดิม.
+
 ### Added — endpoint แก้ชื่อรายการ + แก้ชื่อ 7TG
 - `POST /api/admin/programs/rename { outletCode, code, newName }` (admin, audited): แก้ชื่อ Program ใน DB (data.ts เป็น seed แบบ create-only — แก้ชื่อแล้วแถวเก่าไม่เปลี่ยน จึงต้องมี endpoint) + rename โฟลเดอร์รายการใน Drive ให้อัตโนมัติถ้ายังใช้ชื่อเก่า.
 - แก้ชื่อรายการ POP `7TG`: "7 Things I love about..." → **"7 THINGS WE LOVE ABOUT..."** (data.ts แก้แล้ว; โฟลเดอร์ Drive rename แล้ว; DB row ต้องยิง endpoint นี้หลัง deploy).
