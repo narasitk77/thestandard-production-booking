@@ -121,6 +121,11 @@ export async function PATCH(
       assignedEmails,
       cameraCount,
       micCount,
+      // v1.128 — admin can flip Block Shot + adjust videographer/switcher
+      // headcounts after creation (block-shot jobs firm up their gear late).
+      isBlockShot,
+      videographerCount,
+      switcherCount,
       needsVan,
       specialEquipment,
       // v1.62.0 — Auto-Planning fields (replace the manual planning sheet)
@@ -202,6 +207,9 @@ export async function PATCH(
           ...(assignedEmails && Array.isArray(assignedEmails) && { assignedEmails }),
           ...(cameraCount !== undefined && { cameraCount: cameraCount === null || cameraCount === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0) }),
           ...(micCount !== undefined && { micCount: micCount === null || micCount === '' ? null : Math.max(0, parseInt(micCount, 10) || 0) }),
+          ...(typeof isBlockShot === 'boolean' && { isBlockShot }),
+          ...(videographerCount !== undefined && { videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)) }),
+          ...(switcherCount !== undefined && { switcherCount: Math.max(1, Math.min(10, parseInt(switcherCount, 10) || 1)) }),
           ...(typeof needsVan === 'boolean' && { needsVan }),
           ...(Array.isArray(specialEquipment) && { specialEquipment: specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
           ...(equipmentNote !== undefined && { equipmentNote: equipmentNote || null }),

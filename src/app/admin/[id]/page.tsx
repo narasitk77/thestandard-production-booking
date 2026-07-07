@@ -160,6 +160,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     crewRequired: '',
     cameraCount: '',
     micCount: '',
+    isBlockShot: false,
+    videographerCount: '1',
+    switcherCount: '1',
     needsVan: false,
     specialEquipment: [] as string[],
     equipmentNote: '',
@@ -183,6 +186,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       crewRequired: (b.crewRequired || []).join(', '),
       cameraCount: b.cameraCount === null || b.cameraCount === undefined ? '' : String(b.cameraCount),
       micCount: b.micCount === null || b.micCount === undefined ? '' : String(b.micCount),
+      isBlockShot: !!b.isBlockShot,
+      videographerCount: String(b.videographerCount || 1),
+      switcherCount: String(b.switcherCount || 1),
       needsVan: !!b.needsVan,
       specialEquipment: b.specialEquipment || [],
       equipmentNote: b.equipmentNote || '',
@@ -491,6 +497,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         crewRequired: editForm.crewRequired ? editForm.crewRequired.split(',').map(s => s.trim()).filter(Boolean) : [],
         cameraCount: editForm.cameraCount.trim() === '' ? null : Math.max(0, parseInt(editForm.cameraCount, 10) || 0),
         micCount: editForm.micCount.trim() === '' ? null : Math.max(0, parseInt(editForm.micCount, 10) || 0),
+        isBlockShot: editForm.isBlockShot,
+        videographerCount: Math.max(1, parseInt(editForm.videographerCount, 10) || 1),
+        switcherCount: Math.max(1, parseInt(editForm.switcherCount, 10) || 1),
         needsVan: editForm.needsVan,
         specialEquipment: editForm.specialEquipment,
         equipmentNote: editForm.equipmentNote || null,
@@ -1089,6 +1098,28 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 <NumberStepper min={0} max={50} ariaLabel="จำนวนไมค์"
                   value={editForm.micCount}
                   onChange={v => setEditForm({ ...editForm, micCount: v })} />
+              </div>
+              {/* v1.128 — admin can edit the Block Shot queue: flip the flag +
+                  set videographer/switcher headcounts (gear firms up late). */}
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">📦 Block Shot</label>
+                <label className="flex items-center gap-2 h-[38px] px-2 cursor-pointer">
+                  <input type="checkbox" checked={editForm.isBlockShot} className="accent-[#673ab7]"
+                    onChange={e => setEditForm({ ...editForm, isBlockShot: e.target.checked })} />
+                  <span className="text-sm text-gray-700">Block Shot (ไม่ระบุกล้อง/ไมค์)</span>
+                </label>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">🧑‍🎥 จำนวนช่างภาพ</label>
+                <NumberStepper min={1} max={10} ariaLabel="จำนวนช่างภาพ"
+                  value={editForm.videographerCount}
+                  onChange={v => setEditForm({ ...editForm, videographerCount: v })} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">🎛 จำนวน Switcher</label>
+                <NumberStepper min={1} max={10} ariaLabel="จำนวน Switcher"
+                  value={editForm.switcherCount}
+                  onChange={v => setEditForm({ ...editForm, switcherCount: v })} />
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">การเดินทาง</label>

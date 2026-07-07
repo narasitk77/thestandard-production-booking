@@ -13,6 +13,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added — Projector ในอุปกรณ์พิเศษ + รวมรายการอุปกรณ์เป็นชุดเดียว
 - เพิ่ม **Projector** ใน "อุปกรณ์พิเศษ" และย้าย list ที่เคย copy ซ้ำ 3 ที่ (Wizard / producer edit / admin edit) มาเป็น `SPECIAL_EQUIPMENT_OPTIONS` ใน `src/lib/data.ts` ที่เดียว.
 
+### Added — แอดมินแก้ "คิว Block Shot" ได้จากหน้า EDIT
+- ฟอร์มแก้ไขในหน้า admin booking เพิ่ม: ติ๊ก **📦 Block Shot** เปิด/ปิดได้ (เดิมตั้งได้ตอนสร้างเท่านั้น), ปรับ **จำนวนช่างภาพ** และ **จำนวน Switcher** ได้ (งาน block shot มักรู้อุปกรณ์จริงทีหลัง) — `PATCH /api/bookings/[id]` รองรับ `isBlockShot` / `videographerCount` / `switcherCount` แล้ว.
+
 ### Changed — อีเมล "อัปเดตจาก Producer" ส่งเข้า inbox เดียว
 - เมลแจ้ง **Producer แก้ไขรายละเอียดงาน** (producer-edit) และ **ข้อความ/ขอแก้เวลาจาก Producer** (producer-message) เลิกส่งหา admin/queue ทุกคน — ส่งหา **narasit.k คนเดียว** (override ได้ด้วย env `PRODUCER_UPDATE_NOTIFY_EMAIL`, ใส่หลายคนคั่น comma). เมลขอยกเลิกงาน (request-cancel) ไม่เปลี่ยน — ยังไปตาม `CANCEL_NOTIFY_EMAIL`/Manager เดิม.
 
