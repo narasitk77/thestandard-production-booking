@@ -7,7 +7,7 @@ import {
   Briefcase, Calendar as CalendarIcon, MapPin, Users, ClipboardCheck,
   ChevronDown, ChevronUp,
 } from 'lucide-react'
-import { OUTLETS, CREW_OPTIONS } from '@/lib/data'
+import { OUTLETS, CREW_OPTIONS, SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } from '@/lib/locations'
 import NumberStepper from '@/app/_components/NumberStepper'
 
@@ -491,7 +491,6 @@ export default function BookingWizard() {
     setCrew(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
 
   // v1.63.0 — special-gear checklist (power users tick what they already know they need)
-  const SPECIAL_EQUIPMENT_OPTIONS = ['Gimbal/Ronin', 'Prompter', 'Clip-on Mic (DJI Mic)', 'ไฟดวงเล็ก'] as const
   const toggleSpecialEquipment = (item: string) =>
     setSpecialEquipment(prev => prev.includes(item) ? prev.filter(x => x !== item) : [...prev, item])
 

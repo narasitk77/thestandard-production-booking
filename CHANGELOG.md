@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.128.0] — 2026-07-07
+
+### Added — แก้ไข booking จากหน้า Calendar (sidebar ขวา) สำหรับ Coordinator ขึ้นไป
+- คลิกงานในปฏิทิน → drawer เดิมมีปุ่ม **แก้ไข** (เห็นเฉพาะ role ระดับ Coordinator ขึ้นไป — gate เดียวกับ `requireConsole` ฝั่ง server): แก้เวลา call/wrap, สถานที่, ประเภทถ่าย, โปรดิวเซอร์, จำนวนกล้อง/ไมค์, รถตู้, อุปกรณ์พิเศษ, notes ได้ในที่เดียวโดยไม่ต้องออกจากปฏิทิน (PATCH `/api/bookings/[id]` ตัวเดิม) — ฟิลด์ identity (outlet/รายการ/วันถ่าย/EP) ยังแก้ที่หน้า admin เท่านั้น.
+
+### Added — Projector ในอุปกรณ์พิเศษ + รวมรายการอุปกรณ์เป็นชุดเดียว
+- เพิ่ม **Projector** ใน "อุปกรณ์พิเศษ" และย้าย list ที่เคย copy ซ้ำ 3 ที่ (Wizard / producer edit / admin edit) มาเป็น `SPECIAL_EQUIPMENT_OPTIONS` ใน `src/lib/data.ts` ที่เดียว.
+
+### Added — endpoint แก้ชื่อรายการ + แก้ชื่อ 7TG
+- `POST /api/admin/programs/rename { outletCode, code, newName }` (admin, audited): แก้ชื่อ Program ใน DB (data.ts เป็น seed แบบ create-only — แก้ชื่อแล้วแถวเก่าไม่เปลี่ยน จึงต้องมี endpoint) + rename โฟลเดอร์รายการใน Drive ให้อัตโนมัติถ้ายังใช้ชื่อเก่า.
+- แก้ชื่อรายการ POP `7TG`: "7 Things I love about..." → **"7 THINGS WE LOVE ABOUT..."** (data.ts แก้แล้ว; โฟลเดอร์ Drive rename แล้ว; DB row ต้องยิง endpoint นี้หลัง deploy).
+
+---
+
 ## [1.127.0] — 2026-07-07
 
 ### Changed — video-merge ลีนขึ้นมาก: ย้ายทั้งโฟลเดอร์ + auto-run เมื่อ NAS sync เขียว

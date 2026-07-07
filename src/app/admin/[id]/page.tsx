@@ -4,7 +4,7 @@ import { bookingDisplayName } from '@/lib/display'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
-import { programsForOutlet } from '@/lib/data'
+import { programsForOutlet, SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
@@ -1103,7 +1103,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div>
               <label className="text-xs text-gray-500 mb-1 block">⚙️ Special Equipment</label>
               <div className="grid grid-cols-2 gap-2">
-                {['Gimbal/Ronin', 'Prompter', 'Clip-on Mic (DJI Mic)', 'ไฟดวงเล็ก'].map(item => {
+                {SPECIAL_EQUIPMENT_OPTIONS.map(item => {
                   const checked = editForm.specialEquipment.includes(item)
                   return (
                     <label key={item} className="flex items-center gap-2 px-2 py-1 cursor-pointer">

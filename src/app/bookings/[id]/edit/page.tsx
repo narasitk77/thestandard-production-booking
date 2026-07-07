@@ -14,9 +14,9 @@ import { Loader2, ArrowLeft, Save } from 'lucide-react'
 import { bookingDisplayName } from '@/lib/display'
 import { shootTypeLabel } from '@/lib/utils'
 import NumberStepper from '@/app/_components/NumberStepper'
+import { SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 
 const SHOOT_TYPES = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT']
-const SPECIAL_EQUIPMENT_OPTIONS = ['Gimbal/Ronin', 'Prompter', 'Clip-on Mic (DJI Mic)', 'ไฟดวงเล็ก']
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {

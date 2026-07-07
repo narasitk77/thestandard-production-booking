@@ -76,7 +76,7 @@ export const OUTLETS: Outlet[] = [
     borderColor: 'border-pink-200',
     sort: 4,
     programs: [
-      { code: '7TG', name: '7 Things I love about...', category: 'Recurring' },
+      { code: '7TG', name: '7 THINGS WE LOVE ABOUT...', category: 'Recurring' },
       { code: 'CFM', name: 'Coffee Minute', category: 'Recurring' },
       { code: 'GTK', name: 'GET TO KNOW THEM', category: 'Recurring' },
       { code: 'PBZ', name: 'POP Buzz', category: 'Recurring' },
@@ -273,3 +273,7 @@ export function programsForOutlet(outletCode: string): Program[] {
 // (ROLE_ORDER in src/lib/team-roster.ts): Photographer + Switcher have
 // roster sections, so the form should let producers request them.
 export const CREW_OPTIONS = ['Videographer', 'Sound', 'Photographer', 'Switcher', 'DIT', 'Lighting', 'Virtual Production', 'Art Director']
+
+// v1.128 — single source for the booking "อุปกรณ์พิเศษ" checklist (was duplicated
+// as literals in BookingWizard / producer edit / admin edit; + Projector).
+export const SPECIAL_EQUIPMENT_OPTIONS = ['Gimbal/Ronin', 'Prompter', 'Clip-on Mic (DJI Mic)', 'ไฟดวงเล็ก', 'Projector']
