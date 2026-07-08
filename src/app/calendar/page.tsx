@@ -1,41 +1,18 @@
 'use client'
 
 import { bookingDisplayName } from '@/lib/display'
-import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Loader2, X, MapPin, User, Tag, Copy, Check, ExternalLink, CalendarPlus, Pencil, Save } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, X, Copy, Check, ExternalLink, CalendarPlus } from 'lucide-react'
 import {
   format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
-  eachDayOfInterval, isSameMonth, isSameDay, parseISO, startOfToday, addDays,
+  eachDayOfInterval, isSameMonth, isSameDay, startOfToday, addDays,
 } from 'date-fns'
 import StatusPill, { statusDotClass } from '@/app/_components/StatusPill'
 import { hasConsoleAccess, type Role } from '@/lib/roles'
-import { SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
-
-interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
-interface Booking {
-  assignedCrew?: { email: string; name: string; isLead?: boolean }[]
-  id: string
-  shootDate: string
-  callTime: string
-  estimatedWrap?: string
-  status: string
-  shootType: string
-  locationName?: string
-  producer: string
-  needsVan?: boolean
-  cameraCount?: number | null
-  micCount?: number | null
-  isBlockShot?: boolean
-  projectName?: string | null
-  // v1.128 — edit-in-drawer fields (returned by /api/bookings, previously untyped here)
-  specialEquipment?: string[]
-  notes?: string | null
-  outlet: { code: string; name: string }
-  program: { code: string; name: string }
-  episodes: Episode[]
-}
+// v1.129 — the drawer became a full edit/assign surface; it lives in its own file.
+import { BookingDrawer } from './BookingDrawer'
+import type { Booking } from './types'
 
 // The show the crew is shooting — shared rule (src/lib/display.ts), same
 // as the Google Calendar event title (v1.45.0).
@@ -76,11 +53,17 @@ export default function CalendarPage() {
     try { localStorage.setItem(SOURCE_KEY, s) } catch {}
   }
 
-  // v1.128 — Coordinator-and-above can edit a booking straight from the drawer.
+  // v1.128 — Coordinator-and-above can edit/assign a booking straight from the drawer.
   const [canEdit, setCanEdit] = useState(false)
+  const [meEmail, setMeEmail] = useState<string | undefined>(undefined)
   useEffect(() => {
     fetch('/api/me').then(r => r.ok ? r.json() : null)
-      .then(d => { const role = (d?.role ?? d?.user?.role) as Role | undefined; if (role) setCanEdit(hasConsoleAccess(role)) })
+      .then(d => {
+        const role = (d?.role ?? d?.user?.role) as Role | undefined
+        if (role) setCanEdit(hasConsoleAccess(role))
+        const email = d?.email ?? d?.user?.email
+        if (email) setMeEmail(String(email).toLowerCase())
+      })
       .catch(() => {})
   }, [])
 
@@ -237,6 +220,7 @@ export default function CalendarPage() {
         onBack={selected ? () => setOpenId(null) : undefined}
         canEdit={canEdit}
         onSaved={refresh}
+        meEmail={meEmail}
       />
     </div>
   )
@@ -535,286 +519,5 @@ function BookingRow({ b, onOpen }: { b: Booking; onOpen: () => void }) {
         </div>
       </button>
     </li>
-  )
-}
-
-/* ---------- Slide-in detail drawer ---------- */
-
-// v1.128 — the drawer doubles as a quick-edit surface for Coordinator-and-above
-// (same PATCH /api/bookings/[id] the admin edit uses; requireConsole-gated
-// server-side). Identity fields (outlet/program/date/episodes) stay read-only —
-// those change Episode IDs and belong on the admin detail page.
-const SHOOT_TYPE_OPTIONS = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT'] as const
-
-type DrawerForm = {
-  callTime: string; estimatedWrap: string; locationName: string; shootType: string
-  cameraCount: string; micCount: string; needsVan: boolean
-  specialEquipment: string[]; producer: string; notes: string
-}
-
-function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved }: {
-  booking: Booking | null | undefined
-  onClose: () => void
-  /** Present when opened from the day drawer — "←" returns to the day list. */
-  onBack?: () => void
-  canEdit: boolean
-  onSaved: () => void
-}) {
-  const [edit, setEdit] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [form, setForm] = useState<DrawerForm | null>(null)
-
-  // Leaving edit mode when switching to another booking (or closing).
-  useEffect(() => { setEdit(false); setSaveError(null); setForm(null) }, [booking?.id])
-
-  useEffect(() => {
-    if (!booking) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [booking, onClose])
-
-  if (!booking) return null
-  const b = booking
-
-  const startEdit = () => {
-    setForm({
-      callTime: b.callTime || '',
-      estimatedWrap: b.estimatedWrap || '',
-      locationName: b.locationName || '',
-      shootType: b.shootType,
-      cameraCount: typeof b.cameraCount === 'number' ? String(b.cameraCount) : '',
-      micCount: typeof b.micCount === 'number' ? String(b.micCount) : '',
-      needsVan: !!b.needsVan,
-      specialEquipment: b.specialEquipment || [],
-      producer: b.producer || '',
-      notes: b.notes || '',
-    })
-    setSaveError(null)
-    setEdit(true)
-  }
-
-  const save = async () => {
-    if (!form) return
-    setSaving(true); setSaveError(null)
-    try {
-      const res = await fetch(`/api/bookings/${b.id}`, {
-        method: 'PATCH', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callTime: form.callTime,                    // '' is ignored server-side (callTime required)
-          estimatedWrap: form.estimatedWrap,          // '' clears
-          locationName: form.locationName,
-          shootType: form.shootType,
-          cameraCount: form.cameraCount === '' ? null : form.cameraCount,
-          micCount: form.micCount === '' ? null : form.micCount,
-          needsVan: form.needsVan,
-          specialEquipment: form.specialEquipment,
-          ...(form.producer.trim() ? { producer: form.producer.trim() } : {}),
-          notes: form.notes,
-        }),
-      })
-      const d = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(d?.error || `HTTP ${res.status}`)
-      setEdit(false)
-      onSaved()
-    } catch (e: any) {
-      setSaveError(e?.message || 'บันทึกไม่สำเร็จ')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const toggleEquip = (item: string) =>
-    setForm(f => f && ({ ...f, specialEquipment: f.specialEquipment.includes(item) ? f.specialEquipment.filter(x => x !== item) : [...f.specialEquipment, item] }))
-
-  return (
-    <>
-      {/* Scrim */}
-      <button
-        aria-label="Close drawer"
-        onClick={onClose}
-        className="fixed inset-0 bg-black/30 z-40"
-      />
-      {/* Drawer */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="fixed z-50 bg-white shadow-xl flex flex-col
-                   inset-x-0 bottom-0 max-h-[90vh] rounded-t-2xl
-                   sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[420px] sm:max-h-none sm:rounded-none sm:rounded-l-2xl"
-      >
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2 flex-shrink-0">
-          {onBack && (
-            <button onClick={onBack} className="p-1.5 -ml-1 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100 flex-shrink-0" aria-label="กลับไปรายการของวันนี้">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-0.5">
-              <StatusPill status={b.status} />
-              <span className="text-xs text-gray-500 tabular-nums">{b.callTime}{b.estimatedWrap && ` → ${b.estimatedWrap}`}</span>
-            </div>
-            <div className="text-sm font-semibold text-gray-900 truncate">{b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}{b.outlet.name} · {showName(b)}</div>
-          </div>
-          <button onClick={onClose} className="p-1.5 -mr-1 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 text-sm">
-          {edit && form ? (
-            <>
-              <div>
-                <div className="ops-section-title mb-2">Schedule</div>
-                <div className="text-gray-800 mb-2">{format(parseISO(b.shootDate), 'EEE d MMM yyyy')}</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="text-xs text-gray-500">Call time</span>
-                    <input type="time" value={form.callTime} onChange={e => setForm({ ...form, callTime: e.target.value })}
-                      className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs text-gray-500">Est. wrap</span>
-                    <input type="time" value={form.estimatedWrap} onChange={e => setForm({ ...form, estimatedWrap: e.target.value })}
-                      className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <div className="ops-section-title mb-2">Location</div>
-                <input type="text" value={form.locationName} placeholder="สถานที่ถ่ายทำ"
-                  onChange={e => setForm({ ...form, locationName: e.target.value })}
-                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
-                <select value={form.shootType} onChange={e => setForm({ ...form, shootType: e.target.value })}
-                  className="mt-2 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white">
-                  {SHOOT_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <div className="ops-section-title mb-2">Producer</div>
-                <input type="text" value={form.producer} placeholder="ชื่อโปรดิวเซอร์"
-                  onChange={e => setForm({ ...form, producer: e.target.value })}
-                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
-              </div>
-
-              <div>
-                <div className="ops-section-title mb-2">Gear</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="text-xs text-gray-500">🎥 กล้อง</span>
-                    <input type="number" min={0} max={10} value={form.cameraCount}
-                      onChange={e => setForm({ ...form, cameraCount: e.target.value })}
-                      className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs text-gray-500">🎙 ไมค์</span>
-                    <input type="number" min={0} max={10} value={form.micCount}
-                      onChange={e => setForm({ ...form, micCount: e.target.value })}
-                      className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
-                  </label>
-                </div>
-                <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                  <input type="checkbox" checked={form.needsVan} onChange={e => setForm({ ...form, needsVan: e.target.checked })}
-                    className="accent-[#673ab7]" />
-                  <span className="text-sm text-gray-700">🚐 ต้องการรถตู้</span>
-                </label>
-                <div className="mt-2">
-                  <span className="text-xs text-gray-500">อุปกรณ์พิเศษ</span>
-                  <div className="grid grid-cols-2 gap-1 mt-1">
-                    {SPECIAL_EQUIPMENT_OPTIONS.map(item => (
-                      <label key={item} className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="checkbox" checked={form.specialEquipment.includes(item)} onChange={() => toggleEquip(item)}
-                          className="accent-[#673ab7]" />
-                        <span className="text-xs text-gray-700">{item}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="ops-section-title mb-2">Notes</div>
-                <textarea rows={4} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
-                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
-              </div>
-
-              {saveError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">{saveError}</div>}
-            </>
-          ) : (
-            <>
-              <div>
-                <div className="ops-section-title mb-2">Schedule</div>
-                <div className="text-gray-800">{format(parseISO(b.shootDate), 'EEE d MMM yyyy')}</div>
-                <div className="text-gray-500 text-xs tabular-nums">{b.callTime}{b.estimatedWrap && ` → ${b.estimatedWrap}`}</div>
-              </div>
-
-              <div>
-                <div className="ops-section-title mb-2">Location</div>
-                <div className="text-gray-800 flex items-start gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
-                  <span>{b.locationName || '—'}</span>
-                </div>
-                <div className="text-xs text-gray-500 mt-0.5">{b.shootType.replace('_', ' ')}</div>
-              </div>
-
-              <div>
-                <div className="ops-section-title mb-2">People</div>
-                <div className="text-gray-800 flex items-start gap-1.5">
-                  <User className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
-                  <span>Producer: {b.producer || '—'}</span>
-                </div>
-                <CrewLine crew={b.assignedCrew} className="text-[12px] text-gray-600 mt-1 ml-5" />
-              </div>
-
-              <div>
-                <div className="ops-section-title mb-2">Episodes</div>
-                <div className="space-y-1">
-                  {b.episodes.length === 0 ? (
-                    <span className="text-gray-400 text-xs">—</span>
-                  ) : b.episodes.map(ep => (
-                    <div key={ep.episodeId} className="flex items-start gap-2 text-xs">
-                      <Tag className="w-3 h-3 text-gray-400 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <span className="episode-badge">{ep.episodeId}</span>
-                        {ep.title && <span className="ml-2 text-gray-600">{ep.title}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-2 flex-shrink-0">
-          {edit ? (
-            <>
-              <button onClick={() => { setEdit(false); setSaveError(null) }} disabled={saving} className="ops-btn-ghost ops-btn-sm">ยกเลิก</button>
-              <button onClick={save} disabled={saving} className="ops-btn-primary ops-btn-sm inline-flex items-center gap-1.5">
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} บันทึก
-              </button>
-            </>
-          ) : (
-            <>
-              <button onClick={onClose} className="ops-btn-ghost ops-btn-sm">Close</button>
-              <div className="flex items-center gap-2">
-                {canEdit && (
-                  <button onClick={startEdit} className="ops-btn-secondary ops-btn-sm inline-flex items-center gap-1.5">
-                    <Pencil className="w-3.5 h-3.5" /> แก้ไข
-                  </button>
-                )}
-                <Link href={`/dashboard/${b.id}`} className="ops-btn-primary ops-btn-sm">
-                  Open detail →
-                </Link>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </>
   )
 }

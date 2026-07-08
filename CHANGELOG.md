@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.129.0] — 2026-07-08
+
+### Changed — side window ในปฏิทินกลายเป็น Full Edit + จัดทีม (แยกไฟล์เป็น `calendar/BookingDrawer.tsx`)
+- **แก้ไขครบทุกฟิลด์เท่าหน้า admin**: โปรดิวเซอร์ (dropdown รายชื่อตาม outlet + พิมพ์เอง), Creative/Host, Crew ที่ต้องการ, กล้อง/ไมค์/จำนวนช่างภาพ/Switcher, Block Shot, รถตู้, อุปกรณ์พิเศษ, จัดอุปกรณ์/ของเช่า/คิวถ่าย (Itinerary), Agency Ref, ชื่อตอนราย EP, Notes + Admin notes — PATCH ตัวเดิม.
+- **ปุ่ม "จัดทีม" (Assign)**: เลือกทีมจาก roster จริง (จัดกลุ่มตามตำแหน่ง), เลือกช่างภาพหลัก ⭐, ปุ่ม "บันทึก" / "บันทึก + ส่งเมล" — ใช้ endpoint assign ตัวเดียวกับหน้า admin (อัปเดต guest ปฏิทิน + เมลแจ้งทีม + OT อัตโนมัติ). Freelancers แสดงเป็น chip (แก้ที่หน้า admin).
+- **แถบสถานะเหมือนการ์ด My Booking**: ป้ายกล้อง/ไมค์ (หรือ 📦 Block Shot / ⚠️ ไม่ระบุ), ป้าย footage (มีไฟล์/ครบแล้ว), เตือน "⚠️ ทีมงานยังไม่ครบ — ยังขาด: …" (จาก crew-status จริง), รายชื่อคนที่ไปกอง 👥 (ช่างภาพหลักมี ⭐, ชื่อคุณเป็นตัวหนา) + freelancer chips + ส่วน Planning (คิวถ่าย/อุปกรณ์/ของเช่า).
+
+---
+
 ## [1.128.0] — 2026-07-07
 
 ### Added — แก้ไข booking จากหน้า Calendar (sidebar ขวา) สำหรับ Coordinator ขึ้นไป
