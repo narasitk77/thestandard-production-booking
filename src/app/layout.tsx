@@ -3,6 +3,7 @@ import './globals.css'
 import { getSession, getProducerAccess, getOTApproverAccess, getUploadAccess, getUserTier } from '@/lib/session'
 import { isTeamMember } from '@/lib/team-profiles'
 import Nav from './_components/Nav'
+import FeedbackWidget from './_components/FeedbackWidget'
 
 export const metadata: Metadata = {
   title: 'Production Booking — THE STANDARD',
@@ -53,6 +54,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           canUpload={canUpload}
         />
         {children}
+        {/* v1.133 — floating feedback box on every page (signed-in users only;
+            the API needs an identity to reply to). */}
+        {session && <FeedbackWidget />}
       </body>
     </html>
   )
