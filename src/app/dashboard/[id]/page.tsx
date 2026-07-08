@@ -8,6 +8,7 @@ import Link from 'next/link'
 import BackButton from '@/app/_components/BackButton'
 import { formatDateRange, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
 import CalendarPacketDetails from '@/app/_components/CalendarPacketDetails'
+import { isAdvertorial, AdBadge } from '@/app/_components/StatusPill'
 import { Copy, Check, Calendar, Folder, Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 interface Episode {
@@ -221,7 +222,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(booking.status)}`}>
                 {statusLabel(booking.status)}
               </span>
-              <span className="text-xs text-gray-400">{categoryLabel(booking.category)}</span>
+              {isAdvertorial(booking.category)
+                ? <AdBadge category={booking.category} />
+                : <span className="text-xs text-gray-400">{categoryLabel(booking.category)}</span>}
             </div>
             <h1 className="text-2xl font-normal text-gray-800 mb-1">
               {booking.isBlockShot ? '🧱 ' : ''}{booking.outlet.name} · {bookingDisplayName(booking)}

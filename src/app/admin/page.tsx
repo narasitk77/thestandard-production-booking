@@ -11,6 +11,7 @@ import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
 import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
+import { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -22,6 +23,7 @@ interface Booking {
   cancelRequestedAt?: string | null; cancelReason?: string | null; cancelRequestedBy?: string | null
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean
   projectName?: string | null
+  category?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -446,10 +448,11 @@ export default function AdminPage() {
             return (
             <Fragment key={b.id}>
             {!selectedDate && sortBy === 'shoot' && monthFilter === 'all' && showHeader && <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{m}</div>}
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5">
+            <div className={`bg-white rounded-lg border border-gray-200 shadow-sm p-4 sm:p-5 ${categoryCardClass(b.category)}`}>
               <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
                 <div className="flex-1 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <AdBadge category={b.category} />
                     {showingDeleted && (
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-800 text-white">
                         DELETED

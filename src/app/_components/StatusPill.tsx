@@ -53,6 +53,13 @@ export function categoryAccentClass(category?: string | null): string {
   return isAdvertorial(category) ? 'border-l-4 border-l-amber-400' : ''
 }
 
+// Card-level treatment — the whole booking card gets the SAME amber signal on
+// every list surface (admin queue, My Bookings, Overview, Producer, Upload),
+// so "AD job" reads identically anywhere in the app.
+export function categoryCardClass(category?: string | null): string {
+  return isAdvertorial(category) ? 'border-l-4 border-l-amber-400 bg-amber-50/40' : ''
+}
+
 // Small "AD" tag for rows with more room (agenda list, drawer header).
 export function AdBadge({ category, className = '' }: { category?: string | null; className?: string }) {
   if (!isAdvertorial(category)) return null

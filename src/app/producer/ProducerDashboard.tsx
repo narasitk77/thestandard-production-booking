@@ -4,6 +4,7 @@ import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useState, useCallback } from 'react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
+import { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -19,6 +20,7 @@ interface Booking {
   producer: string
   projectId?: string | null
   projectName?: string | null
+  category?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -134,12 +136,15 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
             const assigned = (b.assignedEmails || []).length > 0
             const open = openId === b.id
             return (
-              <div key={b.id} className="gf-card p-4">
+              <div key={b.id} className={`gf-card p-4 ${categoryCardClass(b.category)}`}>
                 <button onClick={() => openBooking(b.id)} className="w-full text-left">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="font-mono font-medium text-gray-800">{b.bookingCode || b.id}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || ''}`}>
-                      {statusLabel(b.status)}
+                    <span className="inline-flex items-center gap-1.5">
+                      <AdBadge category={b.category} />
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || ''}`}>
+                        {statusLabel(b.status)}
+                      </span>
                     </span>
                   </div>
                   <div className="text-sm text-gray-600 mt-1">

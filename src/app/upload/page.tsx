@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Search } from 'lucide-react'
 import UploadSection from '@/app/_components/booking/UploadSection'
+import { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
 
 interface BookingRow {
   id: string
@@ -12,6 +13,7 @@ interface BookingRow {
   shootDate: string
   callTime: string
   status: string
+  category?: string | null
   cameraCount?: number | null
   micCount?: number | null
   outlet: { code: string; name: string }
@@ -279,9 +281,10 @@ function UploadPage() {
             <div className="space-y-2">
               {filtered.map(b => (
                 <Link key={b.id} href={`/upload?bookingId=${b.id}`}
-                  className="gf-card p-3 hover:border-[#673ab7] transition-colors block">
+                  className={`gf-card p-3 hover:border-[#673ab7] transition-colors block ${categoryCardClass(b.category)}`}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono font-medium text-gray-900">{b.bookingCode || b.id}</span>
+                    <AdBadge category={b.category} />
                     <span className="bg-gray-100 px-1.5 py-0.5 text-[11px] rounded">{b.outlet.code}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                       b.status === 'CONFIRMED' ? 'bg-green-50 text-green-700 border border-green-200'

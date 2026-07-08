@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
 import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react'
-import StatusPill from './_components/StatusPill'
+import StatusPill, { categoryCardClass, AdBadge } from './_components/StatusPill'
 import { resolveTier, tierAllows } from '@/lib/tiers'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -24,6 +24,7 @@ interface Booking {
   locationName?: string
   producer: string
   projectName?: string | null
+  category?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -365,7 +366,7 @@ function BookingList({ items }: { items: Booking[] }) {
         <li key={b.id}>
           <Link
             href={`/dashboard/${b.id}`}
-            className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors"
+            className={`flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors ${categoryCardClass(b.category)}`}
           >
             <div className="flex-shrink-0 w-28">
               <div className="text-xs font-medium text-gray-700 leading-tight">{formatDisplayDate(b.shootDate)}</div>
@@ -384,7 +385,10 @@ function BookingList({ items }: { items: Booking[] }) {
               </div>
               <CrewLine crew={b.assignedCrew} />
             </div>
-            <StatusPill status={b.status} />
+            <div className="flex flex-col items-end gap-1">
+              <StatusPill status={b.status} />
+              <AdBadge category={b.category} />
+            </div>
           </Link>
         </li>
       ))}

@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Loader2, Plus, Search, Inbox } from 'lucide-react'
 import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
-import StatusPill from '@/app/_components/StatusPill'
+import StatusPill, { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
 
@@ -26,6 +26,7 @@ interface Booking {
   createdByEmail?: string | null
   producerEmail?: string | null
   projectName?: string | null
+  category?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -270,7 +271,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
   const isOwner = !!meEmail && ((b.createdByEmail || '').toLowerCase() === meEmail || (b.producerEmail || '').toLowerCase() === meEmail)
   const canEdit = b.status === 'REQUESTED' && isOwner
   return (
-    <li className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+    <li className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${categoryCardClass(b.category)}`}>
       <Link
         href={`/dashboard/${b.id}`}
         className="flex items-center gap-3 flex-1 min-w-0"
@@ -295,6 +296,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
         </div>
         <div className="flex flex-col items-end gap-1">
           <StatusPill status={b.status} />
+          <AdBadge category={b.category} />
           <FootageBadge files={b.footageFiles} sent={b.footageSent} />
         </div>
       </Link>

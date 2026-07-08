@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.132.0] — 2026-07-08
+
+### Changed — การ์ดงาน AD เป็นสีอำพันทุกหน้า (global UI)
+- ต่อยอดจาก v1.131: booking ที่เป็น **Advertorial** ตอนนี้การ์ด/แถวทั้งใบติดสีเดียวกันหมด (ขอบซ้ายอำพัน + พื้นอำพันจาง + ป้าย "AD") ผ่าน helper กลาง `categoryCardClass()` ใน `StatusPill.tsx` — ใช้ที่ **คิวงาน admin**, **My Bookings**, **Overview (หน้าแรก)**, **Producer dashboard**, **หน้า Upload**, และ header หน้า `/dashboard/[id]` (ป้าย AD แทนข้อความเทา). ปฏิทิน/drawer/ตารางห้อง ได้ไปแล้วตั้งแต่ v1.131 — ตอนนี้ "งาน AD" อ่านเหมือนกันทุกจุดในแอป.
+
+---
+
 ## [1.131.0] — 2026-07-08
 
 ### Added — สีเน้น AD/Original Content ในปฏิทิน
