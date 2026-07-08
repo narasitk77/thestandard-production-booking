@@ -187,7 +187,8 @@ export default function BookingWizard() {
   const [micCount, setMicCount] = useState('')
   // v1.67 — Block Shot: relaxes the camera/mic requirement for flexible-queue shoots.
   const [isBlockShot, setIsBlockShot] = useState(false)
-  const [needsVan, setNeedsVan] = useState(false)
+  // v1.131 — how many company vans (string for NumberStepper; '0'/'' = none).
+  const [vanCount, setVanCount] = useState('0')
   // v1.101 — Event shoots are "office" by default; tick this when the event is at
   // an EXTERNAL venue → behaves like On Location (Map location + van + validation).
   const [eventExternal, setEventExternal] = useState(false)
@@ -321,6 +322,18 @@ export default function BookingWizard() {
   // excludes the L/S/A/T Episode-Type aliases used by the step-1 picker.
   const epPrograms = (selectedOutlet?.programs ?? []).filter(p => p.code.length > 1)
   const isContentAgency = outletCode === 'AGN'
+  // v1.131 — Product Code (agencyRef, "QU-xxxx") is an agency reference code —
+  // only meaningful for Advertorial work. Content Agency uses the single
+  // `category` radio; every other outlet derives it from the per-episode
+  // Original Content / AD toggle (any AD episode ⇒ show the field).
+  const isAdvertorialBooking = isContentAgency
+    ? category === 'Advertorial'
+    : epRows.some(r => r.contentType === 'ADVERTORIAL')
+  // Clear a stale code if the booking flips back to Original Content — the
+  // field is hidden but state would otherwise still submit with the booking.
+  useEffect(() => {
+    if (!isAdvertorialBooking && agencyRef) setAgencyRef('')
+  }, [isAdvertorialBooking])
   // v1.59 — non-AGN outlets use the per-outlet Producer/Co-Producer dropdown
   // when the outlet has people configured; otherwise fall back to free text.
   // v1.85 — EVENT shoots use the free-text producer: an event's producer is often
@@ -364,7 +377,7 @@ export default function BookingWizard() {
     outletCode, programCode, shootDate, shootEndDate, category, shootType,
     locationId, locationCustom, mapLocation, callTime, estimatedWrap,
     producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
-    creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal,
+    creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, vanCount, eventExternal,
     specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel,
     notes, epCount, epRows, step,
   })
@@ -384,7 +397,7 @@ export default function BookingWizard() {
     }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, needsVan, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, vanCount, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
 
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
   const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
@@ -416,7 +429,11 @@ export default function BookingWizard() {
       if (d.cameraCount != null) setCameraCount(d.cameraCount)
       if (d.micCount != null) setMicCount(d.micCount)
       if (typeof d.isBlockShot === 'boolean') setIsBlockShot(d.isBlockShot)
-      if (typeof d.needsVan === 'boolean') setNeedsVan(d.needsVan)
+      if (d.vanCount != null) setVanCount(String(d.vanCount))
+      // v1.131 — a draft saved before the needsVan→vanCount migration only has
+      // the old boolean; carry it forward as 1 van so a resumed draft doesn't
+      // silently lose "yes I need a van".
+      else if (typeof d.needsVan === 'boolean') setVanCount(d.needsVan ? '1' : '0')
       if (typeof d.eventExternal === 'boolean') setEventExternal(d.eventExternal)
       if (Array.isArray(d.specialEquipment)) setSpecialEquipment(d.specialEquipment)
       if (d.agencyRef != null) setAgencyRef(d.agencyRef)
@@ -690,7 +707,7 @@ export default function BookingWizard() {
           cameraCount: cameraCount.trim() === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
           micCount: micCount.trim() === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
           isBlockShot,
-          needsVan,
+          vanCount: offsite ? Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)) : 0,
           specialEquipment,
           agencyRef: agencyRef || null,
           projectId: isContentAgency ? (projectId || null) : null,
@@ -781,7 +798,7 @@ export default function BookingWizard() {
       micCount.trim() && Number(micCount) > 0 ? `🎙 ${parseInt(micCount, 10)}` : '',
     ].filter(Boolean).join(' · '),
     specialEquipment: specialEquipment.length > 0 ? specialEquipment.join(', ') : '',
-    van: needsVan ? '🚐 ต้องการรถตู้' : '',
+    van: Number(vanCount) > 1 ? `🚐 ต้องการรถตู้ × ${Number(vanCount)}` : Number(vanCount) === 1 ? '🚐 ต้องการรถตู้' : '',
     notes,
   }
 
@@ -1019,7 +1036,7 @@ export default function BookingWizard() {
                             } else {
                               setShootType(opt.value); setEventExternal(false)
                               if (opt.value === 'On Location') { setLocationId(''); setLocationCustom('') }
-                              else { setMapLocation(''); setNeedsVan(false) }  // Studio / office Event
+                              else { setMapLocation(''); setVanCount('0') }  // Studio / office Event
                             }
                           }}
                           className="accent-brand-primary mt-0.5"
@@ -1031,21 +1048,27 @@ export default function BookingWizard() {
                   <FieldHelp>ประเภทการผลิต — ไม่ใช่ห้อง/สถานที่ ใส่ตรงข้างล่าง</FieldHelp>
                 </div>
 
-                {/* v1.41.0 — van request, v1.58 — off-site only. Adds 🚐 to the
-                    calendar event title (web + Google) so logistics see it. */}
+                {/* v1.41.0 — van request, v1.58 — off-site only. v1.131 — count
+                    (not just yes/no), so multi-van shoots can be booked. Adds
+                    🚐 (×N when N>1) to the calendar event title so logistics see it. */}
                 {offsite && (
                   <div>
-                    <Label>การเดินทาง</Label>
-                    <label className={`ops-choice ${needsVan ? 'ops-choice-selected' : ''} cursor-pointer`}>
-                      <input
-                        type="checkbox"
-                        checked={needsVan}
-                        onChange={e => setNeedsVan(e.target.checked)}
-                        className="accent-brand-primary mt-0.5"
+                    <Label>จำนวนรถตู้ (การเดินทาง)</Label>
+                    <div className="max-w-[180px]">
+                      <NumberStepper
+                        value={vanCount}
+                        onChange={setVanCount}
+                        min={0}
+                        max={10}
+                        allowEmpty={false}
+                        ariaLabel="จำนวนรถตู้"
                       />
-                      <span className="text-sm text-gray-700">🚐 ต้องการรถตู้ (งานออกนอกสถานที่)</span>
-                    </label>
-                    <FieldHelp>ถ้าเลือก ชื่องานบนปฏิทินจะขึ้น 🚐 นำหน้า</FieldHelp>
+                    </div>
+                    <FieldHelp>
+                      {Number(vanCount) > 0
+                        ? `ชื่องานบนปฏิทินจะขึ้น 🚐 นำหน้า${Number(vanCount) > 1 ? ` (× ${Number(vanCount)})` : ''}`
+                        : '0 = ไม่ต้องการรถตู้'}
+                    </FieldHelp>
                   </div>
                 )}
 
@@ -1412,7 +1435,9 @@ export default function BookingWizard() {
                             onChange={e => updateEpRow(idx, { title: e.target.value })}
                             aria-label={`Episode ${idx + 1} title`}
                           />
-                          <div className="flex gap-2">
+                          {/* v1.131 — gap widened (2→4) so a mis-tap near the boundary
+                              can't silently flip Original Content ↔ AD. */}
+                          <div className="flex gap-4">
                             {([['ORIGINAL_CONTENT', 'Original Content'], ['ADVERTORIAL', 'AD']] as const).map(([val, lbl]) => (
                               <button
                                 key={val}
@@ -1440,7 +1465,7 @@ export default function BookingWizard() {
                 )}
 
                 {/* Creative / Subject + Product Code */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className={`grid grid-cols-1 gap-4 ${isAdvertorialBooking ? 'sm:grid-cols-2' : ''}`}>
                   <div>
                     <Label htmlFor="creative">แขก / Subject</Label>
                     <input
@@ -1453,18 +1478,22 @@ export default function BookingWizard() {
                     />
                     <FieldHelp>คนหรือหัวข้อที่ถ่าย — แสดงในปฏิทินและอีเมล crew</FieldHelp>
                   </div>
-                  <div>
-                    <Label htmlFor="agencyRef">Product Code <span className="ml-1 text-[11px] font-normal text-gray-500">(optional)</span></Label>
-                    <input
-                      id="agencyRef"
-                      type="text"
-                      className="ops-input"
-                      placeholder="e.g. QU-3108"
-                      value={agencyRef}
-                      onChange={e => setAgencyRef(e.target.value)}
-                    />
-                    <FieldHelp>เขียนลงคอลัมน์ &ldquo;Product Code&rdquo; (F) ของ PD tab</FieldHelp>
-                  </div>
+                  {/* v1.131 — Product Code (QU-xxxx) is an agency reference code,
+                      only relevant for Advertorial work — hidden for Original Content. */}
+                  {isAdvertorialBooking && (
+                    <div>
+                      <Label htmlFor="agencyRef">Product Code <span className="ml-1 text-[11px] font-normal text-gray-500">(optional)</span></Label>
+                      <input
+                        id="agencyRef"
+                        type="text"
+                        className="ops-input"
+                        placeholder="e.g. QU-3108"
+                        value={agencyRef}
+                        onChange={e => setAgencyRef(e.target.value)}
+                      />
+                      <FieldHelp>เขียนลงคอลัมน์ &ldquo;Product Code&rdquo; (F) ของ PD tab</FieldHelp>
+                    </div>
+                  )}
                 </div>
 
                 {/* Crew */}
@@ -1687,7 +1716,7 @@ export default function BookingWizard() {
               <SummaryBlock title="Location" filled={offsite ? !!mapLocation.trim() : !!locationId}>
                 <KV k="Shoot Type" v={summary.shootType} />
                 <KV k={offsite ? 'Map location' : 'Room'} v={summary.location} />
-                {offsite && needsVan && <KV k="Van" v="🚐 ต้องการรถตู้" />}
+                {offsite && summary.van && <KV k="Van" v={summary.van} />}
               </SummaryBlock>
               <SummaryBlock title="People" filled={!!(producerEmail || producerName || producerSel)}>
                 <KV k="Producer" v={summary.producer} />
@@ -1763,7 +1792,9 @@ function ReviewRow({ label, value }: { label: string; value: React.ReactNode }) 
   return (
     <div className="grid grid-cols-[140px_1fr] gap-3 py-2 text-sm">
       <div className="text-[11px] text-gray-500 uppercase tracking-wide pt-0.5">{label}</div>
-      <div className="text-gray-800 break-words">{isEmpty ? <span className="text-gray-400">—</span> : value}</div>
+      {/* whitespace-pre-line — multi-line Notes must keep the line breaks the
+          user typed, not collapse into one run-on line. */}
+      <div className="text-gray-800 break-words whitespace-pre-line">{isEmpty ? <span className="text-gray-400">—</span> : value}</div>
     </div>
   )
 }

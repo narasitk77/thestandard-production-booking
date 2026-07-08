@@ -3,19 +3,13 @@
  * component so the retry + chunking logic is testable + readable in
  * isolation.
  *
- * Two flows, both designed to survive a real network on real footage
- * (4GB+ files over apartment wifi):
+ * `uploadToDrive(sessionUrl, file, onProgress)` — designed to survive a
+ * real network on real footage (4GB+ files over apartment wifi):
+ * chunked resumable PUT — 8MB chunks with Content-Range. Each chunk
+ * retried up to 4 times with exponential backoff. Drive returns
+ * 308 between chunks; 200/201 on the final chunk.
  *
- * 1. `uploadToDrive(sessionUrl, file, onProgress)`
- *    Chunked resumable PUT — 8MB chunks with Content-Range. Each chunk
- *    retried up to 4 times with exponential backoff. Drive returns
- *    308 between chunks; 200/201 on the final chunk.
- *
- * 2. `uploadToWasabi(file, parts, chunkSize, onProgress)`
- *    Multipart PUT — 4 chunks concurrently, each with up to 4 retries.
- *    Returns ETags for the server's CompleteMultipartUpload call.
- *
- * Both surface `onProgress(fraction, retryStatus?)` so the UI can show
+ * Surfaces `onProgress(fraction, retryStatus?)` so the UI can show
  * a "retrying (2/4)" hint without a separate channel.
  */
 
@@ -37,7 +31,7 @@ export interface UploadCallbacks {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // v1.83 — by the time we call /complete the footage bytes are already in
-// Drive/Wasabi, so a momentary blip here (a deploy restart → 502, a non-JSON
+// Drive, so a momentary blip here (a deploy restart → 502, a non-JSON
 // error page, a network drop) must NOT mark a finished upload as failed.
 // /complete is idempotent (a re-call on an already-COMPLETE row returns ok), so
 // retrying is safe. A 4xx is a real, permanent error (auth/validation) →
@@ -145,7 +139,7 @@ async function putChunkWithRetry(opts: {
   body: Blob | ArrayBuffer
   headers?: Record<string, string>
   onChunkProgress?: (chunkBytes: number) => void
-  acceptStatuses: number[]    // statuses that count as success (Drive: 308 between chunks; Wasabi: 200)
+  acceptStatuses: number[]    // statuses that count as success (Drive: 308 between chunks, 200/201 final)
   callbacks?: UploadCallbacks
   label: string               // for retry status messages
 }): Promise<{ status: number; etag: string | null; rangeHeader: string | null }> {
@@ -258,78 +252,4 @@ export async function uploadToDrive(
     }
   }
   callbacks.onProgress(1)
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Wasabi — multipart upload with parallel parts + per-part retry
-// ──────────────────────────────────────────────────────────────────────────────
-
-const WASABI_CONCURRENCY = 4
-
-export async function uploadToWasabi(
-  file: File,
-  parts: Array<{ partNumber: number; url: string }>,
-  chunkSize: number,
-  callbacks: UploadCallbacks,
-): Promise<Array<{ n: number; etag: string }>> {
-  const total = file.size
-  const loaded = new Array<number>(parts.length).fill(0)
-  const out: Array<{ n: number; etag: string }> = new Array(parts.length)
-  let cursor = 0
-  let active = 0
-  let failed = false
-  let failedReason: any = null
-
-  return new Promise<Array<{ n: number; etag: string }>>((resolve, reject) => {
-    const emitProgress = () => {
-      const sum = loaded.reduce((a, b) => a + b, 0)
-      callbacks.onProgress(Math.min(1, sum / total))
-    }
-
-    const settle = () => {
-      if (failed) reject(failedReason)
-      else if (cursor >= parts.length && active === 0) {
-        callbacks.onProgress(1)
-        resolve(out.filter(Boolean))
-      }
-    }
-
-    const startNext = () => {
-      if (failed) { settle(); return }
-      while (active < WASABI_CONCURRENCY && cursor < parts.length) {
-        const idx = cursor++
-        const part = parts[idx]
-        const start = idx * chunkSize
-        const end = Math.min(start + chunkSize, file.size)
-        const chunk = file.slice(start, end)
-        active++
-
-        putChunkWithRetry({
-          url: part.url,
-          body: chunk,
-          // No extra headers — pre-signed URLs sign without them
-          acceptStatuses: [200],
-          onChunkProgress: (chunkBytes) => {
-            loaded[idx] = chunkBytes
-            emitProgress()
-          },
-          callbacks,
-          label: `Wasabi part ${part.partNumber}`,
-        }).then(result => {
-          out[idx] = { n: part.partNumber, etag: result.etag ?? '' }
-          loaded[idx] = end - start
-          emitProgress()
-          active--
-          startNext()
-          if (cursor >= parts.length && active === 0) settle()
-        }).catch(err => {
-          if (!failed) { failed = true; failedReason = err }
-          active--
-          settle()
-        })
-      }
-      if (cursor >= parts.length && active === 0) settle()
-    }
-    startNext()
-  })
 }

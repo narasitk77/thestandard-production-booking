@@ -4,16 +4,15 @@ import { bookingDisplayName } from './display'
 /**
  * Outlet code → folder name mapping.
  *
- * NOTE (v1.70, issue #5): the OUTLET_FOLDER_BY_CODE map below is now used
- * ONLY for the Wasabi archive key (ASCII-stable, keyed by Production ID).
- * The Google Drive footage path moved to PMC's new "VIDEO 2026 [JUL–DEC]"
- * structure and derives outlet folders straight from the OUTLETS master
- * (`outletDriveFolderName`, "01 · News" … "09 · Content Agency"), so the two
- * storages no longer drift.
+ * NOTE (v1.70, issue #5): the OUTLET_FOLDER_BY_CODE map below now only backs
+ * `hasOutletFolderMapping` (the "is this outlet uploadable?" gate in
+ * /api/upload/init). The Google Drive footage path moved to PMC's new
+ * "VIDEO 2026 [JUL–DEC]" structure and derives outlet folders straight from
+ * the OUTLETS master (`outletDriveFolderName`, "01 · News" … "09 · Content
+ * Agency"). (It previously also keyed the Wasabi archive — dual-write removed.)
  *
- * The Shared Drive root (`DRIVE_FOOTAGE_ROOT`) and the Wasabi key prefix
- * (`WASABI_KEY_PREFIX`) both lay out files per-outlet. The folder names
- * in those storages don't always match the 3-letter Outlet.code in our
+ * The Shared Drive root (`DRIVE_FOOTAGE_ROOT`) lays out files per-outlet.
+ * The folder names there don't always match the 3-letter Outlet.code in our
  * DB — historical naming choices the team made before this app existed.
  * This module is the single source of truth that the upload code consults
  * when computing the destination path.
@@ -28,8 +27,7 @@ import { bookingDisplayName } from './display'
  * fresh one. So the values below are the CANONICAL suffix (no "N."
  * prefix); the Drive layer matches an existing child folder whose name
  * equals this suffix after the numeric prefix is stripped
- * (`ensureChildFolderByCanonicalName` in `google-drive.ts`). Wasabi keeps
- * using the canonical name directly (no renumbering problem there).
+ * (`ensureChildFolderByCanonicalName` in `google-drive.ts`).
  *
  * Confirmed against the live Drive on 2026-06-02 (inspect-drive-outlets):
  *   AGN → "ADVERTORIAL"        (folder "9.ADVERTORIAL")
@@ -405,34 +403,5 @@ export function shootFolderLayers(input: {
   }
 }
 
-/**
- * Build the per-file Wasabi key components. Wasabi has no renumbering
- * problem and we want keys to stay stable + ASCII-clean, so it uses the
- * canonical outlet name and the bare bookingCode for the booking segment
- * (NOT the human "code - job name" Drive folder).
- *
- *   buildStoragePath('AGN', 'AGN-260423-EVT-01', 'Cam1', '001.mp4')
- *     → ['ADVERTORIAL', 'AGN-260423-EVT-01', 'Cam1', '001.mp4']
- *   buildStoragePath('AGN', 'AGN-...-01', 'Cam1', '001.mp4', 'EP02')
- *     → ['ADVERTORIAL', 'AGN-...-01', 'EP02', 'Cam1', '001.mp4']
- *
- * v1.93 — `episodeSegment` (e.g. "EP01") mirrors the Drive per-episode folder
- * so footage from different EPs with the same camera + filename can't collide
- * on a single Wasabi key. ASCII-only by contract (no Thai episode title).
- * Caller joins with '/' for the Wasabi key.
- */
-export function buildStoragePath(
-  outletCode: string,
-  bookingCode: string,
-  camera: string,
-  filename: string,
-  episodeSegment?: string | null,
-): string[] {
-  return [
-    outletFolderName(outletCode),
-    bookingCode,
-    ...(episodeSegment ? [episodeSegment] : []),
-    camera,
-    filename,
-  ]
-}
+// (buildStoragePath — the per-file Wasabi archive key builder — was removed
+//  along with the Wasabi dual-write. Drive is the only upload target.)

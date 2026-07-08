@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import { ChevronLeft, Loader2, X, MapPin, User, Tag, Pencil, Save, Users } from 'lucide-react'
-import StatusPill from '@/app/_components/StatusPill'
+import StatusPill, { AdBadge } from '@/app/_components/StatusPill'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
 import { CameraMicTag } from '@/app/admin/_components/CameraMicTag'
@@ -33,7 +33,7 @@ type DrawerForm = {
   creative: string; crewRequired: string[]
   cameraCount: string; micCount: string
   isBlockShot: boolean; videographerCount: string; switcherCount: string
-  needsVan: boolean; specialEquipment: string[]
+  vanCount: string; specialEquipment: string[]
   equipmentNote: string; rentalGearNote: string; itinerary: string; agencyRef: string
   notes: string; adminNotes: string
   episodeTitles: { id: string; episodeId: string; title: string }[]
@@ -58,6 +58,7 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
 
   // edit: producer dropdown (v1.96 outlet producers)
   const [producers, setProducers] = useState<ProducerOpt[]>([])
+  const [producersLoading, setProducersLoading] = useState(false)
   const [producerCustom, setProducerCustom] = useState(false)
 
   // assign
@@ -70,9 +71,11 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
   const bookingFreelancerEmails = useMemo(() => freelancerEmails(bookingFreelancers), [bookingFreelancers])
 
   // Reset per-booking state when switching to another booking (or closing).
+  // producers included — a list fetched for another booking's outlet must not
+  // leak into this one's dropdown (WLT names showed up on NWS bookings).
   useEffect(() => {
     setMode('view'); setSaveError(null); setForm(null); setAssignMsg(null)
-    setCrewStatus(null); setProducerCustom(false)
+    setCrewStatus(null); setProducerCustom(false); setProducers([]); setProducersLoading(false)
   }, [booking?.id])
 
   useEffect(() => {
@@ -92,6 +95,25 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
       .catch(() => {})
     return () => { dead = true }
   }, [booking?.id, mode])
+
+  // Producer dropdown options for THIS booking's outlet (v1.96), fetched on
+  // entering edit. Keyed + dead-flagged so a slow response for a previous
+  // booking can't populate another outlet's dropdown. While the fetch is in
+  // flight the producer field is locked (see JSX) — an editable free-text
+  // input in that window would silently clear producerEmail on keystroke,
+  // then get hot-swapped for the select when the list lands.
+  const outletCode = booking?.outlet.code
+  useEffect(() => {
+    if (mode !== 'edit' || !outletCode) return
+    let dead = false
+    setProducersLoading(true)
+    fetch(`/api/producers?outlet=${encodeURIComponent(outletCode)}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!dead && d?.producers) setProducers(d.producers) })
+      .catch(() => {})
+      .finally(() => { if (!dead) setProducersLoading(false) })
+    return () => { dead = true }
+  }, [mode, outletCode, booking?.id])
 
   if (!booking) return null
   const b = booking
@@ -113,7 +135,7 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
       isBlockShot: !!b.isBlockShot,
       videographerCount: String(b.videographerCount || 1),
       switcherCount: String(b.switcherCount || 1),
-      needsVan: !!b.needsVan,
+      vanCount: String(b.vanCount ?? 0),
       specialEquipment: b.specialEquipment || [],
       equipmentNote: b.equipmentNote || '',
       rentalGearNote: b.rentalGearNote || '',
@@ -126,12 +148,6 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
     setSaveError(null)
     setProducerCustom(false)
     setMode('edit')
-    if (producers.length === 0) {
-      fetch(`/api/producers?outlet=${encodeURIComponent(b.outlet.code)}`, { credentials: 'include' })
-        .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d?.producers) setProducers(d.producers) })
-        .catch(() => {})
-    }
   }
 
   const save = async () => {
@@ -155,7 +171,7 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
           isBlockShot: form.isBlockShot,
           videographerCount: Math.max(1, parseInt(form.videographerCount, 10) || 1),
           switcherCount: Math.max(1, parseInt(form.switcherCount, 10) || 1),
-          needsVan: form.needsVan,
+          vanCount: Math.max(0, Math.min(20, parseInt(form.vanCount, 10) || 0)),
           specialEquipment: form.specialEquipment,
           equipmentNote: form.equipmentNote || null,
           rentalGearNote: form.rentalGearNote || null,
@@ -258,10 +274,11 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-0.5 flex-wrap">
               <StatusPill status={b.status} />
+              <AdBadge category={b.category} />
               <span className="text-xs text-gray-500 tabular-nums">{b.callTime}{b.estimatedWrap && ` → ${b.estimatedWrap}`}</span>
               {mode !== 'view' && <span className="text-[10px] uppercase tracking-wide text-[#673ab7] font-medium">{mode === 'edit' ? 'แก้ไข' : 'จัดทีม'}</span>}
             </div>
-            <div className="text-sm font-semibold text-gray-900 truncate">{b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}{b.outlet.name} · {showName(b)}</div>
+            <div className="text-sm font-semibold text-gray-900 truncate">{!!b.vanCount && <span title={`ต้องการรถตู้ × ${b.vanCount}`}>🚐{b.vanCount > 1 ? `×${b.vanCount}` : ''} </span>}{b.outlet.name} · {showName(b)}</div>
           </div>
           <button onClick={onClose} className="p-1.5 -mr-1 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100" aria-label="Close">
             <X className="w-4 h-4" />
@@ -297,7 +314,10 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
                 <div className="ops-section-title mb-2">Producer</div>
                 {producers.length > 0 && !producerCustom ? (
                   <select
-                    value={form.producerEmail || '__custom__'}
+                    // value must point at an option that exists — a producerEmail
+                    // no longer in the outlet list would otherwise render a BLANK
+                    // select (selectedIndex -1) instead of the "(พิมพ์เอง)" fallback.
+                    value={producers.some(p => p.email === form.producerEmail) ? form.producerEmail : '__custom__'}
                     onChange={e => {
                       const v = e.target.value
                       if (v === '__custom__') { setProducerCustom(true); setForm({ ...form, producerEmail: '' }); return }
@@ -311,6 +331,10 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
                     {producers.map(p => <option key={p.email} value={p.email}>{p.nickname || p.name}</option>)}
                     <option value="__custom__">พิมพ์ชื่อเอง…</option>
                   </select>
+                ) : producersLoading && !producerCustom ? (
+                  // List still loading — lock the field so a keystroke here can't
+                  // silently clear producerEmail before the select swaps in.
+                  <input type="text" value={form.producer} disabled placeholder="กำลังโหลดรายชื่อ…" className={`${inputCls} opacity-60`} />
                 ) : (
                   <input type="text" value={form.producer} placeholder="ชื่อโปรดิวเซอร์"
                     onChange={e => setForm({ ...form, producer: e.target.value, producerEmail: '' })} className={inputCls} />
@@ -342,15 +366,13 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
                     <input type="number" min={1} max={10} value={form.videographerCount} onChange={e => setForm({ ...form, videographerCount: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
                   <label className="block"><span className={labelCls}>🎛 จำนวน Switcher</span>
                     <input type="number" min={1} max={10} value={form.switcherCount} onChange={e => setForm({ ...form, switcherCount: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
+                  <label className="block"><span className={labelCls}>🚐 จำนวนรถตู้</span>
+                    <input type="number" min={0} max={10} value={form.vanCount} onChange={e => setForm({ ...form, vanCount: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
                 </div>
                 <div className="flex flex-wrap gap-4 mt-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={form.isBlockShot} onChange={e => setForm({ ...form, isBlockShot: e.target.checked })} className="accent-[#673ab7]" />
                     <span className="text-sm text-gray-700">📦 Block Shot</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={form.needsVan} onChange={e => setForm({ ...form, needsVan: e.target.checked })} className="accent-[#673ab7]" />
-                    <span className="text-sm text-gray-700">🚐 ต้องการรถตู้</span>
                   </label>
                 </div>
                 <div className="mt-2">
@@ -374,8 +396,12 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
                   <input type="text" value={form.rentalGearNote} onChange={e => setForm({ ...form, rentalGearNote: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
                 <label className="block mt-2"><span className={labelCls}>🗒️ คิวถ่าย / Itinerary</span>
                   <textarea rows={3} value={form.itinerary} onChange={e => setForm({ ...form, itinerary: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
-                <label className="block mt-2"><span className={labelCls}>Agency Ref (QU-xxxx)</span>
-                  <input type="text" value={form.agencyRef} onChange={e => setForm({ ...form, agencyRef: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
+                {/* v1.131 — Agency Ref (QU-xxxx) only matters for Advertorial work;
+                    still shown if a legacy value exists on a non-AD booking. */}
+                {(b.category === 'ADVERTORIAL' || form.agencyRef) && (
+                  <label className="block mt-2"><span className={labelCls}>Agency Ref (QU-xxxx)</span>
+                    <input type="text" value={form.agencyRef} onChange={e => setForm({ ...form, agencyRef: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
+                )}
               </div>
 
               {form.episodeTitles.length > 0 && (

@@ -17,10 +17,13 @@ export interface Booking {
   estimatedWrap?: string
   status: string
   shootType: string
+  // v1.131 — 'ORIGINAL_CONTENT' | 'ADVERTORIAL' | 'EVENT' | 'INTERNAL' (Category enum).
+  // Drives the AD/OG color dot + the conditional Agency Ref field in the drawer.
+  category?: string | null
   locationName?: string
   producer: string
   producerEmail?: string | null
-  needsVan?: boolean
+  vanCount?: number
   cameraCount?: number | null
   micCount?: number | null
   isBlockShot?: boolean

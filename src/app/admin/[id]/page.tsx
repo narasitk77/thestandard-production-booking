@@ -18,11 +18,12 @@ interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
   producer: string; producerEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number; switcherCount?: number
-  cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean; needsVan?: boolean; specialEquipment?: string[]
+  cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean; vanCount?: number; specialEquipment?: string[]
   equipmentNote?: string | null; rentalGearNote?: string | null; itinerary?: string | null; assignedEquipmentIds?: string[]
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
+  category?: string
   freelancers?: unknown
-  outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
+  outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
   deletedAt?: string | null // v1.51 — soft-deleted (visible to ADMIN only)
@@ -163,7 +164,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     isBlockShot: false,
     videographerCount: '1',
     switcherCount: '1',
-    needsVan: false,
+    vanCount: '0',
     specialEquipment: [] as string[],
     equipmentNote: '',
     rentalGearNote: '',
@@ -189,7 +190,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       isBlockShot: !!b.isBlockShot,
       videographerCount: String(b.videographerCount || 1),
       switcherCount: String(b.switcherCount || 1),
-      needsVan: !!b.needsVan,
+      vanCount: String(b.vanCount ?? 0),
       specialEquipment: b.specialEquipment || [],
       equipmentNote: b.equipmentNote || '',
       rentalGearNote: b.rentalGearNote || '',
@@ -500,7 +501,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         isBlockShot: editForm.isBlockShot,
         videographerCount: Math.max(1, parseInt(editForm.videographerCount, 10) || 1),
         switcherCount: Math.max(1, parseInt(editForm.switcherCount, 10) || 1),
-        needsVan: editForm.needsVan,
+        vanCount: Math.max(0, Math.min(20, parseInt(editForm.vanCount, 10) || 0)),
         specialEquipment: editForm.specialEquipment,
         equipmentNote: editForm.equipmentNote || null,
         rentalGearNote: editForm.rentalGearNote || null,
@@ -974,7 +975,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                     .join(', ')
             }</div></div>
             <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-1">กล้อง / ไมค์ (Camera / Mic)</div><CameraMicTag cameraCount={booking.cameraCount} micCount={booking.micCount} isBlockShot={booking.isBlockShot} size="md" /></div>
-            <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
+            {/* v1.131 — Agency Ref (QU-xxxx) only matters for Advertorial work;
+                still shown if a legacy value exists on a non-AD booking. */}
+            {(booking.category === 'ADVERTORIAL' || booking.agencyRef) && (
+              <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
+            )}
             {booking.specialEquipment && booking.specialEquipment.length > 0 && (
               <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Special Equipment</div><div className="text-gray-800">{booking.specialEquipment.join(', ')}</div></div>
             )}
@@ -1122,12 +1127,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                   onChange={v => setEditForm({ ...editForm, switcherCount: v })} />
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">การเดินทาง</label>
-                <label className="flex items-center gap-2 h-[38px] px-2 cursor-pointer">
-                  <input type="checkbox" checked={editForm.needsVan} className="accent-[#673ab7]"
-                    onChange={e => setEditForm({ ...editForm, needsVan: e.target.checked })} />
-                  <span className="text-sm text-gray-700">🚐 ต้องการรถตู้</span>
-                </label>
+                <label className="text-xs text-gray-500 mb-1 block">🚐 จำนวนรถตู้</label>
+                <NumberStepper min={0} max={10} ariaLabel="จำนวนรถตู้"
+                  value={editForm.vanCount}
+                  onChange={v => setEditForm({ ...editForm, vanCount: v })} />
               </div>
             </div>
 
@@ -1172,11 +1175,13 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 onChange={e => setEditForm({ ...editForm, itinerary: e.target.value })} />
             </div>
 
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Agency Ref</label>
-              <input className="gf-input" value={editForm.agencyRef}
-                onChange={e => setEditForm({ ...editForm, agencyRef: e.target.value })} />
-            </div>
+            {(booking.category === 'ADVERTORIAL' || editForm.agencyRef) && (
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Agency Ref</label>
+                <input className="gf-input" value={editForm.agencyRef}
+                  onChange={e => setEditForm({ ...editForm, agencyRef: e.target.value })} />
+              </div>
+            )}
 
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Notes</label>

@@ -5,6 +5,9 @@ import { updateBookingRow } from '@/lib/google-sheets'
 import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
+import { sendBookingConfirmedEmail } from '@/lib/email'
+import { getValidGoogleAccessToken } from '@/lib/google-token'
+import { getToken } from 'next-auth/jwt'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
 import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
 import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, landingBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound, soundStagingCategoryName } from '@/lib/outlet-folders'
@@ -14,7 +17,7 @@ import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 import { rememberDriveLinks } from '@/lib/drive-links'
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
@@ -22,6 +25,10 @@ export async function POST(
     if (!session) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
+    // v1.131 — for the confirmed-email, sent "as" the approving admin (same
+    // Gmail-OAuth-else-SMTP pattern as the assign route's assignment email).
+    const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
+    const senderAccessToken = await getValidGoogleAccessToken(authToken)
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       include: {
@@ -204,9 +211,10 @@ export async function POST(
           videoType: booking.videoType,
           locationName: booking.locationName,
           producer: booking.producer,
+          producerEmail: booking.producerEmail,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
-          needsVan: booking.needsVan,
+          vanCount: booking.vanCount,
           isBlockShot: booking.isBlockShot,
           specialEquipment: booking.specialEquipment,
           projectName: booking.projectName,
@@ -294,6 +302,34 @@ export async function POST(
         })
       }
     })()
+
+    // v1.131 — confirmation email to the original requester (best-effort,
+    // never blocks the response — approve must succeed even if Gmail/SMTP is
+    // down). Decoupled from the calendar IIFE above so it doesn't wait on
+    // event creation; links to /dashboard/[id], viewable now that a CONFIRMED
+    // booking is visible to any signed-in user (see booking-access.ts).
+    const bookerEmail = (updated.createdByEmail || '').trim()
+    if (bookerEmail && bookerEmail.toLowerCase() !== session.email.toLowerCase()) {
+      sendBookingConfirmedEmail({
+        to: bookerEmail,
+        toName: bookerEmail.split('@')[0],
+        bookingId: updated.id,
+        bookingCode: updated.bookingCode,
+        outletName: updated.outlet.name,
+        programName: updated.program.name,
+        shootDate: new Date(updated.shootDate).toISOString().slice(0, 10),
+        shootEndDate: updated.shootEndDate ? new Date(updated.shootEndDate).toISOString().slice(0, 10) : null,
+        callTime: updated.callTime,
+        estimatedWrap: updated.estimatedWrap,
+        shootType: updated.shootType,
+        locationName: updated.locationName,
+        producer: updated.producer,
+        episodes: updated.episodes,
+        notes: updated.notes,
+        senderAccessToken,
+        senderEmail: session.email,
+      }).catch(e => console.error('[approve] booker confirmation email failed (non-fatal):', e?.message || e))
+    }
 
     syncBookingOT(updated.id).catch(e => console.error('syncBookingOT error:', e))
 

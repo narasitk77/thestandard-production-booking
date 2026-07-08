@@ -33,3 +33,11 @@ test('null/empty fields never match', () => {
   // '' vs null createdByEmail must not match ('' === '' without the guard)
   assert.equal(canViewBooking({ email: '', role: 'USER' }, bare), false)
 })
+
+test('v1.131 — a CONFIRMED booking is viewable by anyone (matches list visibility)', () => {
+  const confirmed = { ...booking, status: 'CONFIRMED' }
+  assert.equal(canViewBooking({ email: 'stranger@thestandard.co', role: 'USER' }, confirmed), true)
+  // a non-CONFIRMED booking (REQUESTED/ASSIGNED/etc.) is unaffected — still stranger-blocked
+  const requested = { ...booking, status: 'REQUESTED' }
+  assert.equal(canViewBooking({ email: 'stranger@thestandard.co', role: 'USER' }, requested), false)
+})

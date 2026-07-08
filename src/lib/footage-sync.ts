@@ -123,9 +123,10 @@ export async function runFootageSync(opts: { dryRun?: boolean } = {}): Promise<S
   const appOwnedSkip = new Set<string>()
   for (const u of appOwnedUploads) {
     if (!u.driveFileId) continue
-    // Status flow: PENDING → UPLOADING → (DRIVE_OK | WASABI_OK) → COMPLETE
-    // or → FAILED / ORPHANED. We let the scanner take over only for
-    // COMPLETE rows where /complete failed to write the sheet row.
+    // Status flow: PENDING → UPLOADING → COMPLETE or → FAILED / ORPHANED
+    // (DRIVE_OK / WASABI_OK are legacy dual-write partials — Wasabi removed).
+    // We let the scanner take over only for COMPLETE rows where /complete
+    // failed to write the sheet row.
     if (u.status !== 'COMPLETE') {
       appOwnedSkip.add(u.driveFileId)
       continue

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { diffEditable, fmt } from '../producer-edit-fields'
 
 test('no changes → empty diff', () => {
-  const b = { callTime: '09:00', cameraCount: 2, needsVan: false, crewRequired: ['A', 'B'] }
+  const b = { callTime: '09:00', cameraCount: 2, vanCount: 0, crewRequired: ['A', 'B'] }
   assert.deepEqual(diffEditable(b, { ...b }), {})
 })
 
@@ -30,8 +30,8 @@ test('null vs empty-string vs undefined are treated as equal (no noise)', () => 
   assert.deepEqual(diffEditable({ agencyRef: undefined }, { agencyRef: null }), {})
 })
 
-test('boolean needsVan change detected', () => {
-  assert.deepEqual(diffEditable({ needsVan: false }, { needsVan: true }), { needsVan: { from: false, to: true } })
+test('vanCount change detected', () => {
+  assert.deepEqual(diffEditable({ vanCount: 0 }, { vanCount: 2 }), { vanCount: { from: 0, to: 2 } })
 })
 
 test('non-whitelisted fields are ignored', () => {

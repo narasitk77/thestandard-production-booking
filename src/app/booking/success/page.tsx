@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { CheckCircle2, Copy, Check, ArrowRight, Calendar, Folder } from 'lucide-react'
 import { formatDisplayDate, buildCalendarPacket, shootTypeLabel } from '@/lib/utils'
+import CalendarPacketDetails from '@/app/_components/CalendarPacketDetails'
 
 interface Episode {
   id: string
@@ -23,6 +24,7 @@ interface Booking {
   producer: string
   creative: string[]
   crewRequired: string[]
+  vanCount?: number | null
   agencyRef?: string
   projectId?: string
   projectName?: string
@@ -157,9 +159,24 @@ function SuccessContent() {
             {copied ? <><Check className="w-3.5 h-3.5 text-green-500" /> Copied!</> : <><Copy className="w-3.5 h-3.5" /> Copy</>}
           </button>
         </div>
-        <pre className="text-xs bg-brand-gray-50 rounded-lg p-4 font-mono text-brand-gray-700 whitespace-pre-wrap overflow-x-auto border border-brand-gray-100">
-          {calendarPacket}
-        </pre>
+        <CalendarPacketDetails booking={{
+          outletName: booking.outlet.name,
+          outletCode: booking.outlet.code,
+          programName: booking.program.name,
+          programCode: booking.program.code,
+          shootDate: booking.shootDate,
+          callTime: booking.callTime,
+          estimatedWrap: booking.estimatedWrap,
+          shootType: booking.shootType,
+          locationName: booking.locationName,
+          producer: booking.producer,
+          creative: booking.creative,
+          crewRequired: booking.crewRequired,
+          vanCount: booking.vanCount,
+          agencyRef: booking.agencyRef,
+          notes: booking.notes,
+          episodes: booking.episodes,
+        }} />
       </div>
 
       {/* Actions */}

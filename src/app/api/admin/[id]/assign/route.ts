@@ -115,10 +115,19 @@ export async function POST(
     let calendarSync: CalendarSync = { ok: true, eventId: booking.calendarEventId, action: 'deferred', note: 'Calendar event will be created when admin approves' }
     let resolvedCalendarEventId = booking.calendarEventId
 
+    // v1.131 — the Producer keeps their calendar guest invite (added at
+    // confirm-time, see approve/route.ts + google-calendar.ts createCalendarEvent)
+    // across crew re-assigns — a patch keyed on emailRecipients alone would
+    // silently drop the producer as a "removed guest".
+    const producerEmailTrimmed = (booking.producerEmail || '').trim()
+    const calendarAttendees = producerEmailTrimmed && !emailRecipients.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
+      ? [...emailRecipients, producerEmailTrimmed]
+      : emailRecipients
+
     if (booking.calendarEventId) {
       // (1) Patch existing event's attendees.
       try {
-        const ok = await updateCalendarEventAttendees(booking.calendarEventId, emailRecipients, {
+        const ok = await updateCalendarEventAttendees(booking.calendarEventId, calendarAttendees, {
           bookingId: booking.id,
           bookingCode: booking.bookingCode,
           // Refresh the event details too — admin notes / freelance contacts
@@ -189,9 +198,10 @@ export async function POST(
           videoType: booking.videoType,
           locationName: booking.locationName,
           producer: booking.producer,
+          producerEmail: booking.producerEmail,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
-          needsVan: booking.needsVan,
+          vanCount: booking.vanCount,
           isBlockShot: booking.isBlockShot,
           specialEquipment: booking.specialEquipment,
           projectName: booking.projectName,

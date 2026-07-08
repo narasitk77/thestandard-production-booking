@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
   const {
     outletCode, programCode, episodeTitle, category, videoType, shootType,
     callTime, estimatedWrap, locationName, producer, producerEmail,
-    crewRequired, cameraCount, micCount, needsVan, videographerCount, switcherCount, notes,
+    crewRequired, cameraCount, micCount, vanCount, videographerCount, switcherCount, notes,
     plan,
   } = body || {}
 
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
   const base = {
     outletCode, programCode, category, videoType, shootType,
     callTime, estimatedWrap, locationName, producer, producerEmail,
-    crewRequired, cameraCount, micCount, needsVan, videographerCount, switcherCount, notes,
+    crewRequired, cameraCount, micCount, vanCount, videographerCount, switcherCount, notes,
     isRoutine: true,
     routineGroupId,
     episodes: [{ programCode, title, contentType: category === 'ADVERTORIAL' ? 'ADVERTORIAL' : 'ORIGINAL_CONTENT' }],

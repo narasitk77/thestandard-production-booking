@@ -57,7 +57,7 @@ export async function PATCH(
     // PRODUCER-EDITABLE WHITELIST ONLY. Anything not listed here is ignored.
     const {
       callTime, estimatedWrap, shootType, locationName, producer,
-      creative, crewRequired, cameraCount, micCount, needsVan,
+      creative, crewRequired, cameraCount, micCount, vanCount,
       specialEquipment, agencyRef, notes, episodeTitles,
     } = body
 
@@ -82,7 +82,7 @@ export async function PATCH(
           ...(Array.isArray(crewRequired) && { crewRequired }),
           ...(cameraCount !== undefined && { cameraCount: cameraCount === null || cameraCount === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0) }),
           ...(micCount !== undefined && { micCount: micCount === null || micCount === '' ? null : Math.max(0, parseInt(micCount, 10) || 0) }),
-          ...(typeof needsVan === 'boolean' && { needsVan }),
+          ...(vanCount !== undefined && { vanCount: vanCount === null || vanCount === '' ? 0 : Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)) }),
           ...(Array.isArray(specialEquipment) && { specialEquipment: specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
           ...(agencyRef !== undefined && { agencyRef: agencyRef || null }),
           ...(notes !== undefined && { notes: notes || null }),

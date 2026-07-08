@@ -8,7 +8,7 @@ import {
   format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameMonth, isSameDay, startOfToday, addDays,
 } from 'date-fns'
-import StatusPill, { statusDotClass } from '@/app/_components/StatusPill'
+import StatusPill, { statusDotClass, categoryAccentClass, isAdvertorial, AdBadge } from '@/app/_components/StatusPill'
 import { hasConsoleAccess, type Role } from '@/lib/roles'
 // v1.129 — the drawer became a full edit/assign surface; it lives in its own file.
 import { BookingDrawer } from './BookingDrawer'
@@ -403,29 +403,29 @@ function MonthGrid({
                 }`}>
                   {format(day, 'd')}
                 </div>
-                {/* Mobile: colored dots */}
+                {/* Mobile: colored dots (ring = AD) */}
                 <div className="flex flex-wrap gap-0.5 sm:hidden">
                   {dayBookings.slice(0, 4).map(b => (
-                    <span key={b.id} className={`w-1.5 h-1.5 rounded-full ${statusDotClass(b.status)}`} />
+                    <span key={b.id} className={`w-1.5 h-1.5 rounded-full ${statusDotClass(b.status)} ${isAdvertorial(b.category) ? 'ring-1 ring-amber-400 ring-offset-1' : ''}`} />
                   ))}
                   {dayBookings.length > 4 && (
                     <span className="text-[9px] text-gray-400">+{dayBookings.length - 4}</span>
                   )}
                 </div>
-                {/* Desktop: event chips */}
+                {/* Desktop: event chips (left accent = AD) */}
                 <div className="hidden sm:block space-y-0.5">
                   {dayBookings.slice(0, 3).map(b => (
                     <div
                       key={b.id}
                       onClick={e => { e.stopPropagation(); onSelectDay(day); onOpenBooking(b.id) }}
-                      className={`flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded cursor-pointer leading-tight border border-gray-100 hover:border-gray-400 transition-colors`}
+                      className={`flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded cursor-pointer leading-tight border border-gray-100 hover:border-gray-400 transition-colors ${categoryAccentClass(b.category)}`}
                     >
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(b.status)}`} aria-hidden />
                       <span className="font-medium tabular-nums flex-shrink-0 text-gray-700">{b.callTime}</span>
                       <span className="text-gray-400 flex-shrink-0">·</span>
                       <span className="font-medium flex-shrink-0 text-gray-600">{b.outlet.code}</span>
                       <span className="text-gray-400 flex-shrink-0">·</span>
-                      <span className="truncate flex-1 text-gray-600">{b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}{showName(b)}</span>
+                      <span className="truncate flex-1 text-gray-600">{!!b.vanCount && <span title={`ต้องการรถตู้ × ${b.vanCount}`}>🚐{b.vanCount > 1 ? `×${b.vanCount}` : ''} </span>}{showName(b)}</span>
                     </div>
                   ))}
                   {dayBookings.length > 3 && (
@@ -499,10 +499,11 @@ function BookingRow({ b, onOpen }: { b: Booking; onOpen: () => void }) {
           {b.estimatedWrap && <span className="text-gray-400 text-xs"> → {b.estimatedWrap}</span>}
         </div>
         <StatusPill status={b.status} />
+        <AdBadge category={b.category} className="flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="text-sm text-gray-900 font-medium truncate">
             <span className="text-gray-500 font-normal mr-1">[{b.outlet.code}]</span>
-            {b.needsVan && <span title="ต้องการรถตู้">🚐 </span>}
+            {!!b.vanCount && <span title={`ต้องการรถตู้ × ${b.vanCount}`}>🚐{b.vanCount > 1 ? `×${b.vanCount}` : ''} </span>}
             {b.isBlockShot ? '🧱 ' : ''}{showName(b)}
           </div>
           <div className="text-xs text-gray-500 truncate">

@@ -10,9 +10,9 @@ export const dynamic = 'force-dynamic'
  *
  * Returns every Upload row attached to the booking, newest first. Used
  * by the Upload tab on /admin/[id] to render the "already uploaded for
- * this booking" list — both completed files (with Drive link + Wasabi
- * key) and in-flight ones (so a returning crew member sees their
- * current progress).
+ * this booking" list — both completed files (with Drive link) and
+ * in-flight ones (so a returning crew member sees their current
+ * progress).
  *
  * Auth: same gate as upload itself (video/sound crew or admin).
  */
@@ -51,9 +51,6 @@ export async function GET(request: NextRequest) {
         status: true,
         driveFileId: true,
         driveUrl: true,
-        wasabiBucket: true,
-        wasabiKey: true,
-        wasabiEtag: true,
         uploadedBy: true,
         initiatedAt: true,
         completedAt: true,

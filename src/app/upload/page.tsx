@@ -14,7 +14,7 @@ interface BookingRow {
   status: string
   cameraCount?: number | null
   micCount?: number | null
-  outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
+  outlet: { code: string; name: string }
   program: { code: string; name: string }
   assignedEmails: string[]
   episodes: Array<{ id: string; episodeId: string; title: string; sequence: number }>
@@ -96,6 +96,10 @@ function UploadPage() {
   }, [])
 
   useEffect(() => {
+    // Clear a stale error from the previous mode/booking — this page instance
+    // survives ?bookingId changes, so booking A's error banner would otherwise
+    // keep rendering over booking B's working form.
+    setError('')
     if (requestedBookingId) {
       // Single-booking mode — doesn't need me (no scope decision)
       setLoading(true)
@@ -153,7 +157,11 @@ function UploadPage() {
       .finally(() => setLoading(false))
   }, [requestedBookingId, meLoaded, me?.role])
 
-  const single = requestedBookingId ? bookings[0] : null
+  // Match by id — right after a list→booking navigation, `bookings` still holds
+  // the whole list for one render, so bookings[0] would be the newest booking,
+  // not the requested one (UploadSection would then keep its per-booking state,
+  // e.g. episodeRowId, and every upload would 400 with BAD_EPISODE).
+  const single = requestedBookingId ? bookings.find(b => b.id === requestedBookingId) ?? null : null
   const filtered = bookings.filter(b => {
     if (!search.trim()) return true
     const q = search.toLowerCase()
@@ -171,7 +179,7 @@ function UploadPage() {
       <div className="gf-header p-4 sm:p-6">
         <h1 className="text-xl sm:text-2xl font-normal text-gray-800">Upload Footage</h1>
         <p className="text-xs sm:text-sm text-gray-500">
-          อัปโหลด footage ตรงเข้า Drive (+ Wasabi ถ้า outlet เป็น DUAL_WRITE) — ผูกกับ Production ID อัตโนมัติ
+          อัปโหลด footage ตรงเข้า Drive — ผูกกับ Production ID อัตโนมัติ
         </p>
       </div>
 
@@ -205,7 +213,7 @@ function UploadPage() {
               </div>
             </div>
             {canStatus ? (
-              <UploadSection booking={{
+              <UploadSection key={single.id} booking={{
                 id: single.id,
                 bookingCode: single.bookingCode ?? null,
                 status: single.status,
@@ -279,11 +287,6 @@ function UploadPage() {
                       b.status === 'CONFIRMED' ? 'bg-green-50 text-green-700 border border-green-200'
                                                : 'bg-blue-50 text-blue-700 border border-blue-200'
                     }`}>{b.status}</span>
-                    {b.outlet.storagePolicy === 'DUAL_WRITE' && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200" title="ขึ้นทั้ง Drive + Wasabi">
-                        DUAL
-                      </span>
-                    )}
                     {/* v1.85 — upload status badge: which shoots still need footage */}
                     <span className="ml-auto">{uploadBadge(b, uploadStatus[b.id])}</span>
                   </div>

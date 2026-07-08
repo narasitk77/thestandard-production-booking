@@ -38,7 +38,7 @@ export interface WorkspaceBooking {
   switcherCount?: number | null
   cameraCount?: number | null
   micCount?: number | null
-  needsVan?: boolean | null
+  vanCount?: number | null
   // v1.62.0 — Auto-Planning fields (replace the manual planning sheet)
   equipmentNote?: string | null
   rentalGearNote?: string | null
@@ -179,8 +179,8 @@ export const WORKSPACE_COLUMNS: WorkspaceColumn[] = [
     value: b => b.cameraCount == null ? '' : String(b.cameraCount), num: b => b.cameraCount ?? 0 },
   { key: 'micCount', label: 'Mics', group: 'Crew & Gear', align: 'right',
     value: b => b.micCount == null ? '' : String(b.micCount), num: b => b.micCount ?? 0 },
-  { key: 'needsVan', label: 'Van', group: 'Crew & Gear',
-    value: b => b.needsVan ? 'Yes' : 'No' },
+  { key: 'vanCount', label: 'Vans', group: 'Crew & Gear', align: 'right',
+    value: b => String(b.vanCount ?? 0), num: b => b.vanCount ?? 0 },
   { key: 'freelancerCount', label: 'Freelancers', group: 'Crew & Gear', defaultVisible: true, align: 'right',
     value: b => { const n = freelancerList(b).length; return n ? String(n) : '' },
     num: b => freelancerList(b).length },

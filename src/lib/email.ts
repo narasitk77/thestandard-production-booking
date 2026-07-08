@@ -453,3 +453,69 @@ THE STANDARD Production Booking`
     }
   )
 }
+
+// v1.131 — sent to the original requester (Booking.createdByEmail) when a
+// booking is CONFIRMED. Distinct from sendAssignmentEmail above (that one's
+// addressed to crew being assigned work; this one confirms the booker's own
+// request went through) — same visual shape, different wording + no crew ask.
+export async function sendBookingConfirmedEmail(opts: {
+  to: string
+  toName: string
+  bookingId: string
+  bookingCode?: string | null
+  outletName: string
+  programName: string
+  shootDate: string
+  shootEndDate?: string | null
+  callTime: string
+  estimatedWrap?: string | null
+  shootType: string
+  locationName?: string | null
+  producer: string
+  episodes: Array<{ episodeId: string; title: string }>
+  notes?: string | null
+  senderAccessToken?: string | null
+  senderEmail?: string | null
+  calendarUrl?: string | null
+}) {
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
+  const detailLink = `${appUrl}/dashboard/${opts.bookingId}`
+
+  const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')
+  const location = opts.shootType === 'STUDIO' ? 'Studio' : opts.locationName || opts.shootType.replace('_', ' ')
+  const wrapStr = opts.estimatedWrap ? ` → ${opts.estimatedWrap}` : ''
+  const dateStr = opts.shootEndDate && opts.shootEndDate !== opts.shootDate
+    ? `${opts.shootDate} → ${opts.shootEndDate}`
+    : opts.shootDate
+
+  const text = `สวัสดี ${opts.toName},
+
+งานที่คุณจองได้รับการยืนยันแล้ว (Confirmed)${opts.bookingCode ? ` — ${opts.bookingCode}` : ''}:
+
+────────────────────────────────
+${opts.outletName} · ${opts.programName}
+วันถ่าย: ${dateStr}
+เวลา: ${opts.callTime}${wrapStr}
+สถานที่: ${location}
+Producer: ${opts.producer}
+${epList ? `\nEpisode IDs:\n${epList}` : ''}
+────────────────────────────────
+
+${opts.notes ? `Notes: ${opts.notes}\n\n` : ''}${opts.calendarUrl ? 'เปิดงานนี้ใน Google Calendar:' : 'ดูรายละเอียดได้ที่:'}
+${opts.calendarUrl || detailLink}
+
+THE STANDARD Production Booking`
+
+  await sendEmail(
+    {
+      to: opts.to,
+      subject: `[Confirmed] ${opts.outletName} · ${opts.programName} — ${opts.shootDate}`,
+      text,
+      html: text.replace(/\n/g, '<br>').replace(/────+/g, '<hr>'),
+    },
+    {
+      gmailAccessToken: opts.senderAccessToken,
+      gmailFrom: opts.senderEmail,
+    }
+  )
+}

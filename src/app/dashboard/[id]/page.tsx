@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import BackButton from '@/app/_components/BackButton'
 import { formatDateRange, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
+import CalendarPacketDetails from '@/app/_components/CalendarPacketDetails'
 import { Copy, Check, Calendar, Folder, Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 interface Episode {
@@ -44,6 +45,7 @@ interface BookingDetail {
   producer: string
   creative: string[]
   crewRequired: string[]
+  vanCount?: number | null
   agencyRef?: string
   notes?: string
   outlet: { code: string; name: string }
@@ -250,12 +252,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           )}
         </div>
 
-        <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <div><div className="text-gray-400">Producer</div><div className="font-medium text-gray-800">{booking.producer}</div></div>
-          <div><div className="text-gray-400">Creative/Host</div><div className="font-medium text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
-          <div><div className="text-gray-400">Crew</div><div className="font-medium text-gray-800">{booking.crewRequired.join(', ') || '—'}</div></div>
-          <div className="col-span-2 sm:col-span-4"><div className="text-gray-400">ทีมงาน (assigned)</div><div className="font-medium text-gray-800">{booking.assignedCrew && booking.assignedCrew.length > 0 ? booking.assignedCrew.map(c => `${c.name}${c.isLead ? ' ⭐' : ''}`).join(' · ') : '— ยังไม่ได้ assign —'}</div></div>
-          <div><div className="text-gray-400">Agency Ref</div><div className="font-medium text-gray-800">{booking.agencyRef || '—'}</div></div>
+        {/* Producer/Creative/Crew/Agency Ref moved into the Calendar Packet card
+            below (v1.131 redesign) — only the actually-assigned crew (distinct
+            from crewRequired) stays here since it's not part of that card. */}
+        <div className="mt-4 pt-4 border-t border-gray-100 text-xs">
+          <div className="text-gray-400">ทีมงาน (assigned)</div>
+          <div className="font-medium text-gray-800">{booking.assignedCrew && booking.assignedCrew.length > 0 ? booking.assignedCrew.map(c => `${c.name}${c.isLead ? ' ⭐' : ''}`).join(' · ') : '— ยังไม่ได้ assign —'}</div>
         </div>
       </div>
 
@@ -341,9 +343,25 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             {copied ? <><Check className="w-3.5 h-3.5 text-green-500" /> Copied!</> : <><Copy className="w-3.5 h-3.5" /> Copy</>}
           </button>
         </div>
-        <pre className="text-xs bg-gray-50 rounded-lg p-4 font-mono text-gray-700 whitespace-pre-wrap overflow-x-auto border border-gray-100">
-{calendarPacket}
-        </pre>
+        <CalendarPacketDetails booking={{
+          outletName: booking.outlet.name,
+          outletCode: booking.outlet.code,
+          programName: booking.program.name,
+          programCode: booking.program.code,
+          shootDate: booking.shootDate,
+          shootEndDate: booking.shootEndDate,
+          callTime: booking.callTime,
+          estimatedWrap: booking.estimatedWrap,
+          shootType: booking.shootType,
+          locationName: booking.locationName,
+          producer: booking.producer,
+          creative: booking.creative,
+          crewRequired: booking.crewRequired,
+          vanCount: booking.vanCount,
+          agencyRef: booking.agencyRef,
+          notes: booking.notes,
+          episodes: booking.episodes,
+        }} />
       </div>
 
       {/* Uploads */}
@@ -377,14 +395,6 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           </div>
         )}
       </div>
-
-      {/* Notes */}
-      {booking.notes && (
-        <div className="gf-card p-4">
-          <div className="text-xs text-gray-400 mb-1">Notes</div>
-          <p className="text-sm text-gray-700 whitespace-pre-line">{booking.notes}</p>
-        </div>
-      )}
     </div>
   )
 }

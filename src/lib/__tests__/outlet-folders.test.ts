@@ -9,7 +9,6 @@ import {
   cleanJobName,
   folderNameMatchesCode,
   buildEpisodeFolderName,
-  buildStoragePath,
   shootFolderLayers,
   camerasToPreCreate,
   cameraUploadOptions,
@@ -181,23 +180,6 @@ test('shootFolderLayers: AGN nests Project under the category box; others use sh
   assert.equal(agnNoProj.programFolderName, 'Advertorial')
   assert.equal(agnNoProj.bookingFolderName, 'AGN-260529-STD-01')
   assert.equal(agnNoProj.bookingSubfolderName, undefined) // no project box → no layer
-})
-
-test('buildStoragePath: EP segment is inserted between bookingCode and camera (Wasabi collision guard)', () => {
-  // no episode → flat key (unchanged)
-  assert.deepEqual(
-    buildStoragePath('AGN', 'AGN-260423-EVT-01', 'CAM-A', '001.mp4'),
-    ['ADVERTORIAL', 'AGN-260423-EVT-01', 'CAM-A', '001.mp4'],
-  )
-  // EP-tagged → key carries the EP so same camera+filename across EPs differ
-  assert.deepEqual(
-    buildStoragePath('AGN', 'AGN-260423-EVT-01', 'CAM-A', '001.mp4', 'EP02'),
-    ['ADVERTORIAL', 'AGN-260423-EVT-01', 'EP02', 'CAM-A', '001.mp4'],
-  )
-  // the whole point: identical camera+filename in different EPs → different keys
-  const ep1 = buildStoragePath('AGN', 'X-01', 'CAM-A', 'clip.mp4', 'EP01').join('/')
-  const ep2 = buildStoragePath('AGN', 'X-01', 'CAM-A', 'clip.mp4', 'EP02').join('/')
-  assert.notEqual(ep1, ep2)
 })
 
 test('camerasToPreCreate: CAM-A..CAM-{n} (cap D) + AUDIO if mics; empty for block shot', () => {

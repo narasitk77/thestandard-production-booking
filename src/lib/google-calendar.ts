@@ -257,7 +257,7 @@ export function buildEventTitle(booking: {
   videoType?: string | null
   cameraCount?: number | null
   micCount?: number | null
-  needsVan?: boolean | null
+  vanCount?: number | null
   isBlockShot?: boolean | null
   projectName?: string | null
   outlet: { code: string; name: string }
@@ -283,7 +283,8 @@ export function buildEventTitle(booking: {
   const titleBody = segments.length ? `${core} · ${segments.join(' · ')}` : core
   // v1.111 — 🧱 marks a Block Shot at a glance (ops ask); van emoji leads as before.
   const withBlock = booking.isBlockShot ? `🧱 ${titleBody}` : titleBody
-  return booking.needsVan ? `${VAN_EMOJI} ${withBlock}` : withBlock
+  const vanCount = booking.vanCount || 0
+  return vanCount > 0 ? `${VAN_EMOJI}${vanCount > 1 ? ` ×${vanCount}` : ''} ${withBlock}` : withBlock
 }
 
 export function buildEventDescription(booking: {
@@ -295,7 +296,7 @@ export function buildEventDescription(booking: {
   producer: string
   cameraCount?: number | null
   micCount?: number | null
-  needsVan?: boolean | null
+  vanCount?: number | null
   isBlockShot?: boolean | null
   specialEquipment?: string[] | null
   freelancers?: unknown
@@ -326,7 +327,7 @@ Producer: ${booking.producer}
 Crew: ${booking.crewRequired.join(', ') || '—'}
 Equipment: ${equip || '—'}
 Special Equipment: ${booking.specialEquipment && booking.specialEquipment.length > 0 ? booking.specialEquipment.join(', ') : '—'}
-Van required: ${booking.needsVan ? 'Yes 🚐' : 'No'}
+Van required: ${booking.vanCount ? `Yes 🚐 × ${booking.vanCount}` : 'No'}
 Agency Ref: ${booking.agencyRef || '—'}
 Notes: ${booking.notes || '—'}
 Admin notes: ${booking.adminNotes || '—'}
@@ -350,9 +351,10 @@ export async function createCalendarEvent(booking: {
   videoType?: string | null
   locationName?: string | null
   producer: string
+  producerEmail?: string | null
   cameraCount?: number | null
   micCount?: number | null
-  needsVan?: boolean | null
+  vanCount?: number | null
   isBlockShot?: boolean | null
   specialEquipment?: string[] | null
   projectName?: string | null
@@ -413,7 +415,14 @@ export async function createCalendarEvent(booking: {
       })
       throw err
     }
-    const attendees = canInvite ? assignedEmails.map(email => ({ email })) : []
+    // v1.131 — the Producer gets a calendar guest invite too, alongside crew
+    // (union'd, case-insensitive dedupe — a producer who's also crew-assigned
+    // doesn't get double-invited).
+    const producerEmailTrimmed = (booking.producerEmail || '').trim()
+    const attendeeEmails = producerEmailTrimmed && !assignedEmails.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
+      ? [...assignedEmails, producerEmailTrimmed]
+      : assignedEmails
+    const attendees = canInvite ? attendeeEmails.map(email => ({ email })) : []
 
     const baseBody = {
       summary: title,
@@ -614,7 +623,7 @@ export async function updateCalendarEventDetails(
     producer: string
     cameraCount?: number | null
     micCount?: number | null
-    needsVan?: boolean | null
+    vanCount?: number | null
     isBlockShot?: boolean | null
     specialEquipment?: string[] | null
     projectName?: string | null

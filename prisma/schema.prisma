@@ -41,8 +41,8 @@ enum CalendarSyncStatus {
 enum UploadStatus {
   PENDING       // row created by /api/upload/init, awaiting browser to start
   UPLOADING     // at least one cloud upload in progress
-  DRIVE_OK      // v1.35 — Drive done, Wasabi pending (only DUAL_WRITE outlets)
-  WASABI_OK     // v1.35 — Wasabi done, Drive pending
+  DRIVE_OK      // LEGACY (Wasabi dual-write removed) — Drive done, Wasabi pending
+  WASABI_OK     // LEGACY (Wasabi dual-write removed) — Wasabi done, Drive pending
   COMPLETE      // all required destinations done + sheet row appended
   FAILED        // user cancel or confirm timeout — Upload row stays for audit
   ORPHANED      // v1.35 — partial state stuck >24h, reconciler must inspect
@@ -177,12 +177,12 @@ model OTRecord {
   @@map("ot_records")
 }
 
-// v1.35.0 — per-outlet upload destination policy. The booking upload UI
-// reads this to know whether to require both Drive + Wasabi (paid client
-// work that must be archived) or just Drive (internal / cheaper).
+// v1.35.0 — per-outlet upload destination policy. LEGACY: the Wasabi
+// dual-write was removed, so the upload flow no longer reads this — kept
+// (with existing values) to avoid a destructive migration.
 enum StoragePolicy {
-  DRIVE_ONLY        // Drive only — operator may opt-in to Wasabi per file
-  DUAL_WRITE        // Both clouds required, upload fails unless both succeed
+  DRIVE_ONLY        // Drive only (the only behavior now)
+  DUAL_WRITE        // LEGACY — used to require Drive + Wasabi
 }
 
 model Outlet {
@@ -258,9 +258,14 @@ model Booking {
   // calendar event description + admin detail. Free string[] (no enum) so
   // the option list can grow without a schema change.
   specialEquipment String[]
-  // v1.41.0 — off-site shoots that need a company van. When true the calendar
-  // event title (web + Google) is prefixed with 🚐 so it's obvious at a glance.
+  // v1.41.0 — LEGACY (replaced by vanCount in v1.131) — off-site shoots that
+  // needed a company van. Kept so historical rows aren't dropped; no code
+  // writes this anymore.
   needsVan         Boolean       @default(false)
+  // v1.131 — how many company vans this shoot needs (0 = none). Replaces the
+  // needsVan boolean so multi-van shoots can be booked. When >0 the calendar
+  // event title (web + Google) is prefixed with 🚐 (×N when N>1).
+  vanCount         Int           @default(0)
   // v1.41.0 — structured freelance crew (name · contract · email). Replaces the
   // old "append into adminNotes text" approach that duplicated names on every
   // re-save (the calendar description is rebuilt from this list, never appended).
@@ -414,6 +419,8 @@ model Upload {
   sha256        String?  // computed in browser before upload; verified on complete
   driveFileId   String?  @unique
   driveUrl      String?
+  // LEGACY (Wasabi dual-write removed) — kept so historical rows keep their
+  // archive pointers; no code writes these anymore.
   wasabiBucket       String?
   wasabiKey          String?  // e.g. "VIDEO2026/Advertorial/AGN-…/Cam1/001.mp4"
   wasabiMultipartId  String?  // S3 UploadId between init+complete (v1.35.1)

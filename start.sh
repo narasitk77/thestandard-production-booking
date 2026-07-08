@@ -262,32 +262,38 @@ BEGIN
 END $$;
 SQL
 
+# (v1.130 — the v1.35 boot seed that flipped AGN/TSS/NWS to
+#  storagePolicy='DUAL_WRITE' was removed along with the Wasabi dual-write.
+#  The column/enum stay in the schema as legacy; nothing reads or writes them.)
+
 # ──────────────────────────────────────────────────────────────────────────────
-# v1.35.0 — seed Outlet.storagePolicy = 'DUAL_WRITE' for the outlets that
-# require both Drive + Wasabi archive (paid client / event work):
-# AGN, TSS, NWS. Other outlets stay at the schema default 'DRIVE_ONLY'.
+# v1.131 — needsVan (Boolean) replaced by vanCount (Int, how many vans). The
+# new column defaults to 0 for every row (old and new) once `prisma db push`
+# above adds it — this backfill carries forward any pre-existing needsVan=true
+# rows so they don't silently lose their van request.
 #
-# Guarded so this only flips rows that are still on the default — admins
-# can change a policy via the future admin UI without this seed clobbering
-# their choice on the next restart. Future outlets that should default to
-# DUAL_WRITE either get added to this list or set via that admin UI.
+# Idempotent: only touches rows still at the default vanCount=0, so re-running
+# (or an admin later setting vanCount=0 on purpose) is never clobbered.
 # ──────────────────────────────────────────────────────────────────────────────
-echo "==> Seeding Outlet.storagePolicy for DUAL_WRITE outlets..."
-psql "$DATABASE_URL" <<'SQL' || echo "storagePolicy seed skipped (column missing — old image)"
+echo "==> Backfilling Booking.vanCount from legacy needsVan..."
+psql "$DATABASE_URL" <<'SQL' || echo "vanCount backfill skipped (column missing — old image)"
 DO $$
 DECLARE
-  flipped INT;
+  affected INT;
 BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'outlets' AND column_name = 'storagePolicy'
+    WHERE table_name = 'bookings' AND column_name = 'vanCount'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'bookings' AND column_name = 'needsVan'
   ) THEN
-    UPDATE outlets
-       SET "storagePolicy" = 'DUAL_WRITE'
-     WHERE code IN ('AGN', 'TSS', 'NWS')
-       AND "storagePolicy" = 'DRIVE_ONLY';
-    GET DIAGNOSTICS flipped = ROW_COUNT;
-    RAISE NOTICE 'Flipped % outlet(s) to DUAL_WRITE storage policy', flipped;
+    UPDATE bookings
+       SET "vanCount" = 1
+     WHERE "needsVan" = true
+       AND "vanCount" = 0;
+    GET DIAGNOSTICS affected = ROW_COUNT;
+    RAISE NOTICE 'Backfilled % booking(s): vanCount 0 -> 1 from legacy needsVan=true', affected;
   END IF;
 END $$;
 SQL

@@ -24,7 +24,7 @@ interface Booking {
   status: string; createdByEmail?: string | null; producerEmail?: string | null
   callTime: string; estimatedWrap?: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]
-  cameraCount?: number | null; micCount?: number | null; needsVan?: boolean; specialEquipment?: string[]
+  cameraCount?: number | null; micCount?: number | null; vanCount?: number; specialEquipment?: string[]
   agencyRef?: string; notes?: string; projectName?: string | null
   outlet: { code: string; name: string }; program: { code: string; name: string }
   episodes: Episode[]
@@ -42,7 +42,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
 
   const [form, setForm] = useState({
     callTime: '', estimatedWrap: '', shootType: '', locationName: '', producer: '',
-    creative: '', crewRequired: '', cameraCount: '', micCount: '', needsVan: false,
+    creative: '', crewRequired: '', cameraCount: '', micCount: '', vanCount: '0',
     specialEquipment: [] as string[], agencyRef: '', notes: '',
     episodeTitles: [] as { id: string; episodeId: string; title: string }[],
   })
@@ -68,7 +68,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
           crewRequired: (b.crewRequired || []).join(', '),
           cameraCount: b.cameraCount === null || b.cameraCount === undefined ? '' : String(b.cameraCount),
           micCount: b.micCount === null || b.micCount === undefined ? '' : String(b.micCount),
-          needsVan: !!b.needsVan,
+          vanCount: String(b.vanCount ?? 0),
           specialEquipment: b.specialEquipment || [],
           agencyRef: b.agencyRef || '',
           notes: b.notes || '',
@@ -102,7 +102,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
         crewRequired: form.crewRequired ? form.crewRequired.split(',').map(s => s.trim()).filter(Boolean) : [],
         cameraCount: form.cameraCount.trim() === '' ? null : Math.max(0, parseInt(form.cameraCount, 10) || 0),
         micCount: form.micCount.trim() === '' ? null : Math.max(0, parseInt(form.micCount, 10) || 0),
-        needsVan: form.needsVan,
+        vanCount: Math.max(0, Math.min(20, parseInt(form.vanCount, 10) || 0)),
         specialEquipment: form.specialEquipment,
         agencyRef: form.agencyRef || null,
         notes: form.notes || null,
@@ -225,10 +225,8 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
         </div>
 
         <div>
-          <label className="flex items-center gap-2 cursor-pointer w-fit">
-            <input type="checkbox" className="accent-brand-primary" checked={form.needsVan} onChange={e => setForm({ ...form, needsVan: e.target.checked })} />
-            <span className="text-sm text-gray-700">🚐 ต้องการรถตู้</span>
-          </label>
+          <label className="text-xs text-gray-500 mb-1 block">🚐 จำนวนรถตู้</label>
+          <NumberStepper min={0} max={10} ariaLabel="จำนวนรถตู้" value={form.vanCount} onChange={v => setForm({ ...form, vanCount: v })} />
         </div>
 
         <div>

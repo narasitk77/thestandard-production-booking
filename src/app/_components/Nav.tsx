@@ -77,6 +77,8 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     // v1.73 — Workspace renamed "รายงาน"; Dashboard analytics folded in here.
     { href: '/admin/workspace', label: 'รายงาน', show: isConsole },
     { href: '/admin/routine', label: 'Routine', show: isConsole },
+    // v1.131 — per-room/day availability view for Management (capacity planning).
+    { href: '/admin/room-schedule', label: 'ห้อง/สตูดิโอ', show: isConsole },
     { href: '/profile/signature', label: 'ลายเซ็น', show: !!session },
     { href: '/manual', label: 'คู่มือ', show: true },
     { href: '/changelog', label: 'อัปเดต', show: true },

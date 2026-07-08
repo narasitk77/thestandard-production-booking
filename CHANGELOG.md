@@ -5,6 +5,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.131.0] — 2026-07-08
+
+### Added — สีเน้น AD/Original Content ในปฏิทิน
+- เดือน/agenda/day-drawer: booking ที่เป็น **AD (Advertorial)** มีป้าย "AD" สีอำพัน + ขอบซ้ายสีอำพันบน month-grid chip + ring บน mobile dot — เทียบง่ายกับงาน Original Content โดยไม่ไปรบกวนสีสถานะเดิม.
+
+### Added — จองรถตู้ได้มากกว่า 1 คัน
+- `needsVan` (Boolean) → `vanCount` (จำนวนคัน) ทั้ง wizard/admin/drawer/producer self-edit — ใช้ NumberStepper/number input แทน checkbox. ชื่องานบนปฏิทิน (เว็บ+Google) และอีเมลขึ้น 🚐 ×N เมื่อมากกว่า 1 คัน. **DB ไม่มี migration ทำลายข้อมูล**: เพิ่มคอลัมน์ `vanCount` ใหม่ + backfill จาก `needsVan=true` เดิมตอน boot (`start.sh`), คอลัมน์ `needsVan` เก่ายังอยู่เป็น legacy.
+
+### Added — ตารางห้อง/สตูดิโอ ดูว่าวันไหนว่าง (`/admin/room-schedule`)
+- หน้าใหม่สำหรับ Management: เลือกวันที่ → เห็นทุกห้อง (Studio/A/B) เป็น timeline 07:00–23:00 พร้อมช่วงที่ถูกจองสีตามสถานะ + ป้าย AD, "ว่างทั้งวัน" ถ้าไม่มีคิว, และ list แยกสำหรับ booking ที่ location ไม่ตรงกับห้องในระบบ (กัน silent-drop จากข้อมูลเก่า/พิมพ์เอง). อ่านอย่างเดียว ไม่มีการเขียน — เข้าได้ทุก console tier (ไม่ใช่แค่ ADMIN).
+
+### Changed — Calendar Packet กลายเป็นรายละเอียดการจองแบบอ่านง่าย มีสีเน้น
+- แทนที่ text block แบบ copy-paste ล้วน ด้วย component ใหม่ (`CalendarPacketDetails`) ที่จัดเป็นหมวดหมู่ชัดเจน (เวลา/วันที่/สถานที่/Production Project/Producer/Crew/NAS) — **Notes เด่นเป็นพิเศษด้วยกรอบสีแดง** เพราะสำคัญ, เก็บบรรทัดตามที่พิมพ์มาจริง. ใช้ทั้งหน้า `/dashboard/[id]` และ `/booking/success`; ปุ่ม Copy ยังคัดลอก plain-text เดิมได้เหมือนเดิม (เผื่อวางในแชท/ปฏิทินอื่น).
+- ตัด field ที่ซ้ำกับ Calendar Packet ออกจากหัวข้อ booking ในหน้า `/dashboard/[id]` (Producer/Creative/Crew/Agency Ref) เหลือแค่ "ทีมงาน (assigned)" ที่ไม่มีที่อื่นแสดง.
+
+### Fixed — โน้ตในหน้ารีวิวจองงาน (wizard) รวมเป็นบรรทัดเดียว
+- ขั้นตอน Review ของ booking wizard ไม่ได้ใส่ `whitespace-pre-line` ให้ค่าที่แสดง — โน้ตหลายบรรทัดเลยรวมเป็นก้อนเดียวอ่านไม่รู้เรื่อง (คนละจุดกับหน้า admin/dashboard ที่แก้ไปแล้วก่อนหน้านี้).
+
+### Fixed — user ทั่วไปกด booking จากหน้า Overview เจอ Forbidden
+- หน้า Overview (`/`) โชว์ทุก booking ที่ CONFIRMED ให้ทุกคนดู (ตั้งใจ เพื่อวางแผนกำลังคน) แต่กดเข้าไปดูรายละเอียดกลับโดน 403 เพราะ `canViewBooking` ไม่รู้จักเงื่อนไข "CONFIRMED = ดูได้ทุกคน" — แก้ให้ตรงกับ list แล้ว.
+
+### Changed — Confirm booking แล้วอีเมลไปหาคนจอง + เชิญ Producer เข้า Google Calendar
+- Approve (CONFIRMED) ตอนนี้ส่งอีเมลแจ้งไปหา `createdByEmail` (คนจอง) ด้วย (เดิมไม่มีอีเมลอะไรส่งเลยตอน confirm), และเพิ่ม Producer เป็น guest ใน Google Calendar event (เดิมมีแค่ทีมที่ assign) — คงอยู่ข้าม re-assign/reconcile รอบต่อไปด้วย (ไม่ถูก patch หลุดออกไป).
+
+### Changed — ช่อง Agency Ref (QU-xxxx) โชว์เฉพาะงาน AD
+- Product Code / Agency Ref เป็นรหัสอ้างอิงฝั่ง agency ที่มีความหมายเฉพาะงาน Advertorial — ซ่อนช่องนี้เมื่อเลือก Original Content ทั้งใน wizard/admin edit/drawer (ยังโชว์ถ้ามีค่าเก่าอยู่แล้วในบันทึกที่ไม่ใช่ AD กันข้อมูลหาย).
+
+### Changed — ปุ่ม Original Content / AD ในฟอร์มจองห่างกันขึ้น
+- ป้องกันกดพลาดสลับ AD ↔ Original Content โดยไม่ตั้งใจ (`gap-2` → `gap-4`).
+
+---
+
+## [1.130.0] — 2026-07-08
+
+### Removed — ถอดการผูก Wasabi ออกจากเส้นทางอัปโหลดทั้งหมด (Drive เป็นปลายทางเดียว)
+- `/api/upload/init|complete|cancel|list` เลิกยุ่งกับ Wasabi ทั้งหมด: ไม่ presign multipart, ไม่ verify ฝั่ง S3, ไม่ abort ตอน cancel — เหลือ Drive resumable upload เส้นเดียว. ลบ `src/lib/wasabi.ts`, `uploadToWasabi` ใน upload-client, ถอด dependency `@aws-sdk/*` ออกจาก package.json.
+- UI: checkbox "ส่ง Wasabi ด้วย" + ป้าย DUAL + progress bar Wasabi หายไปจากหน้า upload/UploadSection.
+- **DB ไม่แตะ** (ไม่มี migration): คอลัมน์ `wasabi*`, enum `DRIVE_OK`/`WASABI_OK`, `storagePolicy` ยังอยู่เป็น legacy เพื่อไม่ทำลายแถวเก่า — โค้ดไม่เขียนค่าเหล่านี้อีกแล้ว. compose/env ตัด `WASABI_*` ออก (ตัวแปรใน stack env เก่าไม่มีผลอะไร).
+
+### Fixed — dropdown โปรดิวเซอร์ใน drawer ปฏิทินติดรายชื่อทีมอื่น (เวลธ์โผล่ในงานข่าว)
+- `BookingDrawer` เคย fetch รายชื่อครั้งเดียวแล้ว cache ข้าม booking (`if (producers.length === 0)`) — เปิดงาน Wealth ก่อนแล้วค่อยเปิดงานข่าวจะเห็น ปิ่น/แอ๊นท์ ในงานข่าว. ตอนนี้ล้าง list ตอนสลับ booking + fetch ใหม่ตาม outlet ทุกครั้งที่เข้าโหมดแก้ไข (มี dead-flag กัน response ช้ามาทับ) + ระหว่างโหลดล็อกช่องกันพิมพ์แล้ว email หลุด. ข้อมูล `producerOutlets` ใน DB ตรวจแล้วถูกต้องครบทุก outlet และไม่มี booking ไหนถูกเซฟชื่อผิดทีม (สแกน 184 งาน).
+
+### Fixed — /upload เปิดงานจาก list แล้วติดข้อมูลงานอื่น
+- คลิกงานจากรายการ: render แรก `single` เคยชี้ไปงานบนสุดของ list (ไม่ใช่งานที่คลิก) แล้ว `UploadSection` จำ state ต่องาน (EP ที่เลือก) ของงานผิดไว้ → อัปโหลดโดน 400 BAD_EPISODE ทุกไฟล์จนต้อง reload. ตอนนี้จับคู่ด้วย id + `key={booking.id}` ให้ remount ต่องาน, และล้าง error banner ค้างจากงานก่อนหน้า.
+
+---
+
 ## [1.129.0] — 2026-07-08
 
 ### Changed — side window ในปฏิทินกลายเป็น Full Edit + จัดทีม (แยกไฟล์เป็น `calendar/BookingDrawer.tsx`)

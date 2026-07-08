@@ -63,9 +63,10 @@ type BookingForReconcile = {
   videoType?: string | null
   locationName?: string | null
   producer: string
+  producerEmail?: string | null
   cameraCount?: number | null
   micCount?: number | null
-  needsVan?: boolean | null
+  vanCount?: number | null
   isBlockShot?: boolean | null
   freelancers?: unknown
   assignedEmails: string[]
@@ -84,6 +85,17 @@ type ProcessOptions = {
   dryRun?: boolean
 }
 
+// v1.131 — the Producer is invited as a calendar guest alongside crew (see
+// google-calendar.ts createCalendarEvent). The reconciler's job is to keep
+// calendar attendees matching "the correct set" — so that correct set must
+// include the producer too, or the very next tick "fixes" the event by
+// patching the producer back out.
+export function withProducer(assignedEmails: string[], producerEmail?: string | null): string[] {
+  const trimmed = (producerEmail || '').trim()
+  if (!trimmed || assignedEmails.some(e => e.toLowerCase() === trimmed.toLowerCase())) return assignedEmails
+  return [...assignedEmails, trimmed]
+}
+
 async function createVerifiedCalendarEvent(booking: {
   id: string
   bookingCode?: string | null
@@ -95,9 +107,10 @@ async function createVerifiedCalendarEvent(booking: {
   videoType?: string | null
   locationName?: string | null
   producer: string
+  producerEmail?: string | null
   cameraCount?: number | null
   micCount?: number | null
-  needsVan?: boolean | null
+  vanCount?: number | null
   isBlockShot?: boolean | null
   freelancers?: unknown
   assignedEmails: string[]
@@ -122,11 +135,12 @@ async function createVerifiedCalendarEvent(booking: {
     )
   }
 
+  const wantedAttendees = withProducer(booking.assignedEmails, booking.producerEmail)
   const calendarEvent = await getCalendarEventAttendees(eventId)
-  if (!sameEmails(booking.assignedEmails, calendarEvent.attendees)) {
+  if (!sameEmails(wantedAttendees, calendarEvent.attendees)) {
     await deleteCalendarEvent(eventId)
     throw new Error(
-      `created calendar event is missing assigned attendees (${booking.assignedEmails.join(', ') || 'none'})`,
+      `created calendar event is missing assigned attendees (${wantedAttendees.join(', ') || 'none'})`,
     )
   }
 
@@ -142,6 +156,10 @@ async function processBooking(
   options: ProcessOptions,
 ): Promise<ReconcileItem> {
   const assignedEmails = cleanEmails(booking.assignedEmails)
+  // v1.131 — "correct" calendar attendees = crew + producer; assignedEmails
+  // (crew only) still drives the description's "Assigned:" line and the
+  // ReconcileItem report below.
+  const calendarAttendees = cleanEmails(withProducer(assignedEmails, booking.producerEmail))
   const item: ReconcileItem = {
     bookingId: booking.id,
     bookingCode: booking.bookingCode,
@@ -172,9 +190,10 @@ async function processBooking(
         videoType: booking.videoType,
         locationName: booking.locationName,
         producer: booking.producer,
+        producerEmail: booking.producerEmail,
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
-        needsVan: booking.needsVan,
+        vanCount: booking.vanCount,
         isBlockShot: booking.isBlockShot,
         freelancers: booking.freelancers,
         assignedEmails,
@@ -242,9 +261,10 @@ async function processBooking(
         videoType: booking.videoType,
         locationName: booking.locationName,
         producer: booking.producer,
+        producerEmail: booking.producerEmail,
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
-        needsVan: booking.needsVan,
+        vanCount: booking.vanCount,
         isBlockShot: booking.isBlockShot,
         freelancers: booking.freelancers,
         assignedEmails,
@@ -289,7 +309,7 @@ async function processBooking(
       return item
     }
 
-    if (sameEmails(assignedEmails, calendarEvent.attendees)) {
+    if (sameEmails(calendarAttendees, calendarEvent.attendees)) {
       // Even when nothing changes, refresh the OK timestamp so the UI
       // can show "last verified N min ago" and the stale-PENDING
       // reconciler clause works correctly.
@@ -308,7 +328,7 @@ async function processBooking(
     }
 
     if (!options.dryRun) {
-      const ok = await updateCalendarEventAttendees(booking.calendarEventId, assignedEmails, {
+      const ok = await updateCalendarEventAttendees(booking.calendarEventId, calendarAttendees, {
         bookingId: booking.id,
         bookingCode: booking.bookingCode,
       })
@@ -327,9 +347,10 @@ async function processBooking(
           videoType: booking.videoType,
           locationName: booking.locationName,
           producer: booking.producer,
+          producerEmail: booking.producerEmail,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
-          needsVan: booking.needsVan,
+          vanCount: booking.vanCount,
           isBlockShot: booking.isBlockShot,
           freelancers: booking.freelancers,
           assignedEmails,

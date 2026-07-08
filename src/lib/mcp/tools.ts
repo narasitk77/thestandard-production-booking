@@ -136,7 +136,7 @@ export function buildMcpRegistry(): McpRegistry {
             cameraCount: { type: 'number', description: 'Required unless isBlockShot — number of cameras needed (0 if none)' },
             micCount: { type: 'number', description: 'Required unless isBlockShot — number of mics needed (0 if none)' },
             isBlockShot: { type: 'boolean', description: 'Block Shot booking — flexible-queue shoot; when true, cameraCount/micCount are not required' },
-            needsVan: { type: 'boolean' },
+            vanCount: { type: 'number', description: 'Number of company vans needed (0 = none)' },
             episodes: {
               type: 'array',
               description: 'Outlet bookings only: one entry per episode',
@@ -269,7 +269,7 @@ export function buildMcpRegistry(): McpRegistry {
           switcherCount: b.switcherCount,
           cameraCount: b.cameraCount,
           micCount: b.micCount,
-          needsVan: b.needsVan,
+          vanCount: b.vanCount,
           notes: b.notes,
           calendarSyncStatus: b.calendarSyncStatus,
           createdByEmail: b.createdByEmail,

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, canUploadToBooking } from '@/lib/session'
 import {
-  buildStoragePath,
   hasOutletFolderMapping,
   outletDriveFolderName,
   shootFolderLayers,
@@ -10,18 +9,8 @@ import {
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import {
-  isWasabiConfigured,
-  createMultipart,
-  presignParts,
-  chooseChunkSize,
-  buildKey,
-  getWasabiKeyPrefix,
-  getWasabiBucket,
-} from '@/lib/wasabi'
-import {
   ensureUploadFolderPath,
   createResumableUploadSession,
-  deleteDriveFile,
 } from '@/lib/google-drive'
 import { isDriveAccessError } from '@/lib/drive-access'
 
@@ -30,11 +19,10 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/upload/init
  *
- * Pre-creates the Upload + FootageLog rows, reserves a Drive file slot
- * with a resumable session URL, and (when the outlet requires or the
- * operator opts in) initiates a Wasabi multipart upload with N presigned
- * PUT URLs. Returns everything the browser needs to push bytes directly
- * to the clouds without going through this server.
+ * Pre-creates the Upload + FootageLog rows and reserves a Drive file slot
+ * with a resumable session URL. Returns everything the browser needs to
+ * push bytes directly to Drive without going through this server.
+ * (Wasabi dual-write removed — Drive is the only upload target now.)
  *
  * Request body:
  *   {
@@ -44,10 +32,9 @@ export const dynamic = 'force-dynamic'
  *     size:         number  — bytes
  *     mimeType?:    string  — default 'application/octet-stream'
  *     sha256?:      string  — browser-computed hex digest (optional, verified on complete)
- *     includeWasabi?: boolean — DRIVE_ONLY outlets opt in (DUAL_WRITE always includes)
  *   }
  *
- * Response: { uploadId, targets: { drive?, wasabi? }, chunkSize? }
+ * Response: { uploadId, targets: { drive } }
  */
 
 const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024 * 1024 // 500GB hard cap (v1.87; Drive itself allows 5TB)
@@ -60,9 +47,8 @@ const SAFE_FILENAME_RE = /^[A-Za-z0-9._\-()[\] ฀-๿]+$/  // ASCII + Thai
  * which contain valid chars but still have path-like semantics.
  *
  * Drive ignores OS path separators (it uses ids), but the same `filename`
- * value flows into the Wasabi key + the Drive display name + (legacy)
- * local disk. Keeping it strictly file-basename-shaped is the right
- * invariant.
+ * value flows into the Drive display name + (legacy) local disk.
+ * Keeping it strictly file-basename-shaped is the right invariant.
  */
 function isSafeFilename(filename: string): boolean {
   if (!filename || filename.length > 255) return false
@@ -97,7 +83,6 @@ export async function POST(request: NextRequest) {
     const size = Number(body.size)
     const mimeType = String(body.mimeType || 'application/octet-stream').trim()
     const sha256 = body.sha256 ? String(body.sha256).trim() : null
-    const operatorWantsWasabi = body.includeWasabi === true
 
     // 1. Validate inputs
     if (!bookingId) return NextResponse.json({ error: 'bookingId is required' }, { status: 400 })
@@ -146,7 +131,7 @@ export async function POST(request: NextRequest) {
         crewRequired: true,
         agencyRef: true,
         notes: true,
-        outlet: { select: { code: true, name: true, storagePolicy: true } },
+        outlet: { select: { code: true, name: true } },
         // v1.70 — program name (booking-level + per-episode) drives the new
         // Drive "program / รายการ" folder layer via bookingShowName().
         program: { select: { name: true } },
@@ -184,33 +169,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // 3. Determine which clouds we're writing to.
-    //   v1.72 — Wasabi is OFF by default (Drive-only). Set WASABI_ENABLED=1 in
-    //   the stack env to turn the dual-write archive back on; until then every
-    //   upload goes to Drive only, regardless of outlet storagePolicy or the
-    //   per-upload "include Wasabi" opt-in.
-    const policy = booking.outlet.storagePolicy
-    const wasabiEnabled = process.env.WASABI_ENABLED === '1'
-    const wantWasabi = wasabiEnabled && (policy === 'DUAL_WRITE' || operatorWantsWasabi)
-    if (wantWasabi && !isWasabiConfigured()) {
-      // v1.35.12 — surface which env vars are missing so the admin can
-      // see at a glance what to set in Portainer instead of going to a
-      // separate diagnostic page.
-      const missing = ([
-        ['WASABI_ENDPOINT', process.env.WASABI_ENDPOINT],
-        ['WASABI_REGION', process.env.WASABI_REGION],
-        ['WASABI_BUCKET', process.env.WASABI_BUCKET],
-        ['WASABI_ACCESS_KEY', process.env.WASABI_ACCESS_KEY],
-        ['WASABI_SECRET_KEY', process.env.WASABI_SECRET_KEY],
-      ]).filter(([, v]) => !v?.trim()).map(([k]) => k)
-      return NextResponse.json({
-        error: `Wasabi is required for outlet "${booking.outlet.code}" (storagePolicy=DUAL_WRITE) but is not configured. Admin: set the following env vars in the Portainer stack and redeploy — ${missing.join(', ')}. Diagnose at /api/admin/upload-config.`,
-        code: 'WASABI_NOT_CONFIGURED',
-        missingEnvVars: missing,
-        outletPolicy: policy,
-        adminAction: 'Set WASABI_* env vars in Portainer stack → Pull and redeploy. Verify via /api/admin/upload-config (wasabiPing.ok = true).',
-      }, { status: 503 })
-    }
+    // 3. Drive is the only upload target (Wasabi dual-write removed).
     if (!process.env.DRIVE_FOOTAGE_ROOT?.trim()) {
       return NextResponse.json({
         error: 'DRIVE_FOOTAGE_ROOT env var is not set. Admin: set it in the Portainer stack to the Shared Drive root folder id (VIDEO 2026 [JUL–DEC] = 0AH7f4FZNrHsOUk9PVA) and redeploy.',
@@ -220,9 +179,8 @@ export async function POST(request: NextRequest) {
 
     // v1.93 — multi-EP: the file lands in a per-episode subfolder so episodes
     // aren't all mixed in one camera folder. The uploader picks which EP;
-    // default to the first. Resolved up here because it also feeds the Wasabi
-    // key (below) so EP files don't collide. Bookings with no episodes keep the
-    // flat <booking>/<camera>/ layout (episodeFolderName stays undefined).
+    // default to the first. Bookings with no episodes keep the flat
+    // <booking>/<camera>/ layout (episodeFolderName stays undefined).
     let selectedEp: { id: string; sequence: number; title: string } | null = null
     if (booking.episodes.length > 0) {
       selectedEp = episodeRowId
@@ -245,19 +203,10 @@ export async function POST(request: NextRequest) {
     // v1.94 — Content Agency files EP folders by project EP ID; others by EP01.
     const isAgency = booking.outlet.code === 'AGN'
     const episodeFolderName = selectedEp ? buildEpisodeFolderName(selectedEp, { useEpisodeId: isAgency }) : undefined
-    // ASCII-clean EP segment for the Wasabi key (no Thai title — keys stay
-    // stable + ASCII). Mirrors the Drive EP folder so the two storages don't
-    // drift and same-named files in different EPs can't overwrite each other.
-    // (Wasabi is keyed by the per-booking bookingCode, so EP01 is enough here.)
-    const episodeKeySegment = selectedEp ? `EP${String(selectedEp.sequence).padStart(2, '0')}` : undefined
 
-    // 4. Compute paths.
-    //   Wasabi: stable ASCII key — <prefix>/<OUTLET>/<bookingCode>/[EP01/]<camera>/<file>
-    //   Drive : AGN → <outlet>/<Project ID · name>/<job (AGN-…)>/<EP ID · title>/<camera>/;
-    //           others → <outlet>/<show>/<Production ID · job>/<EP01 · title>/<camera>/.
-    const segments = buildStoragePath(booking.outlet.code, booking.bookingCode, camera, filename, episodeKeySegment)
-    const wasabiKey = buildKey(getWasabiKeyPrefix(), segments)
-
+    // 4. Compute Drive path.
+    //   AGN → <outlet>/<Project ID · name>/<job (AGN-…)>/<EP ID · title>/<camera>/;
+    //   others → <outlet>/<show>/<Production ID · job>/<EP01 · title>/<camera>/.
     const jobName =
       (booking.projectName && booking.projectName.trim()) ||
       (booking.episodes[0]?.title && booking.episodes[0].title.trim()) ||
@@ -287,8 +236,6 @@ export async function POST(request: NextRequest) {
         sha256: sha256 ?? null,
         status: 'UPLOADING',
         initiatedAt: new Date(),
-        wasabiBucket: wantWasabi ? getWasabiBucket() : null,
-        wasabiKey: wantWasabi ? wasabiKey : null,
       },
     })
 
@@ -373,62 +320,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Failed to initiate Drive upload: ${e?.message || e}` }, { status: 502 })
     }
 
-    // 7. Wasabi — initiate multipart + presign N parts
-    let wasabiTarget: {
-      uploadId: string; bucket: string; key: string;
-      parts: Array<{ partNumber: number; url: string }>;
-      chunkSize: number;
-    } | null = null
-    if (wantWasabi) {
-      try {
-        const chunkSize = chooseChunkSize(size)
-        const partCount = Math.max(1, Math.ceil(size / chunkSize))
-        const init = await createMultipart(wasabiKey, mimeType)
-        const parts = await presignParts(wasabiKey, init.uploadId, partCount)
-        wasabiTarget = {
-          uploadId: init.uploadId,
-          bucket: init.bucket,
-          key: init.key,
-          parts,
-          chunkSize,
-        }
-        await prisma.upload.update({
-          where: { id: upload.id },
-          data: { wasabiMultipartId: init.uploadId },
-        })
-      } catch (e: any) {
-        // v1.35.8 — Drive succeeded but Wasabi failed. DUAL_WRITE means
-        // the upload can't proceed, so roll back the Drive reservation
-        // inline (instead of leaving an orphan empty file slot for the
-        // future reconciler to find). Best-effort: if the cleanup itself
-        // fails, the FAILED row still includes both errors in
-        // failureReason so triage isn't blind.
-        const wasabiReason = e?.message || String(e)
-        let cleanupNote = ''
-        if (driveTarget?.fileId) {
-          try {
-            await deleteDriveFile(driveTarget.fileId)
-            await prisma.footageLog.delete({ where: { driveFileId: driveTarget.fileId } }).catch(() => {})
-            cleanupNote = ' · drive slot rolled back'
-          } catch (cleanupErr: any) {
-            cleanupNote = ` · drive cleanup failed: ${cleanupErr?.message || cleanupErr}`
-          }
-        }
-        await prisma.upload.update({
-          where: { id: upload.id },
-          data: { status: 'FAILED', failureReason: `Wasabi init: ${wasabiReason}${cleanupNote}` },
-        })
-        return NextResponse.json({ error: `Failed to initiate Wasabi upload: ${wasabiReason}` }, { status: 502 })
-      }
-    }
-
     return NextResponse.json({
       uploadId: upload.id,
       bookingCode: booking.bookingCode,
       outletFolder: outletDriveFolderName(booking.outlet.code),
       targets: {
         drive: driveTarget,
-        wasabi: wasabiTarget,
       },
     })
   } catch (e: any) {

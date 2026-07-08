@@ -41,6 +41,31 @@ export function statusDotClass(status: Status): string {
   return (STYLES[status] || STYLES.REQUESTED).dot
 }
 
+// v1.131 — AD vs NON-AD (Category enum) color coding, orthogonal to status.
+// Amber matches the "AD" toggle color already used in the booking wizard.
+export function isAdvertorial(category?: string | null): boolean {
+  return category === 'ADVERTORIAL'
+}
+
+// Left-border accent for calendar chips — subtle enough not to compete with
+// the status dot/pill, but a clear "this one's AD" signal at a glance.
+export function categoryAccentClass(category?: string | null): string {
+  return isAdvertorial(category) ? 'border-l-4 border-l-amber-400' : ''
+}
+
+// Small "AD" tag for rows with more room (agenda list, drawer header).
+export function AdBadge({ category, className = '' }: { category?: string | null; className?: string }) {
+  if (!isAdvertorial(category)) return null
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border border-amber-300 bg-amber-50 text-amber-800 text-[9px] font-semibold px-1.5 py-0.5 whitespace-nowrap ${className}`}
+      title="Advertorial"
+    >
+      AD
+    </span>
+  )
+}
+
 export default function StatusPill({ status }: { status: Status }) {
   const s = STYLES[status] || STYLES.REQUESTED
   const label = statusLabel(status).replace(/[\[\]]/g, '')

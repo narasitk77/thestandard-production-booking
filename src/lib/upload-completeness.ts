@@ -63,7 +63,7 @@ export function assessCompleteness(uploads: UploadRow[]): CompletenessReport {
     } else if (u.status === 'FAILED' || u.status === 'ORPHANED') {
       failedCount += 1
     } else {
-      // PENDING / UPLOADING / DRIVE_OK / WASABI_OK — partial
+      // PENDING / UPLOADING (+ legacy DRIVE_OK / WASABI_OK) — partial
       inFlightCount += 1
     }
   }

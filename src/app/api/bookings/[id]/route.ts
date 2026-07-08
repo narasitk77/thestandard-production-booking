@@ -126,7 +126,7 @@ export async function PATCH(
       isBlockShot,
       videographerCount,
       switcherCount,
-      needsVan,
+      vanCount,
       specialEquipment,
       // v1.62.0 — Auto-Planning fields (replace the manual planning sheet)
       equipmentNote,
@@ -210,7 +210,7 @@ export async function PATCH(
           ...(typeof isBlockShot === 'boolean' && { isBlockShot }),
           ...(videographerCount !== undefined && { videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)) }),
           ...(switcherCount !== undefined && { switcherCount: Math.max(1, Math.min(10, parseInt(switcherCount, 10) || 1)) }),
-          ...(typeof needsVan === 'boolean' && { needsVan }),
+          ...(vanCount !== undefined && { vanCount: Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)) }),
           ...(Array.isArray(specialEquipment) && { specialEquipment: specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
           ...(equipmentNote !== undefined && { equipmentNote: equipmentNote || null }),
           ...(rentalGearNote !== undefined && { rentalGearNote: rentalGearNote || null }),

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
-import { uploadToDrive as driveUpload, uploadToWasabi as wasabiUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
+import { uploadToDrive as driveUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
 import { cameraUploadOptions } from '@/lib/outlet-folders'
 
 interface BookingContext {
@@ -12,7 +12,7 @@ interface BookingContext {
   // v1.70 — drive the camera dropdown: CAM-A..CAM-{cameraCount} + AUDIO (if mics) + specials.
   cameraCount?: number | null
   micCount?: number | null
-  outlet: { code: string; name: string; storagePolicy?: 'DRIVE_ONLY' | 'DUAL_WRITE' }
+  outlet: { code: string; name: string }
   // v1.93 — episodes drive the EP picker; footage lands in <booking>/<EP>/<camera>/.
   episodes?: Array<{ id: string; episodeId: string; title: string; sequence: number }>
 }
@@ -25,9 +25,6 @@ interface UploadItem {
   status: string
   driveFileId: string | null
   driveUrl: string | null
-  wasabiBucket: string | null
-  wasabiKey: string | null
-  wasabiEtag: string | null
   uploadedBy: string
   initiatedAt: string
   completedAt: string | null
@@ -41,14 +38,11 @@ interface InFlight {
   camera: string
   episodeRowId: string    // v1.93 — Episode.id this file is filed under ('' = none)
   driveProgress: number   // 0..1
-  wasabiProgress: number  // 0..1
   driveActive: boolean
-  wasabiActive: boolean
   state: 'pending' | 'initiating' | 'uploading' | 'completing' | 'done' | 'failed' | 'cancelled'
   error: string | null
   // v1.35.6 — surface auto-retry attempts so user sees recovery is happening
   driveRetry: RetryStatus | null
-  wasabiRetry: RetryStatus | null
 }
 
 interface Props {
@@ -116,8 +110,6 @@ function statusChip(status: string) {
   switch (status) {
     case 'COMPLETE':  return <span className={`${base} bg-green-50 text-green-700 border-green-200`}>Complete</span>
     case 'UPLOADING': return <span className={`${base} bg-amber-50 text-amber-700 border-amber-200`}>Uploading</span>
-    case 'DRIVE_OK':  return <span className={`${base} bg-blue-50 text-blue-700 border-blue-200`}>Drive OK · Wasabi pending</span>
-    case 'WASABI_OK': return <span className={`${base} bg-blue-50 text-blue-700 border-blue-200`}>Wasabi OK · Drive pending</span>
     case 'FAILED':    return <span className={`${base} bg-red-50 text-red-700 border-red-200`}>Failed</span>
     case 'ORPHANED':  return <span className={`${base} bg-red-50 text-red-700 border-red-200`}>Orphaned</span>
     case 'PENDING':   return <span className={`${base} bg-gray-100 text-gray-600 border-gray-200`}>Pending</span>
@@ -153,7 +145,6 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     return ep.title ? `${lead} · ${ep.title}` : lead
   }
   // (no top-level error banner — per-queue-item errors render inline below)
-  const [includeWasabi, setIncludeWasabi] = useState(booking.outlet.storagePolicy === 'DUAL_WRITE')
   const [history, setHistory] = useState<UploadItem[]>([])
   // v1.126 — the history table used to render every row ("ยาวเป็นพรืด" on a
   // 100-file shoot). Collapsed to the first rows + an expand toggle.
@@ -182,9 +173,6 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [queue, setQueue] = useState<InFlight[]>([])
   // v1.35.6 — drag/drop visual feedback
   const [dragOver, setDragOver] = useState(false)
-
-  const policy = booking.outlet.storagePolicy ?? 'DRIVE_ONLY'
-  const wasabiLocked = policy === 'DUAL_WRITE'
 
   const fetchHistory = async () => {
     setHistoryLoading(true)
@@ -341,13 +329,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       camera,
       episodeRowId,
       driveProgress: 0,
-      wasabiProgress: 0,
       driveActive: false,
-      wasabiActive: false,
       state: 'pending',
       error: null,
       driveRetry: null,
-      wasabiRetry: null,
     }))
     setQueue(prev => [...prev, ...items])
     // fire-and-forget — process each item sequentially (browser parallel
@@ -375,48 +360,28 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
         filename: item.file.name,
         size: item.file.size,
         mimeType: item.file.type || 'application/octet-stream',
-        includeWasabi: wasabiLocked || includeWasabi,
       }),
     })
     const initData = await initRes.json()
     if (!initRes.ok) throw new Error(initData.error || `init failed: ${initRes.status}`)
     const uploadId: string = initData.uploadId
     updateQueue(item.localId, q => ({ ...q, uploadId, state: 'uploading',
-      driveActive: !!initData.targets?.drive,
-      wasabiActive: !!initData.targets?.wasabi }))
+      driveActive: !!initData.targets?.drive }))
 
-    // 2. UPLOAD — parallel Drive resumable + Wasabi multipart, both with
-    //    chunked + retried PUTs (see src/lib/upload-client.ts).
-    const tasks: Array<Promise<any>> = []
-
+    // 2. UPLOAD — Drive resumable with chunked + retried PUTs
+    //    (see src/lib/upload-client.ts).
     if (initData.targets?.drive?.sessionUrl) {
-      tasks.push(driveUpload(
+      await driveUpload(
         initData.targets.drive.sessionUrl,
         item.file,
         {
           onProgress: (frac) => updateQueue(item.localId, q => ({ ...q, driveProgress: frac })),
           onRetry: (status) => updateQueue(item.localId, q => ({ ...q, driveRetry: status.active ? status : null })),
         },
-      ))
+      )
     }
 
-    let wasabiParts: Array<{ n: number; etag: string }> = []
-    if (initData.targets?.wasabi) {
-      const w = initData.targets.wasabi
-      tasks.push(wasabiUpload(
-        item.file,
-        w.parts,
-        w.chunkSize,
-        {
-          onProgress: (frac) => updateQueue(item.localId, q => ({ ...q, wasabiProgress: frac })),
-          onRetry: (status) => updateQueue(item.localId, q => ({ ...q, wasabiRetry: status.active ? status : null })),
-        },
-      ).then(parts => { wasabiParts = parts }))
-    }
-
-    await Promise.all(tasks)
-
-    // 3. COMPLETE — server finalizes both clouds + writes sheet row.
+    // 3. COMPLETE — server verifies Drive + writes sheet row.
     //    v1.83 — retried: the bytes are already in the cloud, so a transient
     //    blip here (server restart/deploy → 502, momentary network drop) must
     //    NOT mark a finished upload as failed. /complete is idempotent so
@@ -425,7 +390,6 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     await completeWithRetry({
       uploadId,
       drive: initData.targets?.drive ? { fileId: initData.targets.drive.fileId } : undefined,
-      wasabi: initData.targets?.wasabi ? { parts: wasabiParts } : undefined,
     })
     updateQueue(item.localId, q => ({ ...q, state: 'done' }))
     fetchHistory()  // refresh the bottom list
@@ -493,18 +457,6 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
               {CAMERAS.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-
-          <div className="sm:col-span-2 flex items-end">
-            <label className="text-xs text-gray-600 flex items-center gap-1 mt-1">
-              <input
-                type="checkbox"
-                checked={wasabiLocked || includeWasabi}
-                disabled={wasabiLocked}
-                onChange={e => setIncludeWasabi(e.target.checked)}
-                className="accent-[#673ab7]" />
-              ส่ง Wasabi ด้วย {wasabiLocked && <span className="text-[10px] text-amber-700">(บังคับ — outlet นี้เป็น DUAL_WRITE)</span>}
-            </label>
-          </div>
         </div>
 
         <div>
@@ -547,7 +499,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             </p>
           </div>
           <p className="text-[10px] text-gray-500 mt-1">
-            จะ upload ตรงเข้า Drive {wasabiLocked || includeWasabi ? '+ Wasabi' : ''} ที่
+            จะ upload ตรงเข้า Drive ที่
             {/* v1.70 — hint reflects the new "VIDEO 2026 [JUL–DEC]" layout:
                 <NN · Outlet>/<program|category>/<Production ID · ชื่องาน>/<camera>/.
                 Exact outlet/program/job are resolved server-side (placeholders). */}
@@ -670,7 +622,6 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
               {(q.state === 'uploading' || q.state === 'completing' || q.state === 'done') && (
                 <div className="space-y-1 mt-1.5">
                   {q.driveActive && <ProgressBar label="Drive" frac={q.driveProgress} retry={q.driveRetry} />}
-                  {q.wasabiActive && <ProgressBar label="Wasabi" frac={q.wasabiProgress} retry={q.wasabiRetry} />}
                 </div>
               )}
             </div>
@@ -854,6 +805,6 @@ function ProgressBar({ label, frac, retry }: { label: string; frac: number; retr
   )
 }
 
-// v1.35.6 — uploadToDrive + uploadToWasabi moved to src/lib/upload-client.ts.
+// v1.35.6 — uploadToDrive moved to src/lib/upload-client.ts.
 // That file holds the chunked + retry logic so the component focuses on
-// queue UI / rendering. See `driveUpload` / `wasabiUpload` imports at top.
+// queue UI / rendering. See the `driveUpload` import at top.

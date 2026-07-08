@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { completeMultipart, verifyUpload, type CompletePart } from '@/lib/wasabi'
 import { getDriveFile } from '@/lib/google-drive'
 import { appendFootageRows } from '@/lib/footage-sheet'
 import { clearFootageCache } from '@/lib/footage-folders'
@@ -11,18 +10,16 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/upload/complete
  *
- * Called by the browser after both clouds finish receiving bytes. We:
- *   1. CompleteMultipartUpload on Wasabi (if it was a target)
- *   2. HEAD verify Wasabi object size matches Upload.fileSize
- *   3. files.get on Drive to confirm the resumable PUT actually finished
- *   4. Flip Upload.status to COMPLETE (or DRIVE_OK / WASABI_OK on partial)
- *   5. Mark FootageLog.sheetRowWritten=true + append the footage sheet row
+ * Called by the browser after Drive finishes receiving bytes. We:
+ *   1. files.get on Drive to confirm the resumable PUT actually finished
+ *   2. Flip Upload.status to COMPLETE (FAILED otherwise)
+ *   3. Mark FootageLog.sheetRowWritten=true + append the footage sheet row
+ * (Wasabi dual-write removed — Drive is the only upload target now.)
  *
  * Request body:
  *   {
  *     uploadId: string,
  *     drive?: { fileId: string },           // present if Drive was a target
- *     wasabi?: { parts: [{n, etag}] }       // present if Wasabi was a target
  *   }
  */
 export async function POST(request: NextRequest) {
@@ -41,7 +38,7 @@ export async function POST(request: NextRequest) {
           select: {
             id: true,
             bookingCode: true,
-            outlet: { select: { code: true, name: true, storagePolicy: true } },
+            outlet: { select: { code: true, name: true } },
             program: { select: { code: true, name: true } },
           },
         },
@@ -86,60 +83,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 2. Wasabi complete + verify
-    let wasabiOk = false
-    if (upload.wasabiMultipartId && upload.wasabiKey) {
-      const reqParts = Array.isArray(body.wasabi?.parts) ? body.wasabi.parts : null
-      if (!reqParts || reqParts.length === 0) {
-        errors.push('Wasabi parts missing from request body — cannot complete multipart upload')
-      } else {
-        const parts: CompletePart[] = reqParts.map((p: any) => ({
-          partNumber: Number(p.n ?? p.partNumber),
-          etag: String(p.etag || '').trim(),
-        }))
-        try {
-          const res = await completeMultipart(upload.wasabiKey, upload.wasabiMultipartId, parts)
-          // Server-side HEAD to sanity-check size matches
-          const verifyOn = (process.env.WASABI_VERIFY_ON_COMPLETE ?? '1') !== '0'
-          let verifyEtag = res.etag
-          if (verifyOn && expectedSize > 0) {
-            const verify = await verifyUpload(upload.wasabiKey, expectedSize)
-            if (!verify.ok) {
-              errors.push(`Wasabi verify: ${verify.reason}`)
-              hasTransient = true // object propagation can lag — retry may resolve
-            } else {
-              verifyEtag = verify.etag ?? verifyEtag
-              wasabiOk = true
-            }
-          } else {
-            wasabiOk = true
-          }
-          if (wasabiOk) {
-            await prisma.upload.update({
-              where: { id: upload.id },
-              data: { wasabiEtag: verifyEtag ?? null },
-            })
-          }
-        } catch (e: any) {
-          errors.push(`Wasabi CompleteMultipartUpload: ${e?.message || e}`)
-          hasTransient = true // S3 5xx / network — safe to retry
-        }
-      }
-    }
-
-    // 3. Decide final status
+    // 2. Decide final status — Drive is the only target.
     const driveExpected = !!upload.driveFileId
-    const wasabiExpected = !!upload.wasabiMultipartId
-    let finalStatus: 'COMPLETE' | 'DRIVE_OK' | 'WASABI_OK' | 'FAILED'
-    if (driveExpected && wasabiExpected) {
-      if (driveOk && wasabiOk) finalStatus = 'COMPLETE'
-      else if (driveOk) finalStatus = 'DRIVE_OK'
-      else if (wasabiOk) finalStatus = 'WASABI_OK'
-      else finalStatus = 'FAILED'
-    } else if (driveExpected) {
+    let finalStatus: 'COMPLETE' | 'FAILED'
+    if (driveExpected) {
       finalStatus = driveOk ? 'COMPLETE' : 'FAILED'
-    } else if (wasabiExpected) {
-      finalStatus = wasabiOk ? 'COMPLETE' : 'FAILED'
     } else {
       finalStatus = 'FAILED'
       errors.push('No upload targets recorded on this Upload row')

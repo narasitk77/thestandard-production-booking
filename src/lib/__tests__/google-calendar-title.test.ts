@@ -15,7 +15,7 @@ const base = {
   videoType: null as string | null,
   cameraCount: null as number | null,
   micCount: null as number | null,
-  needsVan: false,
+  vanCount: 0,
 }
 
 test('Content Agency: title leads with the project name, then the first EP name', () => {
@@ -85,7 +85,7 @@ test('descriptor segments and van prefix still wrap the new core', () => {
   // v1.116 — Video Type dropped from the form + the title (carried no signal).
   const title = buildEventTitle({
     ...base,
-    needsVan: true,
+    vanCount: 1,
     cameraCount: 2,
     micCount: 1,
     projectName: 'KEY MESSAGES x DMHT',
@@ -94,6 +94,18 @@ test('descriptor segments and van prefix still wrap the new core', () => {
     episodes: [{ episodeId: 'PP-26-010-L01', title: 'Pre EP.1 - BKK' }],
   })
   assert.equal(title, '🚐 [AGN] KEY MESSAGES x DMHT — Pre EP.1 - BKK · 🎥 2 · 🎙 1')
+})
+
+test('v1.131 — vanCount > 1 shows a ×N count in the prefix', () => {
+  const title = buildEventTitle({
+    ...base,
+    vanCount: 3,
+    projectName: 'KEY MESSAGES x DMHT',
+    outlet: { code: 'AGN', name: 'Content Agency' },
+    program: { code: 'AGN-LF', name: 'Long Form (project)' },
+    episodes: [{ episodeId: 'PP-26-010-L01', title: 'Pre EP.1 - BKK' }],
+  })
+  assert.equal(title, '🚐 ×3 [AGN] KEY MESSAGES x DMHT — Pre EP.1 - BKK')
 })
 
 test('blank projectName falls back to the program name', () => {

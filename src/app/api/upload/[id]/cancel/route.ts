@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { abortMultipart } from '@/lib/wasabi'
 import { deleteDriveFile } from '@/lib/google-drive'
 
 export const dynamic = 'force-dynamic'
@@ -10,7 +9,6 @@ export const dynamic = 'force-dynamic'
  * POST /api/upload/[id]/cancel
  *
  * User-initiated abort. Cleans up:
- *   - Wasabi: AbortMultipartUpload (releases part storage; no charge)
  *   - Drive: deletes the reserved file slot (otherwise empty/partial file
  *            sits in the Shared Drive forever)
  *   - DB: flips Upload.status to FAILED + records the reason
@@ -42,15 +40,6 @@ export async function POST(
     }
 
     const errors: string[] = []
-
-    // Wasabi abort (best-effort)
-    if (upload.wasabiKey && upload.wasabiMultipartId) {
-      try {
-        await abortMultipart(upload.wasabiKey, upload.wasabiMultipartId)
-      } catch (e: any) {
-        errors.push(`Wasabi abort: ${e?.message || e}`)
-      }
-    }
 
     // Drive delete (best-effort)
     if (upload.driveFileId) {

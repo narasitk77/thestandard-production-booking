@@ -30,7 +30,7 @@ Producer กรอก Booking ครั้งเดียว → Coordinator app
 | **Role tiers** (v1.38) | 5-tier model: ADMIN / SUPPORT / MANAGER / COORDINATOR / USER · permission matrix: who can edit whom · OT approval restricted to Manager + Admin |
 | **Sheet Data Monitor** (v1.39) | Section 4 in `/dashboard` — live project list from Sheet with episode-status breakdown + "Sync Booking List" to force-refresh project cache |
 | Dashboard | Charts + team workload + CSV export + Sheet Data Monitor |
-| Upload platform | Log footage by Production ID + camera slot · Wasabi S3 storage |
+| Upload platform | Log footage by Production ID + camera slot · straight into the Google Shared Drive |
 
 ## ID Layers
 
@@ -71,7 +71,7 @@ OUT    YYMMDD    PROG    Sequence
 | `/admin/team` | Crew roster CRUD |
 | `/admin/health` | Runtime config + live health checks + **Danger Zone (purge all bookings)** |
 | `/admin/permissions` | Role management (ADMIN/SUPPORT/MANAGER/COORDINATOR/USER) |
-| `/upload` | Footage upload — log files by Production ID + camera (Wasabi S3) |
+| `/upload` | Footage upload — log files by Production ID + camera (Google Shared Drive) |
 
 ## Local Development
 
