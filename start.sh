@@ -400,5 +400,19 @@ echo "==> Starting _SHOOT marker reconcile worker (supervised)..."
   done
 ) &
 
+# v1.139 — landing drop-folder lifecycle worker. ON BY DEFAULT. Nightly (evening,
+# LANDING_WORKER_HOUR default 19:00 BKK) it creates the NEXT day's shoot folders
+# on the "Production Team" drop drive + trashes past-empty ones, keeping the drive
+# lean (only upcoming + in-flight shoots). Policy: docs/landing-folder-policy.md.
+# Set LANDING_WORKER_ENABLED=0 to disable.
+echo "==> Starting landing drop-folder lifecycle worker (supervised)..."
+(
+  while true; do
+    node scripts/landing-worker.js
+    echo "[landing] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start

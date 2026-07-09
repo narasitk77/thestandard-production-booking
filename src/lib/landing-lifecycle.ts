@@ -1,0 +1,146 @@
+/**
+ * Landing drop-folder lifecycle (v1.139).
+ *
+ * The "Production Team" landing drive is where crew/NAS drop footage, ONE flat
+ * folder per shoot: "<show · job> (<Production ID>)". Policy (per ops, 2026-07-09
+ * — keep the drive lean; folders for done/unrelated shoots make it hard to find
+ * the right one):
+ *
+ *   • CREATE the drop folder the EVENING BEFORE the shoot — for the NEXT day's
+ *     shoots only. Never pre-create further ahead (a booking confirmed weeks out
+ *     does NOT get a landing folder until the night before).
+ *   • KEEP it through the shoot + a short upload-grace window (crew upload late
+ *     batches; video-merge moves footage to the box but no longer trashes the
+ *     shell — see v1.137).
+ *   • REMOVE it once the shoot is well past AND its footage is delivered (the
+ *     folder is empty of real files), so the drive only ever shows upcoming +
+ *     in-flight shoots.
+ *
+ * This is run nightly by scripts/landing-worker.js. Idempotent + dry-run first;
+ * only EMPTY folders (no real, non-`_SHOOT` file anywhere inside) are ever
+ * trashed, to Shared-Drive trash (recoverable ~30 days). Full policy doc:
+ * docs/landing-folder-policy.md.
+ */
+import { prisma } from './db'
+import {
+  ensureFlatShootFolders, listChildFolders, listFilesRecursive, trashDriveItem, hasDriveCredentials,
+} from './google-drive'
+import {
+  landingBookingFolderName, buildEpisodeFolderName, camerasToPreCreate,
+  hasOutletFolderMapping, isPhotoAlbumBooking,
+} from './outlet-folders'
+import { rememberDriveLinks } from './drive-links'
+import { computeTypeDroppedId } from './id-migration'
+
+const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
+const SHOOT_STUB_RE = /^_SHOOT\b.*\.txt$/i
+
+/** Bangkok calendar-day boundaries (UTC midnight of the BKK date), offset by N days. */
+function bangkokDayRange(offsetDays = 0, now: Date = new Date()): { start: Date; end: Date } {
+  const bkk = new Date(now.getTime() + 7 * 3_600_000)
+  const start = new Date(Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate()) + offsetDays * 24 * 3_600_000)
+  return { start, end: new Date(start.getTime() + 24 * 3_600_000) }
+}
+
+function codeFromFolderName(name: string): string | null {
+  const m = name.match(/\(([A-Za-z0-9-]+)\)\s*$/)
+  if (!m) return null
+  return (computeTypeDroppedId(m[1]) ?? m[1]).toUpperCase()
+}
+
+async function hasRealFiles(folderId: string): Promise<boolean> {
+  const files = await listFilesRecursive(folderId, { maxFiles: 6 })
+  return files.some(f => !SHOOT_STUB_RE.test(f.name))
+}
+
+export interface LandingLifecycleResult {
+  skipped: boolean
+  reason?: string
+  dryRun: boolean
+  targetDay: string           // the BKK date we created folders for (next day)
+  created: number
+  createErrors: number
+  removedPastEmpty: number
+  keptRecent: number          // past folders kept (still within grace / have files)
+  removeErrors: number
+  keepPastDays: number
+  actions: string[]
+}
+
+export async function manageLandingFolders(
+  opts: { dryRun?: boolean; createOffsetDays?: number; keepPastDays?: number } = {},
+): Promise<LandingLifecycleResult> {
+  const dryRun = !!opts.dryRun
+  const createOffsetDays = opts.createOffsetDays ?? 1 // tomorrow
+  const envKeep = Number(process.env.LANDING_KEEP_PAST_DAYS)
+  const keepPastDays = Math.max(0, opts.keepPastDays ?? (Number.isFinite(envKeep) ? envKeep : 3))
+  const create = bangkokDayRange(createOffsetDays)
+  const today = bangkokDayRange(0)
+  const cutoff = new Date(today.start.getTime() - keepPastDays * 24 * 3_600_000) // remove empties for shoots strictly before this
+  const targetDay = create.start.toISOString().slice(0, 10)
+
+  const base: LandingLifecycleResult = {
+    skipped: false, dryRun, targetDay, created: 0, createErrors: 0,
+    removedPastEmpty: 0, keptRecent: 0, removeErrors: 0, keepPastDays, actions: [],
+  }
+  if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
+
+  // ── CREATE: next day's shoots ────────────────────────────────────────────
+  const nextDay = await prisma.booking.findMany({
+    where: {
+      shootDate: { gte: create.start, lt: create.end },
+      status: { in: ['CONFIRMED', 'COMPLETED'] },
+      deletedAt: null, bookingCode: { not: null },
+    },
+    select: {
+      id: true, bookingCode: true, cameraCount: true, micCount: true,
+      projectName: true, outlet: { select: { code: true } },
+      program: { select: { code: true, name: true } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
+    },
+  })
+  for (const b of nextDay) {
+    if (!hasOutletFolderMapping(b.outlet.code) || isPhotoAlbumBooking(b.episodes)) continue
+    const cams = camerasToPreCreate(b.cameraCount, b.micCount)
+    if (cams.length === 0) continue
+    const name = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
+    base.actions.push(`create landing "${name}" (${targetDay})`)
+    if (!dryRun) {
+      try {
+        const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: b.outlet.code === 'AGN' })) : undefined
+        const lid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
+        await rememberDriveLinks(b.id, { landing: lid })
+      } catch (e: any) { base.createErrors++; base.actions.push(`  ERROR create: ${e?.message || e}`); continue }
+    }
+    base.created++
+  }
+
+  // ── CLEANUP: trash EMPTY landing folders for shoots older than the grace window ──
+  const codeToShootDate = new Map<string, Date>()
+  const recent = await prisma.booking.findMany({
+    where: { bookingCode: { not: null }, deletedAt: null },
+    select: { bookingCode: true, shootDate: true },
+  })
+  for (const b of recent) if (b.bookingCode) codeToShootDate.set(b.bookingCode.toUpperCase(), b.shootDate)
+
+  const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
+  for (const f of folders) {
+    const code = codeFromFolderName(f.name)
+    if (!code) continue // not a shoot drop folder (e.g. a manual project folder) — leave
+    const shootDate = codeToShootDate.get(code)
+    if (!shootDate) continue // unknown booking — leave (safety)
+    if (shootDate.getTime() >= cutoff.getTime()) { base.keptRecent++; continue } // within grace / today / future
+    // past the grace window → remove ONLY if empty (footage delivered)
+    let empty = false
+    try { empty = !(await hasRealFiles(f.id)) }
+    catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR check "${f.name}": ${e?.message || e}`); continue }
+    if (!empty) { base.keptRecent++; continue } // still holds footage — never trash
+    base.actions.push(`trash past-empty landing "${f.name}" (shoot ${shootDate.toISOString().slice(0, 10)} < ${cutoff.toISOString().slice(0, 10)})`)
+    if (!dryRun) {
+      try { await trashDriveItem(f.id) } catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR trash: ${e?.message || e}`); continue }
+    }
+    base.removedPastEmpty++
+  }
+
+  return base
+}

@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.139.0] — 2026-07-09
+
+### Changed — โฟลเดอร์ดรอปไฟล์ "Production Team" เป็นระบบ **สร้างเฉพาะงานวันถัดไป + เก็บ drive ให้ lean**
+ตามที่ตกลง (ops 2026-07-09): drop drive ต้องโล่ง เห็นเฉพาะงานที่เกี่ยวข้องตอนนี้ ไม่ใช่โฟลเดอร์ของงานที่จบไปแล้วเป็นกอง (ก่อนหน้านี้ผมรีสโตร์ย้อนหลัง 21 วันมาทั้งหมด = รก — แก้แล้ว).
+- **Policy ใหม่ (มี MD: `docs/landing-folder-policy.md`):** สร้างโฟลเดอร์ดรอป **เฉพาะงาน "วันถัดไป"** ตอนเย็นวันก่อนหน้า (ไม่สร้างล่วงหน้าไกลกว่านั้น) · เก็บไว้ระหว่างวันถ่าย + ช่วงอัปโหลด (`LANDING_KEEP_PAST_DAYS`, default 3 วัน) · **ลบโฟลเดอร์ว่าง**ของงานที่จบเกิน grace แล้วเท่านั้น (มีไฟล์ = ไม่แตะ).
+- **worker ใหม่ `scripts/landing-worker.js`** (ON by default) รันทุกคืน `LANDING_WORKER_HOUR` (default 19:00 น. BKK): สร้างงานพรุ่งนี้ + ลบของเก่าที่ว่าง + ส่งอีเมลสรุป (`LANDING_REPORT_EMAIL`). Logic: `src/lib/landing-lifecycle.ts`; endpoint `GET /api/internal/landing/manage` (dryRun ดีฟอลต์; `?offset=N` สร้างล่วงหน้ากรณีพิเศษ).
+- **prep-folders เลิกสร้าง landing** (คงสร้างแค่กล่อง VIDEO 2026 ของวันนี้) — ถอด `?days` catch-up + delivered-branch ensure (ที่ผมทำเฉพาะหน้ารอบก่อน) ออก. `video-merge` ยังไม่ trash landing (v1.137) — การลบเป็นหน้าที่ lifecycle นี้ (past+empty เท่านั้น) กันโฟลเดอร์หายระหว่างถ่าย.
+
+---
+
 ## [1.138.0] — 2026-07-09
 
 ### Added — dedup โฟลเดอร์ landing ซ้ำใน "Production Team"

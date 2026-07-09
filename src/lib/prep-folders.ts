@@ -8,7 +8,7 @@
  * moving, no _SHOOT.txt — approve handles that).
  */
 import { prisma } from '@/lib/db'
-import { ensureShootCameraFolders, ensureFlatShootFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, findFoldersByCode, listFilesRecursive, hasDriveCredentials } from '@/lib/google-drive'
+import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, findFoldersByCode, listFilesRecursive, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
   shootFolderLayers,
@@ -37,10 +37,9 @@ export function bangkokTodayRange(now: Date = new Date()): { start: Date; end: D
   return { start, end: new Date(start.getTime() + 24 * 3_600_000) }
 }
 
-// v1.88 — "Production Team" landing Shared Drive (where the NAS syncs footage).
-// Hardcoded default so it works without a Portainer env change; override with
-// DRIVE_PRODUCTION_TEAM_ROOT if the drive ever changes.
-const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
+// v1.139 — the "Production Team" landing drop drive is now owned by the next-day
+// landing lifecycle (src/lib/landing-lifecycle.ts); prep-folders only pre-creates
+// the VIDEO 2026 box camera folders for today's shoots.
 
 export interface PrepResult {
   skipped: boolean
@@ -53,19 +52,13 @@ export interface PrepResult {
   results: Array<{ bookingCode: string | null; created?: string[]; prodTeam?: string; wouldCreate?: string[]; skipped?: string; error?: string }>
 }
 
-export async function prepTodayShootFolders(opts: { dryRun?: boolean; catchupDays?: number } = {}): Promise<PrepResult> {
+export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Promise<PrepResult> {
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) {
     return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', dryRun: !!opts.dryRun, total: 0, prepared: 0, errors: 0, prodTeamErrors: 0, results: [] }
   }
 
-  // v1.137 — catchupDays widens the window back N days (default 0 = today only)
-  // for a one-time restore of landing drop folders that the old video-merge
-  // cleanup trashed. Delivered bookings re-ensure ONLY the landing drop folder
-  // (not empty box skeletons), so a catch-up over recent shoots is safe.
-  const { start: todayStart, end } = bangkokTodayRange()
-  const catchup = Math.max(0, Math.min(60, Math.floor(opts.catchupDays || 0)))
-  const start = catchup > 0 ? new Date(todayStart.getTime() - catchup * 24 * 3_600_000) : todayStart
+  const { start, end } = bangkokTodayRange()
   const bookings = await prisma.booking.findMany({
     where: {
       shootDate: { gte: start, lt: end },
@@ -104,25 +97,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean; catchupDay
           if (some.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) { hasFiles = true; break }
         }
         if (hasFiles) {
-          // v1.137 — footage delivered → don't recreate empty BOX skeletons (the
-          // v1.111 ghost-loop guard), BUT still ensure the crew DROP folder in
-          // Production Team exists. Crew upload late/extra batches there for days
-          // after the shoot, and video-merge no longer trashes it — so the drop
-          // target must persist / reappear, not vanish once the first batch merged.
-          let landingNote = 'box skip (delivered)'
-          if (hasOutletFolderMapping(b.outlet.code) && !isPhotoAlbumBooking(b.episodes)) {
-            const cams = camerasToPreCreate(b.cameraCount, b.micCount)
-            if (cams.length > 0) {
-              try {
-                const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: b.outlet.code === 'AGN' })) : undefined
-                const lname = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
-                const lid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: lname, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
-                await rememberDriveLinks(b.id, { landing: lid })
-                landingNote = 'landing drop folder ensured (delivered)'
-              } catch (e: any) { landingNote = `landing ensure error: ${e?.message || e}`; prodTeamErrors++ }
-            }
-          }
-          results.push({ bookingCode: b.bookingCode, skipped: `footage already delivered — ${landingNote}` })
+          results.push({ bookingCode: b.bookingCode, skipped: 'footage already delivered — skip empty re-prep' })
           continue
         }
       } catch (e: any) {
@@ -208,22 +183,13 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean; catchupDay
         cameras,
         episodeFolderNames,
       })
-      // 2) v1.88 — landing folder in Production Team (flat, ALWAYS named by
-      //    Production ID — it's a NAS drop zone, identity = the shoot, not the
-      //    project). Best-effort: a Production Team hiccup must not undo the box prep.
-      //    v1.111 — crew-facing DISPLAY name (real show, no generic Episode-Type
-      //    prefix, "-" job dropped); landing matching is by Production ID.
-      const landingFolderName = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
-      let prodTeam = 'ok'
-      let landingId: string | null = null
-      try {
-        landingId = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: landingFolderName, cameras, episodeFolderNames })).bookingFolderId
-      } catch (ptErr: any) {
-        prodTeam = `error: ${ptErr?.message || ptErr}`
-        prodTeamErrors++ // v1.92.1 — count it so a total Production Team outage shows in the headline log
-      }
-      await rememberDriveLinks(b.id, { box: boxId, landing: landingId ?? undefined })
-      results.push({ bookingCode: b.bookingCode, created: cameras, prodTeam })
+      // 2) v1.139 — the Production Team LANDING drop folder is NO LONGER created
+      //    here. It's owned by the next-day landing lifecycle (src/lib/landing-
+      //    lifecycle.ts): created the evening before the shoot, cleaned up once the
+      //    shoot is past + delivered, so the drop drive stays lean (only upcoming +
+      //    in-flight shoots) instead of accumulating a folder per past shoot.
+      await rememberDriveLinks(b.id, { box: boxId })
+      results.push({ bookingCode: b.bookingCode, created: cameras, prodTeam: 'landing → nightly lifecycle' })
       prepared++
     } catch (e: any) {
       results.push({ bookingCode: b.bookingCode, error: e?.message || String(e) })

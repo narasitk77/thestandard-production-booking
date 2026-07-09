@@ -152,6 +152,20 @@ services:
       SHOOT_MARKER_REPORT_EMAIL: ${SHOOT_MARKER_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
       # SHOOT_MARKER_RECONCILE_URL: ${SHOOT_MARKER_RECONCILE_URL:-}  # override only if app isn't on 127.0.0.1:3000
 
+      # --- Landing drop-folder lifecycle (v1.139) ---
+      # scripts/landing-worker.js runs nightly (LANDING_WORKER_HOUR, default 19:00
+      # BKK — the evening before each shoot day). It creates the NEXT day's shoot
+      # drop folders on the "Production Team" drive and trashes past-empty ones so
+      # the drop drive stays lean (only upcoming + in-flight shoots). ON BY DEFAULT.
+      # LANDING_KEEP_PAST_DAYS = upload grace: a past shoot's EMPTY folder is kept
+      # this many days after the shoot before cleanup (default 3). Policy doc:
+      # docs/landing-folder-policy.md. Set LANDING_WORKER_ENABLED=0 to disable.
+      LANDING_WORKER_ENABLED: ${LANDING_WORKER_ENABLED:-1}
+      LANDING_WORKER_HOUR: ${LANDING_WORKER_HOUR:-19}
+      LANDING_KEEP_PAST_DAYS: ${LANDING_KEEP_PAST_DAYS:-3}
+      LANDING_REPORT_EMAIL: ${LANDING_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
+      # LANDING_MANAGE_URL: ${LANDING_MANAGE_URL:-}  # override only if app isn't on 127.0.0.1:3000
+
       # --- กันลืม reminders (v1.62.0) ---
       # Supervised worker (scripts/reminders-worker.js) scans loans / rentals /
       # invoices / repairs / upcoming shoots / warranties once a day and pushes a
