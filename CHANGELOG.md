@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.135.0] — 2026-07-09
+
+### Added — worker เก็บกวาด `_SHOOT` marker ซ้ำ (footage 1 กอง = การ์ด 1 ใบ)
+- **ต้นตอ (Neo memo 2026-07-09 ข้อ 3):** กล่อง project ของ AGN มี `_SHOOT` marker กองเดียวกัน **2 อัน** — box-level `_SHOOT-AGN-260708-LOC-01.txt` (ของเก่าก่อน migration มี TYPE) + subfolder `_SHOOT.txt` (ปัจจุบัน). crawler เก็บทั้งคู่ → หยอดการ์ด footage 2 ใบต่อ 1 กอง และกลับมาทุกรอบ deposit.
+- **แก้ยั่งยืน:** `reconcileShootMarkers` (src/lib/shoot-marker-reconcile.ts) บังคับกติกา **"1 marker ต่อ 1 กอง อยู่ใน subfolder ของ booking"** ต่อกล่อง AGN: dedupe `_SHOOT.txt` ในแต่ละ subfolder, แล้ว box-level `_SHOOT-<id>.txt` ตัวไหน — parse ID + ตัด [TYPE] (LOC/STD → typeless) เทียบ DB — ถ้า booking มี marker ใน subfolder อยู่แล้ว → **trash ตัวซ้ำ**; ถ้า subfolder ยังไม่มี marker → **ย้ายเข้าไปเป็น `_SHOOT.txt`**; ถ้าไม่ตรง booking ไหนเลย → **trash (stale)**. ลบเฉพาะไฟล์ stub เล็กๆ ที่สร้างใหม่ได้ → ลง Shared Drive trash (กู้คืนได้ ~30 วัน), ไม่แตะโฟลเดอร์ footage. Idempotent + dry-run ก่อนเสมอ.
+- **worker + endpoint:** `scripts/shoot-marker-worker.js` (supervised, ปิดโดยดีฟอลต์ — เปิดด้วย `SHOOT_MARKER_WORKER_ENABLED=1`, ราย ชม.) เรียก `GET /api/internal/shoot-markers/reconcile` (auth: shared secret สำหรับ worker / ADMIN session สำหรับ dry-run บนเบราว์เซอร์; `dryRun` เป็นดีฟอลต์ — ต้อง `dryRun=0` ถึงจะแก้จริง). Audit ทุกครั้งที่แก้ Drive จริง.
+- ป้องกันไม่ให้เกิดใหม่: โค้ดปัจจุบันเขียนแค่ `_SHOOT.txt` ใน subfolder เท่านั้น (ไม่มี path ไหนเขียน box-level `_SHOOT-<code>.txt` แล้ว) — worker คอยกวาดของค้าง/ที่หลุดเข้ามาจาก re-import หรือแก้ Drive มือ.
+
+---
+
 ## [1.134.0] — 2026-07-09
 
 ### Fixed — วันที่ในไฟล์ `_SHOOT.txt` เพี้ยนเป็นปีพุทธ (+543) / ซ้อนเป็น 3112

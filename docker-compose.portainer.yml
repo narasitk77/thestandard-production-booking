@@ -136,6 +136,18 @@ services:
       FOOTAGE_SYNC_SECRET: ${FOOTAGE_SYNC_SECRET:-${NEXTAUTH_SECRET}}
       # FOOTAGE_SYNC_URL: ${FOOTAGE_SYNC_URL:-}  # override only if app isn't on 127.0.0.1:3000
 
+      # --- _SHOOT marker reconcile (v1.135) ---
+      # Supervised worker (scripts/shoot-marker-worker.js) enforces one _SHOOT
+      # marker per booking across AGN project boxes — trashes pre-migration
+      # box-level `_SHOOT-<oldcode>.txt` duplicates that made the footage crawler
+      # file two cards per shoot (Neo memo 2026-07-09). Idempotent; only trashes
+      # small regenerable stubs to Shared-Drive trash (recoverable). Dormant until
+      # SHOOT_MARKER_WORKER_ENABLED=1. Default interval hourly.
+      SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
+      SHOOT_MARKER_WORKER_INTERVAL_MS: ${SHOOT_MARKER_WORKER_INTERVAL_MS:-3600000}
+      SHOOT_MARKER_RECONCILE_SECRET: ${SHOOT_MARKER_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
+      # SHOOT_MARKER_RECONCILE_URL: ${SHOOT_MARKER_RECONCILE_URL:-}  # override only if app isn't on 127.0.0.1:3000
+
       # --- กันลืม reminders (v1.62.0) ---
       # Supervised worker (scripts/reminders-worker.js) scans loans / rentals /
       # invoices / repairs / upcoming shoots / warranties once a day and pushes a

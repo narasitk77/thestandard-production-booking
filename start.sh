@@ -386,5 +386,19 @@ echo "==> Starting video-merge worker (supervised)..."
   done
 ) &
 
+# v1.135 — _SHOOT marker reconcile worker. Stays dormant when
+# SHOOT_MARKER_WORKER_ENABLED is unset/0; supervisor still re-launches so
+# flipping the env var live in Portainer is enough. Enforces one _SHOOT marker
+# per booking across AGN project boxes (trashes pre-migration box-level dupes so
+# the footage crawler stops filing two cards per shoot — Neo memo 2026-07-09).
+echo "==> Starting _SHOOT marker reconcile worker (supervised)..."
+(
+  while true; do
+    node scripts/shoot-marker-worker.js
+    echo "[shoot-marker] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 echo "==> Starting Next.js..."
 exec npm start
