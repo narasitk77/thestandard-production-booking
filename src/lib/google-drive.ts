@@ -891,6 +891,23 @@ export async function trashDriveItem(fileId: string, subject?: string): Promise<
   })
 }
 
+/**
+ * Read a small text file's content (e.g. a `_SHOOT.txt` marker). Read-only.
+ * Returns the UTF-8 string. Used by the marker reconciler to compare a marker's
+ * on-Drive content against the DB before deciding whether to rewrite it.
+ */
+export async function readDriveTextFile(fileId: string): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'text' },
+  )
+  // googleapis returns the body as `data`; text responseType makes it a string,
+  // but some transports hand back an object/Buffer — normalize defensively.
+  const data: any = res.data
+  return typeof data === 'string' ? data : (data == null ? '' : String(data))
+}
+
 /** Read-only: direct child FILES (not folders) of a folder — id, name, size. */
 export async function listFilesInFolder(parentId: string): Promise<Array<{ id: string; name: string; size?: string | null }>> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })

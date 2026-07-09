@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.136.0] — 2026-07-09
+
+### Changed — worker เก็บกวาด `_SHOOT` marker: ตรวจ**เนื้อไฟล์**ด้วย + รัน**ทุกคืน** + ส่งรายงาน
+- ต่อยอด v1.135 (เดิมดู marker ซ้ำจากชื่อไฟล์อย่างเดียว) — ตอนนี้ worker **อ่านเนื้อ marker** ทุกอันแล้วเทียบกับ DB: ถ้าบรรทัด `Production ID :` ไม่ตรง code ปัจจุบัน **หรือ** วันที่เป็นปีพุทธ (≥2500 เช่น 2569/3112) → **เขียน marker ใหม่จาก DB** (ID typeless + วันที่ ค.ศ.). สร้าง marker ให้ถ้ากอง CONFIRMED/COMPLETED มีโฟลเดอร์แต่ยังไม่มี marker. โฟลเดอร์ที่ชื่อยังติด TYPE → **เตือน** (ไม่ rename เอง เพราะเป็นงานของ regenerateBookingId).
+- **รันทุกคืน** (default 03:00 น. BKK ตั้งได้ด้วย `SHOOT_MARKER_WORKER_HOUR`) แทน interval รายชม. — marker drift ช้า ทุกคืนพอ.
+- **ส่งรายงานอีเมล** (`SHOOT_MARKER_REPORT_EMAIL`, default = `FEEDBACK_EMAIL`) ทุกคืนที่เจอ/แก้อะไร: สรุปจำนวนที่ลบซ้ำ/ลบค้าง/ย้าย/เขียนใหม่/สร้าง + รายการ "ต้องดูเอง" (โฟลเดอร์ติด TYPE, กำกวม, orphan) + รายละเอียดต่อ box. คืนที่ clean = เงียบ (ไม่กวน). Dry-run/แอดมินกดเองใส่ `?report=1` เพื่อบังคับส่ง.
+- เพิ่ม `readDriveTextFile` (google-drive.ts) อ่านเนื้อไฟล์ Drive; endpoint เดิมรับ `report=1`.
+
+---
+
 ## [1.135.0] — 2026-07-09
 
 ### Added — worker เก็บกวาด `_SHOOT` marker ซ้ำ (footage 1 กอง = การ์ด 1 ใบ)

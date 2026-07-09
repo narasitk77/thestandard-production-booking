@@ -136,16 +136,20 @@ services:
       FOOTAGE_SYNC_SECRET: ${FOOTAGE_SYNC_SECRET:-${NEXTAUTH_SECRET}}
       # FOOTAGE_SYNC_URL: ${FOOTAGE_SYNC_URL:-}  # override only if app isn't on 127.0.0.1:3000
 
-      # --- _SHOOT marker reconcile (v1.135) ---
-      # Supervised worker (scripts/shoot-marker-worker.js) enforces one _SHOOT
-      # marker per booking across AGN project boxes — trashes pre-migration
+      # --- _SHOOT marker reconcile (v1.135; nightly content-audit v1.136) ---
+      # Supervised worker (scripts/shoot-marker-worker.js) runs ONCE A NIGHT
+      # (SHOOT_MARKER_WORKER_HOUR, default 03:00 BKK). It enforces one _SHOOT
+      # marker per booking across AGN project boxes (trashes pre-migration
       # box-level `_SHOOT-<oldcode>.txt` duplicates that made the footage crawler
-      # file two cards per shoot (Neo memo 2026-07-09). Idempotent; only trashes
-      # small regenerable stubs to Shared-Drive trash (recoverable). Dormant until
-      # SHOOT_MARKER_WORKER_ENABLED=1. Default interval hourly.
+      # file two cards per shoot — Neo memo 2026-07-09) AND audits each marker's
+      # content (Production ID + Gregorian date) vs the DB, rewriting on drift.
+      # Idempotent; only trashes small regenerable stubs to Shared-Drive trash
+      # (recoverable). Emails a digest to SHOOT_MARKER_REPORT_EMAIL when a night
+      # finds anything. Dormant until SHOOT_MARKER_WORKER_ENABLED=1.
       SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
-      SHOOT_MARKER_WORKER_INTERVAL_MS: ${SHOOT_MARKER_WORKER_INTERVAL_MS:-3600000}
+      SHOOT_MARKER_WORKER_HOUR: ${SHOOT_MARKER_WORKER_HOUR:-3}
       SHOOT_MARKER_RECONCILE_SECRET: ${SHOOT_MARKER_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
+      SHOOT_MARKER_REPORT_EMAIL: ${SHOOT_MARKER_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
       # SHOOT_MARKER_RECONCILE_URL: ${SHOOT_MARKER_RECONCILE_URL:-}  # override only if app isn't on 127.0.0.1:3000
 
       # --- กันลืม reminders (v1.62.0) ---

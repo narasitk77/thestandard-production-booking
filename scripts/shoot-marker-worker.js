@@ -1,17 +1,17 @@
 // _SHOOT marker reconcile worker — supervised by start.sh on every container
-// boot. Polls the in-process /api/internal/shoot-markers/reconcile endpoint at
-// the configured interval, which enforces "one _SHOOT marker per booking" across
-// AGN project boxes (trashes pre-migration box-level duplicates so the footage
-// crawler stops filing two cards per shoot — Neo memo 2026-07-09 item 3).
+// boot. Once a NIGHT (default 03:00 Asia/Bangkok) it calls the in-process
+// /api/internal/shoot-markers/reconcile endpoint, which enforces "one _SHOOT
+// marker per booking" across AGN project boxes AND audits each marker's content
+// (Production ID + Gregorian date) against the DB, fixing drift and emailing a
+// digest (Neo memo 2026-07-09). Nightly is plenty — marker drift is slow-moving.
 //
 // Stays dormant when SHOOT_MARKER_WORKER_ENABLED is unset / '0' / 'false' — the
 // supervisor loop still restarts this script every 5s, so flipping the env var
 // live in Portainer and restarting the stack turns it on without a code change.
 //
-// Mirrors scripts/footage-sheet-sync-worker.js (enabled gate, interval, secret
-// resolution, SIGTERM handling). Runs with dryRun=0 (mutating) — the reconciler
-// is idempotent and only trashes small, regenerable _SHOOT stubs to Shared-Drive
-// trash (recoverable ~30 days); footage folders are never touched.
+// Runs with dryRun=0 (mutating): the reconciler is idempotent and only trashes
+// small regenerable _SHOOT stubs to Shared-Drive trash (recoverable ~30 days);
+// footage folders are never touched. The endpoint sends the report email.
 
 const { parsePositiveInt } = require('./lib/env')
 
@@ -22,11 +22,8 @@ if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   return
 }
 
-const intervalMs = Math.max(
-  // hourly floor — marker drift is slow-moving; no need to hammer Drive.
-  10 * 60_000,
-  parsePositiveInt(process.env.SHOOT_MARKER_WORKER_INTERVAL_MS, 60 * 60_000),
-)
+// Target hour of day in Asia/Bangkok to run the nightly pass (0–23; default 3am).
+const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.SHOOT_MARKER_WORKER_HOUR, 3)))
 const baseUrl = (process.env.SHOOT_MARKER_RECONCILE_URL || 'http://127.0.0.1:3000').trim()
 const secret = (
   process.env.SHOOT_MARKER_RECONCILE_SECRET ||
@@ -40,13 +37,27 @@ if (!secret) {
   console.warn('[shoot-marker] WARN: no secret configured (SHOOT_MARKER_RECONCILE_SECRET / NEXTAUTH_SECRET / AUTH_SECRET). Worker will keep polling but every request will 401.')
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// ms until the next targetHourBkk in Asia/Bangkok. BKK is a fixed UTC+7 with no
+// DST, so we can work in UTC: 03:00 BKK == 20:00 UTC the previous day.
+function msUntilNextRun() {
+  const targetUtcHour = (targetHourBkk - 7 + 24) % 24
+  const now = new Date()
+  const next = new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), targetUtcHour, 0, 0, 0,
+  ))
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1)
+  return next.getTime() - now.getTime()
+}
+
 let running = false
 
 async function runOnce() {
   if (running) return
   running = true
   try {
-    // dryRun=0 → apply. The endpoint audits any run that actually changed Drive.
+    // dryRun=0 → apply. The endpoint audits + emails any run that changed Drive.
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/shoot-markers/reconcile?dryRun=0`
     const res = await fetch(url, { headers: secret ? { 'x-reconcile-secret': secret } : {} })
     const body = await res.text()
@@ -55,14 +66,10 @@ async function runOnce() {
       return
     }
     const json = JSON.parse(body)
-    if (json.skipped) {
-      console.log(`[shoot-marker] skipped: ${json.reason}`)
-      return
-    }
-    const changed = (json.trashedDuplicates || 0) + (json.movedIntoBooking || 0) + (json.trashedStale || 0) + (json.dedupedInSubfolder || 0)
-    if (changed > 0 || json.errors > 0) {
-      console.log(`[shoot-marker] projects=${json.projects} dupTrashed=${json.trashedDuplicates} moved=${json.movedIntoBooking} staleTrashed=${json.trashedStale} deduped=${json.dedupedInSubfolder} errors=${json.errors}`)
-    }
+    if (json.skipped) { console.log(`[shoot-marker] skipped: ${json.reason}`); return }
+    const f = json.fixed || {}
+    const changed = (f.duplicatesTrashed || 0) + (f.staleTrashed || 0) + (f.movedIntoBooking || 0) + (f.dedupedInSubfolder || 0) + (f.contentRewritten || 0) + (f.markersCreated || 0)
+    console.log(`[shoot-marker] scanned ${json.scannedProjects}p/${json.scannedBookings}b · changed=${changed} warnings=${(json.warnings || []).length} errors=${json.errors}`)
   } catch (err) {
     console.error('[shoot-marker] run failed:', err?.message || err)
   } finally {
@@ -70,17 +77,24 @@ async function runOnce() {
   }
 }
 
-let timer
+// Nightly scheduler: sleep until the next target hour, run, then every 24h.
+let dailyTimer
+function scheduleNightly() {
+  const wait = msUntilNextRun()
+  console.log(`[shoot-marker] next run in ${Math.round(wait / 60000)} min (~${targetHourBkk.toString().padStart(2, '0')}:00 BKK)`)
+  setTimeout(async () => {
+    await runOnce()
+    dailyTimer = setInterval(runOnce, DAY_MS)
+  }, wait)
+}
+
 function shutdown(signal) {
   console.log(`[shoot-marker] received ${signal}, exiting`)
-  if (timer) clearInterval(timer)
+  if (dailyTimer) clearInterval(dailyTimer)
   process.exit(0)
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
 
-console.log(`[shoot-marker] worker started; interval=${intervalMs}ms; baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`)
-// Longer initial delay than the calendar worker — let the app finish booting +
-// the heavier footage/calendar workers settle before we start walking Drive.
-setTimeout(runOnce, 90_000)
-timer = setInterval(runOnce, intervalMs)
+console.log(`[shoot-marker] worker started; nightly at ${targetHourBkk.toString().padStart(2, '0')}:00 BKK; baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`)
+scheduleNightly()
