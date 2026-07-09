@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.138.0] — 2026-07-09
+
+### Added — dedup โฟลเดอร์ landing ซ้ำใน "Production Team"
+- ตอนกู้โฟลเดอร์ (v1.137 catch-up) ถ้ารันซ้อนกันอาจสร้างโฟลเดอร์ดรอปของกองเดียวกัน 2 อัน — `dedupeLandingFolders` (src/lib/landing-dedup.ts) เก็บ**อันเดียวต่อ 1 Production ID** แล้ว trash เฉพาะ **shell ว่างที่ซ้ำ** (โฟลเดอร์ที่มีไฟล์จริงไม่แตะเด็ดขาด; ถ้า 2 อันมีไฟล์ทั้งคู่ → รายงานให้คนรวมเอง). เร็ว (list ราก 1 ครั้ง). `GET /api/internal/landing-dedup/run?dryRun=1` (admin/secret; dryRun ดีฟอลต์).
+
+---
+
 ## [1.137.0] — 2026-07-09
 
 ### Fixed — โฟลเดอร์ดรอปไฟล์ใน "Production Team" หายเอง (คนลงไฟล์ไม่ได้)
