@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.137.0] — 2026-07-09
+
+### Fixed — โฟลเดอร์ดรอปไฟล์ใน "Production Team" หายเอง (คนลงไฟล์ไม่ได้)
+- **ต้นตอ (2 worker รวมกัน):** (1) `video-merge` ย้าย footage เข้า box แล้ว **trash โฟลเดอร์ landing** ทิ้ง (`cleanupLandingShell`), (2) `prep-folders` พอเห็น footage อยู่ใน box แล้ว **ข้ามไม่สร้าง landing ใหม่** ("skip empty re-prep") → โฟลเดอร์ดรอปไฟล์รายวันหายถาวร ทีมงานอัปโหลด batch ต่อไป/วันถัดไปไม่ได้.
+- **แก้:** landing = ที่ดรอปไฟล์**ถาวร** ไม่ใช่ของชั่วคราว. `video-merge` **เลิก trash landing โดยดีฟอลต์** (footage อยู่ใน box ปลอดภัยแล้ว เหลือ shell ว่างไว้เป็นที่ดรอป; เปิด cleanup คืนด้วย `VIDEO_MERGE_TRASH_LANDING=1` ถ้าอยากเคลียร์). `prep-folders` พอ delivered แล้ว **ยัง ensure โฟลเดอร์ landing ไว้เสมอ** (แต่ไม่สร้าง box skeleton ซ้ำ กัน ghost loop) → โฟลเดอร์ดรอปของงานวันนี้กลับมา + ไม่หายอีก.
+- โฟลเดอร์ที่หายไปก่อนหน้าอยู่ใน Drive trash (กู้ได้ ~30 วัน) — prep tick ถัดไปจะสร้างของงานวันนี้กลับให้เอง.
+
+---
+
 ## [1.136.0] — 2026-07-09
 
 ### Changed — worker เก็บกวาด `_SHOOT` marker: ตรวจ**เนื้อไฟล์**ด้วย + รัน**ทุกคืน** + ส่งรายงาน

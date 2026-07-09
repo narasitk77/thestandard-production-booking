@@ -119,12 +119,19 @@ async function isLandingShell(folderId: string, depth = 0): Promise<boolean> {
 }
 
 /**
- * Trash the emptied landing shell after a merge that actually moved something
- * (the "moved something" gate keeps us from eating a freshly prepped skeleton
- * that's still waiting for the NAS dump). Trash — recoverable ~30 days.
- * Exported for the live e2e check alongside mirrorMove.
+ * Trash the emptied landing shell after a merge that actually moved something.
+ *
+ * v1.137 — DISABLED BY DEFAULT. The "Production Team" landing folders are a
+ * PERSISTENT crew drop zone: trashing the shell right after the first merge made
+ * a shoot's drop folder VANISH, so crew couldn't upload later batches (and
+ * prep-folders won't recreate it once footage is delivered — the two together
+ * deleted the daily folders for good). The footage is already safe in the box, so
+ * keeping the empty shell costs only a little landing-drive clutter and keeps the
+ * drop target alive. Set VIDEO_MERGE_TRASH_LANDING=1 to restore the old cleanup.
+ * Trash is recoverable ~30 days. Exported for the live e2e check alongside mirrorMove.
  */
 export async function cleanupLandingShell(flatId: string, stats: Stats): Promise<boolean> {
+  if (process.env.VIDEO_MERGE_TRASH_LANDING !== '1') return false
   if (stats.err > 0 || stats.moved + stats.movedFolders === 0) return false
   try {
     if (!(await isLandingShell(flatId))) return false

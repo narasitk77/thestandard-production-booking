@@ -98,7 +98,25 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
           if (some.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) { hasFiles = true; break }
         }
         if (hasFiles) {
-          results.push({ bookingCode: b.bookingCode, skipped: 'footage already delivered — skip empty re-prep' })
+          // v1.137 — footage delivered → don't recreate empty BOX skeletons (the
+          // v1.111 ghost-loop guard), BUT still ensure the crew DROP folder in
+          // Production Team exists. Crew upload late/extra batches there for days
+          // after the shoot, and video-merge no longer trashes it — so the drop
+          // target must persist / reappear, not vanish once the first batch merged.
+          let landingNote = 'box skip (delivered)'
+          if (hasOutletFolderMapping(b.outlet.code) && !isPhotoAlbumBooking(b.episodes)) {
+            const cams = camerasToPreCreate(b.cameraCount, b.micCount)
+            if (cams.length > 0) {
+              try {
+                const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: b.outlet.code === 'AGN' })) : undefined
+                const lname = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
+                const lid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: lname, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
+                await rememberDriveLinks(b.id, { landing: lid })
+                landingNote = 'landing drop folder ensured (delivered)'
+              } catch (e: any) { landingNote = `landing ensure error: ${e?.message || e}`; prodTeamErrors++ }
+            }
+          }
+          results.push({ bookingCode: b.bookingCode, skipped: `footage already delivered — ${landingNote}` })
           continue
         }
       } catch (e: any) {
