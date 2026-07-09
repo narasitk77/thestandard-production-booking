@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added — สร้างโฟลเดอร์ดรอปของงานเดียวแบบ on-demand ("ขอเพิ่มพิเศษ")
 - `GET /api/internal/landing/manage?create=<Production ID>` (admin) — สร้างโฟลเดอร์ landing ของ **booking ที่ระบุ** ตัวเดียว (idempotent — มีอยู่แล้วใช้ซ้ำ). ต่างจาก `?offset=N` ที่ทำได้เฉพาะวันในอนาคต — `?create=` ใช้กับงาน**ย้อนหลัง/จบไปแล้ว**ที่โดน prune ไปแต่ต้องอัปไฟล์เพิ่มได้ด้วย. `ensureLandingForBooking()` ใน landing-lifecycle.ts; ข้ามงาน photo/ไม่มีกล้อง/outlet ไม่มี mapping พร้อมเหตุผล. เป็นเครื่องมือหลักของเคส "ขอเพิ่มพิเศษ" ใน `docs/landing-folder-policy.md`.
+- **Guard: งานที่ footage ส่งมอบแล้ว → ไม่สร้าง drop.** `ensureLandingForBooking()` เช็คก่อนสร้างว่ามีไฟล์จริง (นอกจาก `_SHOOT` stub) อยู่ใต้ Production ID นั้นไหม (`findFoldersByCode` → `listFilesRecursive`) — ถ้ามี = ย้ายเข้ากล่อง box แล้ว → คืน `footage already delivered` ไม่สร้างโฟลเดอร์ว่างซ้ำ (mirror ตรรกะ delivered-check ของ prep-folders). ตามที่ ops กำชับ 2026-07-09: "งานไหนย้ายไฟล์แล้ว ไม่ต้องสร้าง drop มา" (เคส TSS-KDM-260708-01 มี 84 ไฟล์ใน box อยู่แล้ว).
 
 ---
 

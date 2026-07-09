@@ -24,6 +24,7 @@
 import { prisma } from './db'
 import {
   ensureFlatShootFolders, listChildFolders, listFilesRecursive, trashDriveItem, hasDriveCredentials,
+  findFoldersByCode,
 } from './google-drive'
 import {
   landingBookingFolderName, buildEpisodeFolderName, camerasToPreCreate,
@@ -172,6 +173,23 @@ export async function ensureLandingForBooking(
   if (isPhotoAlbumBooking(b.episodes)) return { ok: false, dryRun, bookingCode: code, reason: 'photo-album booking has no Production Team landing folder' }
   const cams = camerasToPreCreate(b.cameraCount, b.micCount)
   if (cams.length === 0) return { ok: false, dryRun, bookingCode: code, reason: 'no cameras (block shot / unspecified) — no landing folder' }
+
+  // A booking whose footage is ALREADY delivered (real files exist under its
+  // Production ID anywhere — typically moved into the VIDEO 2026 box) does NOT
+  // need a landing drop folder: making one just resurrects an empty shell the
+  // lean lifecycle correctly cleans up. Mirrors prep-folders' delivered-check.
+  // (2026-07-09: TSS-KDM-260708-01 had 84 files already in the box — the drop
+  // folder was redundant. Per ops: "งานไหนย้ายไฟล์แล้ว ไม่ต้องสร้าง drop มา".)
+  try {
+    for (const c of await findFoldersByCode(b.bookingCode)) {
+      const some = await listFilesRecursive(c.id, { maxFiles: 4 })
+      if (some.some(f => !SHOOT_STUB_RE.test(f.name))) {
+        return { ok: false, dryRun, bookingCode: code, reason: 'footage already delivered — no landing drop folder needed' }
+      }
+    }
+  } catch (e: any) {
+    console.warn('[landing] delivered-check failed (continuing with create):', code, e?.message || e)
+  }
 
   const name = landingBookingFolderName({ bookingCode: b.bookingCode, projectName: b.projectName, program: b.program, episodes: b.episodes })
   if (dryRun) return { ok: true, dryRun, bookingCode: code, created: name }
