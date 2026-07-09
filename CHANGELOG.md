@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.140.0] — 2026-07-09
+
+### Added — prune landing drive ให้เหลือเฉพาะงานวันนี้ (คำสั่งมือ)
+- `GET /api/internal/landing/manage?prune=today&keep=<ชื่อโฟลเดอร์>` (admin) — ลบโฟลเดอร์ดรอปที่**ไม่ใช่งานวันนี้** (Bangkok) ทิ้ง เว้นชื่อใน `keep` (ใส่ซ้ำได้). ปลอดภัย: ลบเฉพาะโฟลเดอร์**ว่าง**; โฟลเดอร์ที่มี footage หรือโฟลเดอร์ manual (ไม่มี Production ID ในชื่อ) จะ**เก็บไว้ + รายงาน** ไม่ลบเงียบ. dryRun ดีฟอลต์. `pruneLandingToToday()` ใน landing-lifecycle.ts.
+
+---
+
 ## [1.139.0] — 2026-07-09
 
 ### Changed — โฟลเดอร์ดรอปไฟล์ "Production Team" เป็นระบบ **สร้างเฉพาะงานวันถัดไป + เก็บ drive ให้ lean**

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { manageLandingFolders } from '@/lib/landing-lifecycle'
+import { manageLandingFolders, pruneLandingToToday } from '@/lib/landing-lifecycle'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 
@@ -44,6 +44,28 @@ export async function GET(request: NextRequest) {
   const createOffsetDays = url.searchParams.get('offset') != null ? Math.max(0, Number(url.searchParams.get('offset'))) : undefined
   const keepPastDays = url.searchParams.get('keepDays') != null ? Math.max(0, Number(url.searchParams.get('keepDays'))) : undefined
   const forceReport = url.searchParams.get('report') === '1'
+
+  // v1.140 — one-off prune: ?prune=today keeps ONLY today's shoot folders + any
+  // ?keep=<name> (repeatable). Trashes only EMPTY non-today folders; footage +
+  // manual folders are kept and reported. Used for a manual "clean the drop drive".
+  if (url.searchParams.get('prune') === 'today') {
+    const keepNames = url.searchParams.getAll('keep').map(s => s.trim()).filter(Boolean)
+    try {
+      const r = await pruneLandingToToday({ dryRun, keepNames })
+      if (!dryRun && (r.trashed > 0 || r.errors > 0)) {
+        logAudit({
+          actorEmail: allowed.actor || 'landing-prune',
+          action: 'drive.prune_landing_to_today',
+          entityType: 'Drive', entityId: 'production-team',
+          changes: { trashed: r.trashed, keptToday: r.keptToday, keptWithFiles: r.keptWithFiles.length, keptManual: r.keptManual.length, keepNames, errors: r.errors },
+        })
+      }
+      return NextResponse.json(r)
+    } catch (e: any) {
+      console.error('GET /api/internal/landing/manage prune error:', e)
+      return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+    }
+  }
 
   try {
     const r = await manageLandingFolders({ dryRun, createOffsetDays, keepPastDays })

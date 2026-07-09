@@ -144,3 +144,63 @@ export async function manageLandingFolders(
 
   return base
 }
+
+export interface LandingPruneResult {
+  skipped: boolean
+  reason?: string
+  dryRun: boolean
+  today: string
+  trashed: number
+  keptToday: number
+  keptWithFiles: string[]   // non-today shoot folders that HOLD footage — kept, reported
+  keptManual: string[]      // folders with no Production ID in the name — kept, reported
+  keptByName: string[]      // matched a keepNames entry
+  errors: number
+  actions: string[]
+}
+
+/**
+ * v1.140 — one-off prune: keep ONLY today's shoot drop folders (Bangkok), plus
+ * anything in `keepNames`. A non-today shoot folder is trashed only when EMPTY;
+ * one that still holds real footage is kept + reported (never silent data loss),
+ * and folders with no Production ID in the name (manual folders) are left alone +
+ * reported. Trash is recoverable ~30 days. dry-run first.
+ */
+export async function pruneLandingToToday(
+  opts: { dryRun?: boolean; keepNames?: string[] } = {},
+): Promise<LandingPruneResult> {
+  const dryRun = !!opts.dryRun
+  const keepNames = (opts.keepNames || []).map(s => s.trim()).filter(Boolean)
+  const today = bangkokDayRange(0)
+  const base: LandingPruneResult = {
+    skipped: false, dryRun, today: today.start.toISOString().slice(0, 10),
+    trashed: 0, keptToday: 0, keptWithFiles: [], keptManual: [], keptByName: [], errors: 0, actions: [],
+  }
+  if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
+
+  const codeToShootDate = new Map<string, Date>()
+  const rows = await prisma.booking.findMany({ where: { bookingCode: { not: null }, deletedAt: null }, select: { bookingCode: true, shootDate: true } })
+  for (const b of rows) if (b.bookingCode) codeToShootDate.set(b.bookingCode.toUpperCase(), b.shootDate)
+
+  const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
+  for (const f of folders) {
+    if (keepNames.some(k => f.name.includes(k))) { base.keptByName.push(f.name); continue }
+    const code = codeFromFolderName(f.name)
+    if (!code) { base.keptManual.push(f.name); continue } // manual folder — never auto-delete
+    const shootDate = codeToShootDate.get(code)
+    if (shootDate && shootDate.getTime() >= today.start.getTime() && shootDate.getTime() < today.end.getTime()) {
+      base.keptToday++; continue // today's shoot — keep
+    }
+    // not today's → trash only if empty; keep + report if it holds footage
+    let empty = false
+    try { empty = !(await hasRealFiles(f.id)) }
+    catch (e: any) { base.errors++; base.actions.push(`ERROR check "${f.name}": ${e?.message || e}`); continue }
+    if (!empty) { base.keptWithFiles.push(f.name); continue }
+    base.actions.push(`trash "${f.name}" (${code}${shootDate ? ` · shoot ${shootDate.toISOString().slice(0, 10)}` : ' · no booking'})`)
+    if (!dryRun) {
+      try { await trashDriveItem(f.id) } catch (e: any) { base.errors++; base.actions.push(`  ERROR trash: ${e?.message || e}`); continue }
+    }
+    base.trashed++
+  }
+  return base
+}
