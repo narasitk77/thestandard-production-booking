@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { manageLandingFolders, pruneLandingToToday } from '@/lib/landing-lifecycle'
+import { manageLandingFolders, pruneLandingToToday, ensureLandingForBooking } from '@/lib/landing-lifecycle'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 
@@ -44,6 +44,25 @@ export async function GET(request: NextRequest) {
   const createOffsetDays = url.searchParams.get('offset') != null ? Math.max(0, Number(url.searchParams.get('offset'))) : undefined
   const keepPastDays = url.searchParams.get('keepDays') != null ? Math.max(0, Number(url.searchParams.get('keepDays'))) : undefined
   const forceReport = url.searchParams.get('report') === '1'
+
+  // v1.141 — create ONE booking's landing folder on demand: ?create=<code>
+  // ("ขอเพิ่มพิเศษ" — a specific shoot, often past/completed, needs a drop target).
+  const createCode = url.searchParams.get('create')?.trim()
+  if (createCode) {
+    try {
+      const r = await ensureLandingForBooking(createCode, { dryRun })
+      if (!dryRun && r.ok) {
+        logAudit({
+          actorEmail: allowed.actor || 'landing-create', action: 'drive.create_landing_for_booking',
+          entityType: 'Drive', entityId: r.bookingCode, changes: { created: r.created, folderId: r.folderId },
+        })
+      }
+      return NextResponse.json(r, { status: r.ok ? 200 : 400 })
+    } catch (e: any) {
+      console.error('GET /api/internal/landing/manage create error:', e)
+      return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+    }
+  }
 
   // v1.140 — one-off prune: ?prune=today keeps ONLY today's shoot folders + any
   // ?keep=<name> (repeatable). Trashes only EMPTY non-today folders; footage +

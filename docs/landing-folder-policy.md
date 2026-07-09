@@ -36,14 +36,24 @@ folder never disappears out from under crew.
   - `?keepDays=N` — override the grace window for this run.
   - `?report=1` — force the digest email even on a manual/dry run.
 
-## "ขอเพิ่มพิเศษ" — pre-creating a folder early
+## "ขอเพิ่มพิเศษ" — creating a folder on demand
 
-Default policy is next-day-only. To make a folder now for a shoot further out
-(e.g. a big shoot the crew want to pre-stage), an admin runs, in a logged-in
-`probook.xtec9.xyz` tab:
+Default policy is next-day-only. When a specific shoot needs its drop folder
+now — a big shoot the crew want to pre-stage, or a **past/completed** shoot whose
+folder was already pruned but still needs a late upload — an admin runs, in a
+logged-in `probook.xtec9.xyz` tab:
 
 ```js
-// create for shoots N days ahead (e.g. 2 = the day after tomorrow)
+// create the landing folder for ONE booking (works for past shoots too) — the preferred tool
+await fetch('/api/internal/landing/manage?dryRun=0&create=TSS-KDM-260708-01', { credentials: 'include' }).then(r => r.json())
+```
+
+`?create=<Production ID>` is idempotent (reuses an existing folder) and is the
+right tool for a single named job. To pre-stage a whole future **day** instead,
+use the day-based offset (offset only reaches forward, never a past day):
+
+```js
+// create for ALL shoots N days ahead (e.g. 2 = the day after tomorrow)
 await fetch('/api/internal/landing/manage?dryRun=0&offset=2', { credentials: 'include' }).then(r => r.json())
 ```
 

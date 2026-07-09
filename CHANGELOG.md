@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.141.0] — 2026-07-09
+
+### Added — สร้างโฟลเดอร์ดรอปของงานเดียวแบบ on-demand ("ขอเพิ่มพิเศษ")
+- `GET /api/internal/landing/manage?create=<Production ID>` (admin) — สร้างโฟลเดอร์ landing ของ **booking ที่ระบุ** ตัวเดียว (idempotent — มีอยู่แล้วใช้ซ้ำ). ต่างจาก `?offset=N` ที่ทำได้เฉพาะวันในอนาคต — `?create=` ใช้กับงาน**ย้อนหลัง/จบไปแล้ว**ที่โดน prune ไปแต่ต้องอัปไฟล์เพิ่มได้ด้วย. `ensureLandingForBooking()` ใน landing-lifecycle.ts; ข้ามงาน photo/ไม่มีกล้อง/outlet ไม่มี mapping พร้อมเหตุผล. เป็นเครื่องมือหลักของเคส "ขอเพิ่มพิเศษ" ใน `docs/landing-folder-policy.md`.
+
+---
+
 ## [1.140.0] — 2026-07-09
 
 ### Added — prune landing drive ให้เหลือเฉพาะงานวันนี้ (คำสั่งมือ)

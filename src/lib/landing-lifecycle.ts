@@ -145,6 +145,42 @@ export async function manageLandingFolders(
   return base
 }
 
+/**
+ * v1.141 — create ONE booking's landing drop folder on demand ("ขอเพิ่มพิเศษ"):
+ * a specific shoot (often a past/completed one whose folder was pruned) needs a
+ * drop target so crew can upload. Idempotent — reuses the folder if it exists.
+ */
+export async function ensureLandingForBooking(
+  bookingCode: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ ok: boolean; dryRun: boolean; bookingCode: string; created?: string; folderId?: string | null; url?: string | null; reason?: string }> {
+  const dryRun = !!opts.dryRun
+  const code = bookingCode.trim().toUpperCase()
+  if (!hasDriveCredentials()) return { ok: false, dryRun, bookingCode: code, reason: 'no Drive credentials' }
+
+  const b = await prisma.booking.findFirst({
+    where: { bookingCode: { equals: code, mode: 'insensitive' }, deletedAt: null },
+    select: {
+      id: true, bookingCode: true, status: true, cameraCount: true, micCount: true,
+      projectName: true, outlet: { select: { code: true } },
+      program: { select: { code: true, name: true } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
+    },
+  })
+  if (!b || !b.bookingCode) return { ok: false, dryRun, bookingCode: code, reason: 'booking not found' }
+  if (!hasOutletFolderMapping(b.outlet.code)) return { ok: false, dryRun, bookingCode: code, reason: `outlet ${b.outlet.code} has no folder mapping` }
+  if (isPhotoAlbumBooking(b.episodes)) return { ok: false, dryRun, bookingCode: code, reason: 'photo-album booking has no Production Team landing folder' }
+  const cams = camerasToPreCreate(b.cameraCount, b.micCount)
+  if (cams.length === 0) return { ok: false, dryRun, bookingCode: code, reason: 'no cameras (block shot / unspecified) — no landing folder' }
+
+  const name = landingBookingFolderName({ bookingCode: b.bookingCode, projectName: b.projectName, program: b.program, episodes: b.episodes })
+  if (dryRun) return { ok: true, dryRun, bookingCode: code, created: name }
+  const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: b.outlet.code === 'AGN' })) : undefined
+  const fid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
+  await rememberDriveLinks(b.id, { landing: fid })
+  return { ok: true, dryRun, bookingCode: code, created: name, folderId: fid, url: fid ? `https://drive.google.com/drive/folders/${fid}` : null }
+}
+
 export interface LandingPruneResult {
   skipped: boolean
   reason?: string
