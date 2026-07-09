@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **ต้นตอ (2 worker รวมกัน):** (1) `video-merge` ย้าย footage เข้า box แล้ว **trash โฟลเดอร์ landing** ทิ้ง (`cleanupLandingShell`), (2) `prep-folders` พอเห็น footage อยู่ใน box แล้ว **ข้ามไม่สร้าง landing ใหม่** ("skip empty re-prep") → โฟลเดอร์ดรอปไฟล์รายวันหายถาวร ทีมงานอัปโหลด batch ต่อไป/วันถัดไปไม่ได้.
 - **แก้:** landing = ที่ดรอปไฟล์**ถาวร** ไม่ใช่ของชั่วคราว. `video-merge` **เลิก trash landing โดยดีฟอลต์** (footage อยู่ใน box ปลอดภัยแล้ว เหลือ shell ว่างไว้เป็นที่ดรอป; เปิด cleanup คืนด้วย `VIDEO_MERGE_TRASH_LANDING=1` ถ้าอยากเคลียร์). `prep-folders` พอ delivered แล้ว **ยัง ensure โฟลเดอร์ landing ไว้เสมอ** (แต่ไม่สร้าง box skeleton ซ้ำ กัน ghost loop) → โฟลเดอร์ดรอปของงานวันนี้กลับมา + ไม่หายอีก.
 - โฟลเดอร์ที่หายไปก่อนหน้าอยู่ใน Drive trash (กู้ได้ ~30 วัน) — prep tick ถัดไปจะสร้างของงานวันนี้กลับให้เอง.
+- **กู้ย้อนหลังครั้งเดียว:** `GET /api/internal/prep-folders/run?days=N` (admin) สร้างโฟลเดอร์ landing ของงานย้อนหลัง N วันกลับมาให้ครบในรอบเดียว (reuse logic เดิม + landing-ensure ใหม่ ปลอดภัย).
 
 ---
 

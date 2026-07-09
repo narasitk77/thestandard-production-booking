@@ -53,13 +53,19 @@ export interface PrepResult {
   results: Array<{ bookingCode: string | null; created?: string[]; prodTeam?: string; wouldCreate?: string[]; skipped?: string; error?: string }>
 }
 
-export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Promise<PrepResult> {
+export async function prepTodayShootFolders(opts: { dryRun?: boolean; catchupDays?: number } = {}): Promise<PrepResult> {
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) {
     return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', dryRun: !!opts.dryRun, total: 0, prepared: 0, errors: 0, prodTeamErrors: 0, results: [] }
   }
 
-  const { start, end } = bangkokTodayRange()
+  // v1.137 — catchupDays widens the window back N days (default 0 = today only)
+  // for a one-time restore of landing drop folders that the old video-merge
+  // cleanup trashed. Delivered bookings re-ensure ONLY the landing drop folder
+  // (not empty box skeletons), so a catch-up over recent shoots is safe.
+  const { start: todayStart, end } = bangkokTodayRange()
+  const catchup = Math.max(0, Math.min(60, Math.floor(opts.catchupDays || 0)))
+  const start = catchup > 0 ? new Date(todayStart.getTime() - catchup * 24 * 3_600_000) : todayStart
   const bookings = await prisma.booking.findMany({
     where: {
       shootDate: { gte: start, lt: end },

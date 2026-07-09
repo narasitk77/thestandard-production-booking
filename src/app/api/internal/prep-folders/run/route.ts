@@ -30,9 +30,14 @@ export async function GET(request: NextRequest) {
   if (!(await isAllowed(request))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  const dryRun = new URL(request.url).searchParams.get('dryRun') === '1'
+  const url = new URL(request.url)
+  const dryRun = url.searchParams.get('dryRun') === '1'
+  // v1.137 — ?days=N: one-time catch-up that re-ensures landing drop folders for
+  // shoots in the last N days (restores folders the old cleanup trashed). Omit for
+  // the normal today-only sweep the hourly worker runs.
+  const catchupDays = url.searchParams.get('days') ? Math.max(0, Number(url.searchParams.get('days'))) : 0
   try {
-    const result = await prepTodayShootFolders({ dryRun })
+    const result = await prepTodayShootFolders({ dryRun, catchupDays })
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
     console.error('GET /api/internal/prep-folders/run error:', e)
