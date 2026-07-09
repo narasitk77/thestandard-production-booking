@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.134.0] — 2026-07-09
+
+### Fixed — วันที่ในไฟล์ `_SHOOT.txt` เพี้ยนเป็นปีพุทธ (+543) / ซ้อนเป็น 3112
+- Marker `_SHOOT.txt` เคย render วันที่ด้วย `th-TH` เฉยๆ ซึ่ง default เป็น**ปฏิทินพุทธ** → งานปกติปี 2026 ขึ้นเป็น "2 ก.ค. 2569", และงานที่ shootDate เผลอถูกเก็บเป็นพุทธ-2569 อยู่แล้วก็ซ้อนเป็น "2 ก.ค. 3112" (บวก 543 สองรอบ — ตาม memo 2026-07-09). แก้เป็น `th-TH-u-ca-gregory` ให้ออกเป็น ค.ศ. ("2 ก.ค. 2026") ตรงกับที่แอปที่อื่นใช้อยู่แล้ว.
+
+### Fixed — กัน Production ID ปีเพี้ยน (AGN-69… แทน AGN-26…) ให้ครบทุกทาง
+- ต้นตอ ID ปี "69": ถ้า `shootDate` ถูกเก็บเป็นปีพุทธ (2569) → `generateEpisodeId` ตัด 2 หลักท้ายได้ "69" แทน "26". รวม guard แปลงปีพุทธ→ค.ศ. เป็น helper กลาง `normalizeBuddhistYear` (src/lib/thai-date.ts) ใช้ร่วมกันทั้ง**ทางสร้าง** (createBookingFromPayload — ครอบ wizard/routine/MCP/API) และ**ทางแก้ไข** (PATCH shootEndDate ที่เดิมไม่มี guard) — เพิ่มเทสครบ.
+- งาน Hat Yai ที่ memo พูดถึง (PP-26-025-S05) **DB ถูกต้องอยู่แล้ว** = `AGN-260702-02` (ปี 26, 2 ก.ค. 2026); `AGN-690702-LOC-01` ที่เจอเป็น marker เก่าค้างบน Drive ก่อน migration.
+
+### หมายเหตุ — Production ID เพี้ยนระหว่างโฟลเดอร์/marker กับ Bookings sheet
+- ปัจจุบันทั้งชื่อโฟลเดอร์ / marker / sheet มาจาก `Booking.bookingCode` เดียวกันหมด (typeless) — ตรงกันแล้วสำหรับงานใหม่. ส่วนที่เพี้ยนคือ**โฟลเดอร์/marker เก่าก่อน migration v1.109** ที่ยังค้าง ID เดิม (มี TYPE / ปี 69) — เป็น data ค้างบน Drive ไม่ใช่บั๊กโค้ดปัจจุบัน. รอตัดสินใจแนวทางเก็บกวาด (แตะ prod Drive) แยกต่างหาก.
+
+---
+
 ## [1.133.0] — 2026-07-08
 
 ### Added — กล่องติชม/แจ้งปัญหา ลอยมุมขวาล่างทุกหน้า (Feedback box)

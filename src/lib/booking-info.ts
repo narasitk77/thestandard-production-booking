@@ -90,15 +90,20 @@ export function bookingInfoInput(b: {
 
 const TZ = 'Asia/Bangkok'
 
+// v1.134 — use the GREGORIAN calendar explicitly ('…-u-ca-gregory'). Plain
+// 'th-TH' defaults to the Thai BUDDHIST calendar, so a normal 2026 shootDate
+// rendered as "2 ก.ค. 2569" (year +543) — and a shootDate accidentally stored
+// as Buddhist-2569 compounded to "2 ก.ค. 3112" (+543 twice). The rest of the app
+// (approve/sheet timestamps) already uses 'th-TH-u-ca-gregory'; this was the
+// one holdout. Output now matches the Gregorian intent, e.g. "29 พ.ค. 2026".
 function fmtDate(d: Date): string {
-  // e.g. "29 พ.ค. 2026"
-  return d.toLocaleDateString('th-TH', {
+  return d.toLocaleDateString('th-TH-u-ca-gregory', {
     timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric',
   })
 }
 
 function fmtDateTime(d: Date): string {
-  return d.toLocaleString('th-TH', {
+  return d.toLocaleString('th-TH-u-ca-gregory', {
     timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })

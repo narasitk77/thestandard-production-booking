@@ -6,6 +6,7 @@
  */
 import { prisma } from '@/lib/db'
 import { generateEpisodeId, parseEpisodeId, formatShootDateForId } from '@/lib/episode-id'
+import { normalizeBuddhistYear } from '@/lib/thai-date'
 import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
@@ -105,14 +106,14 @@ export async function createBookingFromPayload(
     }
   }
 
-  const parsedDate = new Date(shootDate)
-  if (isNaN(parsedDate.getTime())) return fail(400, `Invalid shootDate: ${shootDate}`)
+  const rawDate = new Date(shootDate)
+  if (isNaN(rawDate.getTime())) return fail(400, `Invalid shootDate: ${shootDate}`)
   // Guard: a Buddhist-era year (พ.ศ. ≥ 2500, e.g. a migration pasting 2569 for 2026)
   // would corrupt both the displayed date AND the Production ID (derived below).
   // Normalize to Gregorian. Wizard <input type="date"> is always Gregorian.
-  if (parsedDate.getUTCFullYear() >= 2500) parsedDate.setUTCFullYear(parsedDate.getUTCFullYear() - 543)
-  const parsedEnd = shootEndDate ? new Date(shootEndDate) : null
-  if (parsedEnd && parsedEnd.getUTCFullYear() >= 2500) parsedEnd.setUTCFullYear(parsedEnd.getUTCFullYear() - 543)
+  // Shared with the edit path via normalizeBuddhistYear (src/lib/thai-date.ts).
+  const parsedDate = normalizeBuddhistYear(rawDate)!
+  const parsedEnd = normalizeBuddhistYear(shootEndDate ? new Date(shootEndDate) : null) ?? null
 
   // v1.66 — camera + mic counts are REQUIRED for every creation path (wizard,
   // routine generator, API/MCP). 0 is valid (audio-only / no-camera shoots) but

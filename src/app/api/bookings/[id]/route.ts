@@ -10,6 +10,7 @@ import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
 import { isShootOver } from '@/lib/booking-complete'
 import { logAudit, diffBooking } from '@/lib/audit'
+import { normalizeBuddhistYear } from '@/lib/thai-date'
 import type { BookingStatus } from '@prisma/client'
 
 export async function GET(
@@ -193,7 +194,10 @@ export async function PATCH(
           ...(notes !== undefined && { notes: notes || null }),
           ...(callTime && { callTime }),
           ...(estimatedWrap !== undefined && { estimatedWrap: estimatedWrap || null }),
-          ...(shootEndDate !== undefined && { shootEndDate: shootEndDate ? new Date(shootEndDate) : null }),
+          // normalizeBuddhistYear: an admin could paste a พ.ศ. end date (2569) —
+          // shootDate itself is immutable + guarded at creation, but shootEndDate
+          // is editable here, so guard it too (feeds the marker date range + calendar).
+          ...(shootEndDate !== undefined && { shootEndDate: shootEndDate ? (normalizeBuddhistYear(new Date(shootEndDate)) ?? null) : null }),
           ...(locationName !== undefined && { locationName: locationName || null }),
           ...(crewRequired && Array.isArray(crewRequired) && { crewRequired }),
           ...(shootType && { shootType }),
