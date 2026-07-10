@@ -235,8 +235,12 @@ function RentalForm({ initial, vendors, onClose, onSaved }: {
   // Editing: the stored outletId is a DB cuid but the select's options are
   // outlet CODES — map it back to the code so the current outlet shows selected
   // (and an untouched save round-trips the code, not an unknown id).
-  const [f, setF] = useState<Partial<Rental>>(initial?.id
-    ? { ...initial, outletId: initial.outlet?.code ?? initial.outletId }
+  // Honor `initial` for BOTH edit (has id) AND a pre-filled "add" (deep-link from
+  // a booking sets bookingId+booking but no id) — otherwise the injected bookingId
+  // is dropped and the rental saves unlinked. Plain "Add" passes emptyForm(), so
+  // the spread is a no-op there.
+  const [f, setF] = useState<Partial<Rental>>(initial
+    ? { ...emptyForm(), ...initial, outletId: initial.outlet?.code ?? initial.outletId }
     : emptyForm())
   const [bookingCode, setBookingCode] = useState<string | null>(initial?.booking?.bookingCode ?? null)
   const [saving, setSaving] = useState(false)
@@ -430,6 +434,7 @@ export default function RentalsPage() {
   const [fStatus, setFStatus] = useState('live') // 'live' = hide ARCHIVED (fresh view); archived stay recoverable behind the filter
   const [fPay, setFPay] = useState('all')
   const [onlyIncomplete, setOnlyIncomplete] = useState(false)
+  const [focusId, setFocusId] = useState<string | null>(null)
 
   // Fetch every rental (low volume) and filter client-side. A server year filter
   // would silently drop rentals with no rentalDate — exactly the "ไม่ตกหล่น" gap
@@ -450,6 +455,24 @@ export default function RentalsPage() {
   useEffect(() => {
     fetch('/api/admin/vendors').then((r) => r.json()).then((j) => setVendors(j.vendors || [])).catch(() => {})
   }, [])
+
+  // Deep-links from the booking side (BookingRentals on /admin/[id] + drawer):
+  //   ?newForBooking=<id>&code=<bookingCode> → open the add form pre-linked
+  //   ?focus=<rentalId>                      → open that rental for edit
+  // URL is cleaned after so a refresh doesn't reopen. focus waits for the list.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    const bId = p.get('newForBooking')
+    const fId = p.get('focus')
+    if (bId) setEditing({ ...emptyForm(), bookingId: bId, booking: { id: bId, bookingCode: p.get('code') || bId } })
+    if (fId) setFocusId(fId)
+    if (bId || fId) window.history.replaceState({}, '', '/admin/rentals')
+  }, [])
+  useEffect(() => {
+    if (!focusId) return
+    const r = rentals.find((x) => x.id === focusId)
+    if (r) { setEditing(r); setFocusId(null) }
+  }, [focusId, rentals])
 
   const patchRental = useCallback((id: string, patch: Partial<Rental>) => {
     setRentals((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)))

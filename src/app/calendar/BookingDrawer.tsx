@@ -19,6 +19,7 @@ import { SPECIAL_EQUIPMENT_OPTIONS, CREW_OPTIONS } from '@/lib/data'
 import { ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterMember } from '@/lib/team-roster'
 import { normalizeFreelancers, freelancerEmails, freelancerRoleLabel } from '@/lib/freelancers'
 import type { Booking } from './types'
+import BookingRentals from '@/app/_components/BookingRentals'
 
 const showName = bookingDisplayName
 const SHOOT_TYPE_OPTIONS = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT'] as const
@@ -547,6 +548,9 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
                   {b.itinerary && <div className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">🗒️ {b.itinerary}</div>}
                 </div>
               )}
+
+              {/* งานเช่า linked to this booking — admin/console only (finance data). */}
+              {canEdit && <BookingRentals bookingId={b.id} bookingCode={b.bookingCode} variant="compact" />}
             </>
           )}
         </div>

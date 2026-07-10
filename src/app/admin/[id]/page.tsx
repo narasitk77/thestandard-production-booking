@@ -11,6 +11,7 @@ import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRo
 import { normalizeFreelancers, splitLegacyFreelancers, freelancerRoleLabel } from '@/lib/freelancers'
 import { CameraMicTag } from '../_components/CameraMicTag'
 import NumberStepper from '@/app/_components/NumberStepper'
+import BookingRentals from '@/app/_components/BookingRentals'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -1191,6 +1192,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           </div>
         )}
       </div>
+
+      {/* งานเช่า — the rentals linked to this booking (reverse of the rental→booking
+          link). Console-gated data; a quick "เพิ่มงานเช่า" pre-links this booking. */}
+      {booking.bookingCode && (
+        <BookingRentals bookingId={booking.id} bookingCode={booking.bookingCode} />
+      )}
 
       {/* ASSIGN — allow editing crew on REQUESTED, ASSIGNED, and CONFIRMED bookings (not CANCELLED) */}
       {!isCancelled && (

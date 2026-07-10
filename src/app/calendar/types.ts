@@ -12,6 +12,7 @@ export interface Episode {
 export interface Booking {
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   id: string
+  bookingCode?: string | null
   shootDate: string
   callTime: string
   estimatedWrap?: string
