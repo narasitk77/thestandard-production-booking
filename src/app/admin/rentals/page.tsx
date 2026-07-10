@@ -154,7 +154,7 @@ function DocSlots({ rental, onAdd, onRemove }: { rental: Rental; onAdd: (doc: Do
   )
 }
 
-// ── booking picker (search-as-you-type) ──────────────────────────────────────
+// ── booking picker (click to browse recent, or type to search) ───────────────
 function BookingPicker({ value, label, onChange }: { value: string | null; label: string | null; onChange: (id: string | null, code: string | null) => void }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState<{ id: string; bookingCode: string; projectName?: string | null; producer?: string | null }[]>([])
@@ -162,16 +162,23 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!open || q.trim().length < 2) { setResults([]); return }
+    if (!open) { setResults([]); return }
     let cancelled = false
+    const query = q.trim()
+    // Empty/1-char → show the most-recent bookings straight away (no typing
+    // needed, "เลือกได้เลย"); ≥2 chars → debounced search. /api/bookings already
+    // orders by shootDate desc, so the default list is the latest shoots first.
     const t = setTimeout(async () => {
       setLoading(true)
       try {
-        const res = await fetch(`/api/bookings?scope=all&search=${encodeURIComponent(q.trim())}&limit=12`)
+        const url = query.length >= 2
+          ? `/api/bookings?scope=all&search=${encodeURIComponent(query)}&limit=12`
+          : `/api/bookings?scope=all&limit=15`
+        const res = await fetch(url)
         const json = await res.json().catch(() => ({}))
         if (!cancelled) setResults(json.bookings || []) // ignore a stale response that lost the race
       } finally { if (!cancelled) setLoading(false) }
-    }, 250)
+    }, query.length >= 2 ? 250 : 0)
     return () => { cancelled = true; clearTimeout(t) }
   }, [q, open])
 
@@ -199,6 +206,9 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
       </div>
       {open && results.length > 0 && (
         <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+          {q.trim().length < 2 && (
+            <div className="sticky top-0 bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-400 border-b border-gray-100">เลือกงาน · พิมพ์เพื่อค้นหา</div>
+          )}
           {results.map((b) => (
             <button key={b.id} type="button"
                     onClick={() => { onChange(b.id, b.bookingCode); setOpen(false); setQ('') }}
