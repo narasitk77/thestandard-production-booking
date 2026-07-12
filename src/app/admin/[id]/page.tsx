@@ -18,7 +18,7 @@ interface Episode { id: string; episodeId: string; title: string; program?: { co
 interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
-  producer: string; producerEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number; switcherCount?: number
+  producer: string; producerEmail?: string | null; director?: string | null; directorEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number; switcherCount?: number
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean; vanCount?: number; specialEquipment?: string[]
   equipmentNote?: string | null; rentalGearNote?: string | null; itinerary?: string | null; assignedEquipmentIds?: string[]
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
@@ -963,6 +963,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div><div className="text-xs text-gray-400 mb-0.5">Shoot Type</div><div className="text-gray-800">{shootTypeLabel(booking.shootType)}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Location</div><div className="text-gray-800">{booking.locationName || '—'}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Producer</div><div className="text-gray-800">{booking.producer}</div></div>
+            {(booking.director || booking.directorEmail) && (
+              <div><div className="text-xs text-gray-400 mb-0.5">🎬 Director</div><div className="text-gray-800">{booking.director || booking.directorEmail}</div></div>
+            )}
             <div><div className="text-xs text-gray-400 mb-0.5">Creative/Host</div><div className="text-gray-800">{booking.creative.join(', ') || '—'}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Crew Requested</div><div className="text-gray-800">{
               booking.crewRequired.length === 0

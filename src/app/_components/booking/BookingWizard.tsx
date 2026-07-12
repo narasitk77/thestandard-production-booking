@@ -211,6 +211,11 @@ export default function BookingWizard() {
   const [outletPeopleLoading, setOutletPeopleLoading] = useState(false)
   const [producerSel, setProducerSel] = useState('')
   const [coProducerSel, setCoProducerSel] = useState('')
+  // Video Director picker (non-AGN; AGN has its own Content-Agency director
+  // select above). Optional — but when chosen, approve auto-invites them to the
+  // calendar event + emails them, so nobody has to remember to assign later.
+  const [teamDirectors, setTeamDirectors] = useState<{ name: string; email: string }[]>([])
+  const [videoDirectorSel, setVideoDirectorSel] = useState('')
   const [notes, setNotes] = useState('')
   const [epCount, setEpCount] = useState(1)
   const [epRows, setEpRows] = useState<EpRow[]>([{ programCode: '', title: '', contentType: 'ORIGINAL_CONTENT' }])
@@ -251,6 +256,16 @@ export default function BookingWizard() {
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setPeopleLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Video Director roster (TeamMember role=director) for the non-AGN picker.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/team/directors')
+      .then(r => r.ok ? r.json() : { directors: [] })
+      .then(d => { if (!cancelled) setTeamDirectors(d.directors || []) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [])
 
@@ -379,6 +394,7 @@ export default function BookingWizard() {
     producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
     creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, vanCount, eventExternal,
     specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel,
+    videoDirectorSel,
     notes, epCount, epRows, step,
   })
 
@@ -397,7 +413,7 @@ export default function BookingWizard() {
     }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, vanCount, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, vanCount, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, videoDirectorSel, notes, epCount, epRows, step])
 
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
   const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
@@ -441,6 +457,7 @@ export default function BookingWizard() {
       if (Array.isArray(d.selectedEpisodeIds)) setSelectedEpisodeIds(d.selectedEpisodeIds)
       if (d.producerSel != null) setProducerSel(d.producerSel)
       if (d.coProducerSel != null) setCoProducerSel(d.coProducerSel)
+      if (d.videoDirectorSel != null) setVideoDirectorSel(d.videoDirectorSel)
       if (d.notes != null) setNotes(d.notes)
       if (typeof d.epCount === 'number') setEpCount(d.epCount)
       if (Array.isArray(d.epRows) && d.epRows.length) setEpRows(d.epRows)
@@ -461,6 +478,7 @@ export default function BookingWizard() {
     if (!willBeContentAgency && epRows.some(r => r.programCode)) cleared.push('Episode program(s)')
     if (wasContentAgency && producerEmail) cleared.push('Producer (CA)')
     if (wasContentAgency && directorEmail) cleared.push('Director')
+    if (!wasContentAgency && videoDirectorSel) cleared.push('Video Director')
     if (!wasContentAgency && (producerName || producerPhone || producerEmailText)) cleared.push('Producer contact')
 
     setOutletCode(code)
@@ -469,6 +487,7 @@ export default function BookingWizard() {
     setCoProducerSel('')
     setProducerEmail('')
     setDirectorEmail('')
+    setVideoDirectorSel('')
     setProducerName('')
     setProducerPhone('')
     setProducerEmailText('')
@@ -696,8 +715,12 @@ export default function BookingWizard() {
           producerPhone: isContentAgency || useProducerDropdown ? null : (producerPhone.trim() || null),
           director: isContentAgency
             ? directors.find(d => d.email === directorEmail)?.nickname || ''
-            : null,
-          directorEmail: isContentAgency ? directorEmail : null,
+            // Non-AGN: the Video Director picker. Short label = the nickname
+            // before "·" ("Pook · Panu (Head Director)" → "Pook").
+            : (videoDirectorSel
+                ? (teamDirectors.find(d => d.email === videoDirectorSel)?.name.split('·')[0].trim() || null)
+                : null),
+          directorEmail: isContentAgency ? directorEmail : (videoDirectorSel || null),
           // v1.59 — Co-Producer (non-AGN dropdown only)
           coProducer: useProducerDropdown ? effCoProducer : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
@@ -769,7 +792,9 @@ export default function BookingWizard() {
     coProducer: useProducerDropdown && selCoProd && !(outletCode === 'PM' && !producerSel && coProducerSel) ? selCoProd.nickname : '',
     director: isContentAgency
       ? (caDirector?.nickname ? `${caDirector.nickname} (${directorEmail})` : directorEmail)
-      : '',
+      : (videoDirectorSel
+          ? (teamDirectors.find(d => d.email === videoDirectorSel)?.name || videoDirectorSel)
+          : ''),
     project: isContentAgency && selectedProject
       ? `${selectedProject.projectId} — ${selectedProject.projectName}`
       : '',
@@ -1263,6 +1288,29 @@ export default function BookingWizard() {
                   )}
                 </div>
 
+                {/* Video Director (non-AGN, optional) — picked here so approve can
+                    auto-invite them to the calendar event + email them, instead of
+                    relying on someone remembering to assign the director later. */}
+                {!isContentAgency && teamDirectors.length > 0 && (
+                  <div>
+                    <Label htmlFor="videoDirectorSel">
+                      Video Director <span className="text-[11px] font-normal text-gray-400">(ถ้ามี)</span>
+                    </Label>
+                    <select
+                      id="videoDirectorSel"
+                      className="ops-input"
+                      value={videoDirectorSel}
+                      onChange={e => setVideoDirectorSel(e.target.value)}
+                    >
+                      <option value="">— ไม่ระบุ —</option>
+                      {teamDirectors.map(d => (
+                        <option key={d.email} value={d.email}>{d.name}</option>
+                      ))}
+                    </select>
+                    <FieldHelp>เมื่อ Approve ระบบจะเชิญเข้า Google Calendar และส่งเมลแจ้งให้อัตโนมัติ</FieldHelp>
+                  </div>
+                )}
+
                 {/* Project ID + Episodes — CA only.
                     Ordered right after Producer so the project list filters by
                     the selected Producer; Director comes after this block. */}
@@ -1655,7 +1703,7 @@ export default function BookingWizard() {
                 <ReviewBlock title="People & Crew" onEdit={() => jumpTo(4)}>
                   <ReviewRow label="Producer" value={summary.producer} />
                   {!!summary.coProducer && <ReviewRow label="Co-Producer" value={summary.coProducer} />}
-                  {isContentAgency && <ReviewRow label="Director" value={summary.director} />}
+                  {(isContentAgency || !!summary.director) && <ReviewRow label="Director" value={summary.director} />}
                   {isContentAgency && <ReviewRow label="Project" value={summary.project} />}
                   <ReviewRow label="Episodes" value={summary.episodes} />
                   <ReviewRow label="แขก / Subject" value={summary.subject} />
@@ -1721,7 +1769,7 @@ export default function BookingWizard() {
               <SummaryBlock title="People" filled={!!(producerEmail || producerName || producerSel)}>
                 <KV k="Producer" v={summary.producer} />
                 {!!summary.coProducer && <KV k="Co-Producer" v={summary.coProducer} />}
-                {isContentAgency && <KV k="Director" v={summary.director} />}
+                {(isContentAgency || !!summary.director) && <KV k="Director" v={summary.director} />}
                 <KV k="Crew" v={summary.crew} />
               </SummaryBlock>
               {isContentAgency && summary.project && (
@@ -1746,7 +1794,7 @@ export default function BookingWizard() {
               <KV k="Schedule" v={[summary.dateRange, summary.timeRange].filter(Boolean).join(' · ')} />
               <KV k="Location" v={summary.location} />
               <KV k="Producer" v={summary.producer} />
-              {isContentAgency && <KV k="Director" v={summary.director} />}
+              {(isContentAgency || !!summary.director) && <KV k="Director" v={summary.director} />}
               {summary.crew && <KV k="Crew" v={summary.crew} />}
             </div>
           </div>

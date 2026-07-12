@@ -5,7 +5,7 @@ import { updateBookingRow } from '@/lib/google-sheets'
 import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
-import { sendBookingConfirmedEmail } from '@/lib/email'
+import { sendBookingConfirmedEmail, sendAssignmentEmail } from '@/lib/email'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { getToken } from 'next-auth/jwt'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
@@ -212,6 +212,7 @@ export async function POST(
           locationName: booking.locationName,
           producer: booking.producer,
           producerEmail: booking.producerEmail,
+          directorEmail: booking.directorEmail,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           vanCount: booking.vanCount,
@@ -329,6 +330,37 @@ export async function POST(
         senderAccessToken,
         senderEmail: session.email,
       }).catch(e => console.error('[approve] booker confirmation email failed (non-fatal):', e?.message || e))
+    }
+
+    // Director picked at booking time gets an assignment email on approve (the
+    // calendar guest invite rides the event above; this is the explicit "คุณคือ
+    // Director งานนี้" notice — ops: don't rely on someone assigning it later).
+    // Best-effort like the booker email; skips self-approve + director==booker,
+    // and the COMPLETED→CONFIRMED re-open path (they were emailed the first time).
+    const isReapprove = booking.status === 'COMPLETED'
+    const directorEmailTrimmed = (updated.directorEmail || '').trim()
+    if (!isReapprove
+        && directorEmailTrimmed
+        && directorEmailTrimmed.toLowerCase() !== session.email.toLowerCase()
+        && directorEmailTrimmed.toLowerCase() !== bookerEmail.toLowerCase()) {
+      sendAssignmentEmail({
+        to: directorEmailTrimmed,
+        toName: updated.director || directorEmailTrimmed.split('@')[0],
+        bookingId: updated.id,
+        outletName: updated.outlet.name,
+        programName: updated.program.name,
+        shootDate: new Date(updated.shootDate).toISOString().slice(0, 10),
+        shootEndDate: updated.shootEndDate ? new Date(updated.shootEndDate).toISOString().slice(0, 10) : null,
+        callTime: updated.callTime,
+        estimatedWrap: updated.estimatedWrap,
+        shootType: updated.shootType,
+        locationName: updated.locationName,
+        producer: updated.producer,
+        episodes: updated.episodes,
+        notes: updated.notes,
+        senderAccessToken,
+        senderEmail: session.email,
+      }).catch(e => console.error('[approve] director email failed (non-fatal):', e?.message || e))
     }
 
     syncBookingOT(updated.id).catch(e => console.error('syncBookingOT error:', e))

@@ -120,9 +120,15 @@ export async function POST(
     // across crew re-assigns — a patch keyed on emailRecipients alone would
     // silently drop the producer as a "removed guest".
     const producerEmailTrimmed = (booking.producerEmail || '').trim()
-    const calendarAttendees = producerEmailTrimmed && !emailRecipients.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
+    const withProducerAttendees = producerEmailTrimmed && !emailRecipients.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
       ? [...emailRecipients, producerEmailTrimmed]
       : emailRecipients
+    // Same for the Director picked at booking time — they must survive crew
+    // re-assign patches, not get dropped as a "removed guest".
+    const directorEmailTrimmed = (booking.directorEmail || '').trim()
+    const calendarAttendees = directorEmailTrimmed && !withProducerAttendees.some(e => e.toLowerCase() === directorEmailTrimmed.toLowerCase())
+      ? [...withProducerAttendees, directorEmailTrimmed]
+      : withProducerAttendees
 
     if (booking.calendarEventId) {
       // (1) Patch existing event's attendees.
@@ -199,6 +205,7 @@ export async function POST(
           locationName: booking.locationName,
           producer: booking.producer,
           producerEmail: booking.producerEmail,
+          directorEmail: booking.directorEmail,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           vanCount: booking.vanCount,

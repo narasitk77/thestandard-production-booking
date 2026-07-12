@@ -352,6 +352,7 @@ export async function createCalendarEvent(booking: {
   locationName?: string | null
   producer: string
   producerEmail?: string | null
+  directorEmail?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -419,9 +420,15 @@ export async function createCalendarEvent(booking: {
     // (union'd, case-insensitive dedupe — a producer who's also crew-assigned
     // doesn't get double-invited).
     const producerEmailTrimmed = (booking.producerEmail || '').trim()
-    const attendeeEmails = producerEmailTrimmed && !assignedEmails.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
+    const withProducerEmails = producerEmailTrimmed && !assignedEmails.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
       ? [...assignedEmails, producerEmailTrimmed]
       : assignedEmails
+    // The Director picked at booking time gets a guest invite the same way —
+    // the whole point of the picker: nobody has to remember to assign them.
+    const directorEmailTrimmed = (booking.directorEmail || '').trim()
+    const attendeeEmails = directorEmailTrimmed && !withProducerEmails.some(e => e.toLowerCase() === directorEmailTrimmed.toLowerCase())
+      ? [...withProducerEmails, directorEmailTrimmed]
+      : withProducerEmails
     const attendees = canInvite ? attendeeEmails.map(email => ({ email })) : []
 
     const baseBody = {

@@ -12,6 +12,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.143.0] — 2026-07-09
+
+### Added — เลือก Video Director ตอนจอง → Approve แล้วเชิญเข้า Calendar + ส่งเมลอัตโนมัติ
+ตามที่ ops ขอ: "ให้คน Assign มันไม่ทำหรอก" — Director ที่ถูกเลือกตั้งแต่ตอนจองจะถูกดูแลโดยระบบเอง ไม่ต้องรอใครมา assign.
+- **ฟอร์มจอง (wizard):** outlet ที่ไม่ใช่ AGN มี dropdown **"Video Director (ถ้ามี)"** ใต้ Producer — รายชื่อจาก TeamMember role=director (endpoint ใหม่ `GET /api/team/directors`, ทุก user ที่ล็อกอิน; fallback seed roster). เก็บลง `Booking.director`/`directorEmail` (คอลัมน์มีอยู่แล้ว — เดิมใช้เฉพาะ AGN). โชว์ในหน้า Review ก่อน submit + หน้า booking detail (🎬 Director).
+- **ตอน Approve:** (1) directorEmail ถูก union เข้า **attendees ของ Google Calendar event** (คู่กับ producer/crew, dedupe case-insensitive) → Google ส่ง invite ให้เอง (2) ส่ง **assignment email** ("คุณได้รับมอบหมายงาน Production ใหม่") ให้ Director ด้วย — ข้ามถ้า Director คือคน approve เองหรือคนจองเอง (ได้เมลยืนยันไปแล้ว). Best-effort ไม่บล็อก approve.
+- **คงอยู่ถาวร:** re-assign ทีม (assign route) และ calendar reconciler (10-min sweep + resync) union director เข้า attendee set เหมือน producer — director ไม่โดนถอดออกจาก event ตอน patch/recreate (`withProducer()` รับ directorEmail เพิ่ม — ครบทั้ง 3 จุด recreate).
+- จาก adversarial review ก่อน ship: กรอง `active: true` ใน `/api/team/directors` (director ที่ถูกลบต้องไม่โผล่) + seed fallback เฉพาะตอน DB error · reset ตัวเลือก director ตอนเปลี่ยน Outlet · โชว์ director ในหน้า Review/สรุป (non-AGN) · draft autosave จำ director · กันส่งเมลซ้ำตอน re-open (COMPLETED→CONFIRMED).
+- **หมายเหตุ:** booking AGN ที่ CONFIRMED อยู่แล้วและมี director — reconcile รอบแรกหลัง deploy จะเชิญ director เหล่านั้นเข้า event ด้วย (พฤติกรรมตรงตามฟีเจอร์ — director ควรอยู่ใน invite ของงานที่ยัง active).
+
+---
+
 ## [1.142.0] — 2026-07-09
 
 ### Added — หน้างานโชว์ "งานเช่า" ของงานนั้น (เชื่อมโยง booking ↔ งานเช่า สองทาง)

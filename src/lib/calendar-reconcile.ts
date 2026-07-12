@@ -64,6 +64,7 @@ type BookingForReconcile = {
   locationName?: string | null
   producer: string
   producerEmail?: string | null
+  directorEmail?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -89,11 +90,15 @@ type ProcessOptions = {
 // google-calendar.ts createCalendarEvent). The reconciler's job is to keep
 // calendar attendees matching "the correct set" — so that correct set must
 // include the producer too, or the very next tick "fixes" the event by
-// patching the producer back out.
-export function withProducer(assignedEmails: string[], producerEmail?: string | null): string[] {
-  const trimmed = (producerEmail || '').trim()
-  if (!trimmed || assignedEmails.some(e => e.toLowerCase() === trimmed.toLowerCase())) return assignedEmails
-  return [...assignedEmails, trimmed]
+// patching the producer back out. Same for the Director picked at booking
+// time (v1.143) — omit them here and the reconciler un-invites them nightly.
+export function withProducer(assignedEmails: string[], producerEmail?: string | null, directorEmail?: string | null): string[] {
+  let out = assignedEmails
+  for (const raw of [producerEmail, directorEmail]) {
+    const trimmed = (raw || '').trim()
+    if (trimmed && !out.some(e => e.toLowerCase() === trimmed.toLowerCase())) out = [...out, trimmed]
+  }
+  return out
 }
 
 async function createVerifiedCalendarEvent(booking: {
@@ -108,6 +113,7 @@ async function createVerifiedCalendarEvent(booking: {
   locationName?: string | null
   producer: string
   producerEmail?: string | null
+  directorEmail?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -135,7 +141,7 @@ async function createVerifiedCalendarEvent(booking: {
     )
   }
 
-  const wantedAttendees = withProducer(booking.assignedEmails, booking.producerEmail)
+  const wantedAttendees = withProducer(booking.assignedEmails, booking.producerEmail, booking.directorEmail)
   const calendarEvent = await getCalendarEventAttendees(eventId)
   if (!sameEmails(wantedAttendees, calendarEvent.attendees)) {
     await deleteCalendarEvent(eventId)
@@ -159,7 +165,7 @@ async function processBooking(
   // v1.131 — "correct" calendar attendees = crew + producer; assignedEmails
   // (crew only) still drives the description's "Assigned:" line and the
   // ReconcileItem report below.
-  const calendarAttendees = cleanEmails(withProducer(assignedEmails, booking.producerEmail))
+  const calendarAttendees = cleanEmails(withProducer(assignedEmails, booking.producerEmail, booking.directorEmail))
   const item: ReconcileItem = {
     bookingId: booking.id,
     bookingCode: booking.bookingCode,
@@ -191,6 +197,7 @@ async function processBooking(
         locationName: booking.locationName,
         producer: booking.producer,
         producerEmail: booking.producerEmail,
+        directorEmail: booking.directorEmail,
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
         vanCount: booking.vanCount,
@@ -262,6 +269,7 @@ async function processBooking(
         locationName: booking.locationName,
         producer: booking.producer,
         producerEmail: booking.producerEmail,
+        directorEmail: booking.directorEmail,
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
         vanCount: booking.vanCount,
@@ -348,6 +356,7 @@ async function processBooking(
           locationName: booking.locationName,
           producer: booking.producer,
           producerEmail: booking.producerEmail,
+          directorEmail: booking.directorEmail,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           vanCount: booking.vanCount,
