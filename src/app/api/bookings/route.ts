@@ -98,6 +98,10 @@ export async function GET(request: NextRequest) {
       ...(outlet && { outlet: { code: outlet } }),
       ...(date && { shootDate: new Date(date) }),
       ...((from || to) && !date && { shootDate: { ...(from && { gte: new Date(from) }), ...(to && { lt: new Date(to) }) } }),
+      // v1.144 — ?hasCode=1: only bookings with a Production ID. Filtering here
+      // (not client-side after `take`) keeps null-code legacy rows from eating
+      // result slots — a post-pagination filter made matches unreachable.
+      ...(searchParams.get('hasCode') === '1' && { bookingCode: { not: null } }),
       ...(searchClause && { AND: [searchClause] }),
     }
 

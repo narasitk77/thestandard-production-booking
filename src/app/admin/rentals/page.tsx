@@ -7,7 +7,7 @@
    ใบเสร็จ · ใบโอน) so a missing paper is obvious at a glance. Files upload to
    Google Drive under เช่า/<เดือน>/<booking>/ automatically (API). ADMIN only. */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Plus, Search, X, Loader2, Upload, ExternalLink, Trash2, Link2,
   Pencil, AlertCircle, Check, Calendar, RefreshCw, FileText,
@@ -15,6 +15,7 @@ import {
 import { PAYMENT_STATUS, RENTAL_STATUS } from '../_components/badges'
 import { baht, ymd } from '../_components/CrudTable'
 import { OUTLETS } from '@/lib/data'
+import { bookingDisplayName } from '@/lib/display'
 
 // ── types ───────────────────────────────────────────────────────────────────
 type DocRef = { id: string; kind: string; fileName: string; driveUrl?: string | null }
@@ -154,33 +155,64 @@ function DocSlots({ rental, onAdd, onRemove }: { rental: Rental; onAdd: (doc: Do
   )
 }
 
-// ── booking picker (click to browse recent, or type to search) ───────────────
+// ── booking picker (click to browse recent, filter by date, or type to search) ─
+type PickerBooking = {
+  id: string
+  bookingCode: string | null
+  shootDate?: string | null
+  producer?: string | null
+  projectName?: string | null
+  program: { name: string }
+  episodes?: Array<{ episodeId?: string; title?: string | null; program?: { code?: string; name: string } | null }> | null
+}
 function BookingPicker({ value, label, onChange }: { value: string | null; label: string | null; onChange: (id: string | null, code: string | null) => void }) {
   const [q, setQ] = useState('')
-  const [results, setResults] = useState<{ id: string; bookingCode: string; projectName?: string | null; producer?: string | null }[]>([])
+  const [dateFilter, setDateFilter] = useState('') // YYYY-MM-DD → /api/bookings?date= (exact shoot-day)
+  const [results, setResults] = useState<PickerBooking[]>([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [fetched, setFetched] = useState(false) // ≥1 fetch done — gates the "ไม่พบ" state so it can't flash pre-fetch
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const prevDateRef = useRef(dateFilter)
+
+  // Dismissal: click-outside or Escape closes the list (before this, an unlinked
+  // form had NO way to close it short of picking a row).
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
 
   useEffect(() => {
     if (!open) { setResults([]); return }
+    // A changed date filter invalidates what's on screen NOW — clear before the
+    // fetch so stale rows never sit under the new "งานวันที่ X" header.
+    if (prevDateRef.current !== dateFilter) { prevDateRef.current = dateFilter; setResults([]) }
     let cancelled = false
     const query = q.trim()
     // Empty/1-char → show the most-recent bookings straight away (no typing
-    // needed, "เลือกได้เลย"); ≥2 chars → debounced search. /api/bookings already
-    // orders by shootDate desc, so the default list is the latest shoots first.
+    // needed, "เลือกได้เลย"); ≥2 chars → debounced search; a date filter narrows
+    // either mode to that shoot day. /api/bookings orders by shootDate desc.
     const t = setTimeout(async () => {
       setLoading(true)
       try {
-        const url = query.length >= 2
-          ? `/api/bookings?scope=all&search=${encodeURIComponent(query)}&limit=12`
-          : `/api/bookings?scope=all&limit=15`
-        const res = await fetch(url)
+        // hasCode=1 — only bookings with a Production ID (filtered SERVER-side,
+        // so null-code legacy rows can't eat pagination slots; the client
+        // .filter below stays as a type-narrowing safety net).
+        const p = new URLSearchParams({ scope: 'all', hasCode: '1', limit: dateFilter ? '50' : (query.length >= 2 ? '12' : '15') })
+        if (query.length >= 2) p.set('search', query)
+        if (dateFilter) p.set('date', dateFilter)
+        const res = await fetch(`/api/bookings?${p.toString()}`)
         const json = await res.json().catch(() => ({}))
-        if (!cancelled) setResults(json.bookings || []) // ignore a stale response that lost the race
-      } finally { if (!cancelled) setLoading(false) }
-    }, query.length >= 2 ? 250 : 0)
+        // rentals link by Production ID — rows without one can't be picked
+        if (!cancelled) setResults((json.bookings || []).filter((b: PickerBooking) => b.bookingCode)) // ignore a stale response that lost the race
+      } finally { if (!cancelled) { setLoading(false); setFetched(true) } }
+    }, query.length >= 2 || dateFilter ? 250 : 0)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [q, open])
+  }, [q, open, dateFilter])
 
   if (value && !open) {
     return (
@@ -195,32 +227,57 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <div className="flex items-center gap-2 border border-gray-300 rounded-md px-2 py-1.5">
-        <Search className="w-4 h-4 text-gray-400" />
+        <Search className="w-4 h-4 text-gray-400 shrink-0" />
         <input value={q} onFocus={() => setOpen(true)} onChange={(e) => setQ(e.target.value)}
                placeholder="ค้นหา Booking (รหัส / ชื่องาน / โปรดิวเซอร์)…"
-               className="flex-1 text-sm outline-none bg-transparent" />
-        {loading && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
-        {value && <button type="button" onClick={() => setOpen(false)} className="text-xs text-gray-400">ยกเลิก</button>}
+               className="flex-1 min-w-0 text-sm outline-none bg-transparent" />
+        {loading && <Loader2 className="w-4 h-4 animate-spin text-gray-400 shrink-0" />}
+        {/* filter the list to one shoot day — "ฟิลเตอร์ตามวัน" */}
+        <input type="date" value={dateFilter} title="กรองตามวันถ่าย"
+               onChange={(e) => { setDateFilter(e.target.value); setOpen(true) }}
+               onFocus={() => setOpen(true)}
+               className="shrink-0 text-xs text-gray-500 border-l border-gray-200 pl-2 outline-none bg-transparent" />
+        {dateFilter && (
+          <button type="button" onClick={() => setDateFilter('')} title="ล้างตัวกรองวัน"
+                  className="text-gray-400 hover:text-red-600 shrink-0"><X className="w-3.5 h-3.5" /></button>
+        )}
+        {/* explicit close — always available while the list is open (an unlinked
+            form previously had NO dismiss path besides picking a row) */}
+        {open && <button type="button" onClick={() => setOpen(false)} className="text-xs text-gray-400 hover:text-gray-700 shrink-0">ปิด</button>}
       </div>
       {open && results.length > 0 && (
         <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
-          {q.trim().length < 2 && (
-            <div className="sticky top-0 bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-400 border-b border-gray-100">เลือกงาน · พิมพ์เพื่อค้นหา</div>
-          )}
-          {results.map((b) => (
-            <button key={b.id} type="button"
-                    onClick={() => { onChange(b.id, b.bookingCode); setOpen(false); setQ('') }}
-                    className="w-full text-left px-3 py-2 hover:bg-purple-50 border-b border-gray-50 last:border-0">
-              <div className="text-sm font-medium text-gray-800">{b.bookingCode}</div>
-              <div className="text-xs text-gray-500 truncate">{[b.projectName, b.producer].filter(Boolean).join(' · ') || '—'}</div>
-            </button>
-          ))}
+          <div className="sticky top-0 bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-400 border-b border-gray-100">
+            {dateFilter ? `งานวันที่ ${dateFilter}` : 'เลือกงาน'} · พิมพ์เพื่อค้นหา
+          </div>
+          {results.map((b) => {
+            const name = bookingDisplayName(b)
+            // suffix only when the title isn't already part of the display name
+            // (multi-episode generic bookings render "T1 / T2" as the name)
+            const rawTitle = b.episodes?.[0]?.title?.trim()
+            const epTitle = rawTitle && !name.includes(rawTitle) ? rawTitle : null
+            return (
+              <button key={b.id} type="button"
+                      onClick={() => { onChange(b.id, b.bookingCode); setOpen(false); setQ('') }}
+                      className="w-full text-left px-3 py-2 hover:bg-purple-50 border-b border-gray-50 last:border-0">
+                <div className="text-sm font-medium text-gray-800 truncate">
+                  {name}
+                  {epTitle ? <span className="text-gray-500 font-normal"> — {epTitle}</span> : null}
+                </div>
+                <div className="text-xs text-gray-500 truncate">
+                  {[b.bookingCode, b.shootDate ? ymd(b.shootDate) : null, b.producer].filter(Boolean).join(' · ')}
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
-      {open && q.trim().length >= 2 && !loading && results.length === 0 && (
-        <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg px-3 py-2 text-sm text-gray-400">ไม่พบ Booking</div>
+      {open && !loading && fetched && results.length === 0 && (
+        <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg px-3 py-2 text-sm text-gray-400">
+          {dateFilter ? `ไม่พบงานวันที่ ${dateFilter}` : 'ไม่พบ Booking'}
+        </div>
       )}
     </div>
   )

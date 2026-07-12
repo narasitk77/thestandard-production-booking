@@ -299,6 +299,8 @@ export function buildEventDescription(booking: {
   vanCount?: number | null
   isBlockShot?: boolean | null
   specialEquipment?: string[] | null
+  equipmentNote?: string | null
+  rentalGearNote?: string | null
   freelancers?: unknown
   outlet: { code: string; name: string }
   program: { code: string; name: string }
@@ -325,7 +327,7 @@ Shoot Type: ${shootTypeLabel}
 Location / Room: ${location}
 Producer: ${booking.producer}
 Crew: ${booking.crewRequired.join(', ') || '—'}
-Equipment: ${equip || '—'}
+Equipment: ${equip || '—'}${booking.equipmentNote ? `\n🎬 อุปกรณ์: ${booking.equipmentNote}` : ''}${booking.rentalGearNote ? `\n📦 เช่า: ${booking.rentalGearNote}` : ''}
 Special Equipment: ${booking.specialEquipment && booking.specialEquipment.length > 0 ? booking.specialEquipment.join(', ') : '—'}
 Van required: ${booking.vanCount ? `Yes 🚐 × ${booking.vanCount}` : 'No'}
 Agency Ref: ${booking.agencyRef || '—'}
@@ -358,6 +360,8 @@ export async function createCalendarEvent(booking: {
   vanCount?: number | null
   isBlockShot?: boolean | null
   specialEquipment?: string[] | null
+  equipmentNote?: string | null
+  rentalGearNote?: string | null
   projectName?: string | null
   freelancers?: unknown
   assignedEmails?: string[]
@@ -633,6 +637,8 @@ export async function updateCalendarEventDetails(
     vanCount?: number | null
     isBlockShot?: boolean | null
     specialEquipment?: string[] | null
+    equipmentNote?: string | null
+    rentalGearNote?: string | null
     projectName?: string | null
     freelancers?: unknown
     assignedEmails?: string[]

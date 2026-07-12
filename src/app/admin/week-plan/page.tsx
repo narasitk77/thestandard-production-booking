@@ -4,9 +4,10 @@ import WeekPlanClient from './WeekPlanClient'
 
 export const dynamic = 'force-dynamic'
 
-// Camera allocation planner for CONFIRMED shoots, by week. ADMIN-only — it reads
-// the camera inventory (GET /api/admin/equipment is ADMIN-gated) and equipment is
-// an ADMIN-hub concern, so the page + menu link + middleware all gate on ADMIN.
+// Week Plan — weekly gear-notes board for CONFIRMED shoots (v1.144 replaced the
+// camera-chip allocator with free-text อุปกรณ์/เช่า fields; see WeekPlanClient).
+// ADMIN-only: every debounced save PATCHes the booking (background calendar
+// re-sync) and the legacy camera-name lookup reads the ADMIN-gated equipment API.
 export default async function WeekPlanPage() {
   const session = await getSession()
   if (!session) redirect('/login?next=/admin/week-plan')

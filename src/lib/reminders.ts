@@ -135,6 +135,7 @@ async function detect(today: Date): Promise<Candidate[]> {
       bookingCode: true,
       shootDate: true,
       equipmentNote: true,
+      rentalGearNote: true,
       assignedEquipmentIds: true,
       outlet: { select: { name: true } },
       program: { select: { name: true } },
@@ -157,6 +158,8 @@ async function detect(today: Date): Promise<Candidate[]> {
   for (const b of upcoming) {
     const hasGear =
       (b.equipmentNote && b.equipmentNote.trim() !== '') ||
+      // v1.144 — the Week Plan's เช่า field counts as gear planning too
+      (b.rentalGearNote && b.rentalGearNote.trim() !== '') ||
       (b.assignedEquipmentIds?.length ?? 0) > 0 ||
       loanedBookingIds.has(b.id)
     if (hasGear) continue

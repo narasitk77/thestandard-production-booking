@@ -69,6 +69,8 @@ type BookingForReconcile = {
   micCount?: number | null
   vanCount?: number | null
   isBlockShot?: boolean | null
+  equipmentNote?: string | null
+  rentalGearNote?: string | null
   freelancers?: unknown
   assignedEmails: string[]
   crewRequired: string[]
@@ -118,6 +120,8 @@ async function createVerifiedCalendarEvent(booking: {
   micCount?: number | null
   vanCount?: number | null
   isBlockShot?: boolean | null
+  equipmentNote?: string | null
+  rentalGearNote?: string | null
   freelancers?: unknown
   assignedEmails: string[]
   outlet: { code: string; name: string }
@@ -202,6 +206,8 @@ async function processBooking(
         micCount: booking.micCount,
         vanCount: booking.vanCount,
         isBlockShot: booking.isBlockShot,
+        equipmentNote: booking.equipmentNote,
+        rentalGearNote: booking.rentalGearNote,
         freelancers: booking.freelancers,
         assignedEmails,
         outlet: booking.outlet,
@@ -274,6 +280,8 @@ async function processBooking(
         micCount: booking.micCount,
         vanCount: booking.vanCount,
         isBlockShot: booking.isBlockShot,
+        equipmentNote: booking.equipmentNote,
+        rentalGearNote: booking.rentalGearNote,
         freelancers: booking.freelancers,
         assignedEmails,
         outlet: booking.outlet,
@@ -361,6 +369,8 @@ async function processBooking(
           micCount: booking.micCount,
           vanCount: booking.vanCount,
           isBlockShot: booking.isBlockShot,
+          equipmentNote: booking.equipmentNote,
+          rentalGearNote: booking.rentalGearNote,
           freelancers: booking.freelancers,
           assignedEmails,
           outlet: booking.outlet,
