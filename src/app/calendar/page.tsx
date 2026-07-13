@@ -97,14 +97,26 @@ export default function CalendarPage() {
 
   const bookingsByDay = useMemo(() => {
     const map = new Map<string, Booking[]>()
+    const DAY = 24 * 3_600_000
     bookings.forEach(b => {
-      const key = b.shootDate.slice(0, 10)
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(b)
+      // Multi-day shoots (shootDate → shootEndDate) appear on EVERY day of the
+      // range, not just day 1. Both are date-only (midnight UTC), so plain UTC
+      // day-stepping is safe. Guards: end before start is ignored (bad data),
+      // span capped at 31 days so a typo'd year can't flood the grid.
+      const start = new Date(b.shootDate.slice(0, 10) + 'T00:00:00Z')
+      const endRaw = b.shootEndDate ? new Date(b.shootEndDate.slice(0, 10) + 'T00:00:00Z') : start
+      const end = isNaN(endRaw.getTime()) || endRaw < start ? start : endRaw
+      const span = Math.min(Math.round((end.getTime() - start.getTime()) / DAY), 30)
+      for (let i = 0; i <= span; i++) {
+        const key = new Date(start.getTime() + i * DAY).toISOString().slice(0, 10)
+        if (!map.has(key)) map.set(key, [])
+        map.get(key)!.push(b)
+      }
     })
     map.forEach(arr => arr.sort((a, b) => a.callTime.localeCompare(b.callTime)))
     return map
   }, [bookings])
+
 
   const selectedBookings = selected
     ? bookingsByDay.get(format(selected, 'yyyy-MM-dd')) || []
@@ -266,7 +278,7 @@ function DayDrawer({ date, bookings, onClose, onOpenBooking }: {
             <div className="ops-empty">No bookings on this day.</div>
           ) : (
             <ul className="divide-y divide-gray-100">
-              {bookings.map(b => <BookingRow key={b.id} b={b} onOpen={() => onOpenBooking(b.id)} />)}
+              {bookings.map(b => <BookingRow key={b.id} b={b} dayKey={format(date, 'yyyy-MM-dd')} onOpen={() => onOpenBooking(b.id)} />)}
             </ul>
           )}
         </div>
@@ -421,7 +433,8 @@ function MonthGrid({
                       className={`flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded cursor-pointer leading-tight border border-gray-100 hover:border-gray-400 transition-colors ${categoryAccentClass(b.category)}`}
                     >
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(b.status)}`} aria-hidden />
-                      <span className="font-medium tabular-nums flex-shrink-0 text-gray-700">{b.callTime}</span>
+                      {/* continuation day of a multi-day shoot → ต่อ, not day-1's call time */}
+                      <span className="font-medium tabular-nums flex-shrink-0 text-gray-700">{b.shootDate.slice(0, 10) !== key ? 'ต่อ' : b.callTime}</span>
                       <span className="text-gray-400 flex-shrink-0">·</span>
                       <span className="font-medium flex-shrink-0 text-gray-600">{b.outlet.code}</span>
                       <span className="text-gray-400 flex-shrink-0">·</span>
@@ -476,7 +489,7 @@ function AgendaList({ loading, agenda, onOpenBooking }: {
               <span className="text-xs text-gray-500">{bookings.length} booking{bookings.length === 1 ? '' : 's'}</span>
             </div>
             <ul className="divide-y divide-gray-100">
-              {bookings.map(b => <BookingRow key={b.id} b={b} onOpen={() => onOpenBooking(b.id)} />)}
+              {bookings.map(b => <BookingRow key={b.id} b={b} dayKey={format(date, 'yyyy-MM-dd')} onOpen={() => onOpenBooking(b.id)} />)}
             </ul>
           </div>
         )
@@ -487,7 +500,9 @@ function AgendaList({ loading, agenda, onOpenBooking }: {
 
 /* ---------- Booking row (used by selected-day + agenda) ---------- */
 
-function BookingRow({ b, onOpen }: { b: Booking; onOpen: () => void }) {
+function BookingRow({ b, onOpen, dayKey }: { b: Booking; onOpen: () => void; dayKey?: string }) {
+  // a multi-day shoot listed on a day after its start → ต่อ, not day-1's call time
+  const continuation = dayKey && b.shootDate.slice(0, 10) !== dayKey
   return (
     <li>
       <button
@@ -495,8 +510,14 @@ function BookingRow({ b, onOpen }: { b: Booking; onOpen: () => void }) {
         className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
       >
         <div className="text-sm text-gray-700 w-20 flex-shrink-0 tabular-nums">
-          {b.callTime}
-          {b.estimatedWrap && <span className="text-gray-400 text-xs"> → {b.estimatedWrap}</span>}
+          {continuation ? (
+            <span className="text-gray-500" title={`ถ่ายต่อเนื่อง ${b.shootDate.slice(0, 10)} → ${(b.shootEndDate || b.shootDate).slice(0, 10)}`}>ต่อ ↩</span>
+          ) : (
+            <>
+              {b.callTime}
+              {b.estimatedWrap && <span className="text-gray-400 text-xs"> → {b.estimatedWrap}</span>}
+            </>
+          )}
         </div>
         <StatusPill status={b.status} />
         <AdBadge category={b.category} className="flex-shrink-0" />

@@ -14,6 +14,7 @@ export interface Booking {
   id: string
   bookingCode?: string | null
   shootDate: string
+  shootEndDate?: string | null
   callTime: string
   estimatedWrap?: string
   status: string
