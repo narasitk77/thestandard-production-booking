@@ -12,6 +12,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.145.3] — 2026-07-13
+
+### Fixed — PATCH booking รับ `director`/`directorEmail` (แก้อีเมล Director ที่บันทึกผิดได้)
+- ใช้กวาดแก้ booking เก่าที่เก็บ `tanapak.l@` (ที่อยู่ไม่มีจริง — I/l typo ในชีท _Users ที่แก้ไปแล้ว) → `tanapak.i@` โดยเฉพาะงาน CONFIRMED ที่ calendar ยังพยายามเชิญที่อยู่ตาย.
+
+---
+
 ## [1.145.2] — 2026-07-13
 
 ### Changed — ป้ายวันของงานหลายวัน: "ต่อ" → ตัวนับวัน + drawer โชว์ช่วงวันที่
