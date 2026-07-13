@@ -18,6 +18,18 @@ import type { Booking } from './types'
 // as the Google Calendar event title (v1.45.0).
 const showName = bookingDisplayName
 
+// วันที่เท่าไรของงานหลายวัน: {n, total} หรือ null เมื่อเป็นงานวันเดียว/นอกช่วง.
+// date-only UTC math ตรงกับ bookingsByDay ใน CalendarPage.
+function dayOfSpan(b: { shootDate: string; shootEndDate?: string | null }, dayKey: string): { n: number; total: number } | null {
+  if (!b.shootEndDate || b.shootEndDate.slice(0, 10) === b.shootDate.slice(0, 10)) return null
+  const start = new Date(b.shootDate.slice(0, 10) + 'T00:00:00Z').getTime()
+  const end = new Date(b.shootEndDate.slice(0, 10) + 'T00:00:00Z').getTime()
+  if (isNaN(start) || isNaN(end) || end < start) return null
+  const total = Math.min(Math.round((end - start) / 86_400_000), 30) + 1
+  const n = Math.round((new Date(dayKey + 'T00:00:00Z').getTime() - start) / 86_400_000) + 1
+  return n >= 1 && n <= total ? { n, total } : null
+}
+
 type ViewMode = 'month' | 'agenda'
 type CalSource = 'app' | 'google'
 
@@ -433,8 +445,17 @@ function MonthGrid({
                       className={`flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded cursor-pointer leading-tight border border-gray-100 hover:border-gray-400 transition-colors ${categoryAccentClass(b.category)}`}
                     >
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(b.status)}`} aria-hidden />
-                      {/* continuation day of a multi-day shoot → ต่อ, not day-1's call time */}
-                      <span className="font-medium tabular-nums flex-shrink-0 text-gray-700">{b.shootDate.slice(0, 10) !== key ? 'ต่อ' : b.callTime}</span>
+                      {/* multi-day shoot → day counter: 1/6 on the start day (next to call time), 2/6.. on continuation days */}
+                      {(() => {
+                        const dc = dayOfSpan(b, key)
+                        if (dc && dc.n > 1) return <span className="font-medium tabular-nums flex-shrink-0 text-gray-700">{dc.n}/{dc.total}</span>
+                        return (
+                          <>
+                            <span className="font-medium tabular-nums flex-shrink-0 text-gray-700">{b.callTime}</span>
+                            {dc && <span className="tabular-nums flex-shrink-0 text-gray-400">1/{dc.total}</span>}
+                          </>
+                        )
+                      })()}
                       <span className="text-gray-400 flex-shrink-0">·</span>
                       <span className="font-medium flex-shrink-0 text-gray-600">{b.outlet.code}</span>
                       <span className="text-gray-400 flex-shrink-0">·</span>
@@ -501,8 +522,8 @@ function AgendaList({ loading, agenda, onOpenBooking }: {
 /* ---------- Booking row (used by selected-day + agenda) ---------- */
 
 function BookingRow({ b, onOpen, dayKey }: { b: Booking; onOpen: () => void; dayKey?: string }) {
-  // a multi-day shoot listed on a day after its start → ต่อ, not day-1's call time
-  const continuation = dayKey && b.shootDate.slice(0, 10) !== dayKey
+  // multi-day shoot → which day of the span this row sits on (n/total)
+  const dc = dayKey ? dayOfSpan(b, dayKey) : null
   return (
     <li>
       <button
@@ -510,12 +531,13 @@ function BookingRow({ b, onOpen, dayKey }: { b: Booking; onOpen: () => void; day
         className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
       >
         <div className="text-sm text-gray-700 w-20 flex-shrink-0 tabular-nums">
-          {continuation ? (
-            <span className="text-gray-500" title={`ถ่ายต่อเนื่อง ${b.shootDate.slice(0, 10)} → ${(b.shootEndDate || b.shootDate).slice(0, 10)}`}>ต่อ ↩</span>
+          {dc && dc.n > 1 ? (
+            <span className="text-gray-500" title={`ถ่ายต่อเนื่อง ${b.shootDate.slice(0, 10)} → ${(b.shootEndDate || b.shootDate).slice(0, 10)}`}>วัน {dc.n}/{dc.total}</span>
           ) : (
             <>
               {b.callTime}
               {b.estimatedWrap && <span className="text-gray-400 text-xs"> → {b.estimatedWrap}</span>}
+              {dc && <div className="text-[10px] text-gray-400">วัน 1/{dc.total}</div>}
             </>
           )}
         </div>

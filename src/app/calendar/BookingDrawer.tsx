@@ -19,6 +19,7 @@ import { SPECIAL_EQUIPMENT_OPTIONS, CREW_OPTIONS } from '@/lib/data'
 import { ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterMember } from '@/lib/team-roster'
 import { normalizeFreelancers, freelancerEmails, freelancerRoleLabel } from '@/lib/freelancers'
 import type { Booking } from './types'
+import { formatDateRange } from '@/lib/utils'
 import BookingRentals from '@/app/_components/BookingRentals'
 
 const showName = bookingDisplayName
@@ -38,6 +39,15 @@ type DrawerForm = {
   equipmentNote: string; rentalGearNote: string; itinerary: string; agencyRef: string
   notes: string; adminNotes: string
   episodeTitles: { id: string; episodeId: string; title: string }[]
+}
+
+// จำนวนวันถ่ายรวม (1 เมื่อวันเดียว/ไม่มีวันจบ) — ใช้กำกับ Schedule ใน drawer
+function shootDays(b: { shootDate: string; shootEndDate?: string | null }): number {
+  if (!b.shootEndDate) return 1
+  const s = new Date(b.shootDate.slice(0, 10) + 'T00:00:00Z').getTime()
+  const e = new Date(b.shootEndDate.slice(0, 10) + 'T00:00:00Z').getTime()
+  if (isNaN(s) || isNaN(e) || e <= s) return 1
+  return Math.min(Math.round((e - s) / 86_400_000), 30) + 1
 }
 
 export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEmail }: {
@@ -292,7 +302,7 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
             <>
               <div>
                 <div className="ops-section-title mb-2">Schedule</div>
-                <div className="text-gray-800 mb-2">{format(parseISO(b.shootDate), 'EEE d MMM yyyy')}</div>
+                <div className="text-gray-800 mb-2">{formatDateRange(b.shootDate, b.shootEndDate)}{shootDays(b) > 1 ? <span className="text-gray-400 text-xs"> · {shootDays(b)} วัน</span> : null}</div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="block"><span className={labelCls}>Call time</span>
                     <input type="time" value={form.callTime} onChange={e => setForm({ ...form, callTime: e.target.value })} className={`mt-1 ${inputCls}`} /></label>
@@ -492,7 +502,7 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
 
               <div>
                 <div className="ops-section-title mb-2">Schedule</div>
-                <div className="text-gray-800">{format(parseISO(b.shootDate), 'EEE d MMM yyyy')}</div>
+                <div className="text-gray-800">{formatDateRange(b.shootDate, b.shootEndDate)}{shootDays(b) > 1 ? <span className="text-gray-400 text-xs"> · {shootDays(b)} วัน</span> : null}</div>
                 <div className="text-gray-500 text-xs tabular-nums">{b.callTime}{b.estimatedWrap && ` → ${b.estimatedWrap}`}</div>
               </div>
 
