@@ -23,7 +23,7 @@ type Booking = { id: string; bookingCode: string; shootDate?: string | null }
 type Vendor = { id: string; name: string }
 type Rental = {
   id: string
-  jobName?: string | null; quoteNo?: string | null; adType?: string | null; invoiceNo?: string | null
+  jobName?: string | null; items?: string | null; quoteNo?: string | null; adType?: string | null; invoiceNo?: string | null
   rentalDate?: string | null; returnDueDate?: string | null; returnedAt?: string | null
   amount?: string | number | null; paymentStatus: string; status: string; remark?: string | null
   bookingId?: string | null; outletId?: string | null; vendorId?: string | null
@@ -160,12 +160,24 @@ type PickerBooking = {
   id: string
   bookingCode: string | null
   shootDate?: string | null
+  shootEndDate?: string | null
   producer?: string | null
   projectName?: string | null
+  category?: string | null
+  agencyRef?: string | null
+  rentalGearNote?: string | null
   program: { name: string }
+  outlet?: { code: string } | null
   episodes?: Array<{ episodeId?: string; title?: string | null; program?: { code?: string; name: string } | null }> | null
 }
-function BookingPicker({ value, label, onChange }: { value: string | null; label: string | null; onChange: (id: string | null, code: string | null) => void }) {
+
+/** the display line used in picker rows + the auto job name */
+function pickerBookingLabel(b: PickerBooking): string {
+  const name = bookingDisplayName(b)
+  const t = b.episodes?.[0]?.title?.trim()
+  return t && !name.includes(t) ? `${name} — ${t}` : name
+}
+function BookingPicker({ value, label, onChange }: { value: string | null; label: string | null; onChange: (id: string | null, code: string | null, booking?: PickerBooking) => void }) {
   const [q, setQ] = useState('')
   const [dateFilter, setDateFilter] = useState('') // YYYY-MM-DD → /api/bookings?date= (exact shoot-day)
   const [results, setResults] = useState<PickerBooking[]>([])
@@ -260,7 +272,7 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
             const epTitle = rawTitle && !name.includes(rawTitle) ? rawTitle : null
             return (
               <button key={b.id} type="button"
-                      onClick={() => { onChange(b.id, b.bookingCode); setOpen(false); setQ('') }}
+                      onClick={() => { onChange(b.id, b.bookingCode, b); setOpen(false); setQ('') }}
                       className="w-full text-left px-3 py-2 hover:bg-purple-50 border-b border-gray-50 last:border-0">
                 <div className="text-sm font-medium text-gray-800 truncate">
                   {name}
@@ -304,12 +316,45 @@ function RentalForm({ initial, vendors, onClose, onSaved }: {
   const [error, setError] = useState('')
   const set = (k: keyof Rental, v: unknown) => setF((p) => ({ ...p, [k]: v }))
 
+  // Picking a booking fills the form from it (ops: "เลือกงานแล้ว เติมมาให้เลย"):
+  // job name ALWAYS mirrors the booking (that's what ชื่องาน means now); the rest
+  // fill only when still empty so a half-typed form isn't clobbered.
+  const applyBooking = (id: string | null, code: string | null, b?: PickerBooking) => {
+    setBookingCode(code)
+    setF((p) => {
+      const next: Partial<Rental> = { ...p, bookingId: id }
+      if (b) {
+        next.jobName = pickerBookingLabel(b)
+        if (!p.items?.trim() && b.rentalGearNote?.trim()) next.items = b.rentalGearNote
+        if (!p.adType?.trim() && b.category) next.adType = b.category === 'ADVERTORIAL' ? 'AD' : 'NON-AD'
+        if (!p.quoteNo?.trim() && b.agencyRef?.trim()) next.quoteNo = b.agencyRef
+        if (!p.rentalDate && b.shootDate) next.rentalDate = String(b.shootDate).slice(0, 10)
+        if (!p.returnDueDate && (b.shootEndDate || b.shootDate)) next.returnDueDate = String(b.shootEndDate || b.shootDate).slice(0, 10)
+        if (!p.outletId && b.outlet?.code) next.outletId = b.outlet.code
+      }
+      return next
+    })
+  }
+
+  // Deep-link "เพิ่มงานเช่า" from a booking page passes only id+code — fetch the
+  // booking once so that path gets the same auto-fill as picking from the list.
+  useEffect(() => {
+    if (initial?.id || !initial?.bookingId || initial?.jobName) return
+    let dead = false
+    fetch(`/api/bookings/${initial.bookingId}`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!dead && j?.booking) applyBooking(j.booking.id, j.booking.bookingCode, j.booking) })
+      .catch(() => {})
+    return () => { dead = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const save = async () => {
     if (!f.jobName?.trim()) { setError('กรุณาใส่ชื่องาน'); return }
     setSaving(true); setError('')
     try {
       const body = {
-        jobName: f.jobName, quoteNo: f.quoteNo, adType: f.adType, invoiceNo: f.invoiceNo,
+        jobName: f.jobName, items: f.items ?? null, quoteNo: f.quoteNo, adType: f.adType, invoiceNo: f.invoiceNo,
         bookingId: f.bookingId ?? null, outletId: f.outletId ?? null, vendorId: f.vendorId ?? null,
         rentalDate: f.rentalDate ?? null, returnDueDate: f.returnDueDate ?? null, returnedAt: f.returnedAt ?? null,
         amount: f.amount ?? null, paymentStatus: f.paymentStatus, status: f.status, remark: f.remark,
@@ -339,14 +384,19 @@ function RentalForm({ initial, vendors, onClose, onSaved }: {
           {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</div>}
 
           <div>
-            <label className={lbl}>ชื่องาน *</label>
-            <input value={f.jobName || ''} onChange={(e) => set('jobName', e.target.value)} className={inputCls} placeholder="เช่น เช่าเลนส์ 24-70 งาน APEC" />
+            <label className={lbl}>ผูกกับ Booking <span className="font-normal text-gray-400">(เลือกแล้วเติมข้อมูลให้อัตโนมัติ)</span></label>
+            <BookingPicker value={f.bookingId ?? null} label={bookingCode} onChange={applyBooking} />
           </div>
 
           <div>
-            <label className={lbl}>ผูกกับ Booking</label>
-            <BookingPicker value={f.bookingId ?? null} label={bookingCode}
-                           onChange={(id, code) => { set('bookingId', id); setBookingCode(code) }} />
+            <label className={lbl}>ชื่องาน *</label>
+            <input value={f.jobName || ''} onChange={(e) => set('jobName', e.target.value)} className={inputCls} placeholder="เติมอัตโนมัติเมื่อเลือก Booking" />
+          </div>
+
+          <div>
+            <label className={lbl}>เช่าอะไร</label>
+            <textarea value={f.items || ''} onChange={(e) => set('items', e.target.value)} rows={2} className={inputCls}
+                      placeholder="เช่น เลนส์ 24-70 x1 · จอมอนิเตอร์ x2…" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -445,6 +495,7 @@ function RentalCard({ rental, onAdd, onRemove, onPatch, onEdit }: {
             )}
             {rental.outlet?.code && <span className="text-[11px] text-gray-400">{rental.outlet.code}</span>}
           </div>
+          {rental.items && <div className="mt-0.5 text-xs text-gray-700 whitespace-pre-line">📦 {rental.items}</div>}
           <div className="mt-0.5 flex items-center gap-x-3 gap-y-0.5 flex-wrap text-xs text-gray-500">
             {rental.vendor?.name && <span>🏢 {rental.vendor.name}</span>}
             {rental.rentalDate && <span className="inline-flex items-center gap-1"><Calendar className="w-3 h-3" />{ymd(rental.rentalDate)}{rental.returnDueDate ? ` → คืน ${ymd(rental.returnDueDate)}` : ''}</span>}
@@ -560,7 +611,7 @@ export default function RentalsPage() {
       if (fPay !== 'all' && r.paymentStatus !== fPay) return false
       if (onlyIncomplete && missingSlots(r).length === 0) return false
       if (needle) {
-        const hay = [r.jobName, r.quoteNo, r.invoiceNo, r.vendor?.name, r.booking?.bookingCode].filter(Boolean).join(' ').toLowerCase()
+        const hay = [r.jobName, r.items, r.quoteNo, r.invoiceNo, r.vendor?.name, r.booking?.bookingCode].filter(Boolean).join(' ').toLowerCase()
         if (!hay.includes(needle)) return false
       }
       return true

@@ -676,7 +676,8 @@ model RentalJob {
   id            String        @id @default(cuid())
   quoteNo       String? // QU-xxxx
   adType        String? // AD / NON-AD
-  jobName       String?
+  jobName       String? // the JOB's name (auto-filled from the linked booking)
+  items         String? // WHAT is rented (v1.145 — was mistyped into jobName before)
   bookingId     String?
   booking       Booking?      @relation(fields: [bookingId], references: [id])
   outletId      String?

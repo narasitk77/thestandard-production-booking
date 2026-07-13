@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
         quoteNo: cleanStr(b.quoteNo),
         adType: cleanStr(b.adType),
         jobName: cleanStr(b.jobName),
+        items: cleanStr(b.items),
         bookingId: cleanStr(b.bookingId),
         outletId: await resolveOutletId(b.outletId),
         vendorId: cleanStr(b.vendorId),

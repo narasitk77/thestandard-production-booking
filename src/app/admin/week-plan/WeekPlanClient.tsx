@@ -49,6 +49,10 @@ export default function WeekPlanClient() {
   const [error, setError] = useState('')
   const [savingId, setSavingId] = useState<string | null>(null)
   const [savedId, setSavedId] = useState<string | null>(null)
+  // ✏️ พิมพ์ (textareas) vs 👁 ดูสรุป (clean read-only rows) — "พอใส่เยอะๆ มันดูยาก".
+  const [viewOnly, setViewOnly] = useState(false)
+  useEffect(() => { try { setViewOnly(localStorage.getItem('weekplan-view') === '1') } catch {} }, [])
+  const toggleView = () => setViewOnly(v => { const n = !v; try { localStorage.setItem('weekplan-view', n ? '1' : '0') } catch {}; return n })
   // Debounce the save per booking: each PATCH re-syncs the Google Calendar event
   // (fire-and-forget, server-side), so collapse rapid keystrokes into one call.
   const pendingRef = useRef<Record<string, NotePatch>>({})
@@ -152,6 +156,10 @@ export default function WeekPlanClient() {
           <p className="text-sm text-gray-500">พิมพ์รายการ<b>อุปกรณ์</b>และ<b>ของเช่า</b>ของแต่ละงาน — บันทึกอัตโนมัติ และแสดงต่อในหน้า Booking + Google Calendar</p>
         </div>
         <div className="flex items-center gap-1">
+          <button onClick={toggleView}
+                  className={`px-3 py-1.5 text-sm border rounded mr-1 ${viewOnly ? 'border-[#673ab7] text-[#673ab7] bg-purple-50' : 'border-gray-300 hover:bg-gray-50'}`}>
+            {viewOnly ? '✏️ กลับไปพิมพ์' : '👁 ดูสรุป'}
+          </button>
           <button onClick={() => setWeekStart(w => addWeeks(w, -1))} className="p-1.5 border border-gray-300 rounded hover:bg-gray-50"><ChevronLeft className="w-4 h-4" /></button>
           <button onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))} className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">สัปดาห์นี้</button>
           <button onClick={() => setWeekStart(w => addWeeks(w, 1))} className="p-1.5 border border-gray-300 rounded hover:bg-gray-50"><ChevronRight className="w-4 h-4" /></button>
@@ -206,6 +214,19 @@ export default function WeekPlanClient() {
                             {savedId === b.id && <Check className="w-3.5 h-3.5 text-green-600" />}
                           </div>
                         </div>
+                        {viewOnly ? (
+                          // ดูสรุป — full text, no boxes/scrollbars, easy to scan down the day
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-1.5">
+                            <div className="text-sm text-gray-800 whitespace-pre-line leading-snug">
+                              <span className="text-[11px] text-gray-400 mr-1">🎬</span>
+                              {b.equipmentNote?.trim() || <span className="text-gray-300">—</span>}
+                            </div>
+                            <div className="text-sm text-gray-800 whitespace-pre-line leading-snug">
+                              <span className="text-[11px] text-gray-400 mr-1">📦</span>
+                              {b.rentalGearNote?.trim() || <span className="text-gray-300">—</span>}
+                            </div>
+                          </div>
+                        ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                           <div>
                             <label className="text-[11px] text-gray-400 mb-0.5 block">🎬 อุปกรณ์</label>
@@ -226,6 +247,7 @@ export default function WeekPlanClient() {
                               className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 outline-none focus:border-[#673ab7] resize-y" />
                           </div>
                         </div>
+                        )}
                       </div>
                     ))}
                   </div>

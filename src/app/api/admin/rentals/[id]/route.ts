@@ -24,6 +24,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if ('quoteNo' in b) data.quoteNo = cleanStr(b.quoteNo)
     if ('adType' in b) data.adType = cleanStr(b.adType)
     if ('jobName' in b) data.jobName = cleanStr(b.jobName)
+    if ('items' in b) data.items = cleanStr(b.items)
     if ('bookingId' in b) data.bookingId = cleanStr(b.bookingId)
     if ('outletId' in b) data.outletId = await resolveOutletId(b.outletId)
     if ('vendorId' in b) data.vendorId = cleanStr(b.vendorId)
