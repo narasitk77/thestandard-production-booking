@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.147.2] — 2026-07-14
+
+### Added — แจ้ง Discord เมื่อ NAS ซิงค์ระบายครบ
+- Event "✅ ส่งขึ้น Drive ครบ" (คิว NAS ของโฟลเดอร์ระบายหมด — ไฟล์ทั้งหมดขึ้น Production Team แล้ว) เดิมส่งแค่อีเมล ตอนนี้ยิงเข้า Discord webhook ด้วย (ผ่าน `notifyDiscord` — เงียบเองถ้า `DISCORD_WEBHOOK_URL` ไม่ได้ตั้ง). ตั้ง `DISCORD_WEBHOOK_URL` บน stack แล้ว → footage-ready (โหมด admin), reminders digest และ video-merge ?notify=1 เริ่มยิง Discord ทันทีโดยไม่ต้องแก้อะไรเพิ่ม.
+
+---
+
 ## [1.147.1] — 2026-07-14
 
 ### Changed — settle window ของ auto-แจ้งไฟล์: 1 ชม. → 2 ชม. (default)

@@ -17,6 +17,7 @@
  */
 import { prisma } from './db'
 import { sendEmail, isEmailConfigured } from './email'
+import { notifyDiscord } from './notify'
 import { findFoldersByCode, listFilesRecursive, findChildFolder, SOUND_STAGING_DIR, listSoundStagingTree } from './google-drive'
 
 const IGNORE_RE = /^_SHOOT\b.*\.txt$/i
@@ -181,6 +182,10 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
           text: `คิว NAS ของ "${f.name}" ระบายหมดแล้ว — ไฟล์ทั้งหมดถูกส่งขึ้น Production Team (Drive) แล้ว${driveNote}\n\nกด "รวมไฟล์เข้ากล่องนี้" ในหน้า upload ของงานได้เลย\nhttps://probook.xtec9.xyz/admin\n\n— THE STANDARD Production Booking`,
         }).catch(e => console.error('[nas-sync] drain email failed:', e?.message || e))
       }
+      // v1.147.2 (ops) — Discord ping on the same drain transition, alongside
+      // the email. Independent of emailOk; notifyDiscord no-ops when the
+      // webhook env is unset and never throws.
+      await notifyDiscord(`✅ ซิงค์ขึ้น Drive ครบ: ${f.name} — คิว NAS ระบายหมดแล้ว${driveNote.replace('\n', ' · ')}`)
       statuses[f.code] = { ...p, lastPending: 0, maxSeen, drainedAt: new Date().toISOString() }
     } else {
       statuses[f.code] = { ...p, lastPending: f.nasPending, maxSeen }
