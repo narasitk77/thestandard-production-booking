@@ -5,6 +5,11 @@ import { recordHeartbeat } from '@/lib/heartbeat'
 
 export const dynamic = 'force-dynamic'
 
+// v1.146 review fix — same reentrancy guard as video-merge/sound-merge: a
+// proxy-timeout-driven retry must not overlap two real (non-dryRun) passes,
+// since the underlying Drive folder primitives are non-atomic.
+let footageSyncRunning = false
+
 /**
  * Internal worker endpoint — poked every FOOTAGE_WORKER_INTERVAL_MS by
  * `scripts/footage-sheet-sync-worker.js`. Mirrors the
@@ -37,6 +42,12 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
 
+  if (!dryRun) {
+    if (footageSyncRunning) {
+      return NextResponse.json({ ok: false, reason: 'footage-sync กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
+    }
+    footageSyncRunning = true
+  }
   try {
     const result = await runFootageSync({ dryRun })
     if (!dryRun) await recordHeartbeat('footage')
@@ -44,5 +55,7 @@ export async function GET(request: NextRequest) {
   } catch (e: any) {
     console.error('[footage-sync] route error:', e)
     return NextResponse.json({ ok: false, reason: e?.message || String(e) }, { status: 500 })
+  } finally {
+    if (!dryRun) footageSyncRunning = false
   }
 }

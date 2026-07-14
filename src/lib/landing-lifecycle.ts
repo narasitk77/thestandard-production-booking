@@ -102,7 +102,7 @@ export async function manageLandingFolders(
   })
   for (const b of nextDay) {
     if (!hasOutletFolderMapping(b.outlet.code) || isPhotoAlbumBooking(b.episodes)) continue
-    const cams = camerasToPreCreate(b.cameraCount, b.micCount)
+    const cams = camerasToPreCreate(b.cameraCount)
     if (cams.length === 0) continue
     const name = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
     base.actions.push(`create landing "${name}" (${targetDay})`)
@@ -117,18 +117,22 @@ export async function manageLandingFolders(
   }
 
   // ── CLEANUP: trash EMPTY landing folders for shoots older than the grace window ──
-  const codeToShootDate = new Map<string, Date>()
+  // v1.146 review fix — the age check must use the shoot's LAST day
+  // (shootEndDate ?? shootDate), not day 1: with keepPastDays=1, day 3 of a
+  // 3-day shoot already had shootDate 2 days in the past, so a drop folder
+  // that was transiently empty between upload batches got trashed mid-shoot.
+  const codeToLastShootDay = new Map<string, Date>()
   const recent = await prisma.booking.findMany({
     where: { bookingCode: { not: null }, deletedAt: null },
-    select: { bookingCode: true, shootDate: true },
+    select: { bookingCode: true, shootDate: true, shootEndDate: true },
   })
-  for (const b of recent) if (b.bookingCode) codeToShootDate.set(b.bookingCode.toUpperCase(), b.shootDate)
+  for (const b of recent) if (b.bookingCode) codeToLastShootDay.set(b.bookingCode.toUpperCase(), b.shootEndDate ?? b.shootDate)
 
   const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
   for (const f of folders) {
     const code = codeFromFolderName(f.name)
     if (!code) continue // not a shoot drop folder (e.g. a manual project folder) — leave
-    const shootDate = codeToShootDate.get(code)
+    const shootDate = codeToLastShootDay.get(code)
     if (!shootDate) continue // unknown booking — leave (safety)
     if (shootDate.getTime() >= cutoff.getTime()) { base.keptRecent++; continue } // within grace / today / future
     // past the grace window → remove ONLY if empty (footage delivered)
@@ -171,7 +175,7 @@ export async function ensureLandingForBooking(
   if (!b || !b.bookingCode) return { ok: false, dryRun, bookingCode: code, reason: 'booking not found' }
   if (!hasOutletFolderMapping(b.outlet.code)) return { ok: false, dryRun, bookingCode: code, reason: `outlet ${b.outlet.code} has no folder mapping` }
   if (isPhotoAlbumBooking(b.episodes)) return { ok: false, dryRun, bookingCode: code, reason: 'photo-album booking has no Production Team landing folder' }
-  const cams = camerasToPreCreate(b.cameraCount, b.micCount)
+  const cams = camerasToPreCreate(b.cameraCount)
   if (cams.length === 0) return { ok: false, dryRun, bookingCode: code, reason: 'no cameras (block shot / unspecified) — no landing folder' }
 
   // A booking whose footage is ALREADY delivered (real files exist under its
@@ -232,19 +236,22 @@ export async function pruneLandingToToday(
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
-  const codeToShootDate = new Map<string, Date>()
-  const rows = await prisma.booking.findMany({ where: { bookingCode: { not: null }, deletedAt: null }, select: { bookingCode: true, shootDate: true } })
-  for (const b of rows) if (b.bookingCode) codeToShootDate.set(b.bookingCode.toUpperCase(), b.shootDate)
+  // v1.146 review fix — "today's shoot" must include a multi-day shoot whose
+  // range SPANS today (day 2 of a 3-day shoot), not just one that STARTS today.
+  const codeToShootRange = new Map<string, { start: Date; end: Date }>()
+  const rows = await prisma.booking.findMany({ where: { bookingCode: { not: null }, deletedAt: null }, select: { bookingCode: true, shootDate: true, shootEndDate: true } })
+  for (const b of rows) if (b.bookingCode) codeToShootRange.set(b.bookingCode.toUpperCase(), { start: b.shootDate, end: b.shootEndDate ?? b.shootDate })
 
   const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
   for (const f of folders) {
     if (keepNames.some(k => f.name.includes(k))) { base.keptByName.push(f.name); continue }
     const code = codeFromFolderName(f.name)
     if (!code) { base.keptManual.push(f.name); continue } // manual folder — never auto-delete
-    const shootDate = codeToShootDate.get(code)
-    if (shootDate && shootDate.getTime() >= today.start.getTime() && shootDate.getTime() < today.end.getTime()) {
-      base.keptToday++; continue // today's shoot — keep
+    const range = codeToShootRange.get(code)
+    if (range && range.start.getTime() < today.end.getTime() && range.end.getTime() >= today.start.getTime()) {
+      base.keptToday++; continue // shoot runs today (incl. mid-multi-day) — keep
     }
+    const shootDate = range?.start
     // not today's → trash only if empty; keep + report if it holds footage
     let empty = false
     try { empty = !(await hasRealFiles(f.id)) }

@@ -339,6 +339,19 @@ echo "==> Starting reminder worker (supervised)..."
   done
 ) &
 
+# v1.147 — footage-ready worker. Stays dormant when FOOTAGE_READY_WORKER_ENABLED
+# is unset/0; supervisor still re-launches so flipping the env var live in
+# Portainer is enough. Sweeps recent bookings and auto-notifies once footage is
+# complete + settled (src/lib/footage-ready.ts).
+echo "==> Starting footage-ready worker (supervised)..."
+(
+  while true; do
+    node scripts/footage-ready-worker.js
+    echo "[footage-ready] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 # v1.77 — DB backup worker. Stays dormant when BACKUP_WORKER_ENABLED is unset/0;
 # supervisor still re-launches so flipping the env var live is enough. Daily
 # pg_dump → gzip → Google Drive (BACKUP_DRIVE_FOLDER_ID).

@@ -7,6 +7,11 @@ import { internalSecretAllowed } from '@/lib/internal-auth'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // copying audio across folders can take a while
 
+// v1.146 review fix — same reentrancy guard as video-merge/sound-staging-restructure:
+// a proxy-timeout-driven retry must not overlap two real (non-dryRun) passes,
+// since the underlying Drive folder primitives are non-atomic.
+let soundMergeRunning = false
+
 /**
  * v1.108 — Internal worker endpoint, poked hourly by scripts/sound-merge-worker.js.
  * Copies staged audio (_SOUND-STAGING/<Production ID>/) into each booking's video
@@ -34,6 +39,13 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
   const onlyCode = searchParams.get('code')?.trim() || undefined
+
+  if (!dryRun) {
+    if (soundMergeRunning) {
+      return NextResponse.json({ ok: false, reason: 'sound-merge กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
+    }
+    soundMergeRunning = true
+  }
   try {
     const result = await runSoundMerge({ dryRun, onlyCode })
     if (!dryRun) await recordHeartbeat('sound-merge')
@@ -41,5 +53,7 @@ export async function GET(request: NextRequest) {
   } catch (e: any) {
     console.error('[sound-merge] route error:', e)
     return NextResponse.json({ ok: false, reason: e?.message || String(e) }, { status: 500 })
+  } finally {
+    if (!dryRun) soundMergeRunning = false
   }
 }

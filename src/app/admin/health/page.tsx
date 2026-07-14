@@ -262,7 +262,7 @@ function DangerZone() {
       const res = await fetch('/api/admin/purge-bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: true }),
+        body: JSON.stringify({ confirm }),
       })
       const d = await res.json()
       if (d.ok) {

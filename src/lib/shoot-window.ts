@@ -46,6 +46,17 @@ export function isShootOver(b: ShootWindow, now: Date = new Date()): boolean {
 
 // ── v1.118 — same-day HH:MM occupancy helpers (Week Plan + camera overlap) ──
 
+/**
+ * v1.146 review fix — strict zero-padded 24h "HH:MM" check. Every consumer of
+ * callTime/estimatedWrap (isShootOver's string compare, timeWindowsOverlap,
+ * Week Plan occupancy) assumes lexically-sortable HH:MM; the web wizard's
+ * <input type=time> guarantees it but the MCP/API paths didn't validate at
+ * all, so "9:00" or "09:00 AM" would silently corrupt every comparison.
+ */
+export function isValidHHMM(s: unknown): s is string {
+  return typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s)
+}
+
 /** Add minutes to an "HH:MM", clamped to the same day (max "23:59"). */
 export function addMinutesClamped(hhmm: string, mins: number): string {
   const [h, m] = (hhmm || '').split(':').map(Number)

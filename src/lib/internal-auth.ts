@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server'
+import { timingSafeEqual } from 'crypto'
 
 /**
  * v1.123 — internal-worker auth that accepts ANY configured secret, not just the
@@ -22,8 +23,16 @@ export function internalSecretAllowed(
     request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim(),
   ].filter((v): v is string => Boolean(v))
   if (provided.length === 0) return false
-  const valid = new Set(
-    envKeys.map((k) => process.env[k]?.trim()).filter((v): v is string => Boolean(v)),
-  )
-  return provided.some((v) => valid.has(v))
+  const valid = envKeys
+    .map((k) => process.env[k]?.trim())
+    .filter((v): v is string => Boolean(v))
+  // v1.146 review fix — constant-time compare, same as /api/mcp: a plain
+  // Set.has/=== leaks how many leading bytes matched via timing.
+  return provided.some((p) => {
+    const pb = Buffer.from(p)
+    return valid.some((v) => {
+      const vb = Buffer.from(v)
+      return pb.length === vb.length && timingSafeEqual(pb, vb)
+    })
+  })
 }

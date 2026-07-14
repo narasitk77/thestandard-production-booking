@@ -38,6 +38,9 @@ export function workerSpecs(): WorkerSpec[] {
       intervalMs: posInt(process.env.VIDEO_MERGE_FALLBACK_MS, 6 * HOUR) },
     { key: 'backup', label: 'DB backup', enabled: enabled(process.env.BACKUP_WORKER_ENABLED),
       intervalMs: posInt(process.env.BACKUP_INTERVAL_MS, 24 * HOUR) },
+    // v1.147 — auto "footage ready" notification sweep.
+    { key: 'footage-ready', label: 'Footage ready notify', enabled: enabled(process.env.FOOTAGE_READY_WORKER_ENABLED),
+      intervalMs: posInt(process.env.FOOTAGE_READY_INTERVAL_MS, 30 * MINUTE) },
   ]
 }
 

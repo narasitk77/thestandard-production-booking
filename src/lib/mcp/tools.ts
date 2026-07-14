@@ -121,8 +121,8 @@ export function buildMcpRegistry(): McpRegistry {
             outletCode: { type: 'string' },
             programCode: { type: 'string' },
             shootDate: { type: 'string' },
-            callTime: { type: 'string' },
-            estimatedWrap: { type: 'string' },
+            callTime: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: '24h HH:MM, zero-padded (e.g. 09:00)' },
+            estimatedWrap: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: '24h HH:MM, zero-padded (e.g. 18:00)' },
             shootType: { type: 'string', enum: ['STUDIO', 'ON_LOCATION', 'EVENT'] },
             category: { type: 'string', enum: ['ORIGINAL_CONTENT', 'ADVERTORIAL'] },
             producer: { type: 'string' },
@@ -300,10 +300,24 @@ export function buildMcpRegistry(): McpRegistry {
 
       async create_booking(args) {
         const requestedBy = typeof args.requestedBy === 'string' && args.requestedBy.includes('@')
-          ? args.requestedBy.trim()
+          ? args.requestedBy.trim().toLowerCase()
           : null
-        const actor = requestedBy ? `${mcpActorEmail()} (for ${requestedBy})` : mcpActorEmail()
-        const result = await createBookingFromPayload(args, actor)
+        // v1.146 review fix — requestedBy is attributed as the booking's real
+        // creator ONLY when it matches a known User row (so owner checks and
+        // the approve confirmation email work for the human who asked);
+        // otherwise the MCP actor stays the creator and requestedBy is
+        // recorded in the audit trail only. Never concatenate it into the
+        // identity string — that corrupted createdByEmail for every
+        // MCP-created booking.
+        let createdByEmail: string | undefined
+        if (requestedBy) {
+          const u = await prisma.user.findFirst({
+            where: { email: { equals: requestedBy, mode: 'insensitive' } },
+            select: { email: true },
+          })
+          if (u) createdByEmail = u.email
+        }
+        const result = await createBookingFromPayload(args, mcpActorEmail(), { createdByEmail, requestedBy })
         if (!result.ok) throw new McpToolError(result.error)
         return {
           created: true,
@@ -356,7 +370,7 @@ export function buildMcpRegistry(): McpRegistry {
 
       async list_unpaid_rentals() {
         const rows = await prisma.rentalJob.findMany({
-          where: { paymentStatus: { in: ['INVOICED', 'PENDING'] } },
+          where: { status: { not: 'ARCHIVED' }, paymentStatus: { in: ['INVOICED', 'PENDING'] } },
           orderBy: { rentalDate: 'asc' },
           include: { vendor: { select: { name: true } } },
         })
@@ -407,6 +421,7 @@ export function buildMcpRegistry(): McpRegistry {
         if (!id && !invoiceNo && !quoteNo) throw new McpToolError('provide id, invoiceNo, or quoteNo')
         const rental = await prisma.rentalJob.findFirst({ where: { OR: [...(id ? [{ id }] : []), ...(invoiceNo ? [{ invoiceNo }] : []), ...(quoteNo ? [{ quoteNo }] : [])] } })
         if (!rental) throw new McpToolError('Rental not found')
+        if (rental.status === 'ARCHIVED') throw new McpToolError('Rental is archived (legacy sheet-import) — its source of truth is the Google Sheet, not editable here')
         if (rental.paymentStatus === 'PAID') return { updated: false, note: 'Already PAID', id: rental.id }
         await prisma.rentalJob.update({ where: { id: rental.id }, data: { paymentStatus: 'PAID' } })
         logAudit({ actorEmail: mcpActorEmail(), action: 'rental.update', entityType: 'RentalJob', entityId: rental.id, fromStatus: rental.paymentStatus, toStatus: 'PAID', changes: { via: 'mcp' } })

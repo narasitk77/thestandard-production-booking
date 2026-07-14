@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isShootOver } from '../shoot-window'
+import { isShootOver, isValidHHMM } from '../shoot-window'
 
 const day = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d))
 
@@ -71,4 +71,25 @@ test('multi-day: uses shootEndDate, not shootDate', () => {
     isShootOver({ shootDate: day(2026, 6, 30), shootEndDate: day(2026, 7, 2), estimatedWrap: '18:00' }, now),
     false,
   )
+})
+
+// ── isValidHHMM (v1.146) — the guard for callTime/estimatedWrap ─────────────
+
+test('isValidHHMM: accepts zero-padded 24h times only', () => {
+  assert.equal(isValidHHMM('00:00'), true)
+  assert.equal(isValidHHMM('09:00'), true)
+  assert.equal(isValidHHMM('23:59'), true)
+  assert.equal(isValidHHMM('13:05'), true)
+})
+
+test('isValidHHMM: rejects the formats that used to slip through MCP/API', () => {
+  assert.equal(isValidHHMM('9:00'), false)       // no zero-pad
+  assert.equal(isValidHHMM('09:00 AM'), false)   // 12h suffix
+  assert.equal(isValidHHMM('24:00'), false)      // out of range
+  assert.equal(isValidHHMM('12:60'), false)      // out of range
+  assert.equal(isValidHHMM('0900'), false)       // no colon
+  assert.equal(isValidHHMM(''), false)
+  assert.equal(isValidHHMM(null), false)
+  assert.equal(isValidHHMM(undefined), false)
+  assert.equal(isValidHHMM(900), false)
 })

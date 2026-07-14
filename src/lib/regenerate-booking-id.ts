@@ -45,6 +45,7 @@ import { bookingShowName } from './display'
 import { updateBookingRow } from './google-sheets'
 import { updateCalendarEventDetails } from './google-calendar'
 import { logAudit } from './audit'
+import { computeTypeDroppedId } from './id-migration'
 import type { EpisodeIdChange } from './id-migration'
 
 export type { EpisodeIdChange } from './id-migration'
@@ -153,6 +154,26 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
     })
     if (clash) {
       return { ok: false, bookingId, oldCode, newCode: newBookingCode, episodeChanges, dryRun, effects: { ...NOOP_EFFECTS }, error: `bookingCode "${newBookingCode}" already used by booking ${clash.id}` }
+    }
+
+    // v1.146 review fix — the check above only catches a booking whose CURRENT
+    // bookingCode already equals newBookingCode. It misses a "v1.109 collision
+    // pair" sibling that hasn't migrated yet: its current code still carries
+    // [TYPE], so no literal match exists YET, but its own future type-dropped
+    // code would equal newBookingCode. planTypeDropMigration (the bulk planner)
+    // catches this by evaluating every booking's pair at once; a single-booking
+    // regenerate must run the same pairwise check or it can silently split a
+    // pair the bulk migration deliberately left untouched.
+    const otherCoded = await prisma.booking.findMany({
+      where: { NOT: { id: bookingId }, bookingCode: { not: null } },
+      select: { id: true, bookingCode: true },
+    })
+    const futureClash = otherCoded.find(b => computeTypeDroppedId(b.bookingCode as string) === newBookingCode)
+    if (futureClash) {
+      return {
+        ok: false, bookingId, oldCode, newCode: newBookingCode, episodeChanges, dryRun, effects: { ...NOOP_EFFECTS },
+        error: `bookingCode "${newBookingCode}" would collide with booking ${futureClash.id} ("${futureClash.bookingCode}") once IT drops its [TYPE] segment too — this is a v1.109 collision pair; both must stay on their legacy codes. See /admin/migrate-ids for the full collision report.`,
+      }
     }
   }
 

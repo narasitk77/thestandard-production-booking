@@ -69,6 +69,12 @@ type BookingForReconcile = {
   micCount?: number | null
   vanCount?: number | null
   isBlockShot?: boolean | null
+  // v1.146 review fix — these two were missing from this type AND the three
+  // create payloads below, so any event the reconciler created/recreated lost
+  // the special-equipment list from its description and (for AGN) the project
+  // show name from its title. Same class of bug as the v1.113.1 fix.
+  specialEquipment?: string[] | null
+  projectName?: string | null
   equipmentNote?: string | null
   rentalGearNote?: string | null
   freelancers?: unknown
@@ -120,6 +126,8 @@ async function createVerifiedCalendarEvent(booking: {
   micCount?: number | null
   vanCount?: number | null
   isBlockShot?: boolean | null
+  specialEquipment?: string[] | null
+  projectName?: string | null
   equipmentNote?: string | null
   rentalGearNote?: string | null
   freelancers?: unknown
@@ -145,7 +153,11 @@ async function createVerifiedCalendarEvent(booking: {
     )
   }
 
-  const wantedAttendees = withProducer(booking.assignedEmails, booking.producerEmail, booking.directorEmail)
+  // v1.146 review fix — Director auto-invite is AGN-only (see the matching
+  // gate in google-calendar.ts's createCalendarEvent); must match here or
+  // this "wanted attendees" check would demand a director invite that
+  // createCalendarEvent deliberately never sent for other outlets.
+  const wantedAttendees = withProducer(booking.assignedEmails, booking.producerEmail, booking.outlet.code === 'AGN' ? booking.directorEmail : null)
   const calendarEvent = await getCalendarEventAttendees(eventId)
   if (!sameEmails(wantedAttendees, calendarEvent.attendees)) {
     await deleteCalendarEvent(eventId)
@@ -169,7 +181,11 @@ async function processBooking(
   // v1.131 — "correct" calendar attendees = crew + producer; assignedEmails
   // (crew only) still drives the description's "Assigned:" line and the
   // ReconcileItem report below.
-  const calendarAttendees = cleanEmails(withProducer(assignedEmails, booking.producerEmail, booking.directorEmail))
+  // v1.146 review fix — Director auto-invite is AGN-only. Without this gate
+  // the reconciler would actively PATCH the director back onto the calendar
+  // event on every tick for non-AGN bookings, even though createCalendarEvent
+  // never invites them at creation time for those outlets.
+  const calendarAttendees = cleanEmails(withProducer(assignedEmails, booking.producerEmail, booking.outlet.code === 'AGN' ? booking.directorEmail : null))
   const item: ReconcileItem = {
     bookingId: booking.id,
     bookingCode: booking.bookingCode,
@@ -206,6 +222,8 @@ async function processBooking(
         micCount: booking.micCount,
         vanCount: booking.vanCount,
         isBlockShot: booking.isBlockShot,
+        specialEquipment: booking.specialEquipment,
+        projectName: booking.projectName,
         equipmentNote: booking.equipmentNote,
         rentalGearNote: booking.rentalGearNote,
         freelancers: booking.freelancers,
@@ -221,8 +239,11 @@ async function processBooking(
       // v1.111 — compare-and-swap: only claim if calendarEventId is STILL null.
       // Approve/assign background creates can win this window; blindly writing
       // overwrote their id and left their event as a calendar duplicate.
+      // v1.146 review fix — also re-check status/deletedAt (matches approve.ts's
+      // CAS): a booking cancelled/soft-deleted while this event was being
+      // created must not get the fresh event attached to it.
       const saved = await prisma.booking.updateMany({
-        where: { id: booking.id, calendarEventId: null },
+        where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: null },
         data: {
           calendarEventId: eventId,
           // v1.32.2 — record sync state alongside the event id so UI
@@ -280,6 +301,8 @@ async function processBooking(
         micCount: booking.micCount,
         vanCount: booking.vanCount,
         isBlockShot: booking.isBlockShot,
+        specialEquipment: booking.specialEquipment,
+        projectName: booking.projectName,
         equipmentNote: booking.equipmentNote,
         rentalGearNote: booking.rentalGearNote,
         freelancers: booking.freelancers,
@@ -294,8 +317,11 @@ async function processBooking(
       })
       // v1.111 — compare-and-swap: replace ONLY if the id is still the vanished
       // one. If something else re-pointed the booking meanwhile, drop ours.
+      // v1.146 review fix — also re-check status/deletedAt (matches approve.ts's
+      // CAS): a booking cancelled/soft-deleted mid-recreate must not get the
+      // fresh event attached to it.
       const savedRe = await prisma.booking.updateMany({
-        where: { id: booking.id, calendarEventId: booking.calendarEventId },
+        where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: booking.calendarEventId },
         data: {
           calendarEventId: eventId,
           calendarSyncStatus: 'OK',
@@ -369,6 +395,8 @@ async function processBooking(
           micCount: booking.micCount,
           vanCount: booking.vanCount,
           isBlockShot: booking.isBlockShot,
+          specialEquipment: booking.specialEquipment,
+          projectName: booking.projectName,
           equipmentNote: booking.equipmentNote,
           rentalGearNote: booking.rentalGearNote,
           freelancers: booking.freelancers,
@@ -381,8 +409,13 @@ async function processBooking(
           notes: booking.notes,
           adminNotes: booking.adminNotes,
         })
-        await prisma.booking.update({
-          where: { id: booking.id },
+        // v1.146 review fix — this path previously wrote back with a plain
+        // `update` (no compare-and-swap at all), unlike the two sibling
+        // create/recreate paths above. A booking cancelled/soft-deleted while
+        // the attendees-patch retry was in flight could get this fresh event
+        // attached to it, with no cleanup path ever touching it afterward.
+        const savedPatchFail = await prisma.booking.updateMany({
+          where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: oldEventId },
           data: {
             calendarEventId: eventId,
             calendarSyncStatus: 'OK',
@@ -390,6 +423,14 @@ async function processBooking(
             calendarLastSyncedAt: new Date(),
           },
         })
+        if (savedPatchFail.count === 0) {
+          console.warn(`[calendar-reconcile] booking ${booking.id} changed state mid-recreate (attendees-patch-failure path) — deleting duplicate ${eventId}`)
+          await deleteCalendarEvent(eventId).catch(() => {})
+          const winner = await prisma.booking.findUnique({ where: { id: booking.id }, select: { calendarEventId: true } })
+          item.action = 'ok'
+          item.eventId = winner?.calendarEventId ?? null
+          return item
+        }
         await deleteCalendarEvent(oldEventId)
 
         item.action = 'created'

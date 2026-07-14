@@ -14,8 +14,11 @@
 
    | Env | ค่า | จำเป็น |
    |---|---|---|
-   | `MCP_API_KEY` | key จากข้อ 1 — **ไม่ตั้ง = ปิด MCP** (endpoint ตอบ 503) | ✅ |
+   | `MCP_API_KEY` | key จากข้อ 1 — **ไม่ตั้งทั้งคู่ = ปิด MCP** (endpoint ตอบ 503) | ✅* |
+   | `MCP_API_KEYS` | v1.146 (ทางเลือก) — key รายไคลเอนต์ คั่นด้วย comma, รูปแบบ `<label>:<key>` เช่น `claude-desktop:abc,n8n:def` — หลุดตัวไหน revoke ตัวนั้นโดยไม่ต้อง rotate ทุกไคลเอนต์ (ใช้แทนหรือควบคู่กับ `MCP_API_KEY` ก็ได้) | ✅* |
    | `MCP_ACTOR_EMAIL` | อีเมลที่ใช้บันทึก audit ของงานที่สั่งผ่าน AI (default `mcp@probook`) | — |
+
+   *ต้องตั้งอย่างน้อยหนึ่งใน `MCP_API_KEY` / `MCP_API_KEYS`. ยิง auth ผิดซ้ำเกิน 10 ครั้ง/15 นาทีต่อ IP จะโดน 429 ชั่วคราว.
 
 3. เช็ค `/admin/health` → ส่วน config ต้องเห็น `mcp.enabled: true`
 

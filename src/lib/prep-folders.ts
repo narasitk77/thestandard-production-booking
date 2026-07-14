@@ -143,7 +143,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       results.push({ bookingCode: b.bookingCode, skipped: `outlet ${b.outlet.code} has no folder mapping` })
       continue
     }
-    const cameras = camerasToPreCreate(b.cameraCount, b.micCount)
+    const cameras = camerasToPreCreate(b.cameraCount)
     if (cameras.length === 0) {
       results.push({ bookingCode: b.bookingCode, skipped: 'no cameras (block shot / unspecified)' })
       continue

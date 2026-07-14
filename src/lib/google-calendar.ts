@@ -53,6 +53,17 @@ export function getCalendarImpersonateSubject(): string | undefined {
   return DEFAULT_IMPERSONATE_SUBJECT
 }
 
+// v1.146 review fix — email cooldown per booking+kind, mirroring heartbeat.ts's
+// 6-hour throttle for the same "a background worker is broken" alert class.
+// Without it, a systemic failure (e.g. DWD revoked) re-fails every booking on
+// every 10-min reconcile tick and floods the admin inbox with one email per
+// booking per tick until someone fixes the underlying permission. The AuditLog
+// row below is NOT throttled — every failure stays durable and queryable; only
+// the email is deduped. In-memory is fine: single-container deployment, and a
+// restart re-sending one email per condition is harmless.
+const ALERT_EMAIL_COOLDOWN_MS = 6 * 60 * 60 * 1000
+const lastAlertEmailAt = new Map<string, number>()
+
 // Fire-and-forget alert when calendar guests fail to attach. Writes an AuditLog
 // row (so the failure is durable and queryable) and emails an admin so they can
 // react before guests find out by missing the invite. Recipient resolves to
@@ -88,6 +99,11 @@ function notifyCalendarAlert(input: {
 
   const to = process.env.CALENDAR_ALERT_EMAIL?.trim() || impersonateSubject
   if (!to || !isEmailConfigured()) return
+
+  const cooldownKey = `${input.kind}:${input.bookingId || input.bookingCode || 'unknown'}`
+  const last = lastAlertEmailAt.get(cooldownKey)
+  if (last && Date.now() - last < ALERT_EMAIL_COOLDOWN_MS) return // throttled — audit row already written above
+  lastAlertEmailAt.set(cooldownKey, Date.now())
 
   const headline = input.kind === 'invite_failed'
     ? 'Calendar guest invite FAILED'
@@ -429,7 +445,13 @@ export async function createCalendarEvent(booking: {
       : assignedEmails
     // The Director picked at booking time gets a guest invite the same way —
     // the whole point of the picker: nobody has to remember to assign them.
-    const directorEmailTrimmed = (booking.directorEmail || '').trim()
+    // v1.146 review fix — this auto-invite is deliberately AGN-only (ops:
+    // "REMOVED in v1.143.1 — do not re-add without asking" for other outlets),
+    // but nothing enforced that server-side; directorEmail set on any other
+    // outlet (PATCH, MCP, a future UI change) was silently auto-invited too.
+    // Gating centrally here (rather than at every place directorEmail can be
+    // set) closes the loophole regardless of how the field got populated.
+    const directorEmailTrimmed = booking.outlet.code === 'AGN' ? (booking.directorEmail || '').trim() : ''
     const attendeeEmails = directorEmailTrimmed && !withProducerEmails.some(e => e.toLowerCase() === directorEmailTrimmed.toLowerCase())
       ? [...withProducerEmails, directorEmailTrimmed]
       : withProducerEmails

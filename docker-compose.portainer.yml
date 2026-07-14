@@ -181,6 +181,18 @@ services:
       SHOOT_GEAR_LOOKAHEAD_DAYS: ${SHOOT_GEAR_LOOKAHEAD_DAYS:-3}
       # REMINDERS_URL: ${REMINDERS_URL:-}  # override only if app isn't on 127.0.0.1:3000
 
+      # --- Auto "footage ready" notify (v1.147) ---
+      # Sweeps recent bookings and auto-emails the folder links once footage is
+      # complete + settled (src/lib/footage-ready.ts). Dormant until
+      # FOOTAGE_READY_WORKER_ENABLED=1. Audience: producer (default) | everyone | admin.
+      FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
+      FOOTAGE_READY_INTERVAL_MS: ${FOOTAGE_READY_INTERVAL_MS:-1800000}
+      FOOTAGE_READY_AUDIENCE: ${FOOTAGE_READY_AUDIENCE:-producer}
+      FOOTAGE_READY_LOOKBACK_DAYS: ${FOOTAGE_READY_LOOKBACK_DAYS:-3}
+      FOOTAGE_READY_SETTLE_MS: ${FOOTAGE_READY_SETTLE_MS:-3600000}
+      FOOTAGE_READY_MAX_PER_RUN: ${FOOTAGE_READY_MAX_PER_RUN:-5}
+      FOOTAGE_READY_SECRET: ${FOOTAGE_READY_SECRET:-${NEXTAUTH_SECRET}}
+
       # --- Automated DB backup (v1.77) ---
       # Supervised worker (scripts/backup-worker.js) pg_dumps the DB daily, gzips
       # it, and uploads to BACKUP_DRIVE_FOLDER_ID (service account needs edit
@@ -200,7 +212,7 @@ services:
       NAS_MANIFEST_SECRET: ${NAS_MANIFEST_SECRET:-}
       NAS_REPORT_EMAIL: ${NAS_REPORT_EMAIL:-}
 
-      # (Wasabi dual-write removed — WASABI_* env vars no longer read by the app.)
+      # (Wasabi fully removed — v1.130 dropped the env vars, v1.146 dropped the DB columns.)
 
       # --- App ---
       UPLOAD_DIR: /app/uploads

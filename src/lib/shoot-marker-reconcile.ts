@@ -53,6 +53,20 @@ function normalizeCode(id: string): string {
   return (computeTypeDroppedId(id) ?? id).trim().toUpperCase()
 }
 
+/**
+ * v1.146 review fix — resolve a marker's Production ID against the box's live
+ * booking codes, checking the RAW id BEFORE normalizing. The v1.109 migration
+ * deliberately left the 4 collision-pair bookings on their legacy [TYPE] codes
+ * (e.g. AGN-260703-STD-01 is a LIVE bookingCode); normalizing first dropped
+ * the [TYPE], matched nothing, and the live booking's marker got trashed as
+ * stale. Mirrors the raw-vs-normalized handling the folder-drift warning uses.
+ */
+export function resolveMarkerCode(parsedId: string, liveCodes: string[]): string {
+  const raw = parsedId.trim().toUpperCase()
+  if (liveCodes.includes(raw)) return raw
+  return normalizeCode(parsedId)
+}
+
 /** Pull a Production ID out of a box-level marker filename "_SHOOT-<id>.txt". */
 export function idFromMarkerName(name: string): string | null {
   const m = name.match(/^_SHOOT-(.+)\.txt$/i)
@@ -251,7 +265,7 @@ export async function reconcileShootMarkers(
           base.warnings.push(`box-level "${f.name}" ไม่มี Production ID ในชื่อ — box ${boxName} (ไม่แตะ)`)
           continue
         }
-        const code = normalizeCode(parsedId)
+        const code = resolveMarkerCode(parsedId, codes)
         const sub = codes.includes(code) ? subByCode.get(code) : undefined
 
         if (!codes.includes(code)) {

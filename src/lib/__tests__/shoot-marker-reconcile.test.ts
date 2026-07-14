@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { idFromMarkerName, parseMarkerProductionId, markerDateHasBuddhistYear } from '../shoot-marker-reconcile'
+import { idFromMarkerName, parseMarkerProductionId, markerDateHasBuddhistYear, resolveMarkerCode } from '../shoot-marker-reconcile'
 import { computeTypeDroppedId } from '../id-migration'
 
 test('idFromMarkerName pulls the Production ID out of a box-level marker name', () => {
@@ -63,4 +63,25 @@ test('markerDateHasBuddhistYear flags Buddhist-era years on the date line', () =
 test('markerDateHasBuddhistYear ignores a Gregorian year that appears in an ID line', () => {
   // a 2026-style year in the Production ID must not trip the date check
   assert.equal(markerDateHasBuddhistYear('Production ID : AGN-260708-01\nวันที่ / Date : 8 ก.ค. 2026'), false)
+})
+
+// ── resolveMarkerCode (v1.146) — raw-id-first resolution for collision pairs ─
+
+test('resolveMarkerCode: a live collision-pair legacy [TYPE] code resolves to ITSELF, not its normalized form', () => {
+  // AGN-260703-STD-01 is a real bookingCode the v1.109 migration kept — the
+  // marker must resolve to it (staying "live"), not to AGN-260703-01 (which
+  // matches nothing → the old code trashed the live booking's marker as stale).
+  const live = ['AGN-260703-STD-01', 'AGN-260703-LOC-01']
+  assert.equal(resolveMarkerCode('AGN-260703-STD-01', live), 'AGN-260703-STD-01')
+  assert.equal(resolveMarkerCode('agn-260703-loc-01', live), 'AGN-260703-LOC-01')
+})
+
+test('resolveMarkerCode: a migrated booking still normalizes its legacy marker id', () => {
+  // Booking migrated to the typeless code; a stale marker still carrying the
+  // old [TYPE] id must normalize so it matches the live code.
+  assert.equal(resolveMarkerCode('AGN-260708-LOC-01', ['AGN-260708-01']), 'AGN-260708-01')
+})
+
+test('resolveMarkerCode: a genuinely dead id normalizes and matches nothing (stays stale)', () => {
+  assert.equal(resolveMarkerCode('AGN-250101-STD-01', ['AGN-260708-01']), 'AGN-250101-01')
 })

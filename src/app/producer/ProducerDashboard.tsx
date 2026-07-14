@@ -13,6 +13,7 @@ interface Booking {
   id: string
   bookingCode: string | null
   shootDate: string
+  shootEndDate?: string | null
   callTime: string
   estimatedWrap?: string | null
   status: string
@@ -44,6 +45,42 @@ const STATUS_BADGE: Record<string, string> = {
   COMPLETED: 'bg-blue-100 text-blue-700 border border-blue-200',
 }
 
+// ── v1.147 — date filter (ops: "ขอปุ่มฟิลเตอร์ดูตามวัน") ────────────────────
+// Client-side over the already-loaded list. Dates compare as YYYY-MM-DD
+// strings; "today" is Bangkok (UTC+7, no DST). A multi-day shoot matches any
+// day inside its [shootDate, shootEndDate] range.
+
+export type DateFilter = 'all' | 'today' | 'tomorrow' | 'week' | 'date'
+
+const DATE_FILTER_CHIPS: Array<{ key: DateFilter; label: string }> = [
+  { key: 'all', label: 'ทั้งหมด' },
+  { key: 'today', label: 'วันนี้' },
+  { key: 'tomorrow', label: 'พรุ่งนี้' },
+  { key: 'week', label: '7 วันข้างหน้า' },
+]
+
+export function bangkokTodayStr(): string {
+  return new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10)
+}
+
+export function addDaysStr(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+export function matchesDateFilter(b: Pick<Booking, 'shootDate' | 'shootEndDate'>, filter: DateFilter, pickedDate: string): boolean {
+  if (filter === 'all') return true
+  const start = b.shootDate.slice(0, 10)
+  const end = (b.shootEndDate || b.shootDate).slice(0, 10)
+  const today = bangkokTodayStr()
+  if (filter === 'today') return start <= today && today <= end
+  if (filter === 'tomorrow') { const t = addDaysStr(today, 1); return start <= t && t <= end }
+  if (filter === 'week') return end >= today && start <= addDaysStr(today, 7)
+  if (filter === 'date') return !pickedDate || (start <= pickedDate && pickedDate <= end)
+  return true
+}
+
 export default function ProducerDashboard({ producerEmail }: { producerEmail: string }) {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,6 +88,8 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
   const [history, setHistory] = useState<Record<string, HistoryRow[]>>({})
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState('')
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all')
+  const [pickedDate, setPickedDate] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -126,13 +165,47 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
         <div className="mb-4 rounded bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-blue-800">{flash}</div>
       )}
 
+      {/* v1.147 — filter by shoot day */}
+      <div className="mb-4 flex items-center gap-1.5 flex-wrap">
+        {DATE_FILTER_CHIPS.map(c => (
+          <button
+            key={c.key}
+            onClick={() => { setDateFilter(c.key); setPickedDate('') }}
+            className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+              dateFilter === c.key
+                ? 'bg-[#673ab7] text-white border-[#673ab7]'
+                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+        <input
+          type="date"
+          value={pickedDate}
+          onChange={e => {
+            setPickedDate(e.target.value)
+            setDateFilter(e.target.value ? 'date' : 'all')
+          }}
+          className={`px-2 py-0.5 text-xs rounded-full border ${
+            dateFilter === 'date' ? 'border-[#673ab7] text-[#673ab7]' : 'border-gray-300 text-gray-600'
+          }`}
+          aria-label="เลือกวันถ่าย"
+        />
+      </div>
+
       {loading ? (
         <p className="text-sm text-gray-400">Loading…</p>
       ) : bookings.length === 0 ? (
         <p className="text-sm text-gray-400">ยังไม่มีงานที่คุณเป็น Producer</p>
-      ) : (
+      ) : (() => {
+        const filtered = bookings.filter(b => matchesDateFilter(b, dateFilter, pickedDate))
+        if (filtered.length === 0) {
+          return <p className="text-sm text-gray-400">ไม่มีงานในช่วงวันที่เลือก</p>
+        }
+        return (
         <div className="space-y-3">
-          {[...bookings].sort((a, b) => a.shootDate.localeCompare(b.shootDate)).map(b => {
+          {[...filtered].sort((a, b) => a.shootDate.localeCompare(b.shootDate)).map(b => {
             const assigned = (b.assignedEmails || []).length > 0
             const open = openId === b.id
             return (
@@ -181,7 +254,8 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
             )
           })}
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

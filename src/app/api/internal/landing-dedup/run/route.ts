@@ -6,6 +6,11 @@ import { logAudit } from '@/lib/audit'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// v1.146 review fix — same reentrancy guard as video-merge/sound-merge: a
+// proxy-timeout-driven retry must not overlap two real (non-dryRun) passes,
+// since the underlying Drive folder primitives are non-atomic.
+let landingDedupRunning = false
+
 /**
  * GET /api/internal/landing-dedup/run[?dryRun=1]
  *
@@ -37,6 +42,12 @@ export async function GET(request: NextRequest) {
   const dryRunParam = new URL(request.url).searchParams.get('dryRun')
   const dryRun = !(dryRunParam === '0' || dryRunParam === 'false')
 
+  if (!dryRun) {
+    if (landingDedupRunning) {
+      return NextResponse.json({ error: 'landing-dedup กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
+    }
+    landingDedupRunning = true
+  }
   try {
     const result = await dedupeLandingFolders({ dryRun })
     if (!dryRun && (result.trashed > 0 || result.errors > 0)) {
@@ -52,6 +63,8 @@ export async function GET(request: NextRequest) {
   } catch (e: any) {
     console.error('GET /api/internal/landing-dedup/run error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+  } finally {
+    if (!dryRun) landingDedupRunning = false
   }
 }
 

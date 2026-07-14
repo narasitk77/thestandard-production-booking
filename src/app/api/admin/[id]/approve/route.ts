@@ -135,7 +135,7 @@ export async function POST(
           bookingSubfolderCode: updated.bookingCode,
           // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
           bookingCode: updated.outlet.code === 'AGN' ? undefined : updated.bookingCode,
-          cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
+          cameras: camerasToPreCreate(updated.cameraCount),
           // v1.93 — one folder per episode; empty for no-episode bookings.
           episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,
         })
@@ -340,7 +340,11 @@ export async function POST(
     // Best-effort like the booker email; skips self-approve + director==booker,
     // and the COMPLETED→CONFIRMED re-open path (they were emailed the first time).
     const isReapprove = booking.status === 'COMPLETED'
-    const directorEmailTrimmed = (updated.directorEmail || '').trim()
+    // v1.146 review fix — the Director picker/auto-invite is deliberately
+    // AGN-only (ops decision); this notification email is part of the same
+    // feature and must not fire for other outlets even if directorEmail
+    // happens to be set on the row.
+    const directorEmailTrimmed = updated.outlet.code === 'AGN' ? (updated.directorEmail || '').trim() : ''
     if (!isReapprove
         && directorEmailTrimmed
         && directorEmailTrimmed.toLowerCase() !== session.email.toLowerCase()

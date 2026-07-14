@@ -4,6 +4,11 @@ import { prepTodayShootFolders } from '@/lib/prep-folders'
 
 export const dynamic = 'force-dynamic'
 
+// v1.146 review fix — same reentrancy guard as video-merge/sound-merge: a
+// proxy-timeout-driven retry must not overlap two real (non-dryRun) passes,
+// since the underlying Drive folder primitives are non-atomic.
+let prepFoldersRunning = false
+
 /**
  * GET /api/internal/prep-folders/run[?dryRun=1]
  *
@@ -31,12 +36,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const dryRun = new URL(request.url).searchParams.get('dryRun') === '1'
+
+  if (!dryRun) {
+    if (prepFoldersRunning) {
+      return NextResponse.json({ success: false, error: 'prep-folders กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
+    }
+    prepFoldersRunning = true
+  }
   try {
     const result = await prepTodayShootFolders({ dryRun })
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
     console.error('GET /api/internal/prep-folders/run error:', e)
     return NextResponse.json({ success: false, error: e?.message || String(e) }, { status: 500 })
+  } finally {
+    if (!dryRun) prepFoldersRunning = false
   }
 }
 

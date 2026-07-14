@@ -7,6 +7,13 @@ import { logAudit } from '@/lib/audit'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// v1.146 review fix — same reentrancy guard as video-merge/sound-merge: a
+// proxy-timeout-driven retry (or the nightly worker overlapping a manual
+// call) must not overlap two real (non-dryRun) passes across ANY of this
+// route's three operations (create / prune / sweep) — they all touch the
+// same Production Team landing tree with non-atomic Drive primitives.
+let landingManageRunning = false
+
 /**
  * GET /api/internal/landing/manage?dryRun=1[&offset=1&keepDays=3&report=1]
  *
@@ -44,6 +51,14 @@ export async function GET(request: NextRequest) {
   const createOffsetDays = url.searchParams.get('offset') != null ? Math.max(0, Number(url.searchParams.get('offset'))) : undefined
   const keepPastDays = url.searchParams.get('keepDays') != null ? Math.max(0, Number(url.searchParams.get('keepDays'))) : undefined
   const forceReport = url.searchParams.get('report') === '1'
+
+  if (!dryRun) {
+    if (landingManageRunning) {
+      return NextResponse.json({ error: 'landing กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
+    }
+    landingManageRunning = true
+  }
+  try {
 
   // v1.141 — create ONE booking's landing folder on demand: ?create=<code>
   // ("ขอเพิ่มพิเศษ" — a specific shoot, often past/completed, needs a drop target).
@@ -116,6 +131,9 @@ export async function GET(request: NextRequest) {
   } catch (e: any) {
     console.error('GET /api/internal/landing/manage error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+  }
+  } finally {
+    if (!dryRun) landingManageRunning = false
   }
 }
 

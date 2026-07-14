@@ -123,31 +123,36 @@ export function programFolderName(input: {
 }
 
 // Full camera vocab (issue #5). CAM-A..D are pre-created from cameraCount;
-// AUDIO from micCount; the specials are created on demand at upload time.
+// the specials are created on demand at upload time.
 export const CAM_LETTERS = ['A', 'B', 'C', 'D'] as const
 export const CAMERA_SPECIALS = ['DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'] as const
 
 /**
  * Camera folders to PRE-CREATE when a booking is CONFIRMED: CAM-A..CAM-{n}
- * (capped at CAM-D) + AUDIO when micCount > 0. Returns [] for a Block Shot /
- * unspecified count — the shoot folder is still made; cameras come at upload
- * time via the ensure-create fallback.
+ * (capped at CAM-D), straight from the booked cameraCount. Returns [] for a
+ * Block Shot / unspecified count — the shoot folder is still made; cameras
+ * come at upload time via the ensure-create fallback.
+ *
+ * v1.147 (ops) — AUDIO is NO LONGER pre-created from micCount: sound arrives
+ * via the _SOUND-STAGING → sound-merge pipeline, and the merge ensure-creates
+ * its own AUDIO target (see soundDestination in sound-merge.ts), so the
+ * pre-created shells just sat empty. The upload dropdown still offers AUDIO
+ * (cameraUploadOptions below) and creates the folder on first use.
  */
-export function camerasToPreCreate(cameraCount?: number | null, micCount?: number | null): string[] {
+export function camerasToPreCreate(cameraCount?: number | null): string[] {
   const n = Math.max(0, Math.min(cameraCount ?? 0, CAM_LETTERS.length))
-  const cams = CAM_LETTERS.slice(0, n).map(l => `CAM-${l}`)
-  if ((micCount ?? 0) > 0) cams.push('AUDIO')
-  return cams
+  return CAM_LETTERS.slice(0, n).map(l => `CAM-${l}`)
 }
 
 /**
  * Camera options for the upload dropdown: CAM-A..CAM-{n} (min CAM-A so the
  * list is never empty) + AUDIO (if mics) + the always-available specials.
+ * AUDIO stays selectable even though it's not pre-created anymore.
  */
 export function cameraUploadOptions(cameraCount?: number | null, micCount?: number | null): string[] {
-  const slots = camerasToPreCreate(cameraCount, micCount)
-  const cams = slots.some(s => s.startsWith('CAM-')) ? slots : ['CAM-A', ...slots]
-  return [...cams, ...CAMERA_SPECIALS]
+  const slots = camerasToPreCreate(cameraCount)
+  const cams = slots.length > 0 ? slots : ['CAM-A']
+  return [...cams, ...((micCount ?? 0) > 0 ? ['AUDIO'] : []), ...CAMERA_SPECIALS]
 }
 
 /**

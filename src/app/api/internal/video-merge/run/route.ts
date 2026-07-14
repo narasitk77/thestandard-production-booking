@@ -8,6 +8,15 @@ import { notifyDiscord } from '@/lib/notify'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // walking + moving footage across folders can take a while
 
+// v1.146 review fix — a proxy-timeout-driven retry (browser sees an error and
+// re-fires while the server keeps running) must not overlap two real passes:
+// the underlying ensureFolderPath/ensureChildFolder Drive primitives are
+// non-atomic, so two concurrent runs can fork duplicate box/camera folders.
+// Single container deployment, so a module-level flag is enough — mirrors the
+// guard already used in sound-staging-restructure/route.ts. dryRun reads are
+// never gated.
+let videoMergeRunning = false
+
 /**
  * v1.109 — Internal endpoint. MOVES NAS footage from the flat "Production Team"
  * landing folders into each booking's VIDEO 2026 box, keyed by Production ID,
@@ -37,6 +46,13 @@ export async function GET(request: NextRequest) {
   // v1.127 — ?notify=1 (the NAS-sync-gated worker sends this): Discord-ping the
   // result, but only when something actually moved or failed — no-op runs stay quiet.
   const notify = searchParams.get('notify') === '1'
+
+  if (!dryRun) {
+    if (videoMergeRunning) {
+      return NextResponse.json({ error: 'video-merge กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
+    }
+    videoMergeRunning = true
+  }
   try {
     const result = await runVideoMerge({ dryRun, onlyCode })
     if (!dryRun) await recordHeartbeat('video-merge').catch(() => {})
@@ -50,5 +66,7 @@ export async function GET(request: NextRequest) {
   } catch (e: any) {
     console.error('GET /api/internal/video-merge/run error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+  } finally {
+    if (!dryRun) videoMergeRunning = false
   }
 }

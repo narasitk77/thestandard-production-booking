@@ -40,16 +40,37 @@ export async function reconcileEquipmentStatus(tx: Tx, equipmentIds: Array<strin
   const ids = Array.from(new Set(equipmentIds.filter((x): x is string => !!x)))
   if (ids.length === 0) return
   const rows = await tx.equipment.findMany({ where: { id: { in: ids } }, select: { id: true, status: true } })
-  for (const eq of rows) {
-    if (eq.status === 'RETIRED') continue // owned manually, leave it
-    const openRepairs = await tx.repairTicket.count({
-      where: { equipmentId: eq.id, status: { in: ['REPORTED', 'SENT'] } },
-    })
-    const activeLoans = openRepairs
-      ? 0 // repair wins; skip the extra query
-      : await tx.equipmentLoanItem.count({ where: { equipmentId: eq.id, loan: { status: 'ACTIVE' } } })
-    const next = deriveEquipmentStatus(eq.status, { hasOpenRepair: openRepairs > 0, hasActiveLoan: activeLoans > 0 })
-    if (next !== eq.status) await tx.equipment.update({ where: { id: eq.id }, data: { status: next } })
+  const live = rows.filter(eq => eq.status !== 'RETIRED') // RETIRED owned manually, leave it
+  if (live.length === 0) return
+  const liveIds = live.map(eq => eq.id)
+
+  // v1.146 review fix — batched: this used to run 1-3 sequential COUNT queries
+  // PER id inside the caller's transaction (a 15-20 item bulk checkout = 30-60+
+  // round-trips holding the tx open). Two groupBy queries now cover every id.
+  const openRepairs = await tx.repairTicket.groupBy({
+    by: ['equipmentId'],
+    where: { equipmentId: { in: liveIds }, status: { in: ['REPORTED', 'SENT'] } },
+    _count: true,
+  })
+  const activeLoans = await tx.equipmentLoanItem.groupBy({
+    by: ['equipmentId'],
+    where: { equipmentId: { in: liveIds }, loan: { status: 'ACTIVE' } },
+    _count: true,
+  })
+  const hasRepair = new Set(openRepairs.map(r => r.equipmentId).filter(Boolean))
+  const hasLoan = new Set(activeLoans.map(l => l.equipmentId).filter(Boolean))
+
+  // Batch the writes too — group ids by their derived status (at most 3 groups).
+  const idsByNext = new Map<EquipmentStatus, string[]>()
+  for (const eq of live) {
+    const next = deriveEquipmentStatus(eq.status, { hasOpenRepair: hasRepair.has(eq.id), hasActiveLoan: hasLoan.has(eq.id) })
+    if (next === eq.status) continue
+    const group = idsByNext.get(next) ?? []
+    group.push(eq.id)
+    idsByNext.set(next, group)
+  }
+  for (const [status, group] of Array.from(idsByNext)) {
+    await tx.equipment.updateMany({ where: { id: { in: group } }, data: { status } })
   }
 }
 

@@ -9,6 +9,7 @@ import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
 import { isShootOver } from '@/lib/booking-complete'
+import { isValidHHMM } from '@/lib/shoot-window'
 import { logAudit, diffBooking } from '@/lib/audit'
 import { normalizeBuddhistYear } from '@/lib/thai-date'
 import type { BookingStatus } from '@prisma/client'
@@ -151,6 +152,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
     }
 
+    // v1.146 review fix — same HH:MM guard as createBookingFromPayload; this
+    // route is reachable by API clients, not just the time-picker UI.
+    if (callTime && !isValidHHMM(callTime)) {
+      return NextResponse.json({ error: `Invalid callTime "${callTime}" — must be 24h HH:MM (e.g. 09:00)` }, { status: 400 })
+    }
+    if (estimatedWrap != null && estimatedWrap !== '' && !isValidHHMM(estimatedWrap)) {
+      return NextResponse.json({ error: `Invalid estimatedWrap "${estimatedWrap}" — must be 24h HH:MM (e.g. 18:00)` }, { status: 400 })
+    }
+
     // Reject illegal status transitions (e.g. COMPLETED → REQUESTED) before
     // touching the DB. Returns 400 with the rule it violated.
     if (status && status !== existing.status) {
@@ -174,6 +184,7 @@ export async function PATCH(
     }
 
     // Update booking fields in a transaction along with episode titles
+    const statusChanging = Boolean(status && status !== existing.status)
     const booking = await prisma.$transaction(async (tx) => {
       // Update episode titles if provided (NEVER episodeId or sequence)
       if (Array.isArray(episodeTitles)) {
@@ -189,10 +200,25 @@ export async function PATCH(
         }
       }
 
+      // v1.146 review fix — CAS on the status write: the transition was
+      // validated against `existing.status` read BEFORE this transaction, but
+      // the fire-and-forget autoCompleteBookings() (or another admin tab) can
+      // flip the row in between. Writing unconditionally would then apply a
+      // transition the ALLOWED map forbids (e.g. reverting COMPLETED back to
+      // CANCELLED). Re-check the precondition at write time — 0 rows means the
+      // status moved under us → 409, ask the caller to refresh.
+      if (statusChanging) {
+        const guarded = await tx.booking.updateMany({
+          where: { id: params.id, status: existing.status, deletedAt: null },
+          data: { status },
+        })
+        if (guarded.count === 0) throw new Error('STATUS_CONFLICT')
+      }
+
       return tx.booking.update({
         where: { id: params.id },
         data: {
-          ...(status && { status }),
+          ...(status && !statusChanging && { status }),
           ...(notes !== undefined && { notes: notes || null }),
           ...(callTime && { callTime }),
           ...(estimatedWrap !== undefined && { estimatedWrap: estimatedWrap || null }),
@@ -303,7 +329,13 @@ export async function PATCH(
     }
 
     return NextResponse.json({ booking })
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.message === 'STATUS_CONFLICT') {
+      return NextResponse.json(
+        { error: 'สถานะงานถูกเปลี่ยนระหว่างการแก้ไข (เช่น ระบบปิดงานอัตโนมัติ) — รีเฟรชหน้าแล้วลองใหม่' },
+        { status: 409 },
+      )
+    }
     console.error('PATCH /api/bookings/[id] error:', error)
     return NextResponse.json({ error: 'Failed to update booking' }, { status: 500 })
   }
@@ -348,10 +380,19 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    await prisma.booking.update({
-      where: { id: params.id },
+    // v1.146 review fix — CAS: the transition was validated against `before.status`,
+    // but autoCompleteBookings() (or a concurrent edit) can flip the row between
+    // that read and this write. Re-check at write time; 0 rows = state moved → 409.
+    const cancelled = await prisma.booking.updateMany({
+      where: { id: params.id, status: before.status, deletedAt: null },
       data: { status: 'CANCELLED', calendarEventId: null },
     })
+    if (cancelled.count === 0) {
+      return NextResponse.json(
+        { error: 'สถานะงานถูกเปลี่ยนระหว่างการยกเลิก — รีเฟรชหน้าแล้วลองใหม่' },
+        { status: 409 },
+      )
+    }
 
     // v1.54.1 — same cleanup as the PATCH cancel path: previously this route
     // flipped the status but left the Google Calendar event live (the

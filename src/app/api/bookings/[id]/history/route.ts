@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { canViewBooking } from '@/lib/booking-access'
 
 export async function GET(
   _request: NextRequest,
@@ -21,7 +22,15 @@ export async function GET(
 
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
-      select: { id: true, bookingCode: true, deletedAt: true },
+      select: {
+        id: true,
+        bookingCode: true,
+        deletedAt: true,
+        createdByEmail: true,
+        producerEmail: true,
+        assignedEmails: true,
+        status: true,
+      },
     })
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
@@ -30,6 +39,12 @@ export async function GET(
     // as the detail GET, so history can't confirm a hidden booking exists.
     if (booking.deletedAt && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+    // Same read-scope as the detail GET (src/lib/booking-access.ts) — history
+    // exposes the same adminNotes/status data the detail page already shows,
+    // so it must be gated the same way.
+    if (!canViewBooking(session, booking)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const logs = await prisma.auditLog.findMany({

@@ -111,6 +111,12 @@ THE STANDARD Production Booking`
       }
     }
 
+    // v1.147 — stamp the auto-notifier's send-once marker: a manual 📣 means
+    // everyone already got the links, so the footage-ready worker must not
+    // send a duplicate later. Manual clicks themselves stay unlimited (this
+    // stamp only gates the AUTO path). Best-effort — never fails the send.
+    prisma.booking.update({ where: { id: booking.id }, data: { readyNotifiedAt: new Date() } }).catch(() => {})
+
     logAudit({
       actorEmail: session.email,
       action: 'booking.notified_ready',

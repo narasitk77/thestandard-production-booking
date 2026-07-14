@@ -56,14 +56,20 @@ export function assessCompleteness(uploads: UploadRow[]): CompletenessReport {
   let failedCount = 0
   let totalBytes = 0
   for (const u of uploads) {
-    if (u.status === 'COMPLETE') {
+    // v1.146 review fix — DRIVE_OK is a dead legacy status (dual-write era:
+    // Drive done, Wasabi pending). Wasabi is removed, so a row stuck at
+    // DRIVE_OK has its file safely in Drive — it must count as COMPLETE, not
+    // sit "in-flight" forever and block the booking from ever being ready.
+    // WASABI_OK is the inverse (file went only to the removed cloud) — the
+    // file is unreachable, so it counts as failed rather than forever-pending.
+    if (u.status === 'COMPLETE' || u.status === 'DRIVE_OK') {
       if (isSoundCamera(u.camera)) soundCount += 1
       else videoCount += 1
       if (u.fileSize != null) totalBytes += Number(u.fileSize)
-    } else if (u.status === 'FAILED' || u.status === 'ORPHANED') {
+    } else if (u.status === 'FAILED' || u.status === 'ORPHANED' || u.status === 'WASABI_OK') {
       failedCount += 1
     } else {
-      // PENDING / UPLOADING (+ legacy DRIVE_OK / WASABI_OK) — partial
+      // PENDING / UPLOADING — genuinely partial
       inFlightCount += 1
     }
   }

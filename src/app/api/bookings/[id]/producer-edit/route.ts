@@ -21,6 +21,7 @@ import { getSession } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { FIELD_LABELS, fmt, diffEditable } from '@/lib/producer-edit-fields'
+import { isValidHHMM } from '@/lib/shoot-window'
 
 export async function PATCH(
   request: NextRequest,
@@ -60,6 +61,14 @@ export async function PATCH(
       creative, crewRequired, cameraCount, micCount, vanCount,
       specialEquipment, agencyRef, notes, episodeTitles,
     } = body
+
+    // v1.146 review fix — same HH:MM guard as createBookingFromPayload.
+    if (callTime && !isValidHHMM(callTime)) {
+      return NextResponse.json({ error: `Invalid callTime "${callTime}" — must be 24h HH:MM (e.g. 09:00)` }, { status: 400 })
+    }
+    if (estimatedWrap != null && estimatedWrap !== '' && !isValidHHMM(estimatedWrap)) {
+      return NextResponse.json({ error: `Invalid estimatedWrap "${estimatedWrap}" — must be 24h HH:MM (e.g. 18:00)` }, { status: 400 })
+    }
 
     const booking = await prisma.$transaction(async (tx) => {
       // Episode TITLE edits only — never episodeId or sequence.

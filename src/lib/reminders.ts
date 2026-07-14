@@ -85,6 +85,7 @@ async function detect(today: Date): Promise<Candidate[]> {
   // 3) Invoices aging (invoiced/pending older than N days)
   const aging = await prisma.rentalJob.findMany({
     where: {
+      status: { not: 'ARCHIVED' },
       paymentStatus: { in: ['INVOICED', 'PENDING'] },
       rentalDate: { not: null, lt: addDays(today, -agingDays) },
     },

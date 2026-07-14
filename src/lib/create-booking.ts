@@ -12,6 +12,7 @@ import { appendBookingRow } from '@/lib/google-sheets'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
 import { deriveBookingCategory } from '@/lib/booking-category'
+import { isValidHHMM } from '@/lib/shoot-window'
 
 export type CreateBookingResult =
   | { ok: true; booking: any }
@@ -20,6 +21,14 @@ export type CreateBookingResult =
 export async function createBookingFromPayload(
   body: any,
   actorEmail: string,
+  // v1.146 review fix — the MCP path used to fold "requested by" into the
+  // actor string ("mcp@… (for jane@…)"), which was then stored VERBATIM as
+  // Booking.createdByEmail — breaking every owner check (self-cancel,
+  // self-edit, canViewBooking) and the approve confirmation email for
+  // MCP-created bookings. Callers now pass a VERIFIED createdByEmail
+  // separately (defaults to actorEmail) and the raw requestedBy note goes
+  // into the audit trail instead of the identity column.
+  opts: { createdByEmail?: string | null; requestedBy?: string | null } = {},
 ): Promise<CreateBookingResult> {
   const fail = (status: number, error: string): CreateBookingResult => ({ ok: false, status, error })
 
@@ -115,6 +124,18 @@ export async function createBookingFromPayload(
   const parsedDate = normalizeBuddhistYear(rawDate)!
   const parsedEnd = normalizeBuddhistYear(shootEndDate ? new Date(shootEndDate) : null) ?? null
 
+  // v1.146 review fix — callTime/estimatedWrap must be zero-padded 24h HH:MM.
+  // The wizard's <input type=time> guarantees it, but this shared path also
+  // serves the MCP server / raw API, where "9:00" or "09:00 AM" used to be
+  // written straight to the DB and silently broke every string-compare
+  // downstream (isShootOver, camera-overlap, Week Plan).
+  if (!isValidHHMM(callTime)) {
+    return fail(400, `Invalid callTime "${callTime}" — must be 24h HH:MM, zero-padded (e.g. 09:00)`)
+  }
+  if (estimatedWrap != null && estimatedWrap !== '' && !isValidHHMM(estimatedWrap)) {
+    return fail(400, `Invalid estimatedWrap "${estimatedWrap}" — must be 24h HH:MM, zero-padded (e.g. 18:00)`)
+  }
+
   // v1.66 — camera + mic counts are REQUIRED for every creation path (wizard,
   // routine generator, API/MCP). 0 is valid (audio-only / no-camera shoots) but
   // the count can't be missing — bookings without it broke the camera-overload
@@ -128,19 +149,37 @@ export async function createBookingFromPayload(
     if (!Number.isInteger(micNum) || micNum < 0) return fail(400, 'micCount is required (use 0 for no mic) unless isBlockShot')
   }
 
+  // v1.146 review fix — two FIRST-EVER bookings for an outlet/program racing
+  // each other can both take the upsert's create path and the loser throws
+  // P2002 (observed in live concurrency testing; e.g. a brand-new program's
+  // first day with two producers booking simultaneously). The loser simply
+  // re-reads the row the winner just created.
+  const upsertIgnoreRace = async <T>(upsert: () => Promise<T>, reread: () => Promise<T | null>): Promise<T> => {
+    try { return await upsert() } catch (e: any) {
+      if (e?.code === 'P2002') { const row = await reread(); if (row) return row }
+      throw e
+    }
+  }
+
   // Upsert outlet DB record
-  const outletDb = await prisma.outlet.upsert({
-    where: { code: outletCode },
-    update: {},
-    create: { code: outlet.code, name: outlet.name, notes: outlet.description, sort: outlet.sort },
-  })
+  const outletDb = await upsertIgnoreRace(
+    () => prisma.outlet.upsert({
+      where: { code: outletCode },
+      update: {},
+      create: { code: outlet.code, name: outlet.name, notes: outlet.description, sort: outlet.sort },
+    }),
+    () => prisma.outlet.findUnique({ where: { code: outletCode } }),
+  )
 
   // Upsert program DB record
-  const programDb = await prisma.program.upsert({
-    where: { code_outletId: { code: programCode, outletId: outletDb.id } },
-    update: {},
-    create: { code: program.code, name: program.name, category: program.category, outletId: outletDb.id },
-  })
+  const programDb = await upsertIgnoreRace(
+    () => prisma.program.upsert({
+      where: { code_outletId: { code: programCode, outletId: outletDb.id } },
+      update: {},
+      create: { code: program.code, name: program.name, category: program.category, outletId: outletDb.id },
+    }),
+    () => prisma.program.findUnique({ where: { code_outletId: { code: programCode, outletId: outletDb.id } } }),
+  )
 
   // Build the booking's episode rows + its code.
   //   Content Agency: the booking is a Production (a shoot). The user picked
@@ -149,9 +188,11 @@ export async function createBookingFromPayload(
   //   (OUT-YYMMDD-SHOOTTYPE-NN) as the booking code, and attach the chosen
   //   episodes — we do NOT generate new Episode IDs.
   type EpRecord = { episodeId: string; sequence: number; title: string; programId: string; contentType?: 'ORIGINAL_CONTENT' | 'ADVERTORIAL' }
-  let episodeRecords: EpRecord[]
-  let bookingCode: string
 
+  // AGN: fetch + validate the chosen project episodes BEFORE the locked
+  // transaction below — an external sheet read must never run while holding
+  // the sequence lock.
+  let agnChosen: Array<{ episodeId: string; ep: string | null; projectName: string }> | null = null
   if (isAgency) {
     const epList = await listProjectEpisodes(projectId)
     if (!epList.ok) {
@@ -164,97 +205,124 @@ export async function createBookingFromPayload(
     if (chosen.length === 0) {
       return fail(400, 'Episode ที่เลือกถ่ายไม่ได้แล้ว (อาจถูก Published) — เลือกใหม่')
     }
-    // Production ID = OUT-YYMMDD-NN, numbered per outlet+date (v1.109: [TYPE] dropped).
-    // Prefix matches both new (OUT-YYMMDD-NN) and any legacy (OUT-YYMMDD-TYPE-NN) IDs
-    // for this outlet+date, so the sequence never reuses a number across the migration.
-    const codePrefix = `${outletCode}-${formatShootDateForId(parsedDate)}-`
-    const priorBk = await prisma.booking.findMany({
-      where: { bookingCode: { startsWith: codePrefix } },
-      select: { bookingCode: true },
-    })
-    const seq = priorBk.reduce((mx, b) => {
-      const p = b.bookingCode ? parseEpisodeId(b.bookingCode) : null
-      return p && p.sequence > mx ? p.sequence : mx
-    }, 0) + 1
-    bookingCode = generateEpisodeId(outletCode, parsedDate, seq) // AGN-260423-01
-    episodeRecords = chosen.map((e, idx) => ({
-      episodeId: e.episodeId,
-      sequence: idx + 1,
-      title: e.ep && e.ep !== '-' ? e.ep : e.projectName,
-      programId: programDb.id,
-    }))
-  } else {
-    // Episode ID carries the per-episode program code (v1.46.0 — ops
-    // feedback: "รหัสรายการให้อยู่ใน Booking ID เช่น NWS-KYM-…"):
-    //   [OUT]-[PROG]-[YYMMDD]-[NN]  e.g. NWS-KYM-260616-01  (v1.109: [TYPE] dropped)
-    // sequenced per outlet+program+date, so each show gets its own numbering
-    // stream. Episodes in one booking may carry different programs — each draws
-    // from its own stream.
-    const dateStr = formatShootDateForId(parsedDate)
+    agnChosen = chosen
+  }
 
-    // Upsert each distinct per-episode program once and cache its DB id.
-    const programIdByCode = new Map<string, string>([[programCode, programDb.id]])
-    const nextSeqByProgram = new Map<string, number>()
-    episodeRecords = []
-    for (let idx = 0; idx < episodeInputs.length; idx++) {
-      const ep = episodeInputs[idx]
-      let epProgramId = programIdByCode.get(ep.programCode)
-      if (!epProgramId) {
-        const epProgram = getProgram(outletCode, ep.programCode)!
-        const epProgramDb = await prisma.program.upsert({
+  // Non-AGN: upsert each distinct per-episode program once BEFORE the locked
+  // transaction (idempotent), so the locked section only does sequence reads
+  // + the create.
+  const programIdByCode = new Map<string, string>([[programCode, programDb.id]])
+  if (!isAgency) {
+    for (const ep of episodeInputs) {
+      if (programIdByCode.has(ep.programCode)) continue
+      const epProgram = getProgram(outletCode, ep.programCode)!
+      const epProgramDb = await upsertIgnoreRace(
+        () => prisma.program.upsert({
           where: { code_outletId: { code: ep.programCode, outletId: outletDb.id } },
           update: {},
           create: { code: epProgram.code, name: epProgram.name, category: epProgram.category, outletId: outletDb.id },
-        })
-        epProgramId = epProgramDb.id
-        programIdByCode.set(ep.programCode, epProgramId)
-      }
-
-      // Program segment only when it's a real show code (2–4 alnum chars,
-      // the strict-format constraint) and not just the Episode Type echoed
-      // back by a legacy client — those keep the legacy ID shape.
-      const epProgCode = ep.programCode.trim().toUpperCase()
-      const progForId = /^[A-Z0-9]{2,4}$/.test(epProgCode) && epProgCode !== programCode
-        ? epProgCode
-        : null
-      const streamKey = progForId ?? ''
-      let nextSeq = nextSeqByProgram.get(streamKey)
-      if (nextSeq === undefined) {
-        // v1.109 — sequence is per outlet+program+date (the [TYPE] segment is gone).
-        // Prefix matches both new (…-date-NN) and legacy (…-date-TYPE-NN) IDs so the
-        // number never collides across the migration.
-        const prefix = progForId
-          ? `${outletCode}-${progForId}-${dateStr}-`
-          : `${outletCode}-${dateStr}-`
-        const prior = await prisma.episode.findMany({
-          where: { episodeId: { startsWith: prefix } },
-          select: { episodeId: true },
-        })
-        nextSeq = prior.reduce((mx, e) => {
-          const p = parseEpisodeId(e.episodeId)
-          return p && p.sequence > mx ? p.sequence : mx
-        }, 0) + 1
-      }
-      nextSeqByProgram.set(streamKey, nextSeq + 1)
-
-      episodeRecords.push({
-        episodeId: generateEpisodeId(outletCode, parsedDate, nextSeq, progForId),
-        sequence: nextSeq,
-        title: ep.title,
-        programId: epProgramId,
-        contentType: ep.contentType,
-      })
+        }),
+        () => prisma.program.findUnique({ where: { code_outletId: { code: ep.programCode, outletId: outletDb.id } } }),
+      )
+      programIdByCode.set(ep.programCode, epProgramDb.id)
     }
-    bookingCode = episodeRecords[0].episodeId
   }
 
   // booking.category — v1.98.0: derived from per-episode contentType for non-AGN
   // (radio removed), explicit for AGN (drives folder routing). See booking-category.ts.
   const bookingCategory = deriveBookingCategory(isAgency, category, episodeInputs)
 
-  // Create booking + its episodes. A nested create is atomic on its own.
-  const booking = await prisma.booking.create({
-    data: {
+  const dateStr = formatShootDateForId(parsedDate)
+  // v1.146 review fix — sequence allocation used to be a plain read-then-create
+  // (findMany → reduce → create) with no lock: two bookings submitted at the
+  // same moment for the same outlet+date could compute the same next sequence
+  // and either fail on the @unique bookingCode (first episode) or silently
+  // share an Episode ID (episodeId is deliberately NOT unique). A Postgres
+  // advisory transaction lock keyed per outlet+date serializes the compute +
+  // create; the lock releases automatically at commit/rollback.
+  const seqLockKey = `booking-seq:${outletCode}:${dateStr}`
+
+  // Create booking + its episodes inside the locked transaction.
+  const booking = await prisma.$transaction(async (tx) => {
+    // $executeRaw (not $queryRaw): pg_advisory_xact_lock returns void, which
+    // $queryRaw fails to deserialize — caught in live DB testing.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${seqLockKey}))`
+
+    let episodeRecords: EpRecord[]
+    let bookingCode: string
+    if (isAgency) {
+      // Production ID = OUT-YYMMDD-NN, numbered per outlet+date (v1.109: [TYPE] dropped).
+      // Prefix matches both new (OUT-YYMMDD-NN) and any legacy (OUT-YYMMDD-TYPE-NN) IDs
+      // for this outlet+date, so the sequence never reuses a number across the migration.
+      const codePrefix = `${outletCode}-${dateStr}-`
+      const priorBk = await tx.booking.findMany({
+        where: { bookingCode: { startsWith: codePrefix } },
+        select: { bookingCode: true },
+      })
+      const seq = priorBk.reduce((mx, b) => {
+        const p = b.bookingCode ? parseEpisodeId(b.bookingCode) : null
+        return p && p.sequence > mx ? p.sequence : mx
+      }, 0) + 1
+      bookingCode = generateEpisodeId(outletCode, parsedDate, seq) // AGN-260423-01
+      episodeRecords = agnChosen!.map((e, idx) => ({
+        episodeId: e.episodeId,
+        sequence: idx + 1,
+        title: e.ep && e.ep !== '-' ? e.ep : e.projectName,
+        programId: programDb.id,
+      }))
+    } else {
+      // Episode ID carries the per-episode program code (v1.46.0 — ops
+      // feedback: "รหัสรายการให้อยู่ใน Booking ID เช่น NWS-KYM-…"):
+      //   [OUT]-[PROG]-[YYMMDD]-[NN]  e.g. NWS-KYM-260616-01  (v1.109: [TYPE] dropped)
+      // sequenced per outlet+program+date, so each show gets its own numbering
+      // stream. Episodes in one booking may carry different programs — each draws
+      // from its own stream.
+      const nextSeqByProgram = new Map<string, number>()
+      episodeRecords = []
+      for (let idx = 0; idx < episodeInputs.length; idx++) {
+        const ep = episodeInputs[idx]
+        const epProgramId = programIdByCode.get(ep.programCode)!
+
+        // Program segment only when it's a real show code (2–4 alnum chars,
+        // the strict-format constraint) and not just the Episode Type echoed
+        // back by a legacy client — those keep the legacy ID shape.
+        const epProgCode = ep.programCode.trim().toUpperCase()
+        const progForId = /^[A-Z0-9]{2,4}$/.test(epProgCode) && epProgCode !== programCode
+          ? epProgCode
+          : null
+        const streamKey = progForId ?? ''
+        let nextSeq = nextSeqByProgram.get(streamKey)
+        if (nextSeq === undefined) {
+          // v1.109 — sequence is per outlet+program+date (the [TYPE] segment is gone).
+          // Prefix matches both new (…-date-NN) and legacy (…-date-TYPE-NN) IDs so the
+          // number never collides across the migration.
+          const prefix = progForId
+            ? `${outletCode}-${progForId}-${dateStr}-`
+            : `${outletCode}-${dateStr}-`
+          const prior = await tx.episode.findMany({
+            where: { episodeId: { startsWith: prefix } },
+            select: { episodeId: true },
+          })
+          nextSeq = prior.reduce((mx, e) => {
+            const p = parseEpisodeId(e.episodeId)
+            return p && p.sequence > mx ? p.sequence : mx
+          }, 0) + 1
+        }
+        nextSeqByProgram.set(streamKey, nextSeq + 1)
+
+        episodeRecords.push({
+          episodeId: generateEpisodeId(outletCode, parsedDate, nextSeq, progForId),
+          sequence: nextSeq,
+          title: ep.title,
+          programId: epProgramId,
+          contentType: ep.contentType,
+        })
+      }
+      bookingCode = episodeRecords[0].episodeId
+    }
+
+    return tx.booking.create({
+      data: {
       // bookingCode = the booking's handle: a Production ID (Content Agency)
       // or the first local Episode ID (other outlets).
       bookingCode,
@@ -288,7 +356,7 @@ export async function createBookingFromPayload(
       status: 'REQUESTED',
       isRoutine: isRoutine === true,
       routineGroupId: routineGroupId || null,
-      createdByEmail: actorEmail,
+      createdByEmail: opts.createdByEmail || actorEmail,
       outletId: outletDb.id,
       programId: programDb.id,
       episodes: {
@@ -300,7 +368,8 @@ export async function createBookingFromPayload(
       program: true,
       episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
     },
-  })
+    })
+  }, { timeout: 15000 }) // headroom for lock wait when two creates contend
 
   // Audit — fire-and-forget, outside the booking transaction so an audit
   // failure can't bring down booking creation. logAudit swallows its own
@@ -317,6 +386,8 @@ export async function createBookingFromPayload(
       outletCode,
       programCode,
       shootDate: parsedDate.toISOString(),
+      ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
+      ...(opts.createdByEmail && opts.createdByEmail !== actorEmail ? { createdByEmail: opts.createdByEmail } : {}),
     },
   })
 

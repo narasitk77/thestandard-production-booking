@@ -32,6 +32,22 @@ const OWNER_FK: Record<string, 'rentalJobId' | 'purchaseId' | 'repairTicketId' |
   loan: 'loanId',
 }
 
+// v1.146 review fix — rental/loan/repair records are Admin-only (finance): their
+// CRUD routes all gate on requireAdmin and /admin/rentals|loans|repairs are
+// blocked for non-ADMIN in middleware. The five doc slots attached to those
+// records ARE the financial paperwork, so mutating them must be Admin-only too —
+// previously any console tier (MANAGER/COORDINATOR/SUPPORT) could upload or
+// delete an invoice/receipt by calling this route directly. Purchases keep
+// their own owner+editable guard (purchaseDocGuard) instead.
+const ADMIN_ONLY_OWNER_TYPES = new Set(['rental', 'loan', 'repair'])
+
+function adminOwnerTypeGuard(ownerType: string, role: string | null | undefined): NextResponse | null {
+  if (ADMIN_ONLY_OWNER_TYPES.has(ownerType) && role !== 'ADMIN') {
+    return NextResponse.json({ error: 'เอกสารการเงิน (เช่า/ยืม/ซ่อม) จัดการได้เฉพาะ Admin' }, { status: 403 })
+  }
+  return null
+}
+
 // Top-level folder per category under DRIVE_DOCS_ROOT, then one folder per job
 // inside it ("ผมแบ่งโฟลเดอร์เป็นงาน"). Thai labels match how the team thinks.
 const CATEGORY_FOLDER: Record<string, string> = {
@@ -145,6 +161,7 @@ export async function POST(request: NextRequest) {
       const ownerId = cleanStr(form.get('ownerId'))
       const kind = inEnum(DocKind, form.get('kind')) ? (form.get('kind') as DocKind) : 'OTHER'
       if (!fk || !ownerId) return NextResponse.json({ error: 'ownerType (rental|purchase|repair|loan) + ownerId required' }, { status: 400 })
+      { const blocked = adminOwnerTypeGuard(ownerType, session.role); if (blocked) return blocked }
       if (ownerType === 'purchase') { const blocked = await purchaseDocGuard(ownerId, session.email); if (blocked) return blocked }
       if (!(file instanceof File)) return NextResponse.json({ error: 'file is required' }, { status: 400 })
       if (file.size === 0) return NextResponse.json({ error: 'ไฟล์ว่าง' }, { status: 400 })
@@ -171,6 +188,7 @@ export async function POST(request: NextRequest) {
     const ownerId = cleanStr(b.ownerId)
     const fileName = cleanStr(b.fileName)
     if (!fk || !ownerId) return NextResponse.json({ error: 'ownerType (rental|purchase|repair|loan) + ownerId required' }, { status: 400 })
+    { const blocked = adminOwnerTypeGuard(String(b.ownerType), session.role); if (blocked) return blocked }
     if (String(b.ownerType) === 'purchase') { const blocked = await purchaseDocGuard(ownerId, session.email); if (blocked) return blocked }
     if (!fileName) return NextResponse.json({ error: 'fileName is required' }, { status: 400 })
     const kind = inEnum(DocKind, b.kind) ? b.kind : 'OTHER'
@@ -192,7 +210,9 @@ export async function DELETE(request: NextRequest) {
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   try {
-    const doc = await prisma.documentRef.findUnique({ where: { id }, select: { driveFileId: true, purchaseId: true } })
+    const doc = await prisma.documentRef.findUnique({ where: { id }, select: { driveFileId: true, purchaseId: true, rentalJobId: true, loanId: true, repairTicketId: true } })
+    const docOwnerType = doc?.rentalJobId ? 'rental' : doc?.loanId ? 'loan' : doc?.repairTicketId ? 'repair' : doc?.purchaseId ? 'purchase' : ''
+    { const blocked = adminOwnerTypeGuard(docOwnerType, session.role); if (blocked) return blocked }
     if (doc?.purchaseId) { const blocked = await purchaseDocGuard(doc.purchaseId, session.email); if (blocked) return blocked }
     if (doc?.driveFileId) {
       // Best-effort: a missing/already-deleted Drive file shouldn't block detach.

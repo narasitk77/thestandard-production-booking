@@ -182,14 +182,17 @@ test('shootFolderLayers: AGN nests Project under the category box; others use sh
   assert.equal(agnNoProj.bookingSubfolderName, undefined) // no project box → no layer
 })
 
-test('camerasToPreCreate: CAM-A..CAM-{n} (cap D) + AUDIO if mics; empty for block shot', () => {
-  assert.deepEqual(camerasToPreCreate(2, 1), ['CAM-A', 'CAM-B', 'AUDIO'])
-  assert.deepEqual(camerasToPreCreate(3, 0), ['CAM-A', 'CAM-B', 'CAM-C'])
-  assert.deepEqual(camerasToPreCreate(9, 2), ['CAM-A', 'CAM-B', 'CAM-C', 'CAM-D', 'AUDIO']) // capped at D
-  assert.deepEqual(camerasToPreCreate(null, null), []) // Block Shot / unspecified → none pre-created
+test('camerasToPreCreate: CAM-A..CAM-{n} (cap D) from booked cameraCount; empty for block shot', () => {
+  assert.deepEqual(camerasToPreCreate(2), ['CAM-A', 'CAM-B'])
+  assert.deepEqual(camerasToPreCreate(3), ['CAM-A', 'CAM-B', 'CAM-C'])
+  assert.deepEqual(camerasToPreCreate(9), ['CAM-A', 'CAM-B', 'CAM-C', 'CAM-D']) // capped at D
+  assert.deepEqual(camerasToPreCreate(null), []) // Block Shot / unspecified → none pre-created
 })
 
-test('cameraUploadOptions: never empty (min CAM-A) + always the specials', () => {
+test('cameraUploadOptions: never empty (min CAM-A) + AUDIO if mics + always the specials', () => {
   assert.deepEqual(cameraUploadOptions(0, 0), ['CAM-A', 'DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'])
+  // v1.147 — AUDIO is not PRE-created anymore (sound-merge makes its own), but
+  // it must stay selectable in the upload dropdown for mic bookings.
   assert.deepEqual(cameraUploadOptions(2, 1), ['CAM-A', 'CAM-B', 'AUDIO', 'DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'])
+  assert.deepEqual(cameraUploadOptions(0, 1), ['CAM-A', 'AUDIO', 'DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'])
 })

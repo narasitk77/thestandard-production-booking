@@ -5,6 +5,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.147.0] — 2026-07-14
+
+### Added — 📣 Auto-แจ้งไฟล์พร้อม (footage-ready worker)
+ระบบแจ้งอัตโนมัติเมื่อไฟล์ของงานครบ — คู่ขนานกับปุ่ม ส่งงาน/📣 เดิม (ปุ่มทำงานเหมือนเดิมทุกอย่าง):
+- **นิยาม "ไฟล์พร้อม"** (ต้องครบทุกข้อ): งาน CONFIRMED/COMPLETED ที่ไม่ถูกลบ/ขอยกเลิก · กองถ่ายจบแล้ว (isShootOver, รองรับ multi-day) · ไม่มี upload ค้าง (PENDING/UPLOADING ที่สดกว่า 24 ชม.) · คิว NAS ระบายหมด · Drive walk เจอไฟล์จริง (ครอบทั้ง browser-upload และ NAS→video-merge) · จำนวนไฟล์+ขนาด**นิ่งเกิน 60 นาที** (settle window กันแจ้งกลาง batch)
+- **ส่งครั้งเดียวต่องาน**: คอลัมน์ใหม่ `Booking.readyNotifiedAt` (ปุ่ม 📣 manual ก็ stamp ด้วย — กด manual แล้ว auto ไม่ส่งซ้ำ) + `readySnapshot` เก็บสถานะ settle ข้าม restart; งานที่ ส่งงาน แล้ว (deliveredAt) ไม่ถูกแจ้งซ้ำ
+- **Rollout guard**: มองเฉพาะงานที่ถ่ายภายใน `FOOTAGE_READY_LOOKBACK_DAYS` (default 3 วัน) — เปิดครั้งแรกไม่ blast งานเก่า; จำกัด Drive walk `FOOTAGE_READY_MAX_PER_RUN` (default 5) ต่อรอบ
+- **ปิดเป็น default**: worker ใหม่ `scripts/footage-ready-worker.js` + `GET /api/internal/footage-ready/run` (dormant จนกว่า `FOOTAGE_READY_WORKER_ENABLED=1`); ผู้รับตาม `FOOTAGE_READY_AUDIENCE` = `producer` (default) / `everyone` (producer+crew+ผู้สร้าง แบบเมลแยกรายคน) / `admin` (digest+Discord เท่านั้น — แนะนำใช้ทดลองก่อน); `?dryRun=1` ดู candidate โดยไม่เขียน/ไม่ส่ง; ลง workerSpecs แล้ว (dead-man alert ครอบ)
+- ทดสอบ: unit 7 ตัว (settle logic) + live sweep กับ Postgres จริง 8 เคส (gate ครบ: shoot-not-over, multi-day, photo-album, in-flight upload, delivered/notified/old excluded, dryRun ไม่เขียนอะไร)
+
+### Added — ฟิลเตอร์ตามวันในหน้า Producer
+- `/producer` มีแถวปุ่มกรองเหนือรายการงาน: **ทั้งหมด / วันนี้ / พรุ่งนี้ / 7 วันข้างหน้า / เลือกวันจากปฏิทิน** — กรองฝั่ง client จากรายการที่โหลดแล้ว (ไม่ยิง API เพิ่ม) งานหลายวันนับติดทุกวันในช่วง `shootDate → shootEndDate`, "วันนี้" อิงเวลากรุงเทพฯ (unit test 8 เคสครอบ boundary/timezone)
+
+### Changed — เลิก pre-create โฟลเดอร์ AUDIO (ops)
+- โฟลเดอร์กล้องยังสร้างตามที่จองเป๊ะ (กล้อง 3 → CAM-A/B/C, cap ที่ D) แต่ **AUDIO ไม่ถูกสร้างล่วงหน้าจาก micCount อีกแล้ว** — เสียงเข้ามาทาง _SOUND-STAGING → sound-merge ซึ่ง ensure-create โฟลเดอร์ AUDIO ปลายทางเองอยู่แล้ว (soundDestination ใน sound-merge.ts) การ pre-create ทิ้งไว้ได้แค่ shell ว่างทุกกล่อง/landing
+- Dropdown อัปโหลดยังมีตัวเลือก AUDIO เหมือนเดิมสำหรับงานที่มีไมค์ (สร้างโฟลเดอร์ตอนอัปไฟล์แรก) — พฤติกรรมหน้า upload ไม่เปลี่ยน
+- หมายเหตุ: งาน Block Shot / ไม่ระบุจำนวนกล้อง ยังคงไม่ pre-create CAM (ตาม design เดิม — สร้างตอนอัปโหลด); ถ้าแก้จำนวนกล้องหลัง approve, prep-folders worker รายชั่วโมงจะเติม CAM ให้เองในวันถ่าย
+
+### Fixed — จาก live DB testing (Docker + Postgres 16 จริง)
+- **advisory lock ใช้ `$executeRaw`** — `$queryRaw` deserialize ค่า `void` ของ `pg_advisory_xact_lock` ไม่ได้ (เจอตอนเทสจริง — ถ้าไม่เทสจะพังตอน deploy); ยืนยันแล้ว 5 concurrent creates ได้ sequence 1-5 ไม่ชน
+- **upsert outlet/program กัน P2002 race** — สอง booking แรกสุดของ program ใหม่ที่สร้างพร้อมกัน ตัวแพ้จะ re-read row ที่ตัวชนะสร้าง แทนที่จะ 500
+- ยืนยันบน Postgres จริง: index ใหม่ 4 ตัว apply, คอลัมน์ wasabi/storagePolicy หายจริง, collision-pair guard บล็อกจริง, CAS กัน stale write จริง, purge จำกัดขอบเขตจริง (17/17)
+
+---
+
+## [1.146.0] — 2026-07-13
+
+### Fixed — Hardening pass จาก code audit (19 จุด: security / race / data-integrity)
+**Security & สิทธิ์การเข้าถึง**
+- `GET /api/bookings/[id]/history` เช็ค `canViewBooking` เหมือนหน้า detail แล้ว (เดิมใครล็อกอินก็เปิด audit log ของงานทีมอื่นได้ รวม diff ของ adminNotes).
+- `POST /api/admin/purge-bookings` ต้องส่ง `confirm: 'DELETE ALL'` ตรงตัว (เดิมเช็คแค่ boolean), ลบ AuditLog เฉพาะที่เกี่ยวกับ Booking (เดิมกวาดทั้งตาราง), และเก็บกวาด OTRecord ที่ค้าง bookingId ด้วย.
+- `/api/admin/documents` (เอกสารการเงิน เช่า/ยืม/ซ่อม) จำกัด upload/delete เฉพาะ ADMIN ให้ตรงกับ CRUD route (เดิม console tier ไหนก็เรียกตรงได้).
+- `internal-auth` เทียบ secret แบบ constant-time (`timingSafeEqual`) เหมือน `/api/mcp`.
+
+**Race conditions & compare-and-swap**
+- `calendar-reconcile` เขียน event กลับพร้อม CAS `status:'CONFIRMED', deletedAt:null` ทั้ง 3 จุด (เดิม path attendees-patch-failure ไม่มี CAS เลย) — งานที่ถูกยกเลิกกลาง reconcile จะไม่มี event ค้างบนปฏิทินอีก.
+- PATCH/DELETE booking เช็ค status เดิมตอนเขียนจริง (409 ถ้าสถานะขยับไปแล้ว เช่นชนกับ auto-complete) — กัน COMPLETED โดน revert เป็น CANCELLED.
+- สร้าง booking จองเลข sequence ใต้ Postgres advisory lock ต่อ outlet+วัน — สองงานที่กดพร้อมกันไม่แย่งเลข Episode ID กันแล้ว.
+- ปุ่ม sweep ที่แตะ Drive ทั้ง 6 ตัว (video-merge / sound-merge / footage-sync / prep-folders / landing manage / landing-dedup) มี reentrancy guard คืน 409 ระหว่างรัน — กดซ้ำตอน proxy timeout ไม่เกิดโฟลเดอร์ซ้ำ.
+
+**Data integrity**
+- Rental ที่ ARCHIVED (legacy 221 รายการจากชีทเก่า) ไม่โผล่ใน reminder รายวัน / MCP `list_unpaid_rentals` แล้ว และ `mark_rental_paid` ปฏิเสธการเขียนทับแถว archived.
+- นโยบาย Director auto-invite เฉพาะ AGN บังคับฝั่ง server แล้ว (createCalendarEvent + reconciler + อีเมลตอน approve) — เดิมเช็คแค่ที่ wizard.
+- ปุ่ม Regenerate ID เช็ค collision แบบ pairwise เหมือน bulk planner — กดกับหนึ่งใน 4 คู่ collision v1.109 จะโดน 409 แทนที่จะ migrate ครึ่งเดียว.
+- marker reconciler เช็ค raw id ก่อน normalize — ไม่ลบ `_SHOOT-<id>.txt` ของ booking คู่ collision ที่ยังใช้รหัส [TYPE] เดิม.
+- landing lifecycle ใช้ `shootEndDate` (วันสุดท้ายของกอง) ตัดสินอายุโฟลเดอร์ + prune=today นับงานหลายวันที่คร่อมวันนี้เป็น "ของวันนี้" — โฟลเดอร์ drop ไม่โดนลบกลางกองหลายวัน.
+- reconciler ส่ง `specialEquipment` + `projectName` ครบตอนสร้าง/สร้างซ้ำ event — รายการอุปกรณ์พิเศษและชื่อ show (AGN) ไม่หายจาก event ที่ reconciler สร้าง.
+- `callTime`/`estimatedWrap` validate เป็น HH:MM (24h, zero-padded) ทุก path ที่รับค่า (create / PATCH / producer-edit / MCP schema pattern).
+- MCP `create_booking`: `requestedBy` ที่ตรงกับ User จริงถูกเก็บเป็น `createdByEmail` สะอาดๆ (self-cancel/self-edit/อีเมลยืนยันใช้งานได้), ตัวตน MCP + requestedBy ดิบไปอยู่ใน audit แทน — เลิกต่อ string ปนลงคอลัมน์ identity.
+- `assessCompleteness`: `DRIVE_OK` (legacy dual-write — ไฟล์อยู่ใน Drive จริง) นับเป็น COMPLETE, `WASABI_OK` (ไฟล์อยู่ cloud ที่ถอดไปแล้ว) นับเป็น failed — เลิกค้าง "in-flight" ตลอดกาล.
+- `notifyCalendarAlert` มี cooldown 6 ชม. ต่อ booking+ชนิด (ตาม pattern heartbeat.ts) — DWD เสียทั้งระบบไม่ถล่มอีเมลทุก 10 นาทีอีก; AuditLog ยังบันทึกทุกครั้ง.
+
+### Added — Prisma indexes
+- `Booking @@index([deletedAt, status, shootDate])`, `Episode @@index([bookingId])` + `@@index([programId])`, `Upload @@index([bookingId])` — คอลัมน์ที่ทุก listing/dashboard filter+sort เดิมไม่มี index เลย (มีผลอัตโนมัติตอน deploy ผ่าน `prisma db push` ใน start.sh).
+
+### Added — MCP: key รายไคลเอนต์ + backoff (backward-compatible)
+- `MCP_API_KEYS` (ทางเลือก): key ต่อไคลเอนต์แบบ `<label>:<key>` คั่น comma — หลุดตัวไหน revoke ตัวนั้นได้โดยไม่ rotate ทุกไคลเอนต์. `MCP_API_KEY` เดิมใช้ต่อได้ตามปกติ.
+- Auth ผิดซ้ำเกิน 10 ครั้ง/15 นาทีต่อ IP → 429 ชั่วคราว (กัน brute-force เงียบๆ).
+
+### Removed — ซาก Wasabi (verify แล้วว่าไม่มีโค้ดไหนอ่าน)
+- ลบคอลัมน์ `Upload.wasabiBucket/wasabiKey/wasabiMultipartId/wasabiEtag` และ `Outlet.storagePolicy` + enum `StoragePolicy` ออกจาก schema — Wasabi ถูกถอดตั้งแต่ v1.130 ไม่มีอะไรอ่าน/เขียนอีก (คอลัมน์หายจริงตอน deploy ผ่าน `prisma db push --accept-data-loss` ใน start script; rollback image เก่าจะ re-create คอลัมน์เป็น null เองไม่พัง). ค่า enum `UploadStatus.DRIVE_OK/WASABI_OK` **คงไว้** เพราะแถวเก่ายังถืออยู่.
+
+### Changed — perf
+- `reconcileEquipmentStatus` batch เป็น 2 groupBy + updateMany ต่อกลุ่มสถานะ (เดิม 1-3 query ต่อชิ้นใน loop — เช็คเอาท์ 15-20 ชิ้น = 30-60+ round-trips ใน transaction เดียว).
+
+---
+
 ## [1.141.1] — 2026-07-09
 
 ### Changed — หน้าเช่า: ช่อง "ผูกกับ Booking" คลิกแล้วโชว์รายการงานให้เลือกเลย
