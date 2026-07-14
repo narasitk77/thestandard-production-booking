@@ -16,8 +16,9 @@
  *                      signal that covers BOTH delivery paths (browser uploads
  *                      AND NAS→video-merge, which creates no Upload rows)
  *   f) settled       — fileCount+totalBytes unchanged for FOOTAGE_READY_SETTLE_MS
- *                      (default 60 min) across sweeps, so a multi-batch card dump
- *                      doesn't fire after the first batch
+ *                      (default 2 h — covers the "dump card 1 → travel/dinner →
+ *                      dump card 2" gap) across sweeps, so a multi-batch card
+ *                      dump doesn't fire after the first batch
  *
  * Send-once: Booking.readyNotifiedAt (stamped here AND by the manual notify-ready
  * route, so a manual 📣 suppresses the auto email). deliveredAt-null is also
@@ -122,7 +123,7 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
   const now = new Date()
   const audience = footageReadyAudience()
   const lookbackDays = envInt('FOOTAGE_READY_LOOKBACK_DAYS', 3)
-  const settleMs = envInt('FOOTAGE_READY_SETTLE_MS', 60 * 60_000)
+  const settleMs = envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000)
   const maxPerRun = envInt('FOOTAGE_READY_MAX_PER_RUN', 5)
   const since = new Date(now.getTime() - lookbackDays * DAY)
 

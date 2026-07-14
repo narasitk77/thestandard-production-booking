@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.147.1] — 2026-07-14
+
+### Changed — settle window ของ auto-แจ้งไฟล์: 1 ชม. → 2 ชม. (default)
+- ตาม ops: ช่องโหว่หลักของ 1 ชม. คือ dump การ์ดแรกหลังเก็บกอง → เดินทาง/กินข้าว (60-90 นาที) → dump การ์ดสอง ทำให้แจ้ง "พร้อม" เร็วไปหลังการ์ดแรก; 2 ชม. คลุมช่องว่างนี้ โดยแลกกับแจ้งช้าลง 1 ชม. ซึ่งไม่มีผล (กองจบไปแล้ว). ยัง override ได้ด้วย `FOOTAGE_READY_SETTLE_MS`.
+
+---
+
 ## [1.147.0] — 2026-07-14
 
 ### Added — 📣 Auto-แจ้งไฟล์พร้อม (footage-ready worker)
