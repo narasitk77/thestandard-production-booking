@@ -78,10 +78,15 @@ export async function runCameraFolderNormalize(opts: { dryRun?: boolean } = {}):
   }
   if (allowedDrives.size === 0) throw new Error('resolve driveId ของ root ไม่ได้เลย')
 
-  // One search term per vocab family; 'cam' also matches 'camera'.
+  // One search term per vocab family; 'cam' also matches 'camera'. Scoped
+  // per-drive (corpora:'drive') and fired in parallel — the terms are broad
+  // tokens, and an org-wide allDrives crawl blew the 60s proxy timeout.
   const seen = new Map<string, { id: string; name: string; parents: string[]; driveId?: string | null }>()
-  for (const term of ['cam', 'audio', 'drone', 'switcher', 'photo', 'screen']) {
-    const hits = await findFoldersByNameContains(term)
+  const terms = ['cam', 'audio', 'drone', 'switcher', 'photo', 'screen']
+  const searches = await Promise.all(
+    Array.from(allowedDrives).flatMap(driveId => terms.map(term => findFoldersByNameContains(term, { driveId }))),
+  )
+  for (const hits of searches) {
     for (const h of hits) if (!seen.has(h.id)) seen.set(h.id, h)
   }
   result.searched = seen.size

@@ -765,11 +765,13 @@ export async function findChildFolderByCode(parentId: string, bookingCode: strin
 }
 
 /**
- * v1.147.3 — whole-corpus folder search by name substring (Drive `contains` is
- * case-insensitive). Caller MUST scope results by driveId — allDrives can
- * surface other teams' shared drives.
+ * v1.147.3 — folder search by name substring (Drive `contains` is
+ * case-insensitive token-prefix matching). Pass opts.driveId to scope the
+ * search to ONE shared drive (corpora:'drive') — an allDrives search over
+ * broad tokens like 'cam'/'photo' crawls every drive in the org and blows
+ * past the 60s reverse-proxy timeout.
  */
-export async function findFoldersByNameContains(term: string): Promise<Array<{ id: string; name: string; parents: string[]; driveId?: string | null }>> {
+export async function findFoldersByNameContains(term: string, opts: { driveId?: string } = {}): Promise<Array<{ id: string; name: string; parents: string[]; driveId?: string | null }>> {
   const t = String(term || '').trim()
   if (!t) return []
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
@@ -780,11 +782,12 @@ export async function findFoldersByNameContains(term: string): Promise<Array<{ i
     const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
       q: `name contains '${safe}' and trashed = false and mimeType = '${FOLDER_MIME}'`,
       fields: 'nextPageToken, files(id, name, parents, driveId)',
-      pageSize: 100, pageToken,
-      supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+      pageSize: 1000, pageToken,
+      supportsAllDrives: true, includeItemsFromAllDrives: true,
+      ...(opts.driveId ? { corpora: 'drive', driveId: opts.driveId } : { corpora: 'allDrives' }),
     })
     for (const f of res.data.files ?? []) {
-      if (f.id && f.name) out.push({ id: f.id, name: f.name, parents: (f.parents ?? []) as string[], driveId: f.driveId ?? null })
+      if (f.id && f.name) out.push({ id: f.id, name: f.name, parents: (f.parents ?? []) as string[], driveId: f.driveId ?? opts.driveId ?? null })
     }
     pageToken = res.data.nextPageToken ?? undefined
   } while (pageToken)
