@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.147.3] — 2026-07-14
+
+### Added — admin sweep: normalize ชื่อโฟลเดอร์กล้อง
+- `POST /api/admin/normalize-camera-folders` (dryRun default, `{execute:true}` เพื่อ rename จริง) — กวาดทั้ง VIDEO + Production Team shared drives หาโฟลเดอร์กล้องชื่อไม่ตรงมาตรฐาน ("Cam A", "cam-b", "Audio", "camera d") แล้ว rename เป็น vocab กลาง (CAM-A.., AUDIO/DRONE/SWITCHER/PHOTO/SCREEN). เฉพาะชื่อที่ตรง variant เป๊ะเท่านั้น (ชื่อมีข้อความต่อท้ายไม่แตะ); ถ้า parent มีชื่อ canonical อยู่แล้วจะไม่ rename ซ้อน (รายงานเป็น collision ให้ merge มือ — กันเคสโฟลเดอร์แฝดแบบ landing-dedupe).
+
+---
+
 ## [1.147.2] — 2026-07-14
 
 ### Added — แจ้ง Discord เมื่อ NAS ซิงค์ระบายครบ

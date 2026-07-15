@@ -765,6 +765,40 @@ export async function findChildFolderByCode(parentId: string, bookingCode: strin
 }
 
 /**
+ * v1.147.3 — whole-corpus folder search by name substring (Drive `contains` is
+ * case-insensitive). Caller MUST scope results by driveId — allDrives can
+ * surface other teams' shared drives.
+ */
+export async function findFoldersByNameContains(term: string): Promise<Array<{ id: string; name: string; parents: string[]; driveId?: string | null }>> {
+  const t = String(term || '').trim()
+  if (!t) return []
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const safe = t.replace(/'/g, "\\'")
+  const out: Array<{ id: string; name: string; parents: string[]; driveId?: string | null }> = []
+  let pageToken: string | undefined
+  do {
+    const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      q: `name contains '${safe}' and trashed = false and mimeType = '${FOLDER_MIME}'`,
+      fields: 'nextPageToken, files(id, name, parents, driveId)',
+      pageSize: 100, pageToken,
+      supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+    })
+    for (const f of res.data.files ?? []) {
+      if (f.id && f.name) out.push({ id: f.id, name: f.name, parents: (f.parents ?? []) as string[], driveId: f.driveId ?? null })
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return out
+}
+
+/** v1.147.3 — the shared-drive id a folder lives in (null for My Drive items). */
+export async function getFolderDriveId(folderId: string): Promise<string | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res = await drive.files.get({ fileId: folderId, fields: 'id, driveId', supportsAllDrives: true })
+  return (res.data as { driveId?: string | null }).driveId ?? null
+}
+
+/**
  * v1.111 — GLOBAL code search: find every folder (across all shared drives the
  * service account can see) whose name carries this Production ID, regardless of
  * where ops moved it. The deterministic path resolution breaks whenever a folder
