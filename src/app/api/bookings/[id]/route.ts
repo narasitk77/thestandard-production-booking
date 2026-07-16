@@ -298,7 +298,10 @@ export async function PATCH(
         deleteCalendarEvent(existing.calendarEventId).catch(() => {})
       }
       if (existing.sheetRowIndex) {
-        updateBookingRow(existing.bookingCode || '', { status: 'CANCELLED' }).catch(() => {})
+        // v1.148.0 — also blank col W: the event above was just deleted, and a
+        // stale event id on a CANCELLED row can mislead PMDC's Airtable sync
+        // (it merges Service Jobs by Calendar Event ID).
+        updateBookingRow(existing.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
       }
       await prisma.booking.update({
         where: { id: params.id },
@@ -402,7 +405,8 @@ export async function DELETE(
       deleteCalendarEvent(before.calendarEventId).catch(() => {})
     }
     if (before.sheetRowIndex) {
-      updateBookingRow(before.bookingCode || '', { status: 'CANCELLED' }).catch(() => {})
+      // v1.148.0 — blank col W too (see PATCH cancel path above).
+      updateBookingRow(before.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
     }
     clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
 

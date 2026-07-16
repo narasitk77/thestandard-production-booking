@@ -391,10 +391,14 @@ export async function createBookingFromPayload(
     },
   })
 
-  // Sync to the Producer Dashboard "Bookings" tab — Content Agency only.
-  // Other outlets are recorded in the DB but not pushed to any sheet, so
-  // they never get a sheetRowIndex and later updateBookingRow calls no-op.
-  if (outletCode === 'AGN') {
+  // Sync to the Producer Dashboard "Bookings" tab — ALL outlets (v1.148.0).
+  // Historically AGN-only; PMDC's Airtable sync now consumes every outlet's
+  // bookings (Production ID spine → Service Job → footage mapping), so every
+  // booking gets a row. Row lifecycle (approve/assign/cancel patches) is
+  // already outlet-agnostic — it keys on sheetRowIndex + col-A Production ID.
+  // Kill-switch: set BOOKINGS_EXPORT_AGN_ONLY=1 to restore the old behavior.
+  const agnOnlyExport = process.env.BOOKINGS_EXPORT_AGN_ONLY === '1'
+  if (!agnOnlyExport || outletCode === 'AGN') {
     appendBookingRow({
       ...booking,
       shootDate: booking.shootDate,

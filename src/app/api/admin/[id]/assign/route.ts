@@ -340,6 +340,11 @@ export async function POST(
         assignedEmails: emailRecipients.join(', '),
         status: nextStatus,
         mainVideographer: mainVdo || '',
+        // v1.148.0 — the auto-recover path above can CREATE the calendar
+        // event, but this patch never carried the id, so col W stayed blank
+        // for bookings whose event was born here. PMDC's Airtable sync
+        // dedupes Service Jobs by Calendar Event ID — keep the sheet current.
+        ...(resolvedCalendarEventId ? { calendarEventId: resolvedCalendarEventId } : {}),
       }).catch(e => console.error('updateBookingRow error:', e?.message || e))
     }
 

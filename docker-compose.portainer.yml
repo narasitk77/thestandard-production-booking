@@ -148,6 +148,11 @@ services:
       # finds anything. Dormant until SHOOT_MARKER_WORKER_ENABLED=1.
       SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
       SHOOT_MARKER_WORKER_HOUR: ${SHOOT_MARKER_WORKER_HOUR:-3}
+
+      # v1.148.0 — Bookings-tab export covers ALL outlets by default (PMDC's
+      # Airtable sync consumes the Production ID spine for outlet shoots too).
+      # Set to 1 to restore the historical AGN-only export.
+      BOOKINGS_EXPORT_AGN_ONLY: ${BOOKINGS_EXPORT_AGN_ONLY:-0}
       SHOOT_MARKER_RECONCILE_SECRET: ${SHOOT_MARKER_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
       SHOOT_MARKER_REPORT_EMAIL: ${SHOOT_MARKER_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
       # SHOOT_MARKER_RECONCILE_URL: ${SHOOT_MARKER_RECONCILE_URL:-}  # override only if app isn't on 127.0.0.1:3000
