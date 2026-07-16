@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.148.0] — 2026-07-16
+
+_PR โดยปุ๊ก/Neo (PMDC) — เปิดทาง Production ID spine ฝั่ง outlet ไหลเข้า Airtable_
+
+### Changed
+- **Bookings tab export ครอบทุก outlet** — เดิม `create-booking.ts` เขียนแถวลง Bookings tab เฉพาะ AGN (Content Agency) ทำให้ booking ของ outlet (NWS/TSS/KND/WLT/...) ไม่มีแถวใน sheet → PMDC Airtable sync ไม่เห็น Production ID ของงาน outlet → Service Job ฝั่ง outlet ไม่มี ID ให้ footage pipeline join (พบ 2026-07-16: Footage Log มี PID ครบทุก outlet 147 รายการ แต่ join ได้เฉพาะ AGN) ตอนนี้ทุก booking ได้แถวเสมอ — row lifecycle (approve/assign/cancel patch) outlet-agnostic อยู่แล้ว (คีย์ด้วย sheetRowIndex + col-A lookup) จึงไม่ต้องแก้อะไรเพิ่ม kill-switch: `BOOKINGS_EXPORT_AGN_ONLY=1` คืนพฤติกรรมเดิม (compose default 0)
+
+### Added
+- **`POST /api/admin/backfill-bookings-sheet`** `{ apply?: boolean }` (admin, dry-run default) — one-off เติมย้อนหลังหลังเปิด export ทุก outlet: (1) append แถวให้ booking ที่ยังไม่มี (รวมคิวอนาคตที่ CONFIRMED ไว้แล้ว) (2) claim `sheetRowIndex` ให้ booking ที่มีแถวอยู่แล้วแต่ flag ยัง null (3) เติม Calendar Event ID (col W) ที่ DB รู้แต่ cell ว่าง
+
+### Fixed
+- **Calendar Event ID ไม่เคยถูกเขียนกลับลง sheet นอก approve path** — event ที่เกิดจาก calendar reconciler (ทั้ง 3 ทาง: create/recreate/recreate-หลัง-attendees-patch-fail) และจาก assign auto-recover ไม่เคย backfill ลง col W → cell ว่างถาวร ทั้งที่ PMDC Airtable sync ใช้ Calendar Event ID เป็นคีย์ dedupe Service Job (พบจริง: booking 2 ตัวที่ eid หายทำให้เกิด record ซ้ำใน Airtable) เพิ่ม `syncEventIdToSheet` ใน `calendar-reconcile.ts` + ใส่ `calendarEventId` ใน sheet patch ของ assign route
+- **cancel ไม่ล้าง col W** — ทั้ง PATCH cancel และ DELETE ลบ calendar event แล้ว แต่ทิ้ง event id ค้างในแถว CANCELLED → id ผี pointing ไป event ที่ตายแล้ว (เสี่ยงหลอก dedupe ฝั่ง PMDC) ตอนนี้ blank col W พร้อมกับ set status
+
+---
+
 ## [1.147.3] — 2026-07-14
 
 ### Added — admin sweep: normalize ชื่อโฟลเดอร์กล้อง

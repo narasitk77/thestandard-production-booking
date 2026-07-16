@@ -8,7 +8,8 @@
  *   1. DB      — Booking.bookingCode (+ Episode.episodeId, + FootageLog.productionId)
  *   2. Drive   — rename the booking box folder (non-AGN), the sound-staging folder,
  *                and the photo-album folder (all named by the code)
- *   3. Sheet   — rewrite col A (Production ID) + col Q (Episode IDs) — AGN only
+ *   3. Sheet   — rewrite col A (Production ID) + col Q (Episode IDs) — any booking
+ *                with a sheet row (all outlets since v1.148.0)
  *   4. Calendar— rebuild the event title/description (no attendee notification)
  *
  * DB is authoritative and updated in a transaction; the external side-effects are
@@ -212,9 +213,10 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
   const abort = (stage: string): RegenerateResult =>
     ({ ok: false, bookingId, oldCode, newCode: newBookingCode, episodeChanges, dryRun: false, effects, error: `${stage} failed — DB left unchanged, safe to retry` })
 
-  // (1) Producer Dashboard sheet (AGN rows only). Located by the OLD code, then
-  //     col A/Q are overwritten with the new values. 'not-found' is benign (no
-  //     row, or a prior partial run already rewrote it); only 'error' aborts.
+  // (1) Producer Dashboard sheet (any booking with a row — all outlets since
+  //     v1.148.0). Located by the OLD code, then col A/Q are overwritten with
+  //     the new values. 'not-found' is benign (no row, or a prior partial run
+  //     already rewrote it); only 'error' aborts.
   if (codeChanged && oldCode && booking.sheetRowIndex) {
     const newEpisodeIdsJoined = episodesAfter.map(e => e.episodeId).join(', ')
     effects.sheet = await updateBookingRow(oldCode, {

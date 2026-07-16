@@ -6,8 +6,26 @@ import {
   getCalendarEventAttendees,
   updateCalendarEventAttendees,
 } from './google-calendar'
+import { updateBookingRow } from './google-sheets'
 
 type ReconcileAction = 'ok' | 'patched' | 'created' | 'failed' | 'skipped'
+
+/**
+ * v1.148.0 — backfill a reconciler-created event id into the Bookings-tab row
+ * (col W). The approve route writes the id on its own success path, but events
+ * created/recreated HERE (because the approve-time create failed or the event
+ * went stale) never reached the sheet, leaving Calendar Event ID blank — or
+ * stale — forever. Downstream (PMDC's Airtable sync) dedupes Service Jobs by
+ * this id, so a blank costs a merge. Fire-and-forget; benign 'not-found' when
+ * the booking has no sheet row.
+ */
+function syncEventIdToSheet(
+  booking: { sheetRowIndex?: number | null; bookingCode: string | null },
+  eventId: string,
+) {
+  if (!booking.sheetRowIndex) return
+  updateBookingRow(booking.bookingCode || '', { calendarEventId: eventId }).catch(() => {})
+}
 
 export type ReconcileItem = {
   bookingId: string
@@ -84,6 +102,10 @@ type BookingForReconcile = {
   notes?: string | null
   adminNotes?: string | null
   calendarEventId?: string | null
+  // v1.148.0 — lets syncEventIdToSheet know whether the booking has a
+  // Bookings-tab row to patch. Present on both the findMany() and the
+  // single-booking fetch (all Booking scalars come with include).
+  sheetRowIndex?: number | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Array<{ episodeId: string; title: string }>
@@ -264,6 +286,7 @@ async function processBooking(
       item.action = 'created'
       item.eventId = eventId
       item.htmlLink = htmlLink
+      syncEventIdToSheet(booking, eventId)
       await logAudit({
         actorEmail: options.actorEmail ?? 'calendar-reconcile',
         action: 'calendar.reconcile_created',
@@ -340,6 +363,7 @@ async function processBooking(
       item.action = 'created'
       item.eventId = eventId
       item.htmlLink = htmlLink
+      syncEventIdToSheet(booking, eventId)
       await logAudit({
         actorEmail: options.actorEmail ?? 'calendar-reconcile',
         action: 'calendar.reconcile_recreated',
@@ -436,6 +460,7 @@ async function processBooking(
         item.action = 'created'
         item.eventId = eventId
         item.htmlLink = htmlLink
+        syncEventIdToSheet(booking, eventId)
         await logAudit({
           actorEmail: options.actorEmail ?? 'calendar-reconcile',
           action: 'calendar.reconcile_recreated',

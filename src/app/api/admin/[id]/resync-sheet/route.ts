@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic'
  *
  * Rewrite a booking's Producer Dashboard row (Shoot Date / Shoot End Date / Status)
  * from the DB — for repairing a row that drifted (e.g. a date fixed in the DB but
- * still stale in the sheet). AGN-only rows exist in the sheet; a non-AGN call
+ * still stale in the sheet). Since v1.148.0 every outlet's bookings get sheet
+ * rows; a booking with no row (pre-v1.148 outlet booking not yet backfilled)
  * no-ops ('not-found'). Admin-only.
  */
 export async function POST(
