@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.148.1] — 2026-07-17
+
+### Fixed — backfill-bookings-sheet: กัน apply ตอนยังชี้ SANDBOX
+- `POST /api/admin/backfill-bookings-sheet` ตอน `{apply:true}` จะ **409 ถ้าระบบยังชี้ SANDBOX sheet** (`isUsingSandboxSheet()`) — เดิมถ้าเผลอรันตอน env ชี้ sandbox จะ append งานจริงหลายร้อยแถวลง sheet ผิดตัว, กิน quota, และดูเหมือนเสร็จทั้งที่ Airtable ฝั่ง PMDC ยังไม่เห็นอะไร. ต้องสลับ sheet เป็น production ก่อน (docs/runbook-sheet-swap.md) หรือส่ง `{apply:true, force:true}` ถ้าตั้งใจ backfill sandbox จริง. dry-run (อ่านอย่างเดียว) รันได้เสมอ และทุก response บอก `sheetTarget`/`sheetId`/`tab` ที่กำลังทำงานด้วย เพื่อไม่ให้เขียนผิด sheet โดยไม่รู้ตัว
+
+---
+
 ## [1.148.0] — 2026-07-16
 
 _PR โดยปุ๊ก/Neo (PMDC) — เปิดทาง Production ID spine ฝั่ง outlet ไหลเข้า Airtable_
