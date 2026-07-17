@@ -332,6 +332,16 @@ model Booking {
   // `routineGroupId` ties one generated batch together for bulk cancel.
   isRoutine        Boolean       @default(false)
   routineGroupId   String?
+  // v1.148 — footage bundle: a shoot done on a different day but belonging to
+  // the SAME job (e.g. an interview insert shot 18-07 for a program shot 01-08)
+  // can be linked to a "home" booking so all its footage lands in the home's
+  // Drive box. Each shoot stays its OWN booking (own call time / crew / OT /
+  // calendar chip — no multi-day drag). The link is purely a footage-folder
+  // reparent (id-first). onDelete: SetNull — if the home booking is hard-
+  // deleted the children unlink; their footage stays where it physically sits.
+  bundleParentId   String?
+  bundleParent     Booking?      @relation("BookingBundle", fields: [bundleParentId], references: [id], onDelete: SetNull)
+  bundleChildren   Booking[]     @relation("BookingBundle")
   // v1.62.0 — Auto-Planning fields. The only columns the manual planning sheet
   // had that the booking system didn't; capturing them here kills the manual
   // calendar→sheet copy. All nullable — legacy bookings unaffected.
@@ -356,6 +366,7 @@ model Booking {
   // filters+sorts by these three columns with no index at all, forcing a full
   // table scan that only gets worse as bookings accumulate across years.
   @@index([deletedAt, status, shootDate])
+  @@index([bundleParentId])
   @@map("bookings")
 }
 

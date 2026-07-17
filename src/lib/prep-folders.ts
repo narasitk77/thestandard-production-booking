@@ -65,6 +65,10 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       status: { in: ['CONFIRMED', 'COMPLETED'] },
       deletedAt: null,
       bookingCode: { not: null },
+      // v1.148 — a bundled child's footage box lives INSIDE its home booking's
+      // box (reparented at link time). Prepping it here would recreate a
+      // duplicate box at the canonical location; skip — its box already exists.
+      bundleParentId: null,
     },
     select: {
       id: true, bookingCode: true, cameraCount: true, micCount: true,

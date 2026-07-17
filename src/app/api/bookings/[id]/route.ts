@@ -27,6 +27,9 @@ export async function GET(
         outlet: true,
         program: true,
         episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        // v1.148 — footage bundle state for the admin "รวมโฟลเดอร์" control.
+        bundleParent: { select: { id: true, bookingCode: true } },
+        bundleChildren: { select: { id: true, bookingCode: true, shootDate: true }, orderBy: { shootDate: 'asc' } },
         // v1.50.1 — select list: keep the fields the detail pages render, drop
         // storage internals (wasabi keys/multipart ids, sha256) from the wire.
         uploads: {

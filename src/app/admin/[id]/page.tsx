@@ -33,9 +33,106 @@ interface BookingDetail {
   calendarSyncStatus?: 'PENDING' | 'OK' | 'FAILED' | null
   calendarSyncError?: string | null
   calendarLastSyncedAt?: string | null
+  // v1.148 — footage bundle: this booking's home (if it's a child) + its children (if a home).
+  bundleParent?: { id: string; bookingCode: string | null } | null
+  bundleChildren?: { id: string; bookingCode: string | null; shootDate: string }[]
 }
 
 interface Freelancer { id: string; name: string; role: string; phone: string; contract: string; email: string }
+
+// v1.148 — footage bundle control: link this shoot's footage box into a "home"
+// booking (same job, different day — e.g. an interview insert shot before the
+// main program). Each shoot stays its own booking; only the Drive box merges.
+function BundleControl({ booking, onDone }: { booking: BookingDetail; onDone: () => void }) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState<Array<{ id: string; bookingCode: string | null; shootDate: string; outlet?: { name?: string }; projectName?: string | null }>>([])
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const parent = booking.bundleParent
+  const children = booking.bundleChildren || []
+  const isChild = !!parent
+  const isHome = children.length > 0
+
+  useEffect(() => {
+    if (!open) { setResults([]); return }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      const p = new URLSearchParams({ scope: 'all', hasCode: '1', limit: q.trim().length >= 2 ? '12' : '15' })
+      if (q.trim().length >= 2) p.set('search', q.trim())
+      const res = await fetch(`/api/bookings?${p.toString()}`)
+      const json = await res.json().catch(() => ({}))
+      if (!cancelled) setResults((json.bookings || []).filter((b: any) => b.bookingCode && b.id !== booking.id))
+    }, q.trim().length >= 2 ? 250 : 0)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [q, open, booking.id])
+
+  async function link(parentId: string) {
+    setBusy(true); setErr('')
+    try {
+      const res = await fetch(`/api/admin/${booking.id}/bundle`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parentId }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Link failed')
+      setOpen(false); setQ(''); onDone()
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function unlink() {
+    if (!window.confirm('แยกงานนี้ออกจากชุด? โฟลเดอร์ footage จะถูกย้ายกลับที่เดิม')) return
+    setBusy(true); setErr('')
+    try {
+      const res = await fetch(`/api/admin/${booking.id}/bundle`, { method: 'DELETE' })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Unlink failed')
+      onDone()
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-200">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-gray-400">รวมโฟลเดอร์:</span>
+        {isChild ? (
+          <>
+            <span className="inline-flex items-center gap-1 rounded bg-purple-50 border border-purple-200 px-2 py-0.5 text-[#673ab7]">
+              🔗 อยู่ในชุดของ <span className="font-mono">{parent!.bookingCode}</span>
+            </span>
+            <button onClick={unlink} disabled={busy} className="px-2 py-1 border border-gray-400 text-gray-600 rounded hover:bg-gray-50 disabled:opacity-50">แยกออก</button>
+          </>
+        ) : isHome ? (
+          <span className="text-gray-600">🏠 งานหลักของชุด — footage ของลูกมารวมที่นี่: <span className="font-mono">{children.map(c => c.bookingCode).join(', ')}</span></span>
+        ) : !open ? (
+          <button onClick={() => { setOpen(true); setQ('') }} disabled={busy} className="px-2 py-1 border border-gray-500 text-gray-700 rounded hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-1">
+            🔗 รวมเข้างานหลัก…
+          </button>
+        ) : null}
+        {busy && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+      </div>
+
+      {!isChild && !isHome && open && (
+        <div className="mt-2">
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหางานหลัก (รหัส/ชื่อ) แล้วเลือก…"
+            className="gf-input text-sm w-full max-w-md" />
+          <div className="mt-1 max-h-56 overflow-auto rounded border border-gray-200 divide-y max-w-md">
+            {results.length === 0 ? <div className="px-2 py-2 text-xs text-gray-400">พิมพ์เพื่อค้นหา หรือเลือกจากงานล่าสุด…</div> :
+              results.map(b => (
+                <button key={b.id} onClick={() => link(b.id)} disabled={busy}
+                  className="w-full text-left px-2 py-1.5 text-xs hover:bg-purple-50 disabled:opacity-50">
+                  <span className="font-mono text-gray-800">{b.bookingCode}</span>
+                  <span className="text-gray-500"> · {b.projectName || b.outlet?.name} · {String(b.shootDate).slice(0, 10)}</span>
+                </button>
+              ))}
+          </div>
+          <button onClick={() => { setOpen(false); setQ('') }} className="mt-1 text-xs text-gray-500 hover:text-gray-800">ยกเลิก</button>
+        </div>
+      )}
+      <div className="text-gray-400 mt-1 text-[11px]">งานถ่ายคนละวันแต่งานเดียวกัน (เช่น insert) — footage ไปรวมกล่องเดียว โดยแต่ละวันยังเป็น booking แยก (call time/ทีม/OT/ปฏิทินของตัวเอง)</div>
+      {err && <div className="text-red-600 text-xs mt-1">{err}</div>}
+    </div>
+  )
+}
 
 // Team distribution / group inboxes — quick-select alongside individual crew so
 // an admin can notify a whole team at once (e.g. the shared video / sound desk).
@@ -757,6 +854,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           {regeneratingId && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
           <span className="text-gray-400">ตัด segment เก่า (เช่น -L-/-STD-) → rename โฟลเดอร์ + Sheet + Calendar ให้ตรงกัน</span>
         </div>
+
+        {/* v1.148 — footage bundle: fold this shoot's box into a home booking's box */}
+        <BundleControl booking={booking} onDone={() => {
+          fetch(`/api/bookings/${id}`).then(r => r.json()).then(d => { if (d?.booking) setBooking(d.booking) })
+          showSaved('✓ อัปเดตชุดโฟลเดอร์แล้ว')
+        }} />
       </details>
 
       {/* v1.68 — incomplete-details warning, surfaced right on the card */}

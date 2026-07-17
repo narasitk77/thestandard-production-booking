@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.149.0] — 2026-07-17
+
+### Added — 🔗 รวมโฟลเดอร์ footage ข้ามวัน (bundle งานเดียวกัน)
+งานที่ถ่ายคนละวันแต่เป็นงานเดียวกัน (เช่น insert สัมภาษณ์ถ่าย 18-07 ของรายการที่ถ่ายจริง 01-08) ผูกให้ footage ไปรวมกล่อง Drive เดียวกันได้ โดย**แต่ละวันยังเป็น booking แยก** (call time / ทีม / OT / ปฏิทินของตัวเอง — ไม่มีแถบ multi-day ลากยาว):
+- **กลไก id-first:** ผูก = reparent กล่อง footage ของงานลูกเข้าไปในกล่องงานหลัก (folder ID เดิม ไม่เปลี่ยน) → detect / video-merge / sound-merge / notify-ready / footage-ready / upload ทุกตัวเดินตาม `driveFolders.box` เดิมอยู่แล้ว จึงทำงานต่อได้โดยไม่ต้องแก้ logic
+- **UI:** หน้า admin ของ booking (ในกล่องเครื่องมือ) มี "🔗 รวมเข้างานหลัก…" เลือกงานหลักจาก picker → footage ของงานนี้ย้ายเข้ากล่องงานหลัก; งานหลักโชว์ว่ามีลูกในชุด; แยกออกได้ (ย้ายโฟลเดอร์กลับที่เดิม)
+- **API:** `POST/DELETE /api/admin/[id]/bundle` (admin only); ฟิลด์ใหม่ `Booking.bundleParentId` (self-relation, `onDelete: SetNull` — ลบงานหลักแล้วลูกหลุดชุดเอง ไม่ cascade)
+- **กันซ้ำ:** prep-folders ข้ามงานลูกที่ผูกแล้ว (ไม่สร้างกล่องซ้ำที่ตำแหน่งเดิม); scope เฉพาะ non-AGN (AGN ใช้ Project box ร่วมกันอยู่แล้ว) + ไม่รวม photo-album; ผูกได้ชั้นเดียว
+- ทดสอบ: unit 8 เคส (validation) + live DB 5 เคส (self-relation, prep-skip, SetNull cascade) บน Postgres 16 จริง
+
+---
+
 ## [1.148.0] — 2026-07-16
 
 _PR โดยปุ๊ก/Neo (PMDC) — เปิดทาง Production ID spine ฝั่ง outlet ไหลเข้า Airtable_
