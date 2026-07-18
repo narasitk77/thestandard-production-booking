@@ -78,6 +78,9 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
         programFolderName,
         bookingFolderName,
         bookingFolderNameAlts,
+        // v1.149 — AGN: last-resort match of the shared project box by projectId
+        // (name drift / ops renames), mirroring the create path.
+        bookingFolderCode: isAgency ? booking.projectId ?? undefined : undefined,
         // v1.112 — AGN: descend into the per-booking layer when it exists.
         bookingSubfolderName: layers.bookingSubfolderName,
         bookingSubfolderCode: booking.bookingCode,

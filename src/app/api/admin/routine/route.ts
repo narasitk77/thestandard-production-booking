@@ -4,6 +4,7 @@ import { requireConsole, requireAdmin } from '@/lib/session'
 import { createBookingFromPayload } from '@/lib/create-booking'
 import { generateRoutineDates, ROUTINE_MAX_DAYS } from '@/lib/routine'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { updateBookingRow } from '@/lib/google-sheets'
 import { clearBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 
@@ -77,12 +78,18 @@ export async function POST(request: NextRequest) {
     if (!groupId) return NextResponse.json({ error: 'routineGroupId required' }, { status: 400 })
     const rows = await prisma.booking.findMany({
       where: { routineGroupId: groupId, deletedAt: null },
-      select: { id: true, calendarEventId: true },
+      select: { id: true, calendarEventId: true, bookingCode: true, sheetRowIndex: true },
     })
     if (rows.length === 0) return NextResponse.json({ error: 'ไม่พบงานในชุดนี้' }, { status: 404 })
     for (const r of rows) {
       if (r.calendarEventId) deleteCalendarEvent(r.calendarEventId).catch(() => {})
       clearBookingOT(r.id).catch(() => {})
+      // v1.149 — mirror the cancel flows: blank col W + Status on the Sheet so
+      // the bulk-cancelled rows don't keep a live-looking Status + a dead
+      // Calendar Event ID (PMDC's Airtable sync merges Service Jobs by that id).
+      if (r.sheetRowIndex) {
+        updateBookingRow(r.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
+      }
     }
     await prisma.booking.updateMany({
       where: { routineGroupId: groupId, deletedAt: null },

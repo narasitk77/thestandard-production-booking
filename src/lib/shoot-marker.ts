@@ -96,6 +96,8 @@ async function resolveMarkerFolder(b: BookingForMarker & { bookingCode: string }
     programFolderName: layers.programFolderName,
     bookingFolderName: layers.bookingFolderName,
     bookingCode: isSharedProjectBox ? undefined : b.bookingCode,
+    // v1.149 — shared project box: last-resort match by projectId (name drift).
+    bookingFolderCode: isSharedProjectBox ? b.projectId ?? undefined : undefined,
     bookingFolderNameAlts: isSharedProjectBox ? undefined : [legacyBookingFolderName(b.bookingCode, jobName)],
     bookingSubfolderName: layers.bookingSubfolderName,
     bookingSubfolderCode: b.bookingCode,

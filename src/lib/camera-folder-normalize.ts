@@ -101,10 +101,17 @@ export async function runCameraFolderNormalize(opts: { dryRun?: boolean } = {}):
   result.skippedOverCap = candidates.length - toProcess.length
 
   // Same-parent canonical-sibling check — list each parent only once.
+  // v1.149 — ALSO dedupe within the plan itself: two variants of the same slot
+  // under one parent ("Cam A" + "camera-a") both pass the live-sibling check
+  // (neither is named CAM-A yet), and renaming both manufactures exactly the
+  // same-name-sibling mess this sweep exists to prevent. First one wins; the
+  // rest are reported for manual merge.
   const siblingsByParent = new Map<string, Array<{ id: string; name: string }>>()
+  const plannedTargets = new Set<string>()
   for (const f of toProcess) {
     const parent = f.parents?.[0]
     let action: 'rename' | 'collision' = 'rename'
+    let reason = 'canonical sibling already exists — ต้อง merge มือ'
     if (parent) {
       if (!siblingsByParent.has(parent)) {
         siblingsByParent.set(parent, await listChildFolders(parent).catch(() => []))
@@ -112,10 +119,16 @@ export async function runCameraFolderNormalize(opts: { dryRun?: boolean } = {}):
       const siblings = siblingsByParent.get(parent)!
       if (siblings.some(s => s.id !== f.id && s.name.trim() === f.to)) action = 'collision'
     }
+    const targetKey = `${parent ?? '(no-parent)'} ${f.to}`
+    if (action === 'rename' && plannedTargets.has(targetKey)) {
+      action = 'collision'
+      reason = 'อีก variant ใน run นี้ rename เป็นชื่อเดียวกันแล้ว — ต้อง merge มือ'
+    }
     if (action === 'collision') {
-      result.collisions.push({ id: f.id, from: f.name, to: f.to, reason: 'canonical sibling already exists — ต้อง merge มือ' })
+      result.collisions.push({ id: f.id, from: f.name, to: f.to, reason })
       continue
     }
+    plannedTargets.add(targetKey)
     result.plan.push({ id: f.id, from: f.name, to: f.to })
   }
 
