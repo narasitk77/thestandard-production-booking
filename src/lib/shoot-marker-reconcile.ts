@@ -37,10 +37,11 @@
 import { prisma } from './db'
 import {
   listChildFolders, listFilesInFolder, trashDriveItem, moveFileToFolder,
-  renameDriveItem, findProgramFolderId, dedupeShootInfoFiles, upsertTextFile,
-  readDriveTextFile, hasDriveCredentials,
+  renameDriveItem, findProgramFolderId, findChildFolderByCode, dedupeShootInfoFiles, upsertTextFile,
+  readDriveTextFile, hasDriveCredentials, DRIVE_PHOTO_ROOT,
 } from './google-drive'
-import { outletDriveFolderName, shootFolderLayers, folderNameMatchesCode } from './outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, folderNameMatchesCode, isPhotoAlbumBooking } from './outlet-folders'
+import { bookingShowName } from './display'
 import { computeTypeDroppedId } from './id-migration'
 import { EPISODE_ID_RE_LOOSE } from './episode-id'
 import { renderBookingInfo, bookingInfoInput } from './booking-info'
@@ -130,6 +131,9 @@ export interface ShootMarkerReconcileResult {
   dryRun: boolean
   scannedProjects: number
   scannedBookings: number
+  /** v1.149 — bookings audited by the GENERIC-layout pass (non-AGN outlets +
+   *  AGN without a project + photo-album jobs). Absent on AGN-only runs. */
+  scannedGenericBookings?: number
   fixed: {
     duplicatesTrashed: number
     staleTrashed: number
@@ -352,6 +356,209 @@ export async function reconcileShootMarkers(
   return base
 }
 
+/**
+ * v1.149 — the GENERIC-layout complement of reconcileShootMarkers(). That pass
+ * only covers AGN project boxes (the shared-box layout); every OTHER booking —
+ * non-AGN outlets, AGN without a project, photo-album jobs — had NO automatic
+ * marker repair at all, so a regenerated ID or a failed approve-time write left
+ * the marker stale/missing forever (the crawler then files the shoot under a
+ * dead Production ID, or never sees it). Per booking with a resolvable box:
+ *   1. collapse duplicate `_SHOOT*.txt` (same-name dedupe, keep newest),
+ *   2. a box whose only marker carries a legacy name ("_SHOOT-<code>.txt") gets
+ *      it renamed to the canonical `_SHOOT.txt`; a legacy file BESIDE the
+ *      canonical is trashed as a duplicate,
+ *   3. a missing marker is created; content whose Production ID ≠ the DB code
+ *      or whose date is Buddhist-era is rewritten from the DB.
+ * Never creates folders (approve/prep own creation). Bounded to recent shoots
+ * (sinceDays, default 45) so the nightly pass stays cheap; program-folder
+ * lookups are cached per run.
+ */
+export async function reconcileGenericMarkers(
+  opts: { dryRun?: boolean; sinceDays?: number } = {},
+): Promise<ShootMarkerReconcileResult> {
+  const dryRun = !!opts.dryRun
+  const base: ShootMarkerReconcileResult = {
+    skipped: false, dryRun, scannedProjects: 0, scannedBookings: 0, scannedGenericBookings: 0,
+    fixed: emptyFixed(), warnings: [], errors: 0, details: [],
+  }
+  const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+  if (!root || !hasDriveCredentials()) {
+    return { ...base, skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials' }
+  }
+  const sinceDays = Math.max(1, opts.sinceDays ?? 45)
+  const since = new Date(Date.now() - sinceDays * 24 * 3_600_000)
+
+  const bookings = await prisma.booking.findMany({
+    where: {
+      bookingCode: { not: null },
+      deletedAt: null,
+      status: { in: ['CONFIRMED', 'COMPLETED'] },
+      shootDate: { gte: since },
+      // NOTE: AGN-project bookings are fetched too, but only their PHOTO-ALBUM
+      // jobs are processed here (photo markers live in the Photographer drive,
+      // which the AGN project-box pass never visits); the rest are skipped in
+      // the loop below as the AGN pass's territory. Filtering needs episodes'
+      // program codes, which Prisma can't express in the where clause.
+    },
+    select: {
+      bookingCode: true, status: true, projectId: true, projectName: true, category: true,
+      videoType: true, shootType: true, shootDate: true, shootEndDate: true,
+      callTime: true, estimatedWrap: true, locationName: true,
+      producer: true, producerEmail: true, director: true, directorEmail: true,
+      mainVideographerEmail: true, assignedEmails: true, crewRequired: true,
+      agencyRef: true, notes: true,
+      outlet: { select: { name: true, code: true } },
+      program: { select: { code: true, name: true } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true, sequence: true, program: { select: { code: true, name: true } } } },
+    },
+  })
+
+  type BookingGeneric = (typeof bookings)[number]
+  const markerContent = (b: BookingGeneric): string => renderBookingInfo(bookingInfoInput(b))
+
+  // Per-run caches — many bookings share a program folder.
+  const programIdCache = new Map<string, string | null>()
+  const programKidsCache = new Map<string, Array<{ id: string; name: string }>>()
+
+  for (const b of bookings) {
+    // AGN shared-project bookings (non-photo) belong to reconcileShootMarkers's
+    // project-box walk — skip them here so no booking is double-processed.
+    if (b.outlet.code === 'AGN' && b.projectId && !isPhotoAlbumBooking(b.episodes)) continue
+    base.scannedGenericBookings!++
+    const code = b.bookingCode!.toUpperCase()
+    const actions: string[] = []
+    try {
+      // ── locate the booking's box (find-only) ─────────────────────────────
+      let boxId: string | null = null
+      let boxName = ''
+      if (isPhotoAlbumBooking(b.episodes)) {
+        boxId = await findChildFolderByCode(DRIVE_PHOTO_ROOT, code)
+        boxName = boxId ? `(photo) ${code}` : ''
+      } else {
+        const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
+        const layers = shootFolderLayers({
+          outletCode: b.outlet.code,
+          showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
+          category: b.category,
+          projectId: b.projectId,
+          projectName: b.projectName,
+          bookingCode: b.bookingCode!,
+          jobName,
+        })
+        const canonOutlet = outletDriveFolderName(b.outlet.code)
+        const progKey = `${canonOutlet}\u0000${layers.programFolderName}`
+        if (!programIdCache.has(progKey)) {
+          programIdCache.set(progKey, await findProgramFolderId(root, canonOutlet, layers.programFolderName))
+        }
+        const programId = programIdCache.get(progKey)!
+        if (programId) {
+          if (!programKidsCache.has(programId)) {
+            programKidsCache.set(programId, await listChildFolders(programId))
+          }
+          const kid = programKidsCache.get(programId)!.find(f => folderNameMatchesCode(f.name, code))
+          if (kid) { boxId = kid.id; boxName = kid.name }
+        }
+      }
+      if (!boxId) {
+        // No box on Drive — creation is approve/prep's job, not the reconciler's.
+        base.details.push({ projectId: code, skipped: 'booking box not found on Drive (creation is approve/prep\'s job)' })
+        continue
+      }
+
+      // ── one marker, canonical name ──────────────────────────────────────
+      const dd = await dedupeShootInfoFiles(boxId, { dryRun })
+      if (dd.totalTrashed > 0) {
+        base.fixed.dedupedInSubfolder += dd.totalTrashed
+        actions.push(`dedupe: trashed ${dd.totalTrashed} duplicate marker(s)`)
+      }
+      const files = await listFilesInFolder(boxId)
+      const markers = files.filter(f => SHOOT_FILE_RE.test(f.name))
+      let canonical = markers.find(f => f.name.toLowerCase() === CANONICAL_MARKER.toLowerCase()) ?? null
+      for (const m of markers) {
+        if (canonical && m.id === canonical.id) continue
+        if (!canonical) {
+          // legacy-named only ("_SHOOT-<code>.txt") → normalize to _SHOOT.txt
+          actions.push(`rename legacy "${m.name}" → ${CANONICAL_MARKER}`)
+          if (!dryRun) {
+            try { await renameDriveItem(m.id, CANONICAL_MARKER) }
+            catch (e: any) { base.errors++; actions.push(`  ERROR rename: ${e?.message || e}`); continue }
+          }
+          canonical = m
+          base.fixed.movedIntoBooking++
+        } else {
+          // legacy file BESIDE the canonical → duplicate → trash
+          actions.push(`trash duplicate legacy "${m.name}" (canonical exists)`)
+          if (!dryRun) {
+            try { await trashDriveItem(m.id) }
+            catch (e: any) { base.errors++; actions.push(`  ERROR trash: ${e?.message || e}`); continue }
+          }
+          base.fixed.duplicatesTrashed++
+        }
+      }
+
+      // ── content: create missing, rewrite drift ──────────────────────────
+      if (!canonical) {
+        actions.push(`create MISSING ${CANONICAL_MARKER} for ${code}`)
+        if (!dryRun) {
+          try { await upsertTextFile({ parentFolderId: boxId, name: CANONICAL_MARKER, content: markerContent(b) }) }
+          catch (e: any) { base.errors++; actions.push(`  ERROR create: ${e?.message || e}`); continue }
+        }
+        base.fixed.markersCreated++
+      } else {
+        let drift: string | null = null
+        try {
+          const text = await readDriveTextFile(canonical.id)
+          const pid = parseMarkerProductionId(text)
+          if (!pid || pid.toUpperCase() !== code) drift = `Production ID "${pid ?? '—'}" ≠ ${code}`
+          else if (markerDateHasBuddhistYear(text)) drift = 'วันที่เป็นปีพุทธ (ต้องเป็น ค.ศ.)'
+        } catch (e: any) {
+          base.warnings.push(`อ่าน marker ของ ${code} ไม่ได้: ${e?.message || e} — box ${boxName}`)
+        }
+        if (drift) {
+          actions.push(`rewrite ${CANONICAL_MARKER} for ${code} — ${drift}`)
+          if (!dryRun) {
+            try { await upsertTextFile({ parentFolderId: boxId, name: CANONICAL_MARKER, content: markerContent(b) }) }
+            catch (e: any) { base.errors++; actions.push(`  ERROR rewrite: ${e?.message || e}`); continue }
+          }
+          base.fixed.contentRewritten++
+        }
+      }
+
+      if (actions.length) {
+        base.details.push({
+          projectId: code, box: boxName,
+          boxUrl: `https://drive.google.com/drive/folders/${boxId}`,
+          actions,
+        })
+      }
+    } catch (e: any) {
+      base.errors++
+      base.details.push({ projectId: code, skipped: `error: ${e?.message || String(e)}`, actions })
+    }
+  }
+
+  return base
+}
+
+/** Merge the generic-pass counters into the AGN-pass result (one digest email). */
+export function mergeReconcileResults(agn: ShootMarkerReconcileResult, generic: ShootMarkerReconcileResult): ShootMarkerReconcileResult {
+  return {
+    ...agn,
+    scannedGenericBookings: generic.scannedGenericBookings ?? 0,
+    fixed: {
+      duplicatesTrashed: agn.fixed.duplicatesTrashed + generic.fixed.duplicatesTrashed,
+      staleTrashed: agn.fixed.staleTrashed + generic.fixed.staleTrashed,
+      movedIntoBooking: agn.fixed.movedIntoBooking + generic.fixed.movedIntoBooking,
+      dedupedInSubfolder: agn.fixed.dedupedInSubfolder + generic.fixed.dedupedInSubfolder,
+      contentRewritten: agn.fixed.contentRewritten + generic.fixed.contentRewritten,
+      markersCreated: agn.fixed.markersCreated + generic.fixed.markersCreated,
+    },
+    warnings: [...agn.warnings, ...generic.warnings],
+    errors: agn.errors + generic.errors,
+    details: [...agn.details, ...generic.details],
+  }
+}
+
 /** Human-readable digest for the nightly report email. */
 export function formatReconcileReport(r: ShootMarkerReconcileResult): { subject: string; text: string } {
   if (r.skipped) {
@@ -363,7 +570,7 @@ export function formatReconcileReport(r: ShootMarkerReconcileResult): { subject:
   const subject = `${head} — แก้ ${changes} · เตือน ${r.warnings.length}${r.errors ? ` · error ${r.errors}` : ''}`
 
   const lines: string[] = []
-  lines.push(`สแกน ${r.scannedProjects} โปรเจกต์ · ${r.scannedBookings} booking (AGN)`)
+  lines.push(`สแกน ${r.scannedProjects} โปรเจกต์ · ${r.scannedBookings} booking (AGN)${r.scannedGenericBookings != null ? ` · ${r.scannedGenericBookings} booking (ทั่วไป)` : ''}`)
   lines.push('')
   lines.push('── แก้อัตโนมัติ ─────────────────')
   lines.push(`ลบมาร์กเกอร์ซ้ำ (box-level)   : ${f.duplicatesTrashed}`)

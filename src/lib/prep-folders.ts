@@ -4,11 +4,13 @@
  * approve route already does this per-booking on CONFIRM; this is the daily/
  * hourly safety-net sweep so EVERY booking shooting today has its folders,
  * regardless of when/whether it was approved. Idempotent — ensureShootCameraFolders
- * reuses existing folders, only creates missing ones. Creates folders only (no
- * moving, no _SHOOT.txt — approve handles that).
+ * reuses existing folders, only creates missing ones. v1.149 — the sweep also
+ * writes `_SHOOT.txt` when the booking folder has NONE (approve's one-shot write
+ * is best-effort; a transient Drive error used to leave the box permanently
+ * invisible to the footage crawler). It never overwrites an existing marker.
  */
 import { prisma } from '@/lib/db'
-import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, findFoldersByCode, listFilesRecursive, hasDriveCredentials } from '@/lib/google-drive'
+import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, findFoldersByCode, listFilesInFolder, listFilesRecursive, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
   shootFolderLayers,
@@ -22,8 +24,28 @@ import {
   soundStagingCategoryName,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
+import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
+import { CANONICAL_MARKER_NAME, ensureShootMarkerExists } from '@/lib/shoot-marker'
 // v1.114 — id-first Drive linkage.
 import { rememberDriveLinks } from '@/lib/drive-links'
+
+const SHOOT_FILE_RE = /^_SHOOT.*\.txt$/i
+
+/** v1.149 — create `_SHOOT.txt` when the folder has NO marker at all. Never
+ *  overwrites an existing one (approve/regenerate own the content; the nightly
+ *  reconciler audits it) — this only fills the hole a failed approve-time write
+ *  left. Returns true when a marker was created. */
+async function ensureMarkerFile(folderId: string, b: Parameters<typeof bookingInfoInput>[0] & { bookingCode: string | null }): Promise<boolean> {
+  try {
+    const files = await listFilesInFolder(folderId)
+    if (files.some(f => SHOOT_FILE_RE.test(f.name))) return false
+    await upsertTextFile({ parentFolderId: folderId, name: CANONICAL_MARKER_NAME, content: renderBookingInfo(bookingInfoInput(b)) })
+    return true
+  } catch (e: any) {
+    console.error('[prep] marker ensure failed (non-fatal):', b.bookingCode, e?.message || e)
+    return false
+  }
+}
 
 /** Half-open range matching bookings whose **Bangkok** shoot-day is today.
  *  `Booking.shootDate` is `@db.Date` (date-only) — Prisma returns/compares it as
@@ -69,7 +91,14 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     select: {
       id: true, bookingCode: true, cameraCount: true, micCount: true,
       projectId: true, projectName: true, category: true, crewRequired: true,
-      outlet: { select: { code: true } },
+      // v1.149 — full marker field set: the sweep now also repairs a MISSING
+      // `_SHOOT.txt` (approve's write is best-effort and can fail transiently;
+      // without this the crawler never saw the shoot at all).
+      status: true, videoType: true, shootType: true, shootDate: true, shootEndDate: true,
+      callTime: true, estimatedWrap: true, locationName: true,
+      producer: true, producerEmail: true, director: true, directorEmail: true,
+      mainVideographerEmail: true, assignedEmails: true, agencyRef: true, notes: true,
+      outlet: { select: { code: true, name: true } },
       program: { select: { code: true, name: true } },
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
     },
@@ -97,7 +126,19 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
           if (some.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) { hasFiles = true; break }
         }
         if (hasFiles) {
-          results.push({ bookingCode: b.bookingCode, skipped: 'footage already delivered — skip empty re-prep' })
+          // v1.149 — footage delivered ≠ marker exists: the exact failure this
+          // sweep repairs ("approve's marker write failed") often surfaces AFTER
+          // crew uploaded. Ensure the marker (create-only, proper box resolution,
+          // never a folder create) before skipping the folder re-prep.
+          const marker = await ensureShootMarkerExists(b).catch(e => {
+            console.warn('[prep] marker ensure on delivered booking failed (non-fatal):', b.bookingCode, e?.message || e)
+            return 'skipped' as const
+          })
+          results.push({
+            bookingCode: b.bookingCode,
+            skipped: 'footage already delivered — skip empty re-prep',
+            ...(marker === 'updated' ? { created: [CANONICAL_MARKER_NAME] } : {}),
+          })
           continue
         }
       } catch (e: any) {
@@ -131,7 +172,9 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       try {
         const { bookingFolderId: photoId } = await ensurePhotoAlbumFolder({ bookingCode: b.bookingCode!, bookingFolderName: photoName })
         await rememberDriveLinks(b.id, { photo: photoId })
-        results.push({ bookingCode: b.bookingCode, created: [`(photo) ${photoName}`] })
+        const created = [`(photo) ${photoName}`]
+        if (await ensureMarkerFile(photoId, b)) created.push(CANONICAL_MARKER_NAME)
+        results.push({ bookingCode: b.bookingCode, created })
         prepared++
       } catch (e: any) {
         results.push({ bookingCode: b.bookingCode, error: `photo folder: ${e?.message || e}` })
@@ -189,7 +232,14 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       //    shoot is past + delivered, so the drop drive stays lean (only upcoming +
       //    in-flight shoots) instead of accumulating a folder per past shoot.
       await rememberDriveLinks(b.id, { box: boxId })
-      results.push({ bookingCode: b.bookingCode, created: cameras, prodTeam: 'landing → nightly lifecycle' })
+      // v1.149 — approve's `_SHOOT.txt` write is best-effort (fire-and-forget,
+      // one shot); if it failed, the box existed but the footage crawler could
+      // never see the shoot. The sweep now repairs a missing marker — this is
+      // the only automatic recovery path, so keep it inside the success branch
+      // (boxId is the per-booking folder: AGN = the v1.112 subfolder).
+      const created: string[] = [...cameras]
+      if (await ensureMarkerFile(boxId, b)) created.push(CANONICAL_MARKER_NAME)
+      results.push({ bookingCode: b.bookingCode, created, prodTeam: 'landing → nightly lifecycle' })
       prepared++
     } catch (e: any) {
       results.push({ bookingCode: b.bookingCode, error: e?.message || String(e) })

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { reconcileShootMarkers, formatReconcileReport, totalChanges } from '@/lib/shoot-marker-reconcile'
+import { reconcileShootMarkers, reconcileGenericMarkers, mergeReconcileResults, formatReconcileReport, totalChanges } from '@/lib/shoot-marker-reconcile'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 
@@ -54,7 +54,13 @@ export async function GET(request: NextRequest) {
   const forceReport = searchParams.get('report') === '1'
 
   try {
-    const result = await reconcileShootMarkers({ dryRun, projectId, limitProjects })
+    const agnResult = await reconcileShootMarkers({ dryRun, projectId, limitProjects })
+    // v1.149 — also audit the GENERIC layout (non-AGN outlets + AGN without a
+    // project + photo jobs); those bookings previously had NO marker repair at
+    // all. Skipped when the caller scoped the run to one AGN project.
+    const result = projectId
+      ? agnResult
+      : mergeReconcileResults(agnResult, await reconcileGenericMarkers({ dryRun }))
     const changes = totalChanges(result)
 
     if (!dryRun && changes > 0) {
@@ -62,8 +68,8 @@ export async function GET(request: NextRequest) {
         actorEmail: allowed.actorEmail || 'shoot-marker-worker',
         action: 'drive.reconcile_shoot_markers',
         entityType: 'Drive',
-        entityId: projectId || 'all-agn',
-        changes: { ...result.fixed, warnings: result.warnings.length, errors: result.errors, scannedBookings: result.scannedBookings },
+        entityId: projectId || 'all-bookings',
+        changes: { ...result.fixed, warnings: result.warnings.length, errors: result.errors, scannedBookings: result.scannedBookings, scannedGenericBookings: result.scannedGenericBookings ?? 0 },
       })
     }
 

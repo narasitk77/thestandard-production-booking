@@ -43,6 +43,7 @@ import {
   bookingNeedsSound,
 } from './outlet-folders'
 import { bookingShowName } from './display'
+import { refreshShootMarker } from './shoot-marker'
 import { updateBookingRow } from './google-sheets'
 import { updateCalendarEventDetails } from './google-calendar'
 import { logAudit } from './audit'
@@ -70,6 +71,9 @@ export type RegenerateResult = {
     driveBookingFolder: SideEffect
     driveSoundFolder: SideEffect
     drivePhotoFolder: SideEffect
+    /** v1.149 — `_SHOOT.txt` re-rendered from the post-change booking, so the
+     *  footage crawler never reads a dead Production ID / stale Episode IDs. */
+    driveMarker: SideEffect
     sheet: SideEffect
     calendar: SideEffect
     footageLogRows: number
@@ -81,6 +85,7 @@ const NOOP_EFFECTS: RegenerateResult['effects'] = {
   driveBookingFolder: 'skipped',
   driveSoundFolder: 'skipped',
   drivePhotoFolder: 'skipped',
+  driveMarker: 'skipped',
   sheet: 'skipped',
   calendar: 'skipped',
   footageLogRows: 0,
@@ -389,6 +394,21 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
     })
   } catch (e: any) {
     return { ok: false, bookingId, oldCode, newCode: newBookingCode, episodeChanges, dryRun: false, effects, error: `DB update failed: ${e?.message || e}` }
+  }
+
+  // (5) v1.149 — re-render `_SHOOT.txt` from the committed state. The marker was
+  //     written once at approve time; without this, a regenerated/reprogrammed
+  //     booking's marker keeps the OLD Production ID + Episode IDs forever and
+  //     the footage crawler files the shoot under a dead code. Best-effort AFTER
+  //     the commit (the DB is already authoritative; a marker failure must not
+  //     abort — the nightly marker reconciler is the backstop).
+  if (hasDriveCredentials()) {
+    try {
+      effects.driveMarker = await refreshShootMarker(bookingAfter) === 'updated' ? 'updated' : 'not-found'
+    } catch (e: any) {
+      console.error('[regenerate] marker refresh failed (reconciler will catch up):', e?.message || e)
+      effects.driveMarker = 'error'
+    }
   }
 
   // ── Audit ───────────────────────────────────────────────────────────────

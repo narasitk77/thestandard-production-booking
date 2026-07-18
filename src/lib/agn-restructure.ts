@@ -21,11 +21,20 @@
 import { prisma } from './db'
 import {
   listChildFolders, listFilesInFolder, listFilesRecursive, moveFileToFolder,
-  findProgramFolderId, ensureFolderPath, trashDriveItem, hasDriveCredentials,
+  findProgramFolderId, ensureFolderPath, trashDriveItem, renameDriveItem, hasDriveCredentials,
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName, folderNameMatchesCode,
 } from './outlet-folders'
+import { CANONICAL_MARKER_NAME } from './shoot-marker'
+
+/** A pre-v1.112 box-level marker file ("_SHOOT-<code>.txt"). These must not
+ *  survive under their legacy name after the move: the crawler matches
+ *  `_SHOOT*.txt`, so a moved-but-unrenamed one sits BESIDE the booking's real
+ *  `_SHOOT.txt` and files the same shoot twice under its old [TYPE] id. */
+export function isLegacyMarkerName(name: string): boolean {
+  return /^_SHOOT-[A-Z0-9-]+\.txt$/i.test(name)
+}
 
 export interface AgnRestructureResult {
   skipped: boolean
@@ -148,7 +157,10 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
       const folderIdByCode = new Map<string, string>()
       for (const mv of plan) {
         const tname = targetName(mv.toCode)
-        moves.push(`"${mv.name}" → "${tname}"`)
+        const legacyMarker = isLegacyMarkerName(mv.name)
+        moves.push(legacyMarker
+          ? `"${mv.name}" → "${tname}" (as ${CANONICAL_MARKER_NAME}; trashed instead if one already exists)`
+          : `"${mv.name}" → "${tname}"`)
         if (base.dryRun) { base.moved++; continue }
         let tid = folderIdByCode.get(mv.toCode)
         if (!tid) {
@@ -157,7 +169,29 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
             ?? await ensureFolderPath(boxId, [tname])
           folderIdByCode.set(mv.toCode, tid)
         }
-        try { await moveFileToFolder(mv.id, tid, boxId); base.moved++ }
+        try {
+          // v1.149 — a legacy "_SHOOT-<code>.txt" must not keep its old name in
+          // the booking folder (the crawler reads `_SHOOT*.txt`, so it would file
+          // the shoot AGAIN under the dead [TYPE] id). Mirror the reconciler:
+          // rename to the canonical marker after the move — or, when the booking
+          // folder already HAS `_SHOOT.txt`, trash the legacy duplicate instead.
+          if (legacyMarker) {
+            const targetFiles = await listFilesInFolder(tid)
+            const hasCanonical = targetFiles.some(f => f.name.toLowerCase() === CANONICAL_MARKER_NAME.toLowerCase())
+            if (hasCanonical) {
+              await trashDriveItem(mv.id)
+              base.trashed++
+              moves.push(`  (canonical existed — trashed "${mv.name}" as duplicate)`)
+              continue
+            }
+            await moveFileToFolder(mv.id, tid, boxId)
+            await renameDriveItem(mv.id, CANONICAL_MARKER_NAME)
+            base.moved++
+            continue
+          }
+          await moveFileToFolder(mv.id, tid, boxId)
+          base.moved++
+        }
         catch (e: any) { base.errors++; moves.push(`ERROR "${mv.name}": ${e?.message || e}`) }
       }
 

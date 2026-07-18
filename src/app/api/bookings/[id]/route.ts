@@ -12,6 +12,8 @@ import { isShootOver } from '@/lib/booking-complete'
 import { isValidHHMM } from '@/lib/shoot-window'
 import { logAudit, diffBooking } from '@/lib/audit'
 import { normalizeBuddhistYear } from '@/lib/thai-date'
+import { refreshShootMarker } from '@/lib/shoot-marker'
+import { hasDriveCredentials } from '@/lib/google-drive'
 import type { BookingStatus } from '@prisma/client'
 
 export async function GET(
@@ -329,6 +331,17 @@ export async function PATCH(
       )
     ) {
       syncBookingOT(params.id).catch(e => console.error('syncBookingOT error:', e))
+    }
+
+    // v1.149 — edits to a live booking must also flow to the Drive `_SHOOT.txt`
+    // marker (same principle as the calendar patch above): episode titles, times,
+    // location, crew all render into the marker the footage crawler reads.
+    // Fire-and-forget find-only refresh — never creates folders, never blocks
+    // the edit; the nightly marker reconciler is the backstop.
+    if ((booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') && hasDriveCredentials()) {
+      refreshShootMarker(booking).catch(e =>
+        console.error('[booking-patch] marker refresh failed (non-fatal):', e?.message || e),
+      )
     }
 
     return NextResponse.json({ booking })
