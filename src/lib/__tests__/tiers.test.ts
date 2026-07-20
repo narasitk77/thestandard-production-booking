@@ -49,12 +49,20 @@ test('tierAllows: every tier can open its OWN booking detail + self-edit (v1.92.
   }
 })
 
-test('tierAllows: crew = upload job task, not console/producer', () => {
+test('tierAllows: crew = upload job task, not the console', () => {
   assert.equal(tierAllows('crew', '/upload'), true)
   assert.equal(tierAllows('crew', '/upload?bookingId=x'.split('?')[0]), true)
   assert.equal(tierAllows('crew', '/my-bookings'), true)
   assert.equal(tierAllows('crew', '/admin'), false)
-  assert.equal(tierAllows('crew', '/producer'), false)
+})
+
+test('tierAllows: /producer is open to every tier (v1.148.2 — producing is a role-on-booking, not a job title)', () => {
+  // 9 real producers (assistants/creators/PMs, e.g. aphisit.h with 16 bookings)
+  // sat in the crew tier and couldn't reach /producer to send edit requests.
+  // The page scopes all data by the session's own producerEmail, so this is safe.
+  for (const tier of ['crew', 'producer', 'coordinator', 'sound-mgmt', 'admin'] as const) {
+    assert.equal(tierAllows(tier, '/producer'), true, `${tier} must reach /producer`)
+  }
 })
 
 test('tierAllows: every signed-in tier can open /new (the booking wizard is for everyone)', () => {

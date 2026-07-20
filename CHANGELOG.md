@@ -12,6 +12,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.148.2] — 2026-07-19
+
+### Fixed — เมนู Producer หายสำหรับคนที่เป็น producer จริงแต่ตำแหน่งไม่ใช่ "Producer"
+- พบ 9 คน (เช่น aphisit.h — "Assistant to KND Manager" แต่เป็น producer บน 16 งาน, รวมถึง Content Creator/Project Manager หลายคน) ไม่เห็นเมนู Producer และเปิด /producer ไม่ได้ → ส่งคำขอแก้ไข/ขอเลื่อนเวลาไม่ได้เลย เพราะ tier ผูกกับ**ชื่อตำแหน่ง** ("position contains producer") แต่การเป็น producer คือ**บทบาทบนงาน**
+- แก้ 2 จุด: (1) `getProducerAccess` เพิ่มเงื่อนไข "เป็น producerEmail บนงานที่ยังไม่ถูกลบอย่างน้อย 1 งาน" → เมนูโชว์ตามความจริง (2) `/producer` เข้า ALWAYS ใน tier gate — หน้า/API scope ข้อมูลด้วย producerEmail ของ session เองอยู่แล้ว เปิดกว้างจึงปลอดภัย (บทเรียนเดียวกับ /new และ /dashboard)
+- การส่งคำขอ (producer-message) ไม่ต้องแก้ — เช็ค owner ต่อ booking อยู่แล้ว
+
+## [1.148.1] — 2026-07-19
+
+### Added — รั้วกัน backfill ยิงใส่ sandbox sheet
+- `POST /api/admin/backfill-bookings-sheet` ปฏิเสธ (409) เมื่อ `PRODUCER_DASHBOARD_SHEET_ID` ยังชี้ sandbox — กันมือลั่น apply ระหว่างรอสลับ sheet จริง (override ได้ด้วย `{ apply: true, force: true }` เมื่อจงใจเทสกับ sandbox)
+
+---
+
 ## [1.148.0] — 2026-07-16
 
 _PR โดยปุ๊ก/Neo (PMDC) — เปิดทาง Production ID spine ฝั่ง outlet ไหลเข้า Airtable_

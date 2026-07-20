@@ -77,9 +77,19 @@ export async function getProducerAccess(email: string | null | undefined): Promi
       where: { email: email.toLowerCase() },
       select: { role: true, position: true },
     })
-    if (!u) return false
-    if (u.role === 'ADMIN') return true
-    return (u.position || '').toLowerCase().includes('producer')
+    if (u?.role === 'ADMIN') return true
+    if ((u?.position || '').toLowerCase().includes('producer')) return true
+    // v1.148.2 — "producer" is a role-ON-A-BOOKING, not a job title. Assistants,
+    // content creators and PMs produce shoots too (found 2026-07-19: 9 real
+    // producers locked out of the Producer menu — e.g. aphisit.h, position
+    // "Assistant to KND Manager", producer on 16 live bookings — so they
+    // couldn't submit update/time-change requests). Anyone who IS the named
+    // producer on a live booking gets the menu; the per-booking APIs still
+    // enforce ownership themselves.
+    const n = await prisma.booking.count({
+      where: { producerEmail: { equals: email, mode: 'insensitive' }, deletedAt: null },
+    })
+    return n > 0
   } catch {
     return false
   }

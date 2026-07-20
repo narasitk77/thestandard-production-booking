@@ -47,7 +47,13 @@ export function tierHome(tier: Tier): string {
 // reachable by everyone, like '/new': blocking them at the tier gate trapped
 // non-admin tiers after submitting a booking, and locked the roster out of
 // recording their own OT. Their own layouts/APIs do the real authorization.
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot']
+// v1.148.2 — '/producer' joined ALWAYS: being a producer is a role-on-a-booking,
+// not a job title, so the position-based tier can't know who needs it (9 real
+// producers — assistants/creators/PMs — were locked out and couldn't send
+// update/time-change requests). The page + its APIs already scope everything
+// by the session's own producerEmail, so opening it with zero bookings just
+// shows an empty list. Same lesson as /new and /dashboard above.
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],
