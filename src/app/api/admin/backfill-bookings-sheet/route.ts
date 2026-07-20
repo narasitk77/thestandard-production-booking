@@ -3,7 +3,7 @@ import { google } from 'googleapis'
 import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
 import { appendBookingRow, updateBookingRow, getSheetsReadAuth } from '@/lib/google-sheets'
-import { getProducerDashboardSheetId, getBookingsTabName } from '@/lib/google-config'
+import { getProducerDashboardSheetId, getBookingsTabName, isUsingSandboxSheet } from '@/lib/google-config'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -27,6 +27,15 @@ export const maxDuration = 300
  *
  * Default is a DRY RUN returning the full plan; pass { apply: true } to
  * execute. Honors BOOKINGS_EXPORT_AGN_ONLY=1 (appends AGN only). Admin-only.
+ *
+ * v1.148.1 — SANDBOX GUARD: `apply` is refused while the app still points at
+ * the sandbox Producer Dashboard sheet. The entire point of this backfill is
+ * to feed PMDC's Airtable sync off the PRODUCTION Bookings tab; running it
+ * against the sandbox would append every live booking (hundreds of rows) into
+ * the wrong sheet, burn quota, and LOOK done while Airtable still sees
+ * nothing. Swap the sheet first (docs/runbook-sheet-swap.md), or pass
+ * { apply: true, force: true } if you really do mean the sandbox. The dry run
+ * is read-only and always allowed — every response reports its sheet target.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -34,7 +43,25 @@ export async function POST(request: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     const body = await request.json().catch(() => ({}))
     const apply = body?.apply === true
+    const force = body?.force === true
     const agnOnly = process.env.BOOKINGS_EXPORT_AGN_ONLY === '1'
+
+    const sandbox = isUsingSandboxSheet()
+    const target = {
+      sheetTarget: sandbox ? ('sandbox' as const) : ('production' as const),
+      sheetId: getProducerDashboardSheetId(),
+      tab: getBookingsTabName(),
+    }
+    if (apply && sandbox && !force) {
+      return NextResponse.json({
+        error:
+          'ระบบยังชี้ไป SANDBOX Producer Dashboard sheet — backfill จะเขียนลง sheet ผิดตัว ' +
+          'และ Airtable ฝั่ง PMDC จะยังไม่เห็นอะไรเลย. ตั้ง PRODUCER_DASHBOARD_SHEET_ID ' +
+          'ให้เป็น sheet production ก่อนแล้ว redeploy (ดู docs/runbook-sheet-swap.md) — ' +
+          'ถ้าตั้งใจจะ backfill ลง sandbox จริงๆ ส่ง { apply: true, force: true }',
+        ...target,
+      }, { status: 409 })
+    }
 
     // ── Read the tab once: col A (Production ID) + col W (Calendar Event ID)
     const sheets = google.sheets({ version: 'v4', auth: getSheetsReadAuth() })
@@ -59,6 +86,8 @@ export async function POST(request: NextRequest) {
 
     const plan = {
       dryRun: !apply,
+      ...target, // v1.148.1 — always say WHICH sheet this plan is about
+      forcedSandbox: apply && sandbox && force,
       agnOnly,
       sheetRows: sheetRows.length,
       dbBookings: bookings.length,
