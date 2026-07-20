@@ -91,7 +91,13 @@ export function parseMarkerProductionId(text: string): string | null {
  */
 export function markerDateHasBuddhistYear(text: string): boolean {
   for (const line of text.split('\n')) {
-    if (!/วันที่|Date/i.test(line)) continue
+    // v1.148.3 — ONLY the Schedule "วันที่ / Date" LABEL line, not any line that
+    // merely contains the word "วันที่". Notes are free text (e.g. a client note
+    // "ลูกค้ายืนยันวันที่ 3 มีนาคม 2569") and would otherwise trip this forever —
+    // the reconciler rewrites the marker, the พ.ศ. year in Notes survives, and it
+    // re-drifts + re-emails every night. The renderer writes the label
+    // left-justified, padded, then ": <date>" (see booking-info.ts `line()`).
+    if (!/^\s*วันที่ \/ Date\s*:/.test(line)) continue
     for (const y of line.match(/\b(\d{4})\b/g) || []) {
       if (parseInt(y, 10) >= 2500) return true
     }
@@ -319,6 +325,7 @@ export async function reconcileShootMarkers(
         }
         // read the existing canonical marker + verify content
         let drift: string | null = null
+        let driftIsBuddhistDate = false
         try {
           const files = await listFilesInFolder(sub.id)
           const marker = files.find(fx => fx.name.toLowerCase() === CANONICAL_MARKER.toLowerCase())
@@ -327,18 +334,27 @@ export async function reconcileShootMarkers(
           const text = await readDriveTextFile(marker.id)
           const pid = parseMarkerProductionId(text)
           if (!pid || pid.toUpperCase() !== code) drift = `Production ID "${pid ?? '—'}" ≠ ${code}`
-          else if (markerDateHasBuddhistYear(text)) drift = 'วันที่เป็นปีพุทธ (ต้องเป็น ค.ศ.)'
+          else if (markerDateHasBuddhistYear(text)) { drift = 'วันที่เป็นปีพุทธ (ต้องเป็น ค.ศ.)'; driftIsBuddhistDate = true }
         } catch (e: any) {
           base.warnings.push(`อ่าน marker ของ ${code} ไม่ได้: ${e?.message || e} — box ${boxName}`)
           continue
         }
         if (drift) {
-          actions.push(`rewrite _SHOOT.txt for ${code} — ${drift}`)
-          if (!dryRun) {
-            try { await upsertTextFile({ parentFolderId: sub.id, name: CANONICAL_MARKER, content: markerContent(bk) }) }
-            catch (e: any) { base.errors++; actions.push(`  ERROR rewrite: ${e?.message || e}`); continue }
+          const newContent = markerContent(bk)
+          // v1.148.3 — if the drift is a Buddhist-era date but the freshly
+          // rendered marker is STILL Buddhist, the shootDate in the DB is itself
+          // พ.ศ.; rewriting can't fix it and would re-drift every night. Warn a
+          // human (fix the booking) instead of counting a phantom fix.
+          if (driftIsBuddhistDate && markerDateHasBuddhistYear(newContent)) {
+            base.warnings.push(`marker ${code} วันที่เป็นปีพุทธ แต่ค่าใน DB ก็เป็น พ.ศ. — แก้วันถ่ายที่ booking ก่อน (box ${boxName})`)
+          } else {
+            actions.push(`rewrite _SHOOT.txt for ${code} — ${drift}`)
+            if (!dryRun) {
+              try { await upsertTextFile({ parentFolderId: sub.id, name: CANONICAL_MARKER, content: newContent }) }
+              catch (e: any) { base.errors++; actions.push(`  ERROR rewrite: ${e?.message || e}`); continue }
+            }
+            base.fixed.contentRewritten++
           }
-          base.fixed.contentRewritten++
         }
       }
 
@@ -374,7 +390,7 @@ export async function reconcileShootMarkers(
  * lookups are cached per run.
  */
 export async function reconcileGenericMarkers(
-  opts: { dryRun?: boolean; sinceDays?: number } = {},
+  opts: { dryRun?: boolean; sinceDays?: number; limit?: number } = {},
 ): Promise<ShootMarkerReconcileResult> {
   const dryRun = !!opts.dryRun
   const base: ShootMarkerReconcileResult = {
@@ -411,6 +427,11 @@ export async function reconcileGenericMarkers(
       program: { select: { code: true, name: true } },
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true, sequence: true, program: { select: { code: true, name: true } } } },
     },
+    // v1.148.3 — `limit` bounds the batch (most-recent shoots first) so a staged
+    // rollout can exercise the GENERIC pass on N bookings, matching the AGN
+    // pass's `limitProjects`. Unbounded when omitted (the nightly default).
+    orderBy: { shootDate: 'desc' },
+    ...(opts.limit ? { take: Math.max(1, opts.limit) } : {}),
   })
 
   type BookingGeneric = (typeof bookings)[number]
@@ -506,21 +527,29 @@ export async function reconcileGenericMarkers(
         base.fixed.markersCreated++
       } else {
         let drift: string | null = null
+        let driftIsBuddhistDate = false
         try {
           const text = await readDriveTextFile(canonical.id)
           const pid = parseMarkerProductionId(text)
           if (!pid || pid.toUpperCase() !== code) drift = `Production ID "${pid ?? '—'}" ≠ ${code}`
-          else if (markerDateHasBuddhistYear(text)) drift = 'วันที่เป็นปีพุทธ (ต้องเป็น ค.ศ.)'
+          else if (markerDateHasBuddhistYear(text)) { drift = 'วันที่เป็นปีพุทธ (ต้องเป็น ค.ศ.)'; driftIsBuddhistDate = true }
         } catch (e: any) {
           base.warnings.push(`อ่าน marker ของ ${code} ไม่ได้: ${e?.message || e} — box ${boxName}`)
         }
         if (drift) {
-          actions.push(`rewrite ${CANONICAL_MARKER} for ${code} — ${drift}`)
-          if (!dryRun) {
-            try { await upsertTextFile({ parentFolderId: boxId, name: CANONICAL_MARKER, content: markerContent(b) }) }
-            catch (e: any) { base.errors++; actions.push(`  ERROR rewrite: ${e?.message || e}`); continue }
+          const newContent = markerContent(b)
+          // v1.148.3 — see AGN pass: warn (don't churn) when the DB shootDate is
+          // itself พ.ศ. so a rewrite would leave the marker still Buddhist.
+          if (driftIsBuddhistDate && markerDateHasBuddhistYear(newContent)) {
+            base.warnings.push(`marker ${code} วันที่เป็นปีพุทธ แต่ค่าใน DB ก็เป็น พ.ศ. — แก้วันถ่ายที่ booking ก่อน (box ${boxName})`)
+          } else {
+            actions.push(`rewrite ${CANONICAL_MARKER} for ${code} — ${drift}`)
+            if (!dryRun) {
+              try { await upsertTextFile({ parentFolderId: boxId, name: CANONICAL_MARKER, content: newContent }) }
+              catch (e: any) { base.errors++; actions.push(`  ERROR rewrite: ${e?.message || e}`); continue }
+            }
+            base.fixed.contentRewritten++
           }
-          base.fixed.contentRewritten++
         }
       }
 

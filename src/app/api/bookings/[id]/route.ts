@@ -338,7 +338,36 @@ export async function PATCH(
     // location, crew all render into the marker the footage crawler reads.
     // Fire-and-forget find-only refresh — never creates folders, never blocks
     // the edit; the nightly marker reconciler is the backstop.
-    if ((booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') && hasDriveCredentials()) {
+    //
+    // v1.148.3 — gate on whether a field that actually RENDERS into the marker
+    // was part of this edit (mirror the OT-sync gate above). A pure status flip
+    // or an equipment/van/headcount-only edit no longer rewrites _SHOOT.txt —
+    // that write is a non-atomic list-then-create, so churning it on every PATCH
+    // was needless load and a drift risk. Fields below = the marker's rendered
+    // set (see booking-info.ts renderBookingInfo); status isn't rendered.
+    const markerFieldEdited =
+      notes !== undefined ||
+      callTime !== undefined ||
+      estimatedWrap !== undefined ||
+      shootEndDate !== undefined ||
+      shootType !== undefined ||
+      locationName !== undefined ||
+      videoType !== undefined ||
+      category !== undefined ||
+      producer !== undefined ||
+      producerEmail !== undefined ||
+      director !== undefined ||
+      directorEmail !== undefined ||
+      agencyRef !== undefined ||
+      Array.isArray(crewRequired) ||
+      Array.isArray(assignedEmails) ||
+      Array.isArray(episodeTitles)
+
+    if (
+      markerFieldEdited &&
+      (booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') &&
+      hasDriveCredentials()
+    ) {
       refreshShootMarker(booking).catch(e =>
         console.error('[booking-patch] marker refresh failed (non-fatal):', e?.message || e),
       )
