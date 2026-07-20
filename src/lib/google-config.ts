@@ -20,27 +20,42 @@
  */
 
 /**
- * SANDBOX Producer Dashboard sheet id. Fallback when
- * PRODUCER_DASHBOARD_SHEET_ID env is unset. Production deploys MUST
- * override this via the stack env to point at the real Producer
- * Dashboard sheet — see docs/runbook-sheet-swap.md for the swap procedure.
+ * The team's real, in-use Producer Dashboard sheet — the ONE sheet that
+ * owns "All Projects", "_Users", "_EPs", and the "Bookings" tab the app
+ * writes back to. Confirmed by ปุ๊ก (PMDC owner) 2026-07-21: this is
+ * PRODUCTION, and the PMDC Airtable sync reads its "Bookings" tab daily.
+ * It is the default when PRODUCER_DASHBOARD_SHEET_ID env is unset.
+ *
+ * Set that env var ONLY to point at a *different* (throwaway / test)
+ * sheet — doing so flips isUsingSandboxSheet() to true and re-arms the
+ * backfill guard. See docs/runbook-sheet-swap.md.
+ *
+ * NOTE (v1.148.3): this constant was previously named
+ * SANDBOX_PRODUCER_DASHBOARD_SHEET_ID with the same value, which
+ * mislabeled the live production sheet as "sandbox" — so /api/health
+ * always reported isSandbox:true and the v1.148.1 backfill guard 409'd
+ * every `apply` against the real sheet (the reported "still on sandbox"
+ * blocker). There is no separate sandbox sheet; the team uses this one.
+ * Renamed + inverted the sandbox test below to fix it.
  */
-export const SANDBOX_PRODUCER_DASHBOARD_SHEET_ID =
+export const PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID =
   '10TnR03z7qx1gYf6yCqnFG3TDcvEAwXpZqSJTMNpSzL4'
 
 /** The currently-active Producer Dashboard sheet id (env wins). */
 export function getProducerDashboardSheetId(): string {
   const fromEnv = process.env.PRODUCER_DASHBOARD_SHEET_ID?.trim()
-  return fromEnv || SANDBOX_PRODUCER_DASHBOARD_SHEET_ID
+  return fromEnv || PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID
 }
 
 /**
- * True when the app is using the SANDBOX sheet (i.e. env override is
- * missing or matches the sandbox id). Surfaced in /api/health so admins
- * can verify production is pointed at a real sheet before going live.
+ * True when the app is pointed at a NON-production sheet — i.e. the env
+ * override is set to something other than the real Producer Dashboard.
+ * Default (no override, or override == the production id) is false.
+ * Surfaced in /api/health and used by the backfill guard so a stray
+ * `apply` can't dump hundreds of live bookings into a throwaway sheet.
  */
 export function isUsingSandboxSheet(): boolean {
-  return getProducerDashboardSheetId() === SANDBOX_PRODUCER_DASHBOARD_SHEET_ID
+  return getProducerDashboardSheetId() !== PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID
 }
 
 /** Bookings tab name inside the Producer Dashboard sheet. */

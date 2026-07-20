@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.148.3] — 2026-07-21
+
+### Fixed — Producer Dashboard sheet was mislabeled "sandbox" (unblocks v1.148 backfill)
+- `10TnR0…pSzL4` is the team's **real production** Producer Dashboard (confirmed by ปุ๊ก/PMDC — the PMDC Airtable sync reads its `Bookings` tab daily). The code hardcoded it as `SANDBOX_PRODUCER_DASHBOARD_SHEET_ID`, so `isUsingSandboxSheet()` returned **true** whenever the app pointed at the live sheet → `/api/health` permanently showed `SANDBOX`, and the v1.148.1 backfill guard **409'd every `apply`** against the real sheet. That was the "prod still points at sandbox" blocker — it was a label bug, not an env misconfig.
+- Renamed the constant → `PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID` (same value, now the correct **default** when `PRODUCER_DASHBOARD_SHEET_ID` is unset) and **inverted** `isUsingSandboxSheet()` to mean "env override points at a *different*, non-production sheet". Default deploy is now correctly `isSandbox:false`, so `POST /api/admin/backfill-bookings-sheet {apply:true}` runs against production without `force`.
+- `/api/health` now reports `productionId` instead of `sandboxId`. `docs/runbook-sheet-swap.md` updated: production is the default; set the env var only to point at a throwaway/test sheet. No separate sandbox sheet exists.
+
+---
+
 ## [1.148.1] — 2026-07-17
 
 ### Fixed — backfill-bookings-sheet: กัน apply ตอนยังชี้ SANDBOX

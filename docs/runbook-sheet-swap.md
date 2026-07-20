@@ -1,5 +1,18 @@
 # Runbook — swap Producer Dashboard sheet (sandbox ↔ production)
 
+> ⚠️ **Updated v1.148.3 — the model is now the other way around.**
+> The **production** Producer Dashboard sheet (`10TnR0…pSzL4`, the one the
+> team actually uses and the PMDC Airtable sync reads daily) is the
+> **built-in default** — no env override needed to run production. This
+> replaces the old, incorrect assumption that the hardcoded id was a
+> "sandbox" you had to override away from (that mislabel made
+> `/api/health` always show `SANDBOX` and made the backfill guard 409
+> every real `apply`). Today there is **no separate sandbox sheet**.
+> Set `PRODUCER_DASHBOARD_SHEET_ID` **only** if you deliberately want to
+> point the app at a *different* throwaway/test sheet — that (and only
+> that) turns `isSandbox` on and re-arms the backfill guard. The steps
+> below are the generic "point at some other sheet" procedure.
+
 ## TL;DR
 
 1. Find the new sheet's **spreadsheet id** (the long random string in the
@@ -46,9 +59,10 @@ As of **v1.30** all sheet-id reads go through
 `src/lib/google-config.ts` → `getProducerDashboardSheetId()`. There is
 no longer a hardcoded sheet id duplicated across `google-sheets.ts`,
 `projects.ts`, `people.ts`, `dashboard-episodes.ts`. The only hardcoded
-value is the **sandbox fallback** in `google-config.ts`
-(`SANDBOX_PRODUCER_DASHBOARD_SHEET_ID`), used when the env var is
-unset — which `/admin/health` flags as `⚠ SANDBOX`.
+value is the **production default** in `google-config.ts`
+(`PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID`), used when the env var is
+unset — and `/admin/health` flags `⚠ SANDBOX` only when the env var
+overrides it to a *different* sheet.
 
 ## Verification checklist (copy this into a Slack/Notion message after a swap)
 

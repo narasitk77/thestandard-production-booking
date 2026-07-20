@@ -7,7 +7,7 @@ import {
   getBookingsTabName,
   isUsingSandboxSheet,
   maskSheetId,
-  SANDBOX_PRODUCER_DASHBOARD_SHEET_ID,
+  PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID,
 } from '@/lib/google-config'
 import { getCalendarImpersonateSubject, getCalendarAuth } from '@/lib/google-calendar'
 import { getSheetsWriteAuth, getSheetsReadAuth } from '@/lib/google-sheets'
@@ -61,7 +61,7 @@ export async function GET(_req: NextRequest) {
         ? 'env'
         : 'hardcoded-fallback',
       isSandbox: isUsingSandboxSheet(),
-      sandboxId: maskSheetId(SANDBOX_PRODUCER_DASHBOARD_SHEET_ID),
+      productionId: maskSheetId(PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID),
       bookingsTab: getBookingsTabName(),
     },
     calendar: {
