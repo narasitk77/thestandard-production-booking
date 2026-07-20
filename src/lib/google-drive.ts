@@ -488,7 +488,10 @@ function ensureBookingFolder(drive: drive_v3.Drive, parentId: string, bookingCod
 async function ensureBookingFolderUncoordinated(drive: drive_v3.Drive, parentId: string, bookingCode: string, newName: string): Promise<string> {
   // listChildFolders paginates fully — a flat archive (photo / _SOUND-STAGING) can
   // exceed one page, and missing a match there would recreate a duplicate.
-  const existing = (await listChildFolders(parentId)).find(f => folderNameMatchesCode(f.name, bookingCode))
+  // v1.148.3 — pick the OLDEST matching box, not the first Drive happens to
+  // return (list order isn't guaranteed), so a duplicate can't make us reuse an
+  // arbitrary/newer fork.
+  const existing = oldestChildFolder((await listChildFolders(parentId)).filter(f => folderNameMatchesCode(f.name, bookingCode)))
   if (existing) return existing.id
   return ensureChildFolder(drive, parentId, newName)
 }
@@ -505,9 +508,11 @@ function ensureEpisodeFolder(drive: drive_v3.Drive, parentId: string, name: stri
   const lead = name.split(' · ')[0]?.trim()
   if (!lead) return ensureChildFolder(drive, parentId, name)
   return dedupeEnsure(`${parentId} ep:${lead.toLowerCase()}`, async () => {
-    const existing = (await listChildFolders(parentId)).find(
+    // v1.148.3 — oldest match wins (see ensureBookingFolderUncoordinated): a
+    // retitled episode must reuse its ORIGINAL folder, not an arbitrary fork.
+    const existing = oldestChildFolder((await listChildFolders(parentId)).filter(
       f => f.name === name || f.name === lead || f.name.startsWith(`${lead} `),
-    )
+    ))
     if (existing) return existing.id
     return ensureChildFolderUncoordinated(drive, parentId, name)
   })
@@ -814,20 +819,36 @@ export async function ensureSoundStagingFolder(input: { rootFolderId: string; bo
 }
 
 /** Read-only: all direct child folders (id + name), paginated. */
-export async function listChildFolders(parentId: string): Promise<Array<{ id: string; name: string }>> {
+export async function listChildFolders(parentId: string): Promise<Array<{ id: string; name: string; createdTime?: string }>> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
-  const out: Array<{ id: string; name: string }> = []
+  const out: Array<{ id: string; name: string; createdTime?: string }> = []
   let pageToken: string | undefined
   do {
     const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      // v1.148.3 — createdTime lets find-or-create deterministically pick the
+      // OLDEST match when duplicates exist (Drive doesn't guarantee list order).
       q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`,
-      fields: 'nextPageToken, files(id, name)', pageSize: 1000, pageToken,
+      fields: 'nextPageToken, files(id, name, createdTime)', pageSize: 1000, pageToken,
       supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
     })
-    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name })
+    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name, createdTime: f.createdTime ?? undefined })
     pageToken = res.data.nextPageToken ?? undefined
   } while (pageToken)
   return out
+}
+
+/** Deterministically pick the OLDEST folder (earliest createdTime) among matches
+ *  — the original box, so find-or-create reuses it instead of an arbitrary
+ *  duplicate. Entries without a createdTime sort last (still stable). */
+function oldestChildFolder<T extends { createdTime?: string }>(matches: T[]): T | undefined {
+  if (matches.length <= 1) return matches[0]
+  // ISO-8601 sorts chronologically under plain lexicographic compare; missing
+  // createdTime ('￿') sorts last. Deterministic — no locale dependence.
+  return [...matches].sort((a, b) => {
+    const ca = a.createdTime ?? '￿'
+    const cb = b.createdTime ?? '￿'
+    return ca < cb ? -1 : ca > cb ? 1 : 0
+  })[0]
 }
 
 /**
@@ -1404,28 +1425,59 @@ export async function deleteDriveFile(fileId: string): Promise<void> {
  * as the booking's footage box — prep-folders once skipped creating a video box
  * for the whole shoot day because one audio file sat in _SOUND-STAGING.
  */
-let footageDriveIdMemo: { root: string; driveId: string | null } | null = null
-export async function isFootageTreeFolder(folderId: string): Promise<boolean> {
+// v1.148.3 — only a SUCCESSFUL driveId lookup is memoized (see classify below).
+let footageDriveIdMemo: { root: string; driveId: string } | null = null
+
+/** Three-way footage-tree membership: definitely in, definitely out, or UNKNOWN
+ *  (a transient Drive error we could not resolve). Splitting `unknown` out of
+ *  "not in tree" lets a DESTRUCTIVE caller (folder rename) fail-closed on doubt
+ *  instead of acting on a folder it never actually confirmed. */
+export type FootageTreeCheck = 'in-tree' | 'not-in-tree' | 'unknown'
+
+export async function classifyFootageTreeFolder(folderId: string): Promise<FootageTreeCheck> {
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
-  if (!root) return false
+  if (!root) return 'not-in-tree'
   if (!footageDriveIdMemo || footageDriveIdMemo.root !== root) {
-    footageDriveIdMemo = { root, driveId: await getFolderDriveId(root).catch(() => null) }
+    // 3.1 fix — cache ONLY a success. A transient error used to memoize
+    // driveId:null forever (until container restart) → every membership check
+    // then returned false → folder matching broke system-wide. On failure we
+    // leave the memo unset and report `unknown`, so the next call retries.
+    const rootId = await getFolderDriveId(root).catch(() => null)
+    if (!rootId) return 'unknown'
+    footageDriveIdMemo = { root, driveId: rootId }
   }
   const rootDriveId = footageDriveIdMemo.driveId
-  if (!rootDriveId) return false
-  const driveId = await getFolderDriveId(folderId).catch(() => null)
-  if (driveId !== rootDriveId) return false
+
+  // `undefined` = the lookup THREW (unknown); `null` = a real "no shared-drive
+  // id" answer (folder lives in My Drive) → genuinely not in the footage tree.
+  const driveId = await getFolderDriveId(folderId).catch(() => undefined)
+  if (driveId === undefined) return 'unknown'
+  if (driveId !== rootDriveId) return 'not-in-tree'
+
   // Walk up a few parents to rule out the _SOUND-STAGING subtree (staging depth
   // is root/_SOUND-STAGING/<outlet>/<category>/<booking> — 4 hops covers it).
+  // 3.2 fix — a walk error is `unknown`, NOT "reached root / in tree": the old
+  // code returned true on a parent-lookup failure (fail-OPEN), which could feed
+  // a _SOUND-STAGING folder into regenerate's rename sweep.
   let cur = folderId
   for (let i = 0; i < 5; i++) {
-    const parent = await getDriveParentFolderId(cur).catch(() => null)
-    if (!parent || parent === root || parent === rootDriveId) return true
-    const name = await getFileName(parent).catch(() => null)
-    if (name === SOUND_STAGING_DIR) return false
+    const parent = await getDriveParentFolderId(cur).catch(() => undefined)
+    if (parent === undefined) return 'unknown'
+    if (!parent || parent === root || parent === rootDriveId) return 'in-tree'
+    const name = await getFileName(parent).catch(() => undefined)
+    if (name === undefined) return 'unknown'
+    if (name === SOUND_STAGING_DIR) return 'not-in-tree'
     cur = parent
   }
-  return true
+  return 'in-tree'
+}
+
+/** Boolean convenience — true ONLY when confidently in the footage tree;
+ *  `unknown` collapses to false (fail-closed). A caller performing a
+ *  destructive op on the result should call classifyFootageTreeFolder directly
+ *  and act only on an explicit 'in-tree'. */
+export async function isFootageTreeFolder(folderId: string): Promise<boolean> {
+  return (await classifyFootageTreeFolder(folderId)) === 'in-tree'
 }
 
 export async function getDriveFile(fileId: string): Promise<{
