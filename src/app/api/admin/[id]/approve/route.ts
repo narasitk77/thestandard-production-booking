@@ -15,6 +15,9 @@ import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 // v1.114 — id-first Drive linkage: remember created folder IDs on the booking.
 import { rememberDriveLinks } from '@/lib/drive-links'
+// v1.149 — landing drop folder for shoots happening today/tomorrow (the
+// nightly 19:00 worker won't come back around for them).
+import { ensureLandingForBooking, shootIsImminentBkk } from '@/lib/landing-lifecycle'
 
 export async function POST(
   request: NextRequest,
@@ -135,7 +138,7 @@ export async function POST(
           bookingSubfolderCode: updated.bookingCode,
           // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
           bookingCode: updated.outlet.code === 'AGN' ? undefined : updated.bookingCode,
-          cameras: camerasToPreCreate(updated.cameraCount),
+          cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
           // v1.93 — one folder per episode; empty for no-episode bookings.
           episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,
         })
@@ -149,6 +152,24 @@ export async function POST(
         })
       } catch (e: any) {
         console.error('[approve] Drive pre-create failed (non-fatal):', e?.message || e)
+      }
+    })()
+
+    // 1b-2) v1.149 — landing drop folder for imminent shoots. The nightly
+    //       worker creates landing folders only for the NEXT day at 19:00 BKK;
+    //       a booking approved after that tick (shooting today/tomorrow) never
+    //       got one — crew found no CAM-A.. drop target the next morning and
+    //       admins had to fire ?create=<code> by hand at midnight. Same
+    //       fire-and-forget shape as the box pre-create; ensureLandingForBooking
+    //       carries all its own skip checks (photo-album, delivered, no-cams).
+    ;(async () => {
+      if (!updated.bookingCode || !updated.shootDate || !hasDriveCredentials()) return
+      try {
+        if (!shootIsImminentBkk(new Date(updated.shootDate))) return
+        const r = await ensureLandingForBooking(updated.bookingCode)
+        if (!r.ok) console.warn('[approve] landing ensure skipped:', updated.bookingCode, r.reason)
+      } catch (e: any) {
+        console.error('[approve] landing ensure failed (non-fatal):', e?.message || e)
       }
     })()
 

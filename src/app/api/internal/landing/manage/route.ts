@@ -12,7 +12,12 @@ export const maxDuration = 300
 // call) must not overlap two real (non-dryRun) passes across ANY of this
 // route's three operations (create / prune / sweep) — they all touch the
 // same Production Team landing tree with non-atomic Drive primitives.
-let landingManageRunning = false
+// v1.149 — timestamp instead of boolean: a request that dies without
+// reaching `finally` (hung Drive call, killed process thread) must not
+// latch the guard forever — that would 409 every nightly run silently
+// (created=0 → no digest email, no audit row). Stale latches expire.
+let landingManageRunningSince: number | null = null
+const LANDING_GUARD_MAX_MS = 15 * 60 * 1000
 
 /**
  * GET /api/internal/landing/manage?dryRun=1[&offset=1&keepDays=3&report=1]
@@ -53,10 +58,10 @@ export async function GET(request: NextRequest) {
   const forceReport = url.searchParams.get('report') === '1'
 
   if (!dryRun) {
-    if (landingManageRunning) {
+    if (landingManageRunningSince && Date.now() - landingManageRunningSince < LANDING_GUARD_MAX_MS) {
       return NextResponse.json({ error: 'landing กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
     }
-    landingManageRunning = true
+    landingManageRunningSince = Date.now()
   }
   try {
 
@@ -133,7 +138,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
   }
   } finally {
-    if (!dryRun) landingManageRunning = false
+    if (!dryRun) landingManageRunningSince = null
   }
 }
 

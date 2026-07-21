@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.149.0] — 2026-07-22
+
+### Fixed — โฟลเดอร์ CAM/AUDIO ไม่ถูกสร้าง (รายงานจากหน้างาน 22 ก.ค.)
+- **คืน `micCount` ให้ `camerasToPreCreate`** (revert ของ v1.147.0): การตัด AUDIO pre-creation พังสองเวิร์กโฟลว์จริง — (1) ช่อง `<EP>/AUDIO` ราย EP หายไปทั้ง box และ landing เพราะ `resolveAudioTarget` ของ sound-merge สร้าง AUDIO ได้เฉพาะใน EP folder ที่มี CAM อยู่แล้ว งานเสียงหลาย EP เลยไม่มีที่แยกไฟล์ราย EP อีกเลย (2) งานเสียงนำที่ `cameraCount` 0/null ได้ `[]` ทำให้ landing lifecycle **ข้ามการสร้าง drop folder ทั้งใบ**แบบเงียบๆ
+- **ปิดช่องโหว่ approve-หลัง-19:00 (ค้างมาตั้งแต่ v1.139)**: worker กลางคืนสร้าง landing folder เฉพาะ "งานพรุ่งนี้" ตอน 19:00 — งานที่เพิ่ง CONFIRMED หลังจากนั้น (ถ่ายวันนี้/พรุ่งนี้) ไม่เคยได้ folder เลย ทีมงานเจอ Production Team ว่างเปล่าตอนเช้าแล้วแอดมินต้องยิง `?create=` เองตอนเที่ยงคืน (เกิดจริงกับ POP-PIV-260721-01) ตอนนี้ approve จะ `ensureLandingForBooking` ให้ทันทีเมื่อคิวถ่ายคือวันนี้/พรุ่งนี้ (fire-and-forget เหมือน box pre-create, สืบทอด skip checks เดิมครบ)
+- **การ์ด reentrancy ของ landing/manage เปลี่ยน boolean → timestamp + หมดอายุ 15 นาที**: request ที่ตายโดยไม่ถึง `finally` (Drive call ค้าง) เคย latch การ์ดถาวร → nightly run โดน 409 เงียบทุกคืน (created=0 = ไม่มีเมลรายงาน ไม่มี audit row) — ตอนนี้ latch เก่าหมดอายุเอง
+
+---
+
 ## [1.148.3] — 2026-07-21
 
 ### Fixed — Producer Dashboard sheet was mislabeled "sandbox" (unblocks v1.148 backfill)

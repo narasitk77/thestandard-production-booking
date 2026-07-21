@@ -129,25 +129,31 @@ export const CAMERA_SPECIALS = ['DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'] as const
 
 /**
  * Camera folders to PRE-CREATE when a booking is CONFIRMED: CAM-A..CAM-{n}
- * (capped at CAM-D), straight from the booked cameraCount. Returns [] for a
- * Block Shot / unspecified count — the shoot folder is still made; cameras
- * come at upload time via the ensure-create fallback.
+ * (capped at CAM-D), straight from the booked cameraCount, plus AUDIO when
+ * the booking has mics. Returns [] only when there are neither cameras nor
+ * mics (true Block Shot) — the shoot folder is still made; cameras come at
+ * upload time via the ensure-create fallback.
  *
- * v1.147 (ops) — AUDIO is NO LONGER pre-created from micCount: sound arrives
- * via the _SOUND-STAGING → sound-merge pipeline, and the merge ensure-creates
- * its own AUDIO target (see soundDestination in sound-merge.ts), so the
- * pre-created shells just sat empty. The upload dropdown still offers AUDIO
- * (cameraUploadOptions below) and creates the folder on first use.
+ * v1.149 — micCount RESTORED (reverts the v1.147 removal). Dropping AUDIO
+ * pre-creation broke two crew workflows in prod (reported 2026-07-22):
+ * the per-EP `<EP>/AUDIO` slots the sound pipeline fills stopped existing
+ * (sound-merge's resolveAudioTarget only creates AUDIO inside an EP folder
+ * that already has a CAM child, so multi-EP sound bookings lost their
+ * per-EP slots), and a sound-led booking with cameraCount 0/null returned
+ * [] which made the landing lifecycle skip its drop folder entirely.
  */
-export function camerasToPreCreate(cameraCount?: number | null): string[] {
+export function camerasToPreCreate(cameraCount?: number | null, micCount?: number | null): string[] {
   const n = Math.max(0, Math.min(cameraCount ?? 0, CAM_LETTERS.length))
-  return CAM_LETTERS.slice(0, n).map(l => `CAM-${l}`)
+  const cams: string[] = CAM_LETTERS.slice(0, n).map(l => `CAM-${l}`)
+  if ((micCount ?? 0) > 0) cams.push('AUDIO')
+  return cams
 }
 
 /**
  * Camera options for the upload dropdown: CAM-A..CAM-{n} (min CAM-A so the
  * list is never empty) + AUDIO (if mics) + the always-available specials.
- * AUDIO stays selectable even though it's not pre-created anymore.
+ * (AUDIO is appended here from micCount directly, so camerasToPreCreate is
+ * deliberately called without it.)
  */
 export function cameraUploadOptions(cameraCount?: number | null, micCount?: number | null): string[] {
   const slots = camerasToPreCreate(cameraCount)

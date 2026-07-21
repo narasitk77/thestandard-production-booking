@@ -68,6 +68,19 @@ export interface LandingLifecycleResult {
   actions: string[]
 }
 
+/**
+ * v1.149 — true when the shoot happens today or tomorrow (Bangkok). Used by
+ * the approve route to close the v1.139 gap: the nightly worker only creates
+ * landing folders for the NEXT day at 19:00, so a booking approved after that
+ * tick (for a same-day or next-day shoot) would otherwise never get one.
+ */
+export function shootIsImminentBkk(shootDate: Date, now: Date = new Date()): boolean {
+  const today = bangkokDayRange(0, now)
+  const tomorrow = bangkokDayRange(1, now)
+  const t = shootDate.getTime()
+  return t >= today.start.getTime() && t < tomorrow.end.getTime()
+}
+
 export async function manageLandingFolders(
   opts: { dryRun?: boolean; createOffsetDays?: number; keepPastDays?: number } = {},
 ): Promise<LandingLifecycleResult> {
@@ -102,7 +115,7 @@ export async function manageLandingFolders(
   })
   for (const b of nextDay) {
     if (!hasOutletFolderMapping(b.outlet.code) || isPhotoAlbumBooking(b.episodes)) continue
-    const cams = camerasToPreCreate(b.cameraCount)
+    const cams = camerasToPreCreate(b.cameraCount, b.micCount)
     if (cams.length === 0) continue
     const name = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
     base.actions.push(`create landing "${name}" (${targetDay})`)
@@ -175,7 +188,7 @@ export async function ensureLandingForBooking(
   if (!b || !b.bookingCode) return { ok: false, dryRun, bookingCode: code, reason: 'booking not found' }
   if (!hasOutletFolderMapping(b.outlet.code)) return { ok: false, dryRun, bookingCode: code, reason: `outlet ${b.outlet.code} has no folder mapping` }
   if (isPhotoAlbumBooking(b.episodes)) return { ok: false, dryRun, bookingCode: code, reason: 'photo-album booking has no Production Team landing folder' }
-  const cams = camerasToPreCreate(b.cameraCount)
+  const cams = camerasToPreCreate(b.cameraCount, b.micCount)
   if (cams.length === 0) return { ok: false, dryRun, bookingCode: code, reason: 'no cameras (block shot / unspecified) — no landing folder' }
 
   // A booking whose footage is ALREADY delivered (real files exist under its

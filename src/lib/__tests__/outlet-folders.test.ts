@@ -187,6 +187,12 @@ test('camerasToPreCreate: CAM-A..CAM-{n} (cap D) from booked cameraCount; empty 
   assert.deepEqual(camerasToPreCreate(3), ['CAM-A', 'CAM-B', 'CAM-C'])
   assert.deepEqual(camerasToPreCreate(9), ['CAM-A', 'CAM-B', 'CAM-C', 'CAM-D']) // capped at D
   assert.deepEqual(camerasToPreCreate(null), []) // Block Shot / unspecified → none pre-created
+  // v1.149 — micCount restored: AUDIO pre-created again for mic bookings, and
+  // a sound-led booking (no cameras, has mics) is non-empty so the landing
+  // lifecycle creates its drop folder.
+  assert.deepEqual(camerasToPreCreate(2, 1), ['CAM-A', 'CAM-B', 'AUDIO'])
+  assert.deepEqual(camerasToPreCreate(null, 2), ['AUDIO'])
+  assert.deepEqual(camerasToPreCreate(0, 0), [])
 })
 
 test('cameraUploadOptions: never empty (min CAM-A) + AUDIO if mics + always the specials', () => {
