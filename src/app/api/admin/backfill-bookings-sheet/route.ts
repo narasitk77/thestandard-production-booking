@@ -28,14 +28,16 @@ export const maxDuration = 300
  * Default is a DRY RUN returning the full plan; pass { apply: true } to
  * execute. Honors BOOKINGS_EXPORT_AGN_ONLY=1 (appends AGN only). Admin-only.
  *
- * v1.148.1 — SANDBOX GUARD: `apply` is refused while the app still points at
- * the sandbox Producer Dashboard sheet. The entire point of this backfill is
- * to feed PMDC's Airtable sync off the PRODUCTION Bookings tab; running it
- * against the sandbox would append every live booking (hundreds of rows) into
- * the wrong sheet, burn quota, and LOOK done while Airtable still sees
- * nothing. Swap the sheet first (docs/runbook-sheet-swap.md), or pass
- * { apply: true, force: true } if you really do mean the sandbox. The dry run
- * is read-only and always allowed — every response reports its sheet target.
+ * v1.148.1 — SANDBOX GUARD: `apply` is refused while the app points at a
+ * non-production Producer Dashboard sheet (v1.148.3: an env override away
+ * from the production id). The entire point of this backfill is to feed
+ * PMDC's Airtable sync off the PRODUCTION Bookings tab; running it against
+ * a test sheet would append every live booking (hundreds of rows) into the
+ * wrong sheet, burn quota, and LOOK done while Airtable still sees nothing.
+ * Remove the override first (docs/runbook-sheet-swap.md), or pass
+ * { apply: true, force: true } if you really do mean the test sheet. The dry
+ * run is read-only and always allowed — every response reports its sheet
+ * target.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -55,10 +57,11 @@ export async function POST(request: NextRequest) {
     if (apply && sandbox && !force) {
       return NextResponse.json({
         error:
-          'ระบบยังชี้ไป SANDBOX Producer Dashboard sheet — backfill จะเขียนลง sheet ผิดตัว ' +
-          'และ Airtable ฝั่ง PMDC จะยังไม่เห็นอะไรเลย. ตั้ง PRODUCER_DASHBOARD_SHEET_ID ' +
-          'ให้เป็น sheet production ก่อนแล้ว redeploy (ดู docs/runbook-sheet-swap.md) — ' +
-          'ถ้าตั้งใจจะ backfill ลง sandbox จริงๆ ส่ง { apply: true, force: true }',
+          'ระบบกำลังชี้ไป sheet ที่ไม่ใช่ production (PRODUCER_DASHBOARD_SHEET_ID override อยู่) — ' +
+          'backfill จะเขียนลง sheet ผิดตัว และ Airtable ฝั่ง PMDC จะยังไม่เห็นอะไรเลย. ' +
+          'เอา override ออกจาก stack env (หรือตั้งเป็น id ของ sheet production) แล้ว redeploy ' +
+          '(ดู docs/runbook-sheet-swap.md) — ถ้าตั้งใจจะ backfill ลง sheet ทดสอบจริงๆ ' +
+          'ส่ง { apply: true, force: true }',
         ...target,
       }, { status: 409 })
     }

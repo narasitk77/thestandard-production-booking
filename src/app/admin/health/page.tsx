@@ -26,7 +26,7 @@ type HealthResponse = {
       id: string
       source: 'env' | 'hardcoded-fallback'
       isSandbox: boolean
-      sandboxId: string
+      productionId: string
       bookingsTab: string
     }
     calendar: {
@@ -136,15 +136,17 @@ export default function HealthPage() {
               </div>
             </div>
 
-            {/* Sandbox warning */}
+            {/* Sandbox warning — v1.148.3: isSandbox means the env var
+                overrides AWAY from the production sheet */}
             {data.config.producerDashboardSheet.isSandbox && (
               <div className="mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>
-                  This deploy is pointed at the <strong>SANDBOX</strong> Producer Dashboard sheet
-                  ({data.config.producerDashboardSheet.sandboxId}). To switch to production,
-                  set <code className="px-1 bg-amber-100 rounded">PRODUCER_DASHBOARD_SHEET_ID</code> in
-                  the Portainer stack env and redeploy.
+                  This deploy is pointed at a <strong>non-production</strong> Producer Dashboard sheet
+                  ({data.config.producerDashboardSheet.id}) — production is
+                  {' '}{data.config.producerDashboardSheet.productionId}. To switch back, remove
+                  the <code className="px-1 bg-amber-100 rounded">PRODUCER_DASHBOARD_SHEET_ID</code> override
+                  from the Portainer stack env (or set it to the production id) and redeploy.
                 </span>
               </div>
             )}

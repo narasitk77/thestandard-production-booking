@@ -32,8 +32,13 @@
    - Click **Pull and redeploy** (no need to toggle "Re-pull image"
      unless you also want a fresh image build).
 5. After deploy, open `/admin/health` and confirm:
-   - `Producer Dashboard sheet` section → `Source: env`,
-     `Mode: ✓ Production` (the amber `SANDBOX` warning should be gone).
+   - `Producer Dashboard sheet` section → `Source: env`, and the
+     masked id matches the sheet you pasted.
+   - `Mode: ⚠ SANDBOX` — **this is the expected state** (v1.148.3
+     semantics: any env override away from the production sheet shows
+     the amber warning and re-arms the backfill guard). If you see
+     `✓ Production` instead, either the env var didn't take (stale
+     container) or you pasted the production id.
    - `Live checks → Producer Dashboard sheet` → green check, returns
      the sheet's title.
 6. Create one test booking with outlet **Content Agency (AGN)** to
@@ -75,7 +80,8 @@ New sheet id (masked): <from /admin/health after swap>
   [ ] Database round-trip green
   [ ] Google Calendar green
   [ ] Producer Dashboard sheet green — title: <expected title>
-  [ ] "Mode: ✓ Production" (not SANDBOX)
+  [ ] "Mode: ⚠ SANDBOX" (expected — the env override ≠ production
+      sheet; "✓ Production" here means the swap did NOT take effect)
 
 Smoke booking:
   [ ] Created test CA booking with outlet AGN
@@ -85,7 +91,9 @@ Smoke booking:
   [ ] Row appears in NEW sheet "Bookings" tab
 
 Rollback plan (if anything broke):
-  - In Portainer stack env, revert PRODUCER_DASHBOARD_SHEET_ID to old id
+  - In Portainer stack env, restore PRODUCER_DASHBOARD_SHEET_ID to its
+    previous value — to return to production, remove the override
+    entirely (the production sheet is the built-in default)
   - Save settings + Pull and redeploy
   - Cancel + restore the test booking via /admin/[id] (calendar event
     will be re-deleted)
