@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.151.1] — 2026-07-22
+
+### Added — รายการใหม่จากชีต outlet-DB
+- **KND → `TMH` "ถามให้"** (โค้ดถอดเสียงไทยแบบเดียวกับ `AVK` = อวกาศคาดไม่ถึง ของ Podcast)
+- **The Secret Sauce → `WYS` "WYS : What your secret"**
+- seed รันทุกครั้งที่ container boot และเป็น upsert อยู่แล้ว รายการจึงเข้า DB เองตอน deploy — เปิดจองได้ทันที (Production ID จะออกเป็น `KND-TMH-…` / `TSS-WYS-…`)
+
+---
+
 ## [1.151.0] — 2026-07-22
 
 ### Added — worker ตรวจ+ซ่อมโครงสร้างโฟลเดอร์อัตโนมัติ (`folder-integrity`)

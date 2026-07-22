@@ -119,6 +119,9 @@ export const OUTLETS: Outlet[] = [
       { code: 'PLY', name: 'Play Along', category: 'Recurring' },
       { code: 'ENU', name: 'English Unlock', category: 'Recurring' },
       { code: 'SHF', name: 'Short Form', category: 'Recurring' },
+      // TMH = "ถามให้" transliterated, same convention as Podcast's AVK
+      // (อวกาศคาดไม่ถึง) — the code is permanent once a Production ID uses it.
+      { code: 'TMH', name: 'ถามให้', category: 'Recurring', notes: 'รายการใหม่' },
     ],
   },
   {
@@ -163,6 +166,7 @@ export const OUTLETS: Outlet[] = [
       { code: 'TSC', name: 'The Secret Short Clip', category: 'Short-form' },
       { code: 'KDM', name: 'Kendom', category: 'Recurring' },
       { code: 'KSG', name: 'Kensight', category: 'Recurring' },
+      { code: 'WYS', name: 'WYS : What your secret', category: 'Recurring', notes: 'รายการใหม่' },
     ],
   },
   {
