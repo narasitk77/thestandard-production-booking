@@ -250,8 +250,34 @@ export async function reconcileShootMarkers(
           base.fixed.dedupedInSubfolder += dd.totalTrashed
           actions.push(`dedupe "${kid.name}": trashed ${dd.totalTrashed} duplicate _SHOOT.txt`)
         }
+        // v1.150 review fix — normalize a LEGACY-NAMED marker ("_SHOOT-<code>.txt")
+        // BEFORE the content audit, same as the generic pass: without this, the
+        // audit's fallback read of the legacy file + exact-name upsert of
+        // _SHOOT.txt creates a permanent duplicate pair (double-filing the shoot
+        // under a dead id — the exact drift this reconciler exists to remove).
         const files = await listFilesInFolder(kid.id)
-        const hasCanonical = files.some(f => SHOOT_FILE_RE.test(f.name))
+        const markers = files.filter(f => SHOOT_FILE_RE.test(f.name))
+        let canonical = markers.find(f => f.name.toLowerCase() === CANONICAL_MARKER.toLowerCase()) ?? null
+        for (const m of markers) {
+          if (canonical && m.id === canonical.id) continue
+          if (!canonical) {
+            actions.push(`rename legacy "${m.name}" → ${CANONICAL_MARKER} (in "${kid.name}")`)
+            if (!dryRun) {
+              try { await renameDriveItem(m.id, CANONICAL_MARKER) }
+              catch (e: any) { base.errors++; actions.push(`  ERROR rename: ${e?.message || e}`); continue }
+            }
+            canonical = m
+            base.fixed.movedIntoBooking++
+          } else {
+            actions.push(`trash duplicate legacy "${m.name}" (canonical exists, in "${kid.name}")`)
+            if (!dryRun) {
+              try { await trashDriveItem(m.id) }
+              catch (e: any) { base.errors++; actions.push(`  ERROR trash: ${e?.message || e}`); continue }
+            }
+            base.fixed.duplicatesTrashed++
+          }
+        }
+        const hasCanonical = !!canonical
         subByCode.set(code, { id: kid.id, hasCanonical })
       }
 

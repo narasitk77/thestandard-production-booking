@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
+import { updateBookingRow } from '@/lib/google-sheets'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,12 +24,23 @@ export async function POST(
   const { id } = params
   const booking = await prisma.booking.findUnique({
     where: { id },
-    select: { id: true, bookingCode: true, status: true, deletedAt: true },
+    select: { id: true, bookingCode: true, status: true, deletedAt: true, sheetRowIndex: true },
   })
   if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (!booking.deletedAt) return NextResponse.json({ error: 'Not deleted' }, { status: 409 })
 
   await prisma.booking.update({ where: { id }, data: { deletedAt: null } })
+
+  // v1.150 — inverse of soft-delete's Sheet write: that flow stamps Status=
+  // CANCELLED + blanks col W, so without this an undeleted CONFIRMED booking
+  // stays CANCELLED forever on the Bookings tab PMDC's Airtable reads. Col W
+  // stays blank on purpose — the calendar event is NOT recreated here (the
+  // Re-sync flow writes the new event id back when it runs).
+  if (booking.sheetRowIndex) {
+    updateBookingRow(booking.bookingCode || booking.id, { status: booking.status }).catch(e =>
+      console.warn(`[undelete] sheet row update failed: ${e?.message || e}`)
+    )
+  }
 
   logAudit({
     actorEmail: session.email,

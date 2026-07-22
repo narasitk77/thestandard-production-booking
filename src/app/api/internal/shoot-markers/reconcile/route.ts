@@ -7,13 +7,18 @@ import { logAudit } from '@/lib/audit'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-// v1.148.3 reentrancy guard — same shape as prep-folders/video-merge/sound-merge.
+// Reentrancy guard — same shape as prep-folders/video-merge/sound-merge.
 // A proxy-timeout-driven retry (this route runs up to 300s) must not overlap two
 // real (non-dryRun) passes: `upsertTextFile` is list-then-create (non-atomic), so
 // two concurrent passes can each see "no marker" and create a DUPLICATE _SHOOT.txt
 // — the exact drift this reconciler exists to remove. dryRun passes are read-only
 // and may overlap freely.
-let shootMarkerReconcileRunning = false
+// v1.150 — timestamp + expiry, not a boolean (same lesson as landing/manage in
+// v1.149): a request that dies without reaching `finally` (hung Drive call —
+// this route awaits thousands of them) must not latch the guard forever and
+// silently 409 every nightly run.
+let shootMarkerReconcileRunningSince: number | null = null
+const RECONCILE_GUARD_MAX_MS = 15 * 60 * 1000
 
 /**
  * GET /api/internal/shoot-markers/reconcile?dryRun=1&projectId=&limit=&sinceDays=&report=1
@@ -64,13 +69,13 @@ export async function GET(request: NextRequest) {
 
   // Reject an overlapping mutating run before we touch Drive (dryRun is safe).
   if (!dryRun) {
-    if (shootMarkerReconcileRunning) {
+    if (shootMarkerReconcileRunningSince && Date.now() - shootMarkerReconcileRunningSince < RECONCILE_GUARD_MAX_MS) {
       return NextResponse.json(
         { error: 'shoot-marker reconcile กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' },
         { status: 409 },
       )
     }
-    shootMarkerReconcileRunning = true
+    shootMarkerReconcileRunningSince = Date.now()
   }
 
   try {
@@ -118,6 +123,6 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/internal/shoot-markers/reconcile error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
   } finally {
-    if (!dryRun) shootMarkerReconcileRunning = false
+    if (!dryRun) shootMarkerReconcileRunningSince = null
   }
 }

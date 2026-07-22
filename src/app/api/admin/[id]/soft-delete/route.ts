@@ -45,7 +45,9 @@ export async function POST(
   // booking — PMDC's Airtable sync merges Service Jobs by that event id, so a
   // ghost row misleads it. (The row itself stays — the booking still exists.)
   if (booking.sheetRowIndex) {
-    updateBookingRow(booking.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(e =>
+    // v1.150 — col-A lookup key must match what appendBookingRow wrote there:
+    // bookingCode with the booking id as the legacy code-less fallback.
+    updateBookingRow(booking.bookingCode || booking.id, { status: 'CANCELLED', calendarEventId: '' }).catch(e =>
       console.warn(`[soft-delete] sheet row update failed: ${e?.message || e}`)
     )
   }

@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.150.0] — 2026-07-22
+
+_PR #14 + #15 โดยปุ๊ก/Neo (PMDC) + review fixes ตอน merge_
+
+### Added — `_SHOOT.txt` ซ่อมตัวเองได้ (PR #14)
+- `refreshShootMarker()` — อัปเดต marker จาก DB ทุกครั้งที่ identity ของ booking เปลี่ยน (regenerate ID, PATCH booking) แบบ find-only ไม่สร้างโฟลเดอร์; prep sweep รายชั่วโมงเติม marker ที่หาย (create-missing-only); agn-restructure เปลี่ยนชื่อ marker legacy ตอนย้าย; reconciler กลางคืนขยายครอบ**ทุก outlet** (เดิมซ่อมเฉพาะกล่อง AGN)
+- **Review fix ตอน merge**: (1) AGN subfolder audit normalize marker ชื่อ legacy ก่อนตรวจเนื้อหา — กันสร้าง `_SHOOT.txt` ซ้อนข้างไฟล์เก่าแบบถาวร (2) การ์ด reentrancy ของ reconcile route เปลี่ยนเป็น timestamp + หมดอายุ 15 นาที (บทเรียน v1.149)
+- ⚠️ **`SHOOT_MARKER_WORKER_ENABLED` ยังไม่เปิดพร้อม deploy นี้** — ต้อง staged rollout: dryRun=1 ดู digest → รันจริง `limit=20&sinceDays=7` → ค่อยเปิด env (คืนแรกแบบ full-scale = Drive หลายพัน calls)
+
+### Fixed — จับคู่โฟลเดอร์ด้วย key ถาวร + กันสร้างซ้ำ (PR #15)
+- กล่องโปรเจกต์ AGN จับคู่ด้วย `projectId` (เดิมชื่อเป๊ะๆ → แก้ชื่อ/approve พร้อมกัน = กล่องซ้ำ footage แตกสองที่); `dedupeEnsure` กัน race ตอนสร้างพร้อมกันทุก path; EP folder จับคู่ด้วย lead ถาวร (`EP01`/project EP id) ทุก create path — แก้ชื่อตอนไม่ fork โฟลเดอร์ใหม่อีก; delivered-check ของ prep ไม่โดนไฟล์ใน `_SOUND-STAGING` หลอกแล้ว (`isFootageTreeFolder`); soft-delete + bulk-cancel ล้าง Status/col W บนชีต; normalize sweep กันสองตัวแปรชนกันเอง; regenerate กู้กล่องที่ ops ย้ายที่ (rename-only, เฉพาะเจอ 1 เดียว)
+- **Review fixes ตอน merge**: (1) conflict กับ v1.149 ที่ approve แก้แบบเก็บทั้งสองฝั่ง (`bookingFolderCode` + `camerasToPreCreate` 2-arg — AUDIO fix ไม่ถูกย้อน) (2) filter `_SOUND-STAGING` ใส่ให้ delivered-check ของ `ensureLandingForBooking` ด้วย (ตัวแฝดที่ PR ตกหล่น — เสี่ยงขึ้นเพราะ v1.149 ให้ approve เรียกอัตโนมัติ) (3) undelete เขียน Status คืนลงชีต (inverse ของ soft-delete — เดิมงานที่กู้คืนโชว์ CANCELLED ถาวรฝั่ง PMDC) (4) col-A lookup ใช้ `bookingCode || id` ตรงกับตอน append
+
+---
+
 ## [1.149.0] — 2026-07-22
 
 ### Fixed — โฟลเดอร์ CAM/AUDIO ไม่ถูกสร้าง (รายงานจากหน้างาน 22 ก.ค.)

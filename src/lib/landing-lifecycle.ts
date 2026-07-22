@@ -24,7 +24,7 @@
 import { prisma } from './db'
 import {
   ensureFlatShootFolders, listChildFolders, listFilesRecursive, trashDriveItem, hasDriveCredentials,
-  findFoldersByCode,
+  findFoldersByCode, isFootageTreeFolder,
 } from './google-drive'
 import {
   landingBookingFolderName, buildEpisodeFolderName, camerasToPreCreate,
@@ -199,6 +199,11 @@ export async function ensureLandingForBooking(
   // folder was redundant. Per ops: "งานไหนย้ายไฟล์แล้ว ไม่ต้องสร้าง drop มา".)
   try {
     for (const c of await findFoldersByCode(b.bookingCode)) {
+      // v1.150 — same fix pr-15 applied to prep-folders' delivered-check: the
+      // booking's _SOUND-STAGING folder shares the "(code)" name shape and the
+      // drive, so one early audio file must not read as "footage delivered"
+      // (exposure went up in v1.149: approve now calls this for imminent shoots).
+      if (!(await isFootageTreeFolder(c.id))) continue
       const some = await listFilesRecursive(c.id, { maxFiles: 4 })
       if (some.some(f => !SHOOT_STUB_RE.test(f.name))) {
         return { ok: false, dryRun, bookingCode: code, reason: 'footage already delivered — no landing drop folder needed' }

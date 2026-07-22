@@ -88,7 +88,8 @@ export async function POST(request: NextRequest) {
       // the bulk-cancelled rows don't keep a live-looking Status + a dead
       // Calendar Event ID (PMDC's Airtable sync merges Service Jobs by that id).
       if (r.sheetRowIndex) {
-        updateBookingRow(r.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
+        // v1.150 — col-A key matches appendBookingRow's (bookingCode || id).
+        updateBookingRow(r.bookingCode || r.id, { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
       }
     }
     await prisma.booking.updateMany({
