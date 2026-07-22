@@ -36,12 +36,18 @@ if (!secret) {
   console.warn('[folder-integrity] WARN: no secret (PREP_FOLDERS_SECRET / NEXTAUTH_SECRET / AUTH_SECRET) — every request will 401.')
 }
 
+// STAGED ROLLOUT: the worker reports what it WOULD repair until an operator
+// flips FOLDER_INTEGRITY_APPLY=1. A folder-mutating sweep earns its apply flag
+// by producing a digest a human recognises as correct first.
+const apply = String(process.env.FOLDER_INTEGRITY_APPLY ?? '0').toLowerCase()
+const applyMode = apply === '1' || apply === 'true' || apply === 'yes'
+
 let running = false
 async function runOnce() {
   if (running) return
   running = true
   try {
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/internal/folder-integrity/run?dryRun=0`, {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/internal/folder-integrity/run?dryRun=${applyMode ? '0' : '1'}`, {
       headers: secret ? { 'x-reconcile-secret': secret } : {},
     })
     const body = await res.text()
@@ -51,7 +57,7 @@ async function runOnce() {
     const f = j.fixed || {}
     const changed = Object.values(f).reduce((n, v) => n + (Number(v) || 0), 0)
     console.log(
-      `[folder-integrity] checked=${j.checked}/${j.scanned} fixed=${changed}` +
+      `[folder-integrity]${applyMode ? '' : ' (report-only)'} checked=${j.checked}/${j.scanned} ${applyMode ? 'fixed' : 'would-fix'}=${changed}` +
       ` (box +${f.boxCreated || 0}/~${f.boxRenamed || 0}, ep +${f.epCreated || 0}/~${f.epRenamed || 0},` +
       ` cam +${f.camCreated || 0}/~${f.camNormalized || 0}, landing ${f.landingRepaired || 0})` +
       ` warn=${(j.warnings || []).length} errors=${(j.errors || []).length} deferred=${j.deferred || 0}`,
@@ -72,5 +78,5 @@ function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
 
-console.log(`[folder-integrity] worker started; every ${Math.round(intervalMs / 60000)} min (first run in ${Math.round(startDelayMs / 60000)} min); baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`)
+console.log(`[folder-integrity] worker started; mode=${applyMode ? 'APPLY' : 'report-only (set FOLDER_INTEGRITY_APPLY=1 to repair)'}; every ${Math.round(intervalMs / 60000)} min (first run in ${Math.round(startDelayMs / 60000)} min); baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`)
 setTimeout(() => { runOnce(); timer = setInterval(runOnce, intervalMs) }, startDelayMs)

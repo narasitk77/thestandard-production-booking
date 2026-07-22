@@ -21,17 +21,21 @@ test('isAppShapedName: accepts only the shapes this codebase produces', () => {
   assert.equal(isAppShapedName(`PEA (${code})`, ''), false)
 })
 
-test('landingWindow: only today + tomorrow in Bangkok, spanning multi-day shoots', () => {
+test('landingWindow: TODAY only in Bangkok, spanning multi-day shoots', () => {
   // 2026-07-22 18:00 BKK = 11:00 UTC
   const now = new Date('2026-07-22T11:00:00Z')
   const day = (iso: string) => new Date(`${iso}T00:00:00Z`)
 
   assert.equal(landingWindow(day('2026-07-22'), null, now), true)  // today
-  assert.equal(landingWindow(day('2026-07-23'), null, now), true)  // tomorrow
+  // tomorrow belongs to the 19:00 lifecycle — creating it here would just feed
+  // the ~12:00 prune=today cleanup a fresh folder to bin every day
+  assert.equal(landingWindow(day('2026-07-23'), null, now), false)
   assert.equal(landingWindow(day('2026-07-24'), null, now), false) // day after
   assert.equal(landingWindow(day('2026-07-21'), null, now), false) // yesterday
   // a multi-day shoot that STARTED before today but runs through it still needs
   // its drop folder (the v1.146 shootEndDate lesson)
   assert.equal(landingWindow(day('2026-07-20'), day('2026-07-23'), now), true)
   assert.equal(landingWindow(day('2026-07-18'), day('2026-07-21'), now), false)
+  // a multi-day shoot starting tomorrow is still the lifecycle's job
+  assert.equal(landingWindow(day('2026-07-23'), day('2026-07-25'), now), false)
 })

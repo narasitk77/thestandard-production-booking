@@ -204,7 +204,10 @@ services:
       # "Cam A"), and tops up today+tomorrow's crew drop zone. Create + rename
       # only — never moves or trashes; ambiguous cases go to the digest email.
       # ON by default; the per-run write budget bounds Drive quota use.
+      # Staged: the worker runs REPORT-ONLY until FOLDER_INTEGRITY_APPLY=1, and
+      # renames stay off until FOLDER_INTEGRITY_RENAME=1 on top of that.
       FOLDER_INTEGRITY_WORKER_ENABLED: ${FOLDER_INTEGRITY_WORKER_ENABLED:-1}
+      FOLDER_INTEGRITY_APPLY: ${FOLDER_INTEGRITY_APPLY:-0}
       FOLDER_INTEGRITY_INTERVAL_MS: ${FOLDER_INTEGRITY_INTERVAL_MS:-3600000}
       FOLDER_INTEGRITY_START_DELAY_MS: ${FOLDER_INTEGRITY_START_DELAY_MS:-240000}
       FOLDER_INTEGRITY_PAST_DAYS: ${FOLDER_INTEGRITY_PAST_DAYS:-14}
@@ -214,7 +217,7 @@ services:
       FOLDER_INTEGRITY_REPORT_EMAIL: ${FOLDER_INTEGRITY_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
       # Kill switch for just the RENAME repairs (creates + camera-normalize stay
       # on): set to 0 if a rename ever fights an ops naming convention.
-      FOLDER_INTEGRITY_RENAME: ${FOLDER_INTEGRITY_RENAME:-1}
+      FOLDER_INTEGRITY_RENAME: ${FOLDER_INTEGRITY_RENAME:-0}
 
       # --- Automated DB backup (v1.77) ---
       # Supervised worker (scripts/backup-worker.js) pg_dumps the DB daily, gzips

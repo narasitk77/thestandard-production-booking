@@ -38,10 +38,10 @@ import { logAudit } from './audit'
 import {
   hasDriveCredentials, findEpisodeFolderUrls, listChildFolders, getFileName, renameDriveItem,
   ensureFolderPath, ensureShootCameraFolders, ensureFlatShootFolders, findChildFolderByCode,
-  findFoldersByCode, isFolderAlive, isFootageTreeFolder, listFilesRecursive, getDriveParentFolderId,
+  findFoldersByCode, isFolderAlive, classifyFootageTreeFolder, listFilesRecursive, getDriveParentFolderId,
 } from './google-drive'
 import {
-  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName,
+  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, folderNameMatchesCode,
   legacyBookingFolderName, landingBookingFolderName, camerasToPreCreate,
   isPhotoAlbumBooking, hasOutletFolderMapping,
 } from './outlet-folders'
@@ -51,9 +51,15 @@ import { getDriveLink, rememberDriveLinks } from './drive-links'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
 const SHOOT_STUB_RE = /^_SHOOT\b.*\.txt$/i
+const MIDDLE_DOT = '·'
 
-/** Kill switch for the rename repairs (creates + camera-normalize stay on). */
-const renameEnabled = () => process.env.FOLDER_INTEGRITY_RENAME !== '0'
+/**
+ * Rename repairs are OPT-IN (FOLDER_INTEGRITY_RENAME=1). Creating a missing
+ * folder is additive and provably safe; renaming one that already holds footage
+ * is not undoable from Drive trash, so it earns its flag only after ops have
+ * read a report-only digest and agreed with the proposed renames.
+ */
+const renameEnabled = () => process.env.FOLDER_INTEGRITY_RENAME === '1'
 
 /**
  * Is this folder name one that WE generated — "<something> (CODE)" (v1.110) or
@@ -105,14 +111,20 @@ function bkkDayKey(d: Date): string {
   return new Date(d.getTime() + 7 * 3_600_000).toISOString().slice(0, 10)
 }
 
-/** True when the shoot is today or tomorrow in Bangkok — the only window in
- *  which the lean landing policy wants a drop folder to exist. */
+/**
+ * True when the shoot is happening TODAY in Bangkok (spanning multi-day shoots).
+ *
+ * Deliberately today-only, not today+tomorrow: the 19:00 lifecycle owns
+ * creating tomorrow's folders, and the separate ~12:00 `prune=today` cleanup
+ * trashes empty non-today folders — a worker that made tomorrow's skeleton at
+ * 11:00 would just feed that prune a fresh folder to bin, once a day, forever.
+ * Repairing TODAY's drop zone is the part nothing else covers.
+ */
 export function landingWindow(shootDate: Date, shootEndDate: Date | null, now: Date): boolean {
   const today = bkkDayKey(now)
-  const tomorrow = bkkDayKey(new Date(now.getTime() + 24 * 3_600_000))
   const start = bkkDayKey(shootDate)
   const end = bkkDayKey(shootEndDate ?? shootDate)
-  return (start <= tomorrow && end >= today)
+  return start <= today && end >= today
 }
 
 export async function runFolderIntegrity(opts: {
@@ -203,10 +215,15 @@ export async function runFolderIntegrity(opts: {
       const cams = camerasToPreCreate(b.cameraCount, b.micCount)
 
       // ── resolve the box, id-first ────────────────────────────────────────
+      // CRITICAL (AGN): `box` must ALWAYS be the per-booking layer INSIDE the
+      // shared project box. findEpisodeFolderUrls falls back to the project box
+      // itself when the per-booking subfolder doesn't exist yet — storing THAT
+      // id as `box` would poison every id-first reader: video-merge would move
+      // this booking's whole landing subtree into the shared project box and
+      // interleave several bookings' footage. So when the subfolder is expected
+      // but wasn't reached, we refuse the whole booking and report it.
       const boxLink = getDriveLink(b.driveFolders, 'box')
       let boxId: string | null = boxLink && await isFolderAlive(boxLink) ? boxLink : null
-      // The per-booking layer is what we verify; for AGN that is the subfolder
-      // INSIDE the shared project box (never the project box itself).
       let resolvedViaSubfolder = !!boxId
       if (!boxId) {
         const resolved = await findEpisodeFolderUrls({
@@ -221,17 +238,38 @@ export async function runFolderIntegrity(opts: {
           bookingSubfolderCode: code,
           episodeFolderNames: epNames,
         })
-        boxId = resolved.bookingFolderId
         resolvedViaSubfolder = layers.bookingSubfolderName ? resolved.viaBookingSubfolder : true
+        if (resolved.bookingFolderId && !resolvedViaSubfolder) {
+          // Project box only — the booking layer is missing. Creating it is
+          // approve/prep's job (they key it by Production ID); we report.
+          base.warnings.push(`${code}: มีกล่องโปรเจกต์แต่ยังไม่มีโฟลเดอร์ของคิวนี้ข้างใน — รอ approve/prep สร้าง (ไม่แตะกล่องโปรเจกต์)`)
+          continue
+        }
+        boxId = resolved.bookingFolderId
         if (boxId && !dryRun) { await rememberDriveLinks(b.id, { box: boxId }); base.fixed.linksHealed++ }
         else if (boxId) base.fixed.linksHealed++
+      }
+      // Belt and braces for a stored link that predates this rule: an AGN box
+      // whose own name is the PROJECT (not this booking's code) is the shared
+      // box — never walk or rename it.
+      if (boxId && layers.bookingSubfolderName) {
+        const boxName = await getFileName(boxId)
+        if (boxName && !folderNameMatchesCode(boxName, code)) {
+          base.warnings.push(`${code}: box ที่ผูกไว้ ("${boxName}") ไม่ใช่โฟลเดอร์ของคิวนี้ — ข้าม (ตรวจ driveFolders.box)`)
+          continue
+        }
       }
 
       // ── box missing entirely → create, unless footage already lives somewhere ──
       if (!boxId) {
+        // FAIL CLOSED: a transient Drive error must read as "footage might
+        // exist", never as "safe to create" — otherwise a 429 storm makes the
+        // worker mass-create duplicate boxes for the whole window.
         let footageElsewhere = false
         for (const c of await findFoldersByCode(code)) {
-          if (!(await isFootageTreeFolder(c.id))) continue
+          const cls = await classifyFootageTreeFolder(c.id)
+          if (cls === 'not-in-tree') continue
+          if (cls === 'unknown') { footageElsewhere = true; break }
           const some = await listFilesRecursive(c.id, { maxFiles: 4 })
           if (some.some(f => !SHOOT_STUB_RE.test(f.name))) { footageElsewhere = true; break }
         }
@@ -270,14 +308,24 @@ export async function runFolderIntegrity(opts: {
           } else if (!renameEnabled()) {
             base.warnings.push(`${code}: box ควรเปลี่ยนชื่อเป็น "${expectedBoxName}" (ปิด rename อยู่)`)
           } else {
-            const parentKids = layers.bookingSubfolderName
-              ? await listChildFolders((await parentOf(boxId)) || '')
-              : []
-            const collision = parentKids.some(k => k.id !== boxId && k.name === expectedBoxName)
-            if (collision) {
-              base.warnings.push(`${code}: จะเปลี่ยนชื่อ box เป็น "${expectedBoxName}" ไม่ได้ — มีโฟลเดอร์ชื่อนี้อยู่แล้ว`)
-            } else if (await spend(`${code}: rename box "${actual}" → "${expectedBoxName}"`, () => renameDriveItem(boxId!, expectedBoxName))) {
-              base.fixed.boxRenamed++
+            // Collision check is UNCONDITIONAL: Drive allows same-name
+            // siblings, and manufacturing one is how the earlier duplicate
+            // messes started. If the parent can't be resolved we skip rather
+            // than rename blind.
+            const parentId = await parentOf(boxId)
+            const cls = await classifyFootageTreeFolder(boxId)
+            if (!parentId) {
+              base.warnings.push(`${code}: หา parent ของ box ไม่ได้ — ไม่เปลี่ยนชื่อ`)
+            } else if (cls !== 'in-tree') {
+              base.warnings.push(`${code}: box อยู่นอกต้นไม้ footage (${cls}) — ไม่เปลี่ยนชื่อ`)
+            } else {
+              const parentKids = await listChildFolders(parentId)
+              const collision = parentKids.some(k => k.id !== boxId && k.name === expectedBoxName)
+              if (collision) {
+                base.warnings.push(`${code}: จะเปลี่ยนชื่อ box เป็น "${expectedBoxName}" ไม่ได้ — มีโฟลเดอร์ชื่อนี้อยู่แล้ว`)
+              } else if (await spend(`${code}: rename box "${actual}" → "${expectedBoxName}"`, () => renameDriveItem(boxId!, expectedBoxName))) {
+                base.fixed.boxRenamed++
+              }
             }
           }
         }
@@ -301,7 +349,13 @@ export async function runFolderIntegrity(opts: {
             continue
           }
           epParents.push(hit.id)
-          if (hit.name !== want && renameEnabled()) {
+          // Rename an EP folder only when its current name is one WE wrote:
+          // the bare lead ("EP01") or "EP01 · <title>". A crew/ops-authored
+          // name ("EP01 ห้ามลบ ของพี่ต้น") is reported, not overwritten.
+          const appShapedEp = !!lead && (hit.name === lead || hit.name.startsWith(`${lead} ${MIDDLE_DOT} `))
+          if (hit.name !== want && !appShapedEp) {
+            base.warnings.push(`${code}: EP ชื่อ "${hit.name}" ไม่ใช่รูปแบบของระบบ — ไม่แตะ (ควรเป็น "${want}")`)
+          } else if (hit.name !== want && renameEnabled()) {
             const collision = boxKids.some(k => k.id !== hit.id && k.name === want)
             if (collision) {
               base.warnings.push(`${code}: จะเปลี่ยนชื่อ EP เป็น "${want}" ไม่ได้ — มีโฟลเดอร์ชื่อนี้อยู่แล้ว`)
@@ -355,24 +409,58 @@ export async function runFolderIntegrity(opts: {
             base.warnings.push(`${code}: ชื่อ drop folder ไม่ตรง ("${actual}" ควรเป็น "${wantLanding}") — ไม่เปลี่ยนให้ (มิเรอร์ลง NAS อยู่)`)
           }
         }
-        // ensureFlatShootFolders is idempotent: it reuses the folder matched by
-        // Production ID and only fills in the EP/CAM slots that are missing —
-        // exactly the repair the crew needs before a shoot day.
-        const missingLanding = !landingId
-        const ok = await spend(
-          `${code}: ${missingLanding ? 'create' : 'repair'} landing drop folders`,
-          async () => {
-            const { bookingFolderId } = await ensureFlatShootFolders({
-              rootFolderId: PRODUCTION_TEAM_ROOT,
-              bookingCode: code,
-              bookingFolderName: wantLanding,
-              cameras: cams,
-              episodeFolderNames: epNames.length ? epNames : undefined,
-            })
-            await rememberDriveLinks(b.id, { landing: bookingFolderId })
-          },
-        )
-        if (ok) base.fixed.landingRepaired++
+        // Only ACT when a slot is genuinely missing — a blind idempotent call
+        // every hour would report "repaired" on every no-op run (the digest
+        // has to stay meaningful) and would resurrect a drop folder for a
+        // shoot whose footage is already filed away (the 2026-07-02 ghost
+        // loop). So: probe first, and honour the delivered-check.
+        let needsRepair = !landingId
+        if (landingId) {
+          const kids = await listChildFolders(landingId)
+          if (epNames.length === 0) {
+            needsRepair = cams.some(c => !kids.some(k => k.name === c))
+          } else {
+            for (const want of epNames) {
+              const lead = want.split(` ${MIDDLE_DOT} `)[0]?.trim()
+              const ep = kids.find(k => k.name === want || (lead && (k.name === lead || k.name.startsWith(`${lead} `))))
+              if (!ep) { needsRepair = true; break }
+              const epKids = await listChildFolders(ep.id)
+              if (cams.some(c => !epKids.some(k => k.name === c))) { needsRepair = true; break }
+            }
+          }
+        }
+        if (needsRepair) {
+          let delivered = false
+          if (!landingId) {
+            // Mirrors prep-folders / ensureLandingForBooking: a booking whose
+            // footage already landed does NOT need a drop target.
+            for (const c of await findFoldersByCode(code)) {
+              const cls = await classifyFootageTreeFolder(c.id)
+              if (cls === 'not-in-tree') continue
+              if (cls === 'unknown') { delivered = true; break }
+              const some = await listFilesRecursive(c.id, { maxFiles: 4 })
+              if (some.some(f => !SHOOT_STUB_RE.test(f.name))) { delivered = true; break }
+            }
+          }
+          if (delivered) {
+            base.warnings.push(`${code}: ไม่มี drop folder แต่ footage ลงกล่องแล้ว — ไม่สร้างใหม่`)
+          } else {
+            const ok = await spend(
+              `${code}: ${landingId ? 'repair' : 'create'} landing drop folders`,
+              async () => {
+                const { bookingFolderId } = await ensureFlatShootFolders({
+                  rootFolderId: PRODUCTION_TEAM_ROOT,
+                  bookingCode: code,
+                  bookingFolderName: wantLanding,
+                  cameras: cams,
+                  episodeFolderNames: epNames.length ? epNames : undefined,
+                })
+                await rememberDriveLinks(b.id, { landing: bookingFolderId })
+              },
+            )
+            if (ok) base.fixed.landingRepaired++
+          }
+        }
       }
     } catch (e: any) {
       base.errors.push({ code, error: e?.message || String(e) })

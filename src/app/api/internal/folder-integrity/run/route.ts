@@ -75,8 +75,10 @@ export async function GET(request: NextRequest) {
     })
 
     const changed = Object.values(r.fixed).reduce((n, v) => n + v, 0)
+    // Report on worker runs in BOTH modes — the report-only stage is the whole
+    // point of the rollout, and its digest is what earns the apply flag.
     const worth = changed > 0 || r.warnings.length > 0 || r.errors.length > 0
-    if ((allowed.isWorker && worth && !dryRun) || forceReport) {
+    if ((allowed.isWorker && worth) || forceReport) {
       const text = [
         `Folder integrity — ตรวจ ${r.checked}/${r.scanned} งาน${r.dryRun ? ' (DRY RUN)' : ''}`,
         '',
