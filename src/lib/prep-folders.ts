@@ -10,7 +10,7 @@
  * invisible to the footage crawler). It never overwrites an existing marker.
  */
 import { prisma } from '@/lib/db'
-import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, findFoldersByCode, listFilesInFolder, listFilesRecursive, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
+import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, findFoldersByCode, isFootageTreeFolder, listFilesInFolder, listFilesRecursive, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
 import {
   outletDriveFolderName,
   shootFolderLayers,
@@ -122,6 +122,12 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       try {
         let hasFiles = false
         for (const c of await findFoldersByCode(b.bookingCode)) {
+          // v1.149 — only folders in the VIDEO tree (outside _SOUND-STAGING)
+          // count as "delivered footage". The staging booking folder shares the
+          // "(code)" name shape and the same drive, so one early audio file used
+          // to satisfy this check and PERMANENTLY skip creating the video box
+          // for a booking whose approve-time pre-create had failed.
+          if (!(await isFootageTreeFolder(c.id))) continue
           const some = await listFilesRecursive(c.id, { maxFiles: 4 })
           if (some.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) { hasFiles = true; break }
         }
@@ -221,8 +227,10 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
         // v1.112 — AGN: per-booking layer inside the project box.
         bookingSubfolderName: layers.bookingSubfolderName,
         bookingSubfolderCode: b.bookingCode!,
-        // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
+        // AGN box is keyed by projectId (not bookingCode) — v1.149: matched by
+        // that projectId (rename/name-drift tolerant), no longer exact-name.
         bookingCode: b.outlet.code === 'AGN' ? undefined : b.bookingCode!,
+        bookingFolderCode: b.outlet.code === 'AGN' ? (b.projectId ?? undefined) : undefined,
         cameras,
         episodeFolderNames,
       })

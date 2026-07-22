@@ -264,13 +264,41 @@ export async function listFilesRecursive(
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Find or create a single child folder under `parentId`. Race-safe via
- * a list-then-create pattern: two concurrent calls might both create the
- * folder, but the second's create would succeed too and we'd just orphan
- * one empty folder — acceptable cost. To make it strictly atomic we'd
- * need Drive locks (it doesn't have them).
+ * v1.149 — in-process ensure dedupe. Approve's fire-and-forget IIFE, the hourly
+ * prep sweep, and /api/upload/init can all find-or-create the SAME folder
+ * concurrently; each does an unlocked list-then-create, and Drive happily
+ * creates same-name siblings — the "acceptable orphan" below stops being
+ * acceptable the moment both twins receive children (footage splits across
+ * them). The app runs as a single Node process, so collapsing concurrent
+ * ensures of one (parent, key) onto one shared promise closes the race with no
+ * distributed locking. (Cross-process races remain theoretical: one container.)
  */
-async function ensureChildFolder(
+const inflightEnsures = new Map<string, Promise<string>>()
+function dedupeEnsure(key: string, fn: () => Promise<string>): Promise<string> {
+  const existing = inflightEnsures.get(key)
+  if (existing) return existing
+  const p = fn().finally(() => { inflightEnsures.delete(key) })
+  inflightEnsures.set(key, p)
+  return p
+}
+
+/**
+ * Find or create a single child folder under `parentId`. Concurrent in-process
+ * calls for the same (parent, name) share one promise (v1.149); the underlying
+ * list-then-create remains non-atomic across processes — two concurrent calls
+ * might both create the folder, but the second's create would succeed too and
+ * we'd just orphan one empty folder. To make it strictly atomic we'd need
+ * Drive locks (it doesn't have them).
+ */
+function ensureChildFolder(
+  drive: drive_v3.Drive,
+  parentId: string,
+  name: string,
+): Promise<string> {
+  return dedupeEnsure(`${parentId} name:${name}`, () => ensureChildFolderUncoordinated(drive, parentId, name))
+}
+
+async function ensureChildFolderUncoordinated(
   drive: drive_v3.Drive,
   parentId: string,
   name: string,
@@ -346,7 +374,17 @@ function stripOrderingPrefix(name: string): string {
  * `canonicalName` folder — a visible, correctable fallback rather than a
  * silent wrong-folder write.
  */
-async function ensureChildFolderByCanonicalName(
+function ensureChildFolderByCanonicalName(
+  drive: drive_v3.Drive,
+  parentId: string,
+  canonicalName: string,
+): Promise<string> {
+  // v1.149 — same-key concurrent ensures share one promise (see dedupeEnsure).
+  const canonKey = stripOrderingPrefix(canonicalName).trim().toLowerCase()
+  return dedupeEnsure(`${parentId} canon:${canonKey}`, () => ensureChildFolderByCanonicalNameUncoordinated(drive, parentId, canonicalName))
+}
+
+async function ensureChildFolderByCanonicalNameUncoordinated(
   drive: drive_v3.Drive,
   parentId: string,
   canonicalName: string,
@@ -419,6 +457,13 @@ interface ShootFolderInput {
    *  by CODE (either legacy "<code> · …" or new "<show> · … (<code>)" shape) and
    *  REUSED, so a pre-rename folder is never duplicated by the show-first name. */
   bookingCode?: string
+  /** v1.149 — immutable code to MATCH the bookingFolderName layer by when it is
+   *  NOT the Production ID: AGN passes the projectId here, so the shared project
+   *  box is found by "PP-26-XXX" even after projectName drift (the name is a
+   *  per-booking snapshot of the Sheet cell) or an ops rename — previously the
+   *  AGN box was exact-name-matched only, and every drift spawned a duplicate
+   *  box that split the project's footage. */
+  bookingFolderCode?: string
   /** v1.112 — AGN: per-BOOKING layer INSIDE the shared project box
    *  ("<job> (<code>)"). When set, it is resolved/created under bookingFolderName
    *  and treated as THE booking folder (EP/CAM/_SHOOT nest inside), so each คิว's
@@ -435,12 +480,42 @@ interface ShootFolderInput {
  * create it with `newName` (the show-first name). Renaming legacy→new is left to
  * the one-off rename tool, not done here (keeps the upload path side-effect-free).
  */
-async function ensureBookingFolder(drive: drive_v3.Drive, parentId: string, bookingCode: string, newName: string): Promise<string> {
+function ensureBookingFolder(drive: drive_v3.Drive, parentId: string, bookingCode: string, newName: string): Promise<string> {
+  // v1.149 — same-code concurrent ensures share one promise (see dedupeEnsure).
+  return dedupeEnsure(`${parentId} code:${bookingCode.trim().toUpperCase()}`, () => ensureBookingFolderUncoordinated(drive, parentId, bookingCode, newName))
+}
+
+async function ensureBookingFolderUncoordinated(drive: drive_v3.Drive, parentId: string, bookingCode: string, newName: string): Promise<string> {
   // listChildFolders paginates fully — a flat archive (photo / _SOUND-STAGING) can
   // exceed one page, and missing a match there would recreate a duplicate.
-  const existing = (await listChildFolders(parentId)).find(f => folderNameMatchesCode(f.name, bookingCode))
+  // v1.148.3 — pick the OLDEST matching box, not the first Drive happens to
+  // return (list order isn't guaranteed), so a duplicate can't make us reuse an
+  // arbitrary/newer fork.
+  const existing = oldestChildFolder((await listChildFolders(parentId)).filter(f => folderNameMatchesCode(f.name, bookingCode)))
   if (existing) return existing.id
   return ensureChildFolder(drive, parentId, newName)
+}
+
+/**
+ * v1.149 — find-or-create an EPISODE folder by its immutable LEAD segment
+ * ("EP01" / the project EP id — the part before " · <title>"), so a retitled
+ * episode REUSES its existing folder instead of forking a stale-named duplicate
+ * that strands previously-uploaded footage. The read path
+ * (findEpisodeFolderUrls) has matched by lead since v1.111; the create paths
+ * (approve pre-create, prep sweep, upload, landing) now match the same way.
+ */
+function ensureEpisodeFolder(drive: drive_v3.Drive, parentId: string, name: string): Promise<string> {
+  const lead = name.split(' · ')[0]?.trim()
+  if (!lead) return ensureChildFolder(drive, parentId, name)
+  return dedupeEnsure(`${parentId} ep:${lead.toLowerCase()}`, async () => {
+    // v1.148.3 — oldest match wins (see ensureBookingFolderUncoordinated): a
+    // retitled episode must reuse its ORIGINAL folder, not an arbitrary fork.
+    const existing = oldestChildFolder((await listChildFolders(parentId)).filter(
+      f => f.name === name || f.name === lead || f.name.startsWith(`${lead} `),
+    ))
+    if (existing) return existing.id
+    return ensureChildFolderUncoordinated(drive, parentId, name)
+  })
 }
 
 /**
@@ -459,10 +534,13 @@ async function resolveShootFolder(
   const programFolderId = await ensureChildFolderByCanonicalName(drive, outletId, input.programFolderName)
   // Defensive: an empty bookingFolderName nests the EP/camera folders directly
   // under the program box (rather than creating a folder literally named "").
+  // v1.149 — the box layer is matched by an immutable code whenever one exists:
+  // the Production ID, or (AGN) the projectId via bookingFolderCode.
+  const boxMatchCode = input.bookingFolderCode || input.bookingCode
   const bookingFolderId = !input.bookingFolderName
     ? programFolderId
-    : input.bookingCode
-      ? await ensureBookingFolder(drive, programFolderId, input.bookingCode, input.bookingFolderName)
+    : boxMatchCode
+      ? await ensureBookingFolder(drive, programFolderId, boxMatchCode, input.bookingFolderName)
       : await ensureChildFolder(drive, programFolderId, input.bookingFolderName)
   // v1.112 — AGN per-booking layer inside the project box: find by code (reuse,
   // never duplicate) or create, and hand IT back as the booking folder.
@@ -546,6 +624,11 @@ export async function findEpisodeFolderUrls(input: ShootFolderInput & {
     if (!bookingId && input.bookingCode) {
       bookingId = (await listFolders(programId)).find(f => folderNameMatchesCode(f.name, input.bookingCode!))?.id ?? null
     }
+    // v1.149 — same immutable-code fallback for a non-Production-ID box layer
+    // (AGN's shared project box, matched by projectId).
+    if (!bookingId && input.bookingFolderCode) {
+      bookingId = (await listFolders(programId)).find(f => folderNameMatchesCode(f.name, input.bookingFolderCode!))?.id ?? null
+    }
   }
   if (!bookingId) return empty
 
@@ -592,7 +675,7 @@ export async function ensureUploadFolderPath(input: ShootFolderInput & {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
   const { bookingFolderId } = await resolveShootFolder(drive, input)
   const cameraParent = input.episodeFolderName
-    ? await ensureChildFolder(drive, bookingFolderId, input.episodeFolderName)
+    ? await ensureEpisodeFolder(drive, bookingFolderId, input.episodeFolderName)
     : bookingFolderId
   const cameraFolderId = await ensureChildFolder(drive, cameraParent, input.camera)
   return { bookingFolderId, cameraFolderId }
@@ -614,7 +697,7 @@ export async function ensureShootCameraFolders(input: ShootFolderInput & {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
   const { bookingFolderId } = await resolveShootFolder(drive, input)
   const parents = input.episodeFolderNames?.length
-    ? await Promise.all(input.episodeFolderNames.map(ep => ensureChildFolder(drive, bookingFolderId, ep)))
+    ? await Promise.all(input.episodeFolderNames.map(ep => ensureEpisodeFolder(drive, bookingFolderId, ep)))
     : [bookingFolderId]
   for (const parent of parents) {
     for (const cam of input.cameras) await ensureChildFolder(drive, parent, cam)
@@ -736,20 +819,36 @@ export async function ensureSoundStagingFolder(input: { rootFolderId: string; bo
 }
 
 /** Read-only: all direct child folders (id + name), paginated. */
-export async function listChildFolders(parentId: string): Promise<Array<{ id: string; name: string }>> {
+export async function listChildFolders(parentId: string): Promise<Array<{ id: string; name: string; createdTime?: string }>> {
   const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
-  const out: Array<{ id: string; name: string }> = []
+  const out: Array<{ id: string; name: string; createdTime?: string }> = []
   let pageToken: string | undefined
   do {
     const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
+      // v1.148.3 — createdTime lets find-or-create deterministically pick the
+      // OLDEST match when duplicates exist (Drive doesn't guarantee list order).
       q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`,
-      fields: 'nextPageToken, files(id, name)', pageSize: 1000, pageToken,
+      fields: 'nextPageToken, files(id, name, createdTime)', pageSize: 1000, pageToken,
       supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
     })
-    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name })
+    for (const f of res.data.files ?? []) if (f.id && f.name) out.push({ id: f.id, name: f.name, createdTime: f.createdTime ?? undefined })
     pageToken = res.data.nextPageToken ?? undefined
   } while (pageToken)
   return out
+}
+
+/** Deterministically pick the OLDEST folder (earliest createdTime) among matches
+ *  — the original box, so find-or-create reuses it instead of an arbitrary
+ *  duplicate. Entries without a createdTime sort last (still stable). */
+function oldestChildFolder<T extends { createdTime?: string }>(matches: T[]): T | undefined {
+  if (matches.length <= 1) return matches[0]
+  // ISO-8601 sorts chronologically under plain lexicographic compare; missing
+  // createdTime ('￿') sorts last. Deterministic — no locale dependence.
+  return [...matches].sort((a, b) => {
+    const ca = a.createdTime ?? '￿'
+    const cb = b.createdTime ?? '￿'
+    return ca < cb ? -1 : ca > cb ? 1 : 0
+  })[0]
 }
 
 /**
@@ -1018,7 +1117,7 @@ export async function ensureFlatShootFolders(input: {
     ? await ensureBookingFolder(drive, input.rootFolderId, input.bookingCode, input.bookingFolderName)
     : await ensureChildFolder(drive, input.rootFolderId, input.bookingFolderName)
   const parents = input.episodeFolderNames?.length
-    ? await Promise.all(input.episodeFolderNames.map(ep => ensureChildFolder(drive, bookingFolderId, ep)))
+    ? await Promise.all(input.episodeFolderNames.map(ep => ensureEpisodeFolder(drive, bookingFolderId, ep)))
     : [bookingFolderId]
   for (const parent of parents) {
     for (const cam of input.cameras) await ensureChildFolder(drive, parent, cam)
@@ -1317,6 +1416,70 @@ export async function deleteDriveFile(fileId: string): Promise<void> {
  * resumable PUT can succeed partially, leaving a file shorter than
  * expected — checking size mirrors the Wasabi verifyUpload pattern).
  */
+/**
+ * v1.149 — true when the folder lives in the VIDEO footage Shared Drive AND
+ * outside the `_SOUND-STAGING` subtree. Scopes "does this booking already have
+ * footage / a folder?" checks that start from a drive-wide name search
+ * (findFoldersByCode): a hit in the landing/photo drive, or the booking's own
+ * sound-staging folder (same "(code)" name shape, same drive), must NOT count
+ * as the booking's footage box — prep-folders once skipped creating a video box
+ * for the whole shoot day because one audio file sat in _SOUND-STAGING.
+ */
+// v1.148.3 — only a SUCCESSFUL driveId lookup is memoized (see classify below).
+let footageDriveIdMemo: { root: string; driveId: string } | null = null
+
+/** Three-way footage-tree membership: definitely in, definitely out, or UNKNOWN
+ *  (a transient Drive error we could not resolve). Splitting `unknown` out of
+ *  "not in tree" lets a DESTRUCTIVE caller (folder rename) fail-closed on doubt
+ *  instead of acting on a folder it never actually confirmed. */
+export type FootageTreeCheck = 'in-tree' | 'not-in-tree' | 'unknown'
+
+export async function classifyFootageTreeFolder(folderId: string): Promise<FootageTreeCheck> {
+  const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
+  if (!root) return 'not-in-tree'
+  if (!footageDriveIdMemo || footageDriveIdMemo.root !== root) {
+    // 3.1 fix — cache ONLY a success. A transient error used to memoize
+    // driveId:null forever (until container restart) → every membership check
+    // then returned false → folder matching broke system-wide. On failure we
+    // leave the memo unset and report `unknown`, so the next call retries.
+    const rootId = await getFolderDriveId(root).catch(() => null)
+    if (!rootId) return 'unknown'
+    footageDriveIdMemo = { root, driveId: rootId }
+  }
+  const rootDriveId = footageDriveIdMemo.driveId
+
+  // `undefined` = the lookup THREW (unknown); `null` = a real "no shared-drive
+  // id" answer (folder lives in My Drive) → genuinely not in the footage tree.
+  const driveId = await getFolderDriveId(folderId).catch(() => undefined)
+  if (driveId === undefined) return 'unknown'
+  if (driveId !== rootDriveId) return 'not-in-tree'
+
+  // Walk up a few parents to rule out the _SOUND-STAGING subtree (staging depth
+  // is root/_SOUND-STAGING/<outlet>/<category>/<booking> — 4 hops covers it).
+  // 3.2 fix — a walk error is `unknown`, NOT "reached root / in tree": the old
+  // code returned true on a parent-lookup failure (fail-OPEN), which could feed
+  // a _SOUND-STAGING folder into regenerate's rename sweep.
+  let cur = folderId
+  for (let i = 0; i < 5; i++) {
+    const parent = await getDriveParentFolderId(cur).catch(() => undefined)
+    if (parent === undefined) return 'unknown'
+    if (!parent || parent === root || parent === rootDriveId) return 'in-tree'
+    const name = await getFileName(parent).catch(() => undefined)
+    if (name === undefined) return 'unknown'
+    if (name === SOUND_STAGING_DIR) return 'not-in-tree'
+    cur = parent
+  }
+  return 'in-tree'
+}
+
+/** Boolean convenience — true ONLY when confidently in the footage tree;
+ *  `unknown` collapses to false (fail-closed). A caller performing a
+ *  destructive op on the result should call classifyFootageTreeFolder directly
+ *  and act only on an explicit 'in-tree'. */
+export async function isFootageTreeFolder(folderId: string): Promise<boolean> {
+  return (await classifyFootageTreeFolder(folderId)) === 'in-tree'
+}
+
 export async function getDriveFile(fileId: string): Promise<{
   id: string; name: string; size: number | null; webViewLink: string | null
 } | null> {

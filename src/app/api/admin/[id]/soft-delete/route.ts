@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { updateBookingRow } from '@/lib/google-sheets'
 import { clearBookingOT } from '@/lib/ot-sync'
 
 export const dynamic = 'force-dynamic'
@@ -29,7 +30,7 @@ export async function POST(
   const { id } = params
   const booking = await prisma.booking.findUnique({
     where: { id },
-    select: { id: true, bookingCode: true, status: true, calendarEventId: true, deletedAt: true },
+    select: { id: true, bookingCode: true, status: true, calendarEventId: true, deletedAt: true, sheetRowIndex: true },
   })
   if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (booking.deletedAt) return NextResponse.json({ error: 'Already deleted' }, { status: 409 })
@@ -37,6 +38,15 @@ export async function POST(
   if (booking.calendarEventId) {
     deleteCalendarEvent(booking.calendarEventId).catch(e =>
       console.warn(`[soft-delete] calendar event delete failed: ${e}`)
+    )
+  }
+  // v1.149 — mirror the cancel flows: the Sheet row must not keep showing a
+  // live-looking Status + a now-dead Calendar Event ID (col W) for a hidden
+  // booking — PMDC's Airtable sync merges Service Jobs by that event id, so a
+  // ghost row misleads it. (The row itself stays — the booking still exists.)
+  if (booking.sheetRowIndex) {
+    updateBookingRow(booking.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(e =>
+      console.warn(`[soft-delete] sheet row update failed: ${e?.message || e}`)
     )
   }
   await clearBookingOT(id).catch(e =>

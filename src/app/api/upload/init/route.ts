@@ -264,8 +264,10 @@ export async function POST(request: NextRequest) {
         // v1.112 — AGN: uploads land inside the per-booking layer of the project box.
         bookingSubfolderName: driveBookingSubfolder,
         bookingSubfolderCode: booking.bookingCode ?? undefined,
-        // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
+        // AGN box is keyed by projectId (not bookingCode) — v1.149: matched by
+        // that projectId (rename/name-drift tolerant), no longer exact-name.
         bookingCode: booking.outlet.code === 'AGN' ? undefined : (booking.bookingCode ?? undefined),
+        bookingFolderCode: booking.outlet.code === 'AGN' ? (booking.projectId ?? undefined) : undefined,
         episodeFolderName,
         camera,
         subject,

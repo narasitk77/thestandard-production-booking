@@ -136,8 +136,12 @@ export async function POST(
           // v1.112 — AGN: per-booking layer inside the project box (EP/CAM nest there).
           bookingSubfolderName: layers.bookingSubfolderName,
           bookingSubfolderCode: updated.bookingCode,
-          // AGN box is keyed by projectId (not bookingCode) → keep exact-name match.
+          // AGN box is keyed by projectId (not bookingCode) — v1.149: matched by
+          // that projectId (rename/name-drift tolerant), no longer exact-name.
           bookingCode: updated.outlet.code === 'AGN' ? undefined : updated.bookingCode,
+          bookingFolderCode: updated.outlet.code === 'AGN' ? (updated.projectId ?? undefined) : undefined,
+          // v1.149 — 2-arg form (micCount → AUDIO pre-create) must survive this
+          // merge: pr-15 was written against the 1-arg era.
           cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
           // v1.93 — one folder per episode; empty for no-episode bookings.
           episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,

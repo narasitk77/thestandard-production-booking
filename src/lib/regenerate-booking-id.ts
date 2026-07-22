@@ -26,7 +26,9 @@ import {
   findEpisodeFolderUrls,
   findChildFolder,
   findChildFolderByCode,
+  findFoldersByCode,
   findSoundStagingFolderByCode,
+  classifyFootageTreeFolder,
   renameDriveItem,
   moveAndRenameFile,
   ensureProgramPath,
@@ -279,6 +281,11 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
             outletCanonicalName: outletCanon,
             programFolderName: oldLayers.programFolderName,
             bookingFolderName: oldLayers.bookingFolderName,
+            // v1.149 — match the shared project box by projectId too (same as
+            // approve/prep/upload): an ops-retitled box otherwise misses, the
+            // old-code subfolder never gets renamed, and the next upload/prep
+            // creates a new-code twin beside it.
+            bookingFolderCode: booking.projectId ?? undefined,
             bookingSubfolderName: oldLayers.bookingSubfolderName,
             bookingSubfolderCode: oldCode,
             episodeFolderNames: [],
@@ -324,9 +331,40 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
             if (!moved) await renameDriveItem(resolved.bookingFolderId, newLayers.bookingFolderName)
             effects.driveBookingFolder = 'renamed'
           } else {
-            // Not found = folder never created (REQUESTED) OR already renamed by a
-            // prior partial run. Either way nothing to do — NOT an error.
-            effects.driveBookingFolder = 'not-found'
+            // v1.149 — the box may have been HAND-MOVED out of the deterministic
+            // outlet/program path (ops reorganize freely). Before declaring
+            // not-found — which commits the new code and orphans a folder still
+            // named by the OLD code (a "contains newCode" search can never find
+            // it again) — sweep the footage drive by the old code and rename an
+            // unambiguous single hit in place (no move; ops chose its location).
+            const strays: Array<{ id: string; name: string }> = []
+            let anyUnknown = false
+            for (const c of await findFoldersByCode(oldCode)) {
+              // v1.148.3 — fail-CLOSED for this destructive rename: only an
+              // explicit 'in-tree' is a candidate. A transient 'unknown' (Drive
+              // error) must never be renamed — it could be a _SOUND-STAGING
+              // sibling or a folder we never confirmed.
+              const cls = await classifyFootageTreeFolder(c.id)
+              if (cls === 'in-tree') strays.push(c)
+              else if (cls === 'unknown') anyUnknown = true
+            }
+            if (anyUnknown) {
+              // A candidate couldn't be classified. Renaming now risks the wrong
+              // folder, and declaring not-found would commit the new code + orphan
+              // the old-named box. Abort like any other Drive error and retry when
+              // Drive recovers (idempotent — nothing has been committed yet).
+              console.error('[regenerate] footage-tree classification unknown for a candidate — deferring rename')
+              effects.driveBookingFolder = 'error'
+              return abort('Drive footage-tree classification (transient)')
+            }
+            if (strays.length === 1) {
+              await renameDriveItem(strays[0].id, newLayers.bookingFolderName)
+              effects.driveBookingFolder = 'renamed'
+            } else {
+              // 0 hits = folder never created (REQUESTED) OR already renamed by a
+              // prior partial run; >1 = ambiguous — leave for a human. NOT an error.
+              effects.driveBookingFolder = 'not-found'
+            }
           }
         } catch (e: any) {
           console.error('[regenerate] booking folder rename failed:', e?.message || e)
