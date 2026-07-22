@@ -1,14 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { reconcileShootMarkers, formatReconcileReport, totalChanges } from '@/lib/shoot-marker-reconcile'
+import { reconcileShootMarkers, reconcileGenericMarkers, mergeReconcileResults, formatReconcileReport, totalChanges } from '@/lib/shoot-marker-reconcile'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// v1.148.3 reentrancy guard — same shape as prep-folders/video-merge/sound-merge.
+// A proxy-timeout-driven retry (this route runs up to 300s) must not overlap two
+// real (non-dryRun) passes: `upsertTextFile` is list-then-create (non-atomic), so
+// two concurrent passes can each see "no marker" and create a DUPLICATE _SHOOT.txt
+// — the exact drift this reconciler exists to remove. dryRun passes are read-only
+// and may overlap freely.
+let shootMarkerReconcileRunning = false
+
 /**
- * GET /api/internal/shoot-markers/reconcile?dryRun=1&projectId=&limit=&report=1
+ * GET /api/internal/shoot-markers/reconcile?dryRun=1&projectId=&limit=&sinceDays=&report=1
  *
  * v1.135 — enforce "one _SHOOT marker per booking"; v1.136 — also audit marker
  * CONTENT (Production ID + Gregorian date) against the DB and rewrite on drift,
@@ -51,10 +59,30 @@ export async function GET(request: NextRequest) {
   const dryRun = !(dryRunParam === '0' || dryRunParam === 'false')
   const projectId = searchParams.get('projectId')?.trim() || undefined
   const limitProjects = searchParams.get('limit') ? Math.max(1, Number(searchParams.get('limit'))) : undefined
+  const sinceDays = searchParams.get('sinceDays') ? Math.max(1, Number(searchParams.get('sinceDays'))) : undefined
   const forceReport = searchParams.get('report') === '1'
 
+  // Reject an overlapping mutating run before we touch Drive (dryRun is safe).
+  if (!dryRun) {
+    if (shootMarkerReconcileRunning) {
+      return NextResponse.json(
+        { error: 'shoot-marker reconcile กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' },
+        { status: 409 },
+      )
+    }
+    shootMarkerReconcileRunning = true
+  }
+
   try {
-    const result = await reconcileShootMarkers({ dryRun, projectId, limitProjects })
+    const agnResult = await reconcileShootMarkers({ dryRun, projectId, limitProjects })
+    // v1.149 — also audit the GENERIC layout (non-AGN outlets + AGN without a
+    // project + photo jobs); those bookings previously had NO marker repair at
+    // all. Skipped when the caller scoped the run to one AGN project.
+    // v1.148.3 — `limit`/`sinceDays` now flow into the generic pass too (was
+    // AGN-only), so a staged rollout can bound BOTH passes, not just AGN.
+    const result = projectId
+      ? agnResult
+      : mergeReconcileResults(agnResult, await reconcileGenericMarkers({ dryRun, sinceDays, limit: limitProjects }))
     const changes = totalChanges(result)
 
     if (!dryRun && changes > 0) {
@@ -62,8 +90,8 @@ export async function GET(request: NextRequest) {
         actorEmail: allowed.actorEmail || 'shoot-marker-worker',
         action: 'drive.reconcile_shoot_markers',
         entityType: 'Drive',
-        entityId: projectId || 'all-agn',
-        changes: { ...result.fixed, warnings: result.warnings.length, errors: result.errors, scannedBookings: result.scannedBookings },
+        entityId: projectId || 'all-bookings',
+        changes: { ...result.fixed, warnings: result.warnings.length, errors: result.errors, scannedBookings: result.scannedBookings, scannedGenericBookings: result.scannedGenericBookings ?? 0 },
       })
     }
 
@@ -89,5 +117,7 @@ export async function GET(request: NextRequest) {
   } catch (e: any) {
     console.error('GET /api/internal/shoot-markers/reconcile error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
+  } finally {
+    if (!dryRun) shootMarkerReconcileRunning = false
   }
 }
