@@ -86,6 +86,17 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
   // cross-drive folder moves) falls back to the per-file mirror unchanged.
   const subs = await listChildFolders(srcId)
   for (const s of subs) {
+    // v1.150.2 — NEVER relocate an EMPTY landing subtree. The nightly lifecycle
+    // creates tomorrow's drop skeleton (EP / CAM-A..N / AUDIO) at 19:00 BKK;
+    // the hourly merge then found "box twin missing or empty" and moved that
+    // fresh, still-empty skeleton into the box — trashing the box's own twin
+    // first. Net effect every night: the crew's drop folder went back to empty
+    // and there were no CAM slots to drop into the next morning (reported
+    // 2026-07-22, verified on AGN-260722-01: its EP+CAM-A+CAM-B created 19:00
+    // were re-parented under the VIDEO 2026 box within the hour).
+    // An empty subtree has nothing to merge, so skipping it is a pure no-op for
+    // the merge and keeps the drop target intact.
+    if (await isLandingShell(s.id)) continue
     let destSub: string | null = destId ? await findChildFolder(destId, s.name) : null
     if (destId && !dryRun) {
       if (destSub && await isFolderEmpty(destSub)) {
