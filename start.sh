@@ -399,6 +399,20 @@ echo "==> Starting video-merge worker (supervised)..."
   done
 ) &
 
+# v1.151 — folder-integrity worker. ON BY DEFAULT: hourly it re-checks every
+# active booking's Drive tree against the DB and repairs it (create missing
+# box/EP/CAM/AUDIO, rename stale names in place, top up today+tomorrow's crew
+# drop zone). Create + rename ONLY — never moves or trashes; ambiguous cases are
+# emailed for a human. Set FOLDER_INTEGRITY_WORKER_ENABLED=0 to disable.
+echo "==> Starting folder-integrity worker (supervised)..."
+(
+  while true; do
+    node scripts/folder-integrity-worker.js
+    echo "[folder-integrity] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 # v1.135 — _SHOOT marker reconcile worker. Stays dormant when
 # SHOOT_MARKER_WORKER_ENABLED is unset/0; supervisor still re-launches so
 # flipping the env var live in Portainer is enough. Enforces one _SHOOT marker

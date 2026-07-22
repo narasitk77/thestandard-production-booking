@@ -88,6 +88,44 @@ export function getDriveWriteAuth(subjectOverride?: string) {
   })
 }
 
+/**
+ * v1.151 — retry a Drive MUTATION through the transient failures this app
+ * actually hits. Drive enforces a per-user "Write requests per minute" quota
+ * and answers 429 `rateLimitExceeded` once a sweep goes fast enough; before
+ * this helper every such call just threw, so the 2026-07-21 Bookings backfill
+ * died at ~161 of 181 rows and had to be re-fired by hand. Google's own
+ * guidance is exponential backoff with jitter, which is exactly what a
+ * self-healing repair worker needs to stay unattended.
+ *
+ * Retries 429 and 5xx only — a 403/404 (permission, gone) is permanent and
+ * surfaces immediately, so a real bug never hides behind a retry loop.
+ */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
+
+function driveErrorStatus(e: any): number | null {
+  const s = e?.status ?? e?.code ?? e?.response?.status
+  return typeof s === 'number' ? s : null
+}
+
+export async function withDriveRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = 5): Promise<T> {
+  let lastErr: any
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn()
+    } catch (e: any) {
+      lastErr = e
+      const status = driveErrorStatus(e)
+      if (status == null || !RETRYABLE_STATUS.has(status) || attempt === maxAttempts) throw e
+      // 1s, 2s, 4s, 8s (+ up to 1s jitter) — a 429 clears on the next
+      // quota minute, so this rides out a burst without a long stall.
+      const backoff = Math.min(8000, 2 ** (attempt - 1) * 1000) + Math.floor(Math.random() * 1000)
+      console.warn(`[google-drive] ${label} ${status} — retry ${attempt}/${maxAttempts - 1} in ${backoff}ms`)
+      await new Promise(r => setTimeout(r, backoff))
+    }
+  }
+  throw lastErr
+}
+
 export interface DriveFile {
   id: string
   name: string
@@ -316,7 +354,7 @@ async function ensureChildFolderUncoordinated(
   const existing = found.data.files?.[0]
   if (existing?.id) return existing.id
 
-  const created = await drive.files.create({
+  const created = await withDriveRetry(`create folder "${name}"`, () => drive.files.create({
     requestBody: {
       name,
       mimeType: FOLDER_MIME,
@@ -324,7 +362,7 @@ async function ensureChildFolderUncoordinated(
     },
     fields: 'id',
     supportsAllDrives: true,
-  })
+  }))
   if (!created.data.id) throw new Error(`Drive folder create returned no id for "${name}"`)
   return created.data.id
 }
@@ -971,12 +1009,12 @@ export async function findChildFolder(parentId: string, name: string): Promise<s
  */
 export async function copyFileToFolder(fileId: string, targetFolderId: string, name?: string, subject?: string): Promise<string> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
-  const res = await drive.files.copy({
+  const res = await withDriveRetry(`copy ${fileId}`, () => drive.files.copy({
     fileId,
     requestBody: { parents: [targetFolderId], ...(name ? { name } : {}) },
     fields: 'id',
     supportsAllDrives: true,
-  })
+  }))
   if (!res.data.id) throw new Error(`Drive copy returned no id for file ${fileId}`)
   return res.data.id
 }
@@ -989,12 +1027,12 @@ export async function copyFileToFolder(fileId: string, targetFolderId: string, n
  */
 export async function renameDriveItem(fileId: string, newName: string, subject?: string): Promise<void> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
-  await drive.files.update({
+  await withDriveRetry(`rename ${fileId}`, () => drive.files.update({
     fileId,
     requestBody: { name: newName },
     fields: 'id',
     supportsAllDrives: true,
-  })
+  }))
 }
 
 /**
@@ -1019,12 +1057,12 @@ export async function isFolderAlive(folderId: string): Promise<boolean> {
  */
 export async function trashDriveItem(fileId: string, subject?: string): Promise<void> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
-  await drive.files.update({
+  await withDriveRetry(`trash ${fileId}`, () => drive.files.update({
     fileId,
     requestBody: { trashed: true },
     fields: 'id',
     supportsAllDrives: true,
-  })
+  }))
 }
 
 /**
@@ -1070,13 +1108,13 @@ export async function listFilesInFolder(parentId: string): Promise<Array<{ id: s
  */
 export async function moveFileToFolder(fileId: string, targetFolderId: string, removeParentId: string, subject?: string): Promise<void> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
-  await drive.files.update({
+  await withDriveRetry(`move ${fileId}`, () => drive.files.update({
     fileId,
     addParents: targetFolderId,
     removeParents: removeParentId,
     fields: 'id, parents',
     supportsAllDrives: true,
-  })
+  }))
 }
 
 /**
@@ -1165,18 +1203,18 @@ export async function upsertTextFile(input: {
     // Keep the NEWEST id (then overwrite it with the current content), and trash
     // the rest so it stays 1:1 (Drive trash is recoverable — never hard-delete).
     const keepId = dupes[dupes.length - 1]
-    await drive.files.update({ fileId: keepId, media, supportsAllDrives: true })
+    await withDriveRetry(`upsert "${input.name}"`, () => drive.files.update({ fileId: keepId, media, supportsAllDrives: true }))
     for (const dupId of dupes.slice(0, -1)) {
       await drive.files.update({ fileId: dupId, requestBody: { trashed: true }, supportsAllDrives: true }).catch(() => {})
     }
     return keepId
   }
-  const created = await drive.files.create({
+  const created = await withDriveRetry(`create "${input.name}"`, () => drive.files.create({
     requestBody: { name: input.name, mimeType: 'text/plain', parents: [input.parentFolderId] },
     media,
     fields: 'id',
     supportsAllDrives: true,
-  })
+  }))
   if (!created.data.id) throw new Error(`Drive text-file create returned no id for "${input.name}"`)
   return created.data.id
 }

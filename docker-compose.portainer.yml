@@ -198,6 +198,24 @@ services:
       FOOTAGE_READY_MAX_PER_RUN: ${FOOTAGE_READY_MAX_PER_RUN:-5}
       FOOTAGE_READY_SECRET: ${FOOTAGE_READY_SECRET:-${NEXTAUTH_SECRET}}
 
+      # --- Folder integrity check-and-repair (v1.151) ---
+      # Hourly pass over every active booking: creates missing box/EP/CAM/AUDIO
+      # folders, renames stale ones in place (retitled job/episode, hand-made
+      # "Cam A"), and tops up today+tomorrow's crew drop zone. Create + rename
+      # only — never moves or trashes; ambiguous cases go to the digest email.
+      # ON by default; the per-run write budget bounds Drive quota use.
+      FOLDER_INTEGRITY_WORKER_ENABLED: ${FOLDER_INTEGRITY_WORKER_ENABLED:-1}
+      FOLDER_INTEGRITY_INTERVAL_MS: ${FOLDER_INTEGRITY_INTERVAL_MS:-3600000}
+      FOLDER_INTEGRITY_START_DELAY_MS: ${FOLDER_INTEGRITY_START_DELAY_MS:-240000}
+      FOLDER_INTEGRITY_PAST_DAYS: ${FOLDER_INTEGRITY_PAST_DAYS:-14}
+      FOLDER_INTEGRITY_FUTURE_DAYS: ${FOLDER_INTEGRITY_FUTURE_DAYS:-30}
+      FOLDER_INTEGRITY_LIMIT: ${FOLDER_INTEGRITY_LIMIT:-60}
+      FOLDER_INTEGRITY_MAX_WRITES: ${FOLDER_INTEGRITY_MAX_WRITES:-120}
+      FOLDER_INTEGRITY_REPORT_EMAIL: ${FOLDER_INTEGRITY_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
+      # Kill switch for just the RENAME repairs (creates + camera-normalize stay
+      # on): set to 0 if a rename ever fights an ops naming convention.
+      FOLDER_INTEGRITY_RENAME: ${FOLDER_INTEGRITY_RENAME:-1}
+
       # --- Automated DB backup (v1.77) ---
       # Supervised worker (scripts/backup-worker.js) pg_dumps the DB daily, gzips
       # it, and uploads to BACKUP_DRIVE_FOLDER_ID (service account needs edit
