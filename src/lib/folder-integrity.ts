@@ -54,6 +54,17 @@ const SHOOT_STUB_RE = /^_SHOOT\b.*\.txt$/i
 const MIDDLE_DOT = '·'
 
 /**
+ * v1.151.3 — rotation cursor. The window holds more bookings than one run can
+ * touch (121 vs the 60 limit on the first production run) and the query is
+ * ordered, so without this the worker re-checked the SAME first 60 every hour
+ * and the tail was never verified at all. Each run starts where the previous
+ * one stopped and wraps, so the whole window is covered over a few runs.
+ * Single Node process (same assumption as dedupeEnsure), so a module-level
+ * cursor is enough.
+ */
+let scanCursor = 0
+
+/**
  * Rename repairs are OPT-IN (FOLDER_INTEGRITY_RENAME=1). Creating a missing
  * folder is additive and provably safe; renaming one that already holds footage
  * is not undoable from Drive trash, so it earns its flag only after ops have
@@ -194,7 +205,12 @@ export async function runFolderIntegrity(opts: {
   })
   base.scanned = bookings.length
 
-  for (const b of bookings) {
+  // Start where the previous run stopped (see scanCursor) so every booking in
+  // the window gets its turn. A code-scoped run must not disturb the rotation.
+  const start = bookings.length > 0 && !opts.onlyCode ? scanCursor % bookings.length : 0
+  const ordered = start === 0 ? bookings : [...bookings.slice(start), ...bookings.slice(0, start)]
+
+  for (const b of ordered) {
     const code = b.bookingCode as string
     if (opts.onlyCode && code.toUpperCase() !== opts.onlyCode.toUpperCase()) continue
     if (base.checked >= limit || !budgetLeft()) { base.deferred++; continue }
@@ -345,7 +361,14 @@ export async function runFolderIntegrity(opts: {
           if (!hit) {
             let createdId: string | null = null
             const ok = await spend(`${code}: create EP "${want}"`, async () => { createdId = await ensureFolderPath(boxId!, [want]) })
-            if (ok) { base.fixed.epCreated++; if (createdId) epParents.push(createdId) }
+            if (ok) {
+              base.fixed.epCreated++
+              if (createdId) epParents.push(createdId)
+              // In a dry run there is no folder to descend into, so the CAM
+              // pass below would silently under-report. Say it explicitly —
+              // a dry-run report that hides work is worse than no report.
+              else if (dryRun && cams.length) base.actions.push(`${code}:   └ then create ${cams.join(', ')} inside it`)
+            }
             continue
           }
           epParents.push(hit.id)
@@ -465,6 +488,10 @@ export async function runFolderIntegrity(opts: {
     } catch (e: any) {
       base.errors.push({ code, error: e?.message || String(e) })
     }
+  }
+
+  if (bookings.length > 0 && !opts.onlyCode) {
+    scanCursor = (start + base.checked + base.deferred) % bookings.length
   }
 
   if (!dryRun) {

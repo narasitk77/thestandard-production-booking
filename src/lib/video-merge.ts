@@ -97,7 +97,7 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
     // An empty subtree has nothing to merge, so skipping it is a pure no-op for
     // the merge and keeps the drop target intact.
     if (await isLandingShell(s.id)) continue
-    let destSub: string | null = destId ? await findChildFolder(destId, s.name) : null
+    let destSub: string | null = destId ? await findTwinFolder(destId, s.name) : null
     if (destId && !dryRun) {
       if (destSub && await isFolderEmpty(destSub)) {
         // trash-BEFORE-move: if the trash fails we still have the twin and just
@@ -112,6 +112,35 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
     }
     await mirrorMove(s.id, destSub, code, stats, dryRun)
   }
+}
+
+/**
+ * v1.151.3 — find the box's counterpart of a landing subfolder.
+ *
+ * Exact name first, then — for an EP layer — the IMMUTABLE lead segment
+ * ("EP01" / a project EP id), the same key ensureEpisodeFolder and
+ * findEpisodeFolderUrls match on.
+ *
+ * Why this matters: the two trees deliberately name the EP layer differently.
+ * The box uses buildEpisodeFolderName ("EP01 · <episode title>") while the
+ * landing folder is built from the crew-facing display name, which routinely
+ * carries the van/contact note ("EP01 · … (รถ. 22. ก.ค …)"). Exact-name
+ * matching therefore found NO twin for practically every booking with
+ * episodes, so the whole landing EP folder was MOVED into the box beside the
+ * real one — leaving that booking's footage split across two EP01 folders,
+ * which is exactly the "หาไฟล์ไม่เจอ" the crew reports. Verified on
+ * POP-PIV-260722-01, whose box holds both "EP01 · THE INTERVIEW …" (created
+ * with the box) and "EP01 · …(รถ. 22." (moved in from landing).
+ */
+async function findTwinFolder(destId: string, name: string): Promise<string | null> {
+  const exact = await findChildFolder(destId, name)
+  if (exact) return exact
+  const lead = name.split(' · ')[0]?.trim()
+  // Only EP-ish leads may match loosely: a bare CAM-A/AUDIO name has no " · "
+  // so `lead === name` and we must not fuzzy-match it onto something else.
+  if (!lead || lead === name) return null
+  const kids = await listChildFolders(destId)
+  return kids.find(k => k.name === lead || k.name.startsWith(`${lead} `))?.id ?? null
 }
 
 /**

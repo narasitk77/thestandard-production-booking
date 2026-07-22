@@ -12,6 +12,16 @@ export const maxDuration = 300
 let integrityRunningSince: number | null = null
 const GUARD_MAX_MS = 15 * 60 * 1000
 
+// v1.151.3 — digest de-duplication. In report-only mode the same drift is
+// found every hour, so mailing every run would send ops an identical letter 24
+// times a day and the whole thing gets filtered within two days — exactly the
+// alert-fatigue that makes a monitoring system useless. Mail when the picture
+// CHANGES, plus a heartbeat digest at most once every 12h so silence still
+// means "checked and unchanged", never "worker died".
+let lastDigestKey: string | null = null
+let lastDigestAt = 0
+const DIGEST_HEARTBEAT_MS = 12 * 60 * 60 * 1000
+
 /**
  * GET /api/internal/folder-integrity/run
  *   ?dryRun=0            apply (DEFAULT IS DRY RUN — report only)
@@ -78,7 +88,14 @@ export async function GET(request: NextRequest) {
     // Report on worker runs in BOTH modes — the report-only stage is the whole
     // point of the rollout, and its digest is what earns the apply flag.
     const worth = changed > 0 || r.warnings.length > 0 || r.errors.length > 0
-    if ((allowed.isWorker && worth) || forceReport) {
+    // An APPLIED repair is always news; a report-only run is news only when the
+    // picture differs from the last letter (or the 12h heartbeat is due).
+    const digestKey = JSON.stringify({ f: r.fixed, w: [...r.warnings].sort(), e: r.errors.map(e => e.code).sort() })
+    const stale = Date.now() - lastDigestAt > DIGEST_HEARTBEAT_MS
+    const newsworthy = !dryRun ? changed > 0 || r.errors.length > 0 : (digestKey !== lastDigestKey || stale)
+    if ((allowed.isWorker && worth && newsworthy) || forceReport) {
+      lastDigestKey = digestKey
+      lastDigestAt = Date.now()
       const text = [
         `Folder integrity — ตรวจ ${r.checked}/${r.scanned} งาน${r.dryRun ? ' (DRY RUN)' : ''}`,
         '',
