@@ -84,6 +84,10 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
     return (booking.createdByEmail || '').toLowerCase() === meEmail || (booking.producerEmail || '').toLowerCase() === meEmail
   }, [booking, meEmail])
   const editable = !!booking && booking.status === 'REQUESTED' && isOwner
+  // v1.150.1 — a CONFIRMED booking stays location-editable by its owner: the
+  // venue pin/link often changes after approval, and pinging an admin for
+  // every updated Google-Maps link was the old (painful) path.
+  const locationOnly = !!booking && booking.status === 'CONFIRMED' && isOwner
 
   const toggleSpecial = (item: string) =>
     setForm(f => ({ ...f, specialEquipment: f.specialEquipment.includes(item) ? f.specialEquipment.filter(x => x !== item) : [...f.specialEquipment, item] }))
@@ -92,7 +96,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
     setSaving(true)
     setSaveError('')
     try {
-      const body = {
+      const body = locationOnly ? { locationName: form.locationName || null } : {
         callTime: form.callTime,
         estimatedWrap: form.estimatedWrap || null,
         shootType: form.shootType,
@@ -133,6 +137,48 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
       </div>
     )
   }
+  // v1.150.1 — CONFIRMED + owner → compact location-only editor. The server
+  // route enforces the same restriction; this UI just matches it.
+  if (locationOnly) {
+    const confShootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
+    return (
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+        <BackButton fallback="/my-bookings" className="text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1 mb-3" iconClassName="w-3.5 h-3.5" />
+        <div className="ops-card ops-card-pad mb-3">
+          <div className="text-sm font-medium text-gray-900">
+            <span className="text-gray-500 font-normal mr-1">[{booking.outlet.code}]</span>{bookingDisplayName(booking)}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {confShootDate} · {booking.episodes.map(e => e.episodeId).join(' · ')}
+            {booking.bookingCode && <> · {booking.bookingCode}</>}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">
+            งาน Confirmed แล้ว — แก้ได้เฉพาะ <strong>สถานที่ / ลิงก์แผนที่</strong> (อัปเดตไปที่ Calendar และไฟล์ _SHOOT.txt ให้อัตโนมัติ พร้อมส่งอีเมลแจ้งทีมงาน) ฟิลด์อื่นกรุณาแจ้งทีมงาน
+          </p>
+        </div>
+        <div className="ops-card ops-card-pad space-y-4">
+          {saveError && <div className="ops-card px-3 py-2 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">{saveError}</div>}
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">สถานที่ / ลิงก์แผนที่ (Google Maps)</label>
+            <textarea
+              className="ops-input resize-none"
+              rows={3}
+              placeholder="เช่น สตูดิโอ 2 ชั้น 5 หรือวางลิงก์ Google Maps ของสถานที่ใหม่"
+              value={form.locationName}
+              onChange={e => setForm({ ...form, locationName: e.target.value })}
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Link href={`/dashboard/${id}`} className="ops-btn-secondary">ยกเลิก</Link>
+            <button type="button" onClick={handleSave} disabled={saving} className="ops-btn-primary">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึกสถานที่
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (!editable) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-6">
@@ -140,7 +186,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
           <h1 className="text-lg font-medium text-gray-800 mb-1">แก้ไขไม่ได้</h1>
           <p className="text-sm text-gray-600">
             {booking.status !== 'REQUESTED'
-              ? `งานนี้อยู่ในสถานะ ${booking.status} แล้ว — แก้ไขได้เฉพาะงานที่ยังเป็น Requested หากต้องการเปลี่ยน กรุณาแจ้งทีมงาน`
+              ? `งานนี้อยู่ในสถานะ ${booking.status} แล้ว — แก้ไขทุกฟิลด์ได้เฉพาะงาน Requested (งาน Confirmed เจ้าของงานแก้สถานที่ได้) หากต้องการเปลี่ยนอย่างอื่น กรุณาแจ้งทีมงาน`
               : 'คุณไม่ใช่เจ้าของงานนี้ จึงแก้ไขไม่ได้'}
           </p>
           <Link href={`/dashboard/${id}`} className="ops-btn-secondary mt-3 inline-flex"><ArrowLeft className="w-4 h-4" /> กลับไปดูรายละเอียด</Link>

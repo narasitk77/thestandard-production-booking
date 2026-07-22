@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.150.1] — 2026-07-22
+
+### Added — Producer แก้สถานที่/ลิงก์แผนที่ได้หลัง approve
+- เดิม producer แก้งานตัวเองได้เฉพาะสถานะ REQUESTED — พองานถูก approve แล้ว ลิงก์สถานที่ (Google Maps) ที่มักเปลี่ยนตอนใกล้ถ่ายกลับวางใหม่ไม่ได้ ต้องไล่ตามแอดมินทุกครั้ง
+- ตอนนี้งาน **CONFIRMED** เจ้าของงาน (ผู้สร้าง/producer) แก้ได้ **เฉพาะฟิลด์สถานที่** ผ่านหน้า `/bookings/[id]/edit` (โหมดย่อ มีเฉพาะช่องสถานที่) — ปุ่มใน My Bookings เปลี่ยนเป็น "📍 แก้สถานที่" สำหรับงาน Confirmed
+- การแก้กระจายผลอัตโนมัติแบบเดียวกับ admin PATCH: อัปเดต Google Calendar event + refresh `_SHOOT.txt` marker + อีเมลแจ้งทีมงาน (route `producer-edit` เป็น authority — ฟิลด์อื่นถูก drop ที่ server แม้ยิงตรง)
+- COMPLETED/CANCELLED ยังแก้ไม่ได้เหมือนเดิม
+
+---
+
 ## [1.150.0] — 2026-07-22
 
 _PR #14 + #15 โดยปุ๊ก/Neo (PMDC) + review fixes ตอน merge_

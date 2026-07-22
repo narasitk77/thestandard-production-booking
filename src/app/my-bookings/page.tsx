@@ -269,7 +269,10 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
   const valid = !isNaN(d.getTime())
   const showUpload = canUpload && (b.status === 'CONFIRMED' || b.status === 'COMPLETED')
   const isOwner = !!meEmail && ((b.createdByEmail || '').toLowerCase() === meEmail || (b.producerEmail || '').toLowerCase() === meEmail)
-  const canEdit = b.status === 'REQUESTED' && isOwner
+  // v1.150.1 — CONFIRMED bookings stay owner-editable for LOCATION only (the
+  // venue link changes after approval more often than anything else).
+  const canEdit = (b.status === 'REQUESTED' || b.status === 'CONFIRMED') && isOwner
+  const editIsLocationOnly = b.status === 'CONFIRMED'
   return (
     <li className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${categoryCardClass(b.category)}`}>
       <Link
@@ -303,10 +306,10 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
       {canEdit && (
         <Link
           href={`/bookings/${b.id}/edit`}
-          title="แก้ไขรายละเอียดงาน (เฉพาะงานสถานะ Requested)"
+          title={editIsLocationOnly ? 'แก้สถานที่ / ลิงก์แผนที่ (งาน Confirmed แก้ได้เฉพาะสถานที่)' : 'แก้ไขรายละเอียดงาน (เฉพาะงานสถานะ Requested)'}
           className="ml-1 shrink-0 px-2.5 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] bg-white rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1"
         >
-          ✏️ แก้ไข
+          {editIsLocationOnly ? <>📍 แก้สถานที่</> : <>✏️ แก้ไข</>}
         </Link>
       )}
       {showUpload && (

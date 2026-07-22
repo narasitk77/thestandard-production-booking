@@ -22,6 +22,11 @@ import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { FIELD_LABELS, fmt, diffEditable } from '@/lib/producer-edit-fields'
 import { isValidHHMM } from '@/lib/shoot-window'
+// v1.150.1 — post-approval location edits must flow to the calendar event and
+// the _SHOOT.txt marker (same recipe as the admin PATCH's live-edit path).
+import { updateCalendarEventDetails } from '@/lib/google-calendar'
+import { refreshShootMarker } from '@/lib/shoot-marker'
+import { hasDriveCredentials } from '@/lib/google-drive'
 
 export async function PATCH(
   request: NextRequest,
@@ -47,20 +52,30 @@ export async function PATCH(
     if (!isOwner) {
       return NextResponse.json({ error: 'คุณไม่ใช่เจ้าของงานนี้' }, { status: 403 })
     }
-    if (existing.status !== 'REQUESTED') {
+    // v1.150.1 — two edit modes by status:
+    //   REQUESTED  → full producer whitelist (unchanged).
+    //   CONFIRMED  → LOCATION ONLY: the shoot location (often a Google-Maps
+    //                link) routinely changes after approval, and producers had
+    //                no way to paste the updated link — admins were pinged for
+    //                every venue-pin change. Everything else stays locked.
+    // COMPLETED/CANCELLED stay uneditable.
+    if (existing.status !== 'REQUESTED' && existing.status !== 'CONFIRMED') {
       return NextResponse.json(
-        { error: 'แก้ไขได้เฉพาะงานที่อยู่ในสถานะ Requested เท่านั้น — งานนี้ถูกดำเนินการไปแล้ว' },
+        { error: 'งานนี้อยู่ในสถานะที่แก้ไขไม่ได้แล้ว — แก้ได้เฉพาะงาน Requested (ทุกฟิลด์) หรือ Confirmed (เฉพาะสถานที่)' },
         { status: 409 },
       )
     }
+    const locationOnly = existing.status === 'CONFIRMED'
 
     const body = await request.json()
     // PRODUCER-EDITABLE WHITELIST ONLY. Anything not listed here is ignored.
+    // In location-only mode every other field is dropped before destructuring.
+    const src = locationOnly ? { locationName: body?.locationName } : body
     const {
       callTime, estimatedWrap, shootType, locationName, producer,
       creative, crewRequired, cameraCount, micCount, vanCount,
       specialEquipment, agencyRef, notes, episodeTitles,
-    } = body
+    } = src
 
     // v1.146 review fix — same HH:MM guard as createBookingFromPayload.
     if (callTime && !isValidHHMM(callTime)) {
@@ -110,6 +125,22 @@ export async function PATCH(
       .filter(Boolean) as string[]
 
     const hasChanges = Object.keys(fieldChanges).length > 0 || titleChanges.length > 0
+
+    // v1.150.1 — a location change on a CONFIRMED booking must reach the
+    // surfaces the crew actually reads: the Google Calendar event and the
+    // Drive `_SHOOT.txt` marker. Same fire-and-forget recipe as the admin
+    // PATCH (a sync blip must never fail the save; nightly jobs backstop).
+    if (locationOnly && fieldChanges.locationName) {
+      if (booking.calendarEventId) {
+        updateCalendarEventDetails(booking.calendarEventId, booking).catch(e =>
+          console.error('[producer-edit] calendar details update failed (non-fatal):', e?.message || e))
+      }
+      if (hasDriveCredentials()) {
+        refreshShootMarker(booking).catch(e =>
+          console.error('[producer-edit] marker refresh failed (non-fatal):', e?.message || e))
+      }
+    }
+
     if (hasChanges) {
       logAudit({
         actorEmail: session.email,
@@ -136,7 +167,7 @@ export async function PATCH(
               ...Object.entries(fieldChanges).map(([k, { from, to }]) => `${FIELD_LABELS[k] || k}: ${fmt(from)} → ${fmt(to)}`),
               ...titleChanges.map(t => `Episode title — ${t}`),
             ].join('\n')
-            const text = `Producer แก้ไขรายละเอียดงาน (สถานะ Requested)
+            const text = `Producer แก้ไข${locationOnly ? 'สถานที่ (งาน Confirmed แล้ว)' : 'รายละเอียดงาน (สถานะ Requested)'}
 
 Booking: ${code}
 ${booking.outlet.name} · ${booking.program.name} · ${shootDate}
