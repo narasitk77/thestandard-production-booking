@@ -173,14 +173,19 @@ services:
 
       # --- กันลืม reminders (v1.62.0) ---
       # Supervised worker (scripts/reminders-worker.js) scans loans / rentals /
-      # invoices / repairs / upcoming shoots / warranties once a day and pushes a
-      # digest to Discord + email. Dormant until REMINDERS_WORKER_ENABLED=1.
+      # invoices / repairs / upcoming shoots / warranties once a day and emails a
+      # digest. Dormant until REMINDERS_WORKER_ENABLED=1.
+      # v1.152.2 — this digest no longer goes to Discord: that channel carries
+      # FOOTAGE news only, so the crew's file alerts don't get buried in
+      # overdue-rental chatter. DISCORD_NOTIFY_SCOPE=all restores the old mix.
       # DISCORD_WEBHOOK_URL is a secret — set it as a Portainer stack env var,
       # never commit the value here.
       REMINDERS_WORKER_ENABLED: ${REMINDERS_WORKER_ENABLED:-0}
       REMINDERS_WORKER_INTERVAL_MS: ${REMINDERS_WORKER_INTERVAL_MS:-86400000}
       REMINDERS_SECRET: ${REMINDERS_SECRET:-${NEXTAUTH_SECRET}}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      # footage (default) = only file news reaches Discord | all = ops too
+      DISCORD_NOTIFY_SCOPE: ${DISCORD_NOTIFY_SCOPE:-footage}
       REMINDER_ADMIN_EMAIL: ${REMINDER_ADMIN_EMAIL:-}
       INVOICE_AGING_DAYS: ${INVOICE_AGING_DAYS:-7}
       SHOOT_GEAR_LOOKAHEAD_DAYS: ${SHOOT_GEAR_LOOKAHEAD_DAYS:-3}

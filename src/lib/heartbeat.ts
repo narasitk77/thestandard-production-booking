@@ -94,7 +94,9 @@ export async function maybeAlertStaleWorkers(): Promise<void> {
     await recordHeartbeat('alert:stale-workers', stale.map((w) => w.key).join(','))
     const lines = stale.map((w) => `• ${w.label} — last tick ${w.ageMs != null ? Math.round(w.ageMs / MINUTE) + ' min ago' : 'never'}`)
     const msg = `⚠️ Production Booking: worker(s) ไม่ตอบสนอง\n${lines.join('\n')}\nตรวจ container logs / restart stack`
-    await Promise.all([notifyDiscord(msg), notifyEmailDigest('⚠️ Worker หยุดทำงาน — Production Booking', msg)])
+    // v1.152.2 — 'ops': worker health is not footage news, so it stays off
+    // Discord by default and reaches the admin by email.
+    await Promise.all([notifyDiscord(msg, 'ops'), notifyEmailDigest('⚠️ Worker หยุดทำงาน — Production Booking', msg)])
   } catch (e: any) {
     console.warn('[heartbeat] stale-worker alert failed:', e?.message || e)
   }

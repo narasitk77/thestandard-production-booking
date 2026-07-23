@@ -307,7 +307,9 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
     const body = buildDigest(openReminders.map((r) => ({ type: r.type, title: r.title, body: r.body })))
     const subject = `⏰ เตือนงานค้าง ${openReminders.length} รายการ — ${ymd(today)}`
     const text = `${subject}\n\n${body}\n\n— Production Booking · /admin/reminders`
-    const [discord, email] = await Promise.all([notifyDiscord(text), notifyEmailDigest(subject, text)])
+    // v1.152.2 — 'ops': overdue rentals / invoices / gear are not footage news.
+    // The daily digest email remains the channel for these.
+    const [discord, email] = await Promise.all([notifyDiscord(text, 'ops'), notifyEmailDigest(subject, text)])
     dispatched = { discord, email }
     // Mark the freshly-created PENDING ones as SENT (already-SENT rows keep their timestamp).
     await prisma.reminder.updateMany({

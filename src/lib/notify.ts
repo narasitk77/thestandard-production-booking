@@ -12,8 +12,34 @@
 // function (notifyLine) wired into reminders.ts — nothing else changes.
 import { sendEmail, isEmailConfigured } from './email'
 
-/** POST a message to the configured Discord webhook. Returns false (not throw) when unset/failed. */
-export async function notifyDiscord(content: string): Promise<boolean> {
+/**
+ * v1.152.2 — Discord carries FOOTAGE news only (ops decision 2026-07-23:
+ * "แจ้งเตือนแค่เรื่องไฟล์พอ"). The channel is where the crew watches for
+ * footage landing; mixing in overdue-rental reminders and worker-health
+ * alerts trained people to scroll past it, which defeats the one thing it is
+ * good at. Those still go to email, where they belong.
+ *
+ *   'footage' — files moved / footage ready / NAS sync drained
+ *   'ops'     — reminders, worker-down alerts, anything not about files
+ *
+ * Set DISCORD_NOTIFY_SCOPE=all to put the ops chatter back on Discord.
+ */
+export type NotifyCategory = 'footage' | 'ops'
+
+function discordAllows(category: NotifyCategory): boolean {
+  if (category === 'footage') return true
+  return (process.env.DISCORD_NOTIFY_SCOPE || 'footage').trim().toLowerCase() === 'all'
+}
+
+/**
+ * POST a message to the configured Discord webhook. Returns false (not throw)
+ * when unset, filtered out by scope, or failed.
+ *
+ * Callers that treat the return value as "the human was told" (footage-ready
+ * uses it as an email fallback) must pass 'footage', which is never filtered.
+ */
+export async function notifyDiscord(content: string, category: NotifyCategory = 'footage'): Promise<boolean> {
+  if (!discordAllows(category)) return false
   const url = process.env.DISCORD_WEBHOOK_URL?.trim()
   if (!url) return false
   try {
