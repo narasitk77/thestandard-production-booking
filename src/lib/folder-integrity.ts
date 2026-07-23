@@ -35,6 +35,7 @@
  */
 import { prisma } from './db'
 import { logAudit } from './audit'
+import { notifyDiscord } from './notify'
 import {
   hasDriveCredentials, findEpisodeFolderUrls, listChildFolders, getFileName, renameDriveItem,
   ensureFolderPath, ensureShootCameraFolders, ensureFlatShootFolders, findChildFolderByCode,
@@ -554,11 +555,135 @@ export async function runFolderIntegrity(opts: {
         action: 'drive.folder_integrity',
         entityType: 'Drive',
         entityId: 'footage-tree',
-        changes: { ...base.fixed, warnings: base.warnings.length, errors: base.errors.length, checked: base.checked },
+        changes: {
+          ...base.fixed,
+          warnings: base.warnings.length,
+          errors: base.errors.length,
+          checked: base.checked,
+          // v1.153 — keep the actual lines so the daily Discord digest can say
+          // WHAT was repaired, not just how many. Capped so a bad night can't
+          // bloat the audit row.
+          actions: base.actions.slice(0, 40),
+          warningLines: base.warnings.slice(0, 20),
+        },
       })
     }
   }
   return base
+}
+
+// ── Daily Discord digest ─────────────────────────────────────────────────────
+
+/** One line per repair kind, in the order ops reads them. */
+const FIX_LABELS: Array<[keyof FolderIntegrityResult['fixed'], string]> = [
+  ['boxCreated', 'สร้างกล่องงานที่หาย'],
+  ['boxRenamed', 'เปลี่ยนชื่อกล่องให้ตรง'],
+  ['epCreated', 'สร้างโฟลเดอร์ EP'],
+  ['epRenamed', 'เปลี่ยนชื่อ EP ให้ตรง'],
+  ['camCreated', 'สร้างช่องกล้อง/เสียง'],
+  ['camNormalized', 'แก้ชื่อกล้องให้เป็นมาตรฐาน'],
+  ['landingRepaired', 'ซ่อมโฟลเดอร์หน้างาน'],
+  ['landingRenamed', 'เปลี่ยนชื่อโฟลเดอร์หน้างาน'],
+  ['linksHealed', 'ผูก id โฟลเดอร์กลับให้คิว'],
+]
+
+/**
+ * v1.153 — build the once-a-day "what did the folder worker do" summary from
+ * the audit trail (NOT from in-memory counters, which reset on every deploy —
+ * and this app redeploys several times a day).
+ */
+export function buildDailyDigest(
+  rows: Array<{ changes: unknown }>,
+): { text: string; totalFixed: number; totalWarnings: number } {
+  const totals: Record<string, number> = {}
+  const sampleActions: string[] = []
+  const sampleWarnings: string[] = []
+  let totalWarnings = 0
+  let totalErrors = 0
+  let runs = 0
+
+  for (const r of rows) {
+    const c = (r.changes || {}) as Record<string, any>
+    runs++
+    for (const [key] of FIX_LABELS) totals[key] = (totals[key] || 0) + (Number(c[key]) || 0)
+    totals.epDuplicatesFound = (totals.epDuplicatesFound || 0) + (Number(c.epDuplicatesFound) || 0)
+    totalWarnings += Number(c.warnings) || 0
+    totalErrors += Number(c.errors) || 0
+    for (const a of (c.actions || []) as string[]) if (sampleActions.length < 12) sampleActions.push(a)
+    for (const w of (c.warningLines || []) as string[]) if (sampleWarnings.length < 6) sampleWarnings.push(w)
+  }
+
+  const totalFixed = FIX_LABELS.reduce((n, [k]) => n + (totals[k] || 0), 0)
+  const lines: string[] = []
+  lines.push(`📁 **สรุปโฟลเดอร์ประจำวัน** — ตรวจ ${runs} รอบ`)
+  if (totalFixed === 0 && totalWarnings === 0 && totalErrors === 0) {
+    lines.push('ทุกอย่างเรียบร้อย ไม่มีอะไรต้องแก้ 👍')
+    return { text: lines.join('\n'), totalFixed, totalWarnings }
+  }
+
+  lines.push('')
+  lines.push(`__แก้ไปแล้ว ${totalFixed} รายการ__`)
+  for (const [key, label] of FIX_LABELS) {
+    const n = totals[key] || 0
+    if (n > 0) lines.push(`• ${label}: **${n}**`)
+  }
+  if (sampleActions.length) {
+    lines.push('')
+    lines.push('ตัวอย่างที่แก้:')
+    for (const a of sampleActions) lines.push(`  ${a}`)
+  }
+  if (totals.epDuplicatesFound > 0) {
+    lines.push('')
+    lines.push(`⚠️ **เจอโฟลเดอร์ EP ซ้ำ ${totals.epDuplicatesFound} อัน** — ไฟล์อาจกระจาย ต้องรวมเอง (ดูอีเมล)`)
+  }
+  if (totalWarnings > 0) {
+    lines.push('')
+    lines.push(`🔎 ต้องดูเอง ${totalWarnings} รายการ:`)
+    for (const w of sampleWarnings) lines.push(`  • ${w.slice(0, 160)}`)
+    if (totalWarnings > sampleWarnings.length) lines.push(`  …และอีก ${totalWarnings - sampleWarnings.length} รายการ (ดูอีเมล)`)
+  }
+  if (totalErrors > 0) lines.push(`\n❌ error ${totalErrors} รายการ`)
+
+  return { text: lines.join('\n'), totalFixed, totalWarnings }
+}
+
+/**
+ * Post the daily digest to Discord once per day, at/after
+ * FOLDER_INTEGRITY_DIGEST_HOUR (Bangkok, default 09:00).
+ *
+ * Called after each worker run — the "have we posted today" marker lives in
+ * SystemHeartbeat (same durable-throttle pattern as the stale-worker alert),
+ * so a redeploy mid-day can't produce a second post.
+ */
+export async function maybeSendDailyDigest(now: Date = new Date()): Promise<boolean> {
+  const hourBkk = Number(new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(11, 13))
+  const target = (() => {
+    const n = Number(process.env.FOLDER_INTEGRITY_DIGEST_HOUR)
+    return Number.isFinite(n) && n >= 0 && n <= 23 ? n : 9
+  })()
+  if (hourBkk < target) return false
+
+  const KEY = 'digest:folder-integrity'
+  const last = await prisma.systemHeartbeat.findUnique({ where: { key: KEY } }).catch(() => null)
+  // 20h, not 24h: the post should not drift later each day just because the
+  // worker's run happened a few minutes after yesterday's.
+  if (last && now.getTime() - last.at.getTime() < 20 * 3_600_000) return false
+
+  const rows = await prisma.auditLog.findMany({
+    where: { action: 'drive.folder_integrity', at: { gte: new Date(now.getTime() - 24 * 3_600_000) } },
+    orderBy: { at: 'asc' },
+    select: { changes: true },
+  })
+  const { text } = buildDailyDigest(rows)
+  const sent = await notifyDiscord(text, 'footage')
+  // Mark the day done even if Discord is unset/failed, so a broken webhook
+  // doesn't retry every hour for the rest of the day.
+  await prisma.systemHeartbeat.upsert({
+    where: { key: KEY },
+    create: { key: KEY, at: now, note: sent ? 'sent' : 'discord-unavailable' },
+    update: { at: now, note: sent ? 'sent' : 'discord-unavailable' },
+  }).catch(() => {})
+  return sent
 }
 
 /** Parent folder id (first parent) — for the box-rename collision check. */

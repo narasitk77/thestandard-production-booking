@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isAppShapedName, landingWindow, groupEpisodeFoldersByLead } from '../folder-integrity'
+import { isAppShapedName, landingWindow, groupEpisodeFoldersByLead, buildDailyDigest } from '../folder-integrity'
 
 // The rename guard: only names the APP generates may be re-derived. Anything a
 // human authored keeps its name (a rename of a folder holding footage is not
@@ -78,4 +78,40 @@ test('landingWindow: TODAY only in Bangkok, spanning multi-day shoots', () => {
   assert.equal(landingWindow(day('2026-07-18'), day('2026-07-21'), now), false)
   // a multi-day shoot starting tomorrow is still the lifecycle's job
   assert.equal(landingWindow(day('2026-07-23'), day('2026-07-25'), now), false)
+})
+
+// v1.153 — the daily Discord digest is built from AUDIT ROWS, not in-memory
+// counters (this app redeploys several times a day, which would zero them).
+test('buildDailyDigest: rolls up a day of runs with examples', () => {
+  const { text, totalFixed } = buildDailyDigest([
+    { changes: { camCreated: 3, camNormalized: 1, warnings: 2, errors: 0, checked: 60,
+        actions: ['TSS-X: create CAM-A', 'TSS-X: normalize "Cam B" → "CAM-B"'],
+        warningLines: ['AGN-1: มีกล่องโปรเจกต์แต่ยังไม่มีโฟลเดอร์ของคิวนี้'] } },
+    { changes: { camCreated: 2, epCreated: 1, warnings: 1, errors: 0, checked: 60,
+        actions: ['NWS-Y: create EP "EP01 · x"'], warningLines: ['NWS-Y: ชื่อไม่ตรง'] } },
+  ])
+  assert.equal(totalFixed, 7) // 3+1+2+1
+  assert.match(text, /ตรวจ 2 รอบ/)
+  assert.match(text, /สร้างช่องกล้อง\/เสียง: \*\*5\*\*/)
+  assert.match(text, /แก้ชื่อกล้องให้เป็นมาตรฐาน: \*\*1\*\*/)
+  assert.match(text, /create CAM-A/)          // a real example, not just counts
+  assert.match(text, /ต้องดูเอง 3 รายการ/)     // warnings summed across runs
+})
+
+test('buildDailyDigest: a clean day says so instead of printing empty sections', () => {
+  const { text, totalFixed } = buildDailyDigest([{ changes: { checked: 60, warnings: 0, errors: 0 } }])
+  assert.equal(totalFixed, 0)
+  assert.match(text, /ไม่มีอะไรต้องแก้/)
+  assert.doesNotMatch(text, /แก้ไปแล้ว/)
+})
+
+test('buildDailyDigest: duplicate EP folders get their own alarm line', () => {
+  const { text } = buildDailyDigest([{ changes: { epDuplicatesFound: 2, warnings: 2, errors: 0, warningLines: ['X: ซ้ำ'] } }])
+  assert.match(text, /EP ซ้ำ 2 อัน/)
+})
+
+test('buildDailyDigest: no audit rows at all (worker idle) still renders', () => {
+  const { text, totalFixed } = buildDailyDigest([])
+  assert.equal(totalFixed, 0)
+  assert.match(text, /ตรวจ 0 รอบ/)
 })

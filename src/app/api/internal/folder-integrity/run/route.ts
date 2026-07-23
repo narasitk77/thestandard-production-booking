@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { runFolderIntegrity } from '@/lib/folder-integrity'
+import { runFolderIntegrity, maybeSendDailyDigest } from '@/lib/folder-integrity'
 import { sendEmail } from '@/lib/email'
 
 export const dynamic = 'force-dynamic'
@@ -129,6 +129,13 @@ export async function GET(request: NextRequest) {
       } catch (e: any) {
         console.error('[folder-integrity] report email failed (non-fatal):', e?.message || e)
       }
+    }
+    // v1.153 — once a day, post "what did the folder worker do" to Discord.
+    // Worker runs only, and best-effort: a digest failure must not fail the run
+    // that just repaired real folders.
+    if (allowed.isWorker) {
+      await maybeSendDailyDigest().catch(e =>
+        console.error('[folder-integrity] daily digest failed (non-fatal):', e?.message || e))
     }
     return NextResponse.json(r)
   } catch (e: any) {

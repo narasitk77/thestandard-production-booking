@@ -220,6 +220,9 @@ services:
       FOLDER_INTEGRITY_LIMIT: ${FOLDER_INTEGRITY_LIMIT:-60}
       FOLDER_INTEGRITY_MAX_WRITES: ${FOLDER_INTEGRITY_MAX_WRITES:-120}
       FOLDER_INTEGRITY_REPORT_EMAIL: ${FOLDER_INTEGRITY_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
+      # v1.153 — once-a-day Discord summary of what the folder worker found and
+      # repaired (hour is Bangkok; the hourly email digest is unchanged).
+      FOLDER_INTEGRITY_DIGEST_HOUR: ${FOLDER_INTEGRITY_DIGEST_HOUR:-9}
       # Kill switch for just the RENAME repairs (creates + camera-normalize stay
       # on): set to 0 if a rename ever fights an ops naming convention.
       FOLDER_INTEGRITY_RENAME: ${FOLDER_INTEGRITY_RENAME:-0}
