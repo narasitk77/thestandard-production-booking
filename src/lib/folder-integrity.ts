@@ -80,6 +80,32 @@ const renameEnabled = () => process.env.FOLDER_INTEGRITY_RENAME === '1'
  * intent outranks canonical tidiness, and a rename of a folder holding footage
  * is not undoable from Drive trash.
  */
+/**
+ * v1.152.1 — group a box's child folders by their EP lead ("EP01", or an AGN
+ * project EP id), keeping only folders that belong to THIS booking's episodes.
+ * A lead with 2+ members is a duplicate: the booking's footage is split and
+ * neither the crew nor detect sees all of it.
+ *
+ * Scoping to `epNames` matters — a crew folder like "Cam A · backup ของพี่ต้น"
+ * also splits on the middle dot, and grouping it as an EP layer would put
+ * noise in the digest that ops learns to ignore.
+ */
+export function groupEpisodeFoldersByLead(
+  kids: Array<{ id: string; name: string }>,
+  epNames: string[],
+): Map<string, Array<{ id: string; name: string }>> {
+  const out = new Map<string, Array<{ id: string; name: string }>>()
+  const leads = new Set(epNames.map(n => n.split(` ${MIDDLE_DOT} `)[0]?.trim()).filter(Boolean))
+  for (const k of kids) {
+    const lead = k.name.split(` ${MIDDLE_DOT} `)[0]?.trim()
+    if (!lead || !leads.has(lead)) continue
+    const arr = out.get(lead) || []
+    arr.push({ id: k.id, name: k.name })
+    out.set(lead, arr)
+  }
+  return out
+}
+
 export function isAppShapedName(name: string, code: string): boolean {
   const n = name.trim()
   const c = code.trim()
@@ -104,6 +130,10 @@ export interface FolderIntegrityResult {
     landingRepaired: number
     landingRenamed: number
     linksHealed: number
+    /** v1.152.1 — extra EP folders sharing one lead. Report-only: merging means
+     *  moving files, which this worker never does. Counted so the digest can
+     *  shout about it. */
+    epDuplicatesFound: number
   }
   warnings: string[]
   errors: Array<{ code: string; error: string }>
@@ -114,6 +144,7 @@ function emptyFixed(): FolderIntegrityResult['fixed'] {
   return {
     boxCreated: 0, boxRenamed: 0, epCreated: 0, epRenamed: 0,
     camCreated: 0, camNormalized: 0, landingRepaired: 0, landingRenamed: 0, linksHealed: 0,
+    epDuplicatesFound: 0,
   }
 }
 
@@ -353,11 +384,32 @@ export async function runFolderIntegrity(opts: {
       if (epNames.length === 0) {
         epParents.push(boxId)
       } else {
+        // v1.152.1 — DUPLICATE-EP DETECTION. Two folders sharing one EP lead
+        // ("EP01 · <old title>" + "EP01 · <new title>") means a booking's
+        // footage is split across two folders and neither the crew nor detect
+        // sees all of it. Eight of these accumulated before v1.151.3 stopped
+        // video-merge from creating them, and NOTHING would have told us —
+        // they were found only because ops complained. This is the standing
+        // check so the next one is caught the hour it appears.
+        //
+        // REPORT-ONLY, always: merging two folders means moving files, and this
+        // worker's whole safety story is that it never moves or trashes. The
+        // digest names both sides so a human decides.
+        const byLead = groupEpisodeFoldersByLead(boxKids, epNames)
+        byLead.forEach((group, dupLead) => {
+          if (group.length < 2) return
+          base.fixed.epDuplicatesFound += group.length - 1
+          base.warnings.push(
+            `${code}: มีโฟลเดอร์ ${dupLead} ซ้ำ ${group.length} อัน — ไฟล์อาจกระจาย ต้องรวมเอง: ` +
+            group.map(g => `"${g.name}" (https://drive.google.com/drive/folders/${g.id})`).join(' · '),
+          )
+        })
+
         for (const want of epNames) {
           const lead = want.split(' · ')[0]?.trim()
           const exact = boxKids.find(k => k.name === want)
-          const byLead = lead ? boxKids.find(k => k.name === lead || k.name.startsWith(`${lead} `)) : undefined
-          const hit = exact ?? byLead
+          const byLeadHit = lead ? boxKids.find(k => k.name === lead || k.name.startsWith(`${lead} `)) : undefined
+          const hit = exact ?? byLeadHit
           if (!hit) {
             let createdId: string | null = null
             const ok = await spend(`${code}: create EP "${want}"`, async () => { createdId = await ensureFolderPath(boxId!, [want]) })

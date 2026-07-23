@@ -84,10 +84,13 @@ export async function GET(request: NextRequest) {
       maxWrites: num(sp.get('maxWrites')),
     })
 
-    const changed = Object.values(r.fixed).reduce((n, v) => n + v, 0)
+    // epDuplicatesFound is a FINDING, not a repair — counting it as "แก้ N"
+    // would tell ops something was fixed when nothing was touched.
+    const { epDuplicatesFound, ...repaired } = r.fixed
+    const changed = Object.values(repaired).reduce((n, v) => n + v, 0)
     // Report on worker runs in BOTH modes — the report-only stage is the whole
     // point of the rollout, and its digest is what earns the apply flag.
-    const worth = changed > 0 || r.warnings.length > 0 || r.errors.length > 0
+    const worth = changed > 0 || epDuplicatesFound > 0 || r.warnings.length > 0 || r.errors.length > 0
     // An APPLIED repair is always news; a report-only run is news only when the
     // picture differs from the last letter (or the 12h heartbeat is due).
     const digestKey = JSON.stringify({ f: r.fixed, w: [...r.warnings].sort(), e: r.errors.map(e => e.code).sort() })
@@ -107,6 +110,10 @@ export async function GET(request: NextRequest) {
         `แก้ชื่อกล้องให้เป็นมาตรฐาน: ${r.fixed.camNormalized}`,
         `ซ่อม drop zone          : ${r.fixed.landingRepaired} (เปลี่ยนชื่อ ${r.fixed.landingRenamed})`,
         `ผูก id กลับให้ booking   : ${r.fixed.linksHealed}`,
+        // Loudest line in the digest: this one means footage may be split.
+        r.fixed.epDuplicatesFound
+          ? `\n⚠️ พบโฟลเดอร์ EP ซ้ำ ${r.fixed.epDuplicatesFound} อัน — ไฟล์อาจกระจายอยู่คนละที่ (ดูรายการด้านล่าง)`
+          : '',
         r.deferred ? `\nยกไปรอบหน้า: ${r.deferred} งาน (ชนเพดานต่อรอบ)` : '',
         r.warnings.length ? `\n── ต้องดูเอง (${r.warnings.length}) ──\n${r.warnings.slice(0, 40).join('\n')}` : '',
         r.errors.length ? `\n── error (${r.errors.length}) ──\n${r.errors.slice(0, 20).map(e => `${e.code}: ${e.error}`).join('\n')}` : '',
@@ -115,7 +122,7 @@ export async function GET(request: NextRequest) {
       try {
         await sendEmail({
           to: reportEmail(),
-          subject: `[Folders] ตรวจโครงสร้าง — แก้ ${changed} · เตือน ${r.warnings.length}${r.dryRun ? ' (dry run)' : ''}`,
+          subject: `[Folders]${r.fixed.epDuplicatesFound ? ` ⚠️ EP ซ้ำ ${r.fixed.epDuplicatesFound} —` : ''} ตรวจโครงสร้าง — แก้ ${changed} · เตือน ${r.warnings.length}${r.dryRun ? ' (dry run)' : ''}`,
           text,
           html: text.replace(/\n/g, '<br>'),
         })

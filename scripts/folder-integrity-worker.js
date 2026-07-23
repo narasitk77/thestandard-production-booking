@@ -55,11 +55,17 @@ async function runOnce() {
     const j = JSON.parse(body)
     if (j.skipped) { console.log(`[folder-integrity] skipped: ${j.reason}`); return }
     const f = j.fixed || {}
-    const changed = Object.values(f).reduce((n, v) => n + (Number(v) || 0), 0)
+    // epDuplicatesFound is a finding, not a repair — keep it out of the
+    // fixed/would-fix count and give it its own field.
+    const dupes = Number(f.epDuplicatesFound) || 0
+    const changed = Object.entries(f)
+      .filter(([k]) => k !== 'epDuplicatesFound')
+      .reduce((n, [, v]) => n + (Number(v) || 0), 0)
     console.log(
       `[folder-integrity]${applyMode ? '' : ' (report-only)'} checked=${j.checked}/${j.scanned} ${applyMode ? 'fixed' : 'would-fix'}=${changed}` +
       ` (box +${f.boxCreated || 0}/~${f.boxRenamed || 0}, ep +${f.epCreated || 0}/~${f.epRenamed || 0},` +
       ` cam +${f.camCreated || 0}/~${f.camNormalized || 0}, landing ${f.landingRepaired || 0})` +
+      `${dupes ? ` EP-DUPLICATES=${dupes}` : ''}` +
       ` warn=${(j.warnings || []).length} errors=${(j.errors || []).length} deferred=${j.deferred || 0}`,
     )
   } catch (err) {
