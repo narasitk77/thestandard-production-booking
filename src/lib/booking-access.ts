@@ -32,13 +32,21 @@ export interface BookingAccessFields {
 
 export function canViewBooking(
   viewer: { email: string; role?: string | null },
-  booking: BookingAccessFields,
+  _booking: BookingAccessFields,
 ): boolean {
+  // v1.152 — transparent schedule: any signed-in user may open any live
+  // booking's detail, matching the list/calendar which now show every booking
+  // regardless of status. Keeping the detail route stricter than the list is
+  // what produced the v1.131 bug (a booking visible on the calendar answered
+  // "Forbidden" on click-through), and this time REQUESTED shoots are on the
+  // calendar too, so the mismatch would hit far more people.
+  //
+  // What this does NOT open up: soft-deleted bookings (the route 404s those for
+  // non-ADMIN before reaching here), and every mutation — approve/assign/edit/
+  // cancel — which keeps its own owner/console check. adminNotes travels in the
+  // detail payload; ops accepted that as part of "transparent data" (the notes
+  // are operational, not personal). If that ever needs walling off again,
+  // redact the field for non-console viewers rather than 403-ing the page.
   if (hasConsoleAccess(viewer.role)) return true
-  if (booking.status === 'CONFIRMED') return true
-  const email = (viewer.email || '').toLowerCase()
-  if (!email) return false
-  if ((booking.createdByEmail || '').toLowerCase() === email) return true
-  if ((booking.producerEmail || '').toLowerCase() === email) return true
-  return (booking.assignedEmails || []).some(e => (e || '').toLowerCase() === email)
+  return !!(viewer.email || '').trim()
 }

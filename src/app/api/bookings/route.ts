@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { hasConsoleAccess } from '@/lib/roles'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { createBookingFromPayload } from '@/lib/create-booking'
 import { makeCrewNameResolver, makeProducerNickResolver, shortPersonName } from '@/lib/crew-names'
@@ -39,20 +38,31 @@ export async function GET(request: NextRequest) {
     const withCrew = searchParams.get('withCrew') === '1'
 
     // scope=producer → only shoots where this user is the Producer (their own
-    // email — safe, no leak). Otherwise plain USERs are restricted to their own
-    // bookings + confirmed bookings; console tiers (no scope) see everything —
-    // the /admin queue and dashboard need the full set (v1.50, was ADMIN-only).
+    // email — safe, no leak). scope=mine → strictly the caller's own bookings
+    // (My Bookings). Otherwise EVERY signed-in user sees EVERY live booking.
+    //
+    // v1.152 — transparent schedule (ops decision 2026-07-22): the calendar is
+    // a shared capacity view, so a REQUESTED/ASSIGNED shoot must be as visible
+    // as a CONFIRMED one. Until now plain users saw only CONFIRMED bookings
+    // plus their own, so two producers could each request the same crew/day
+    // without seeing the other's pending request — which is precisely what the
+    // "First Come First Served" rule needs people to see. Console tiers were
+    // already unrestricted; this closes the gap for everyone else.
+    //
+    // Detail-level protection is unchanged and lives elsewhere: adminNotes and
+    // the upload rows stay behind canViewBooking (booking-access.ts), and only
+    // the owner/console can EDIT. This is a read-scope change on the schedule,
+    // not a permissions change.
     const userFilter = scope === 'producer'
       ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
-      : hasConsoleAccess(session.role) && scope !== 'mine'
-        ? {}
-        : {
+      : scope === 'mine'
+        ? {
             OR: [
               { createdByEmail: session.email },
               { assignedEmails: { has: session.email } },
-              ...(scope === 'mine' ? [] : [{ status: 'CONFIRMED' as const }]),
             ],
           }
+        : {}
 
     // ?cancelRequested=1 — the "ขอยกเลิก" tab: bookings someone asked to cancel
     // that aren't already cancelled.
