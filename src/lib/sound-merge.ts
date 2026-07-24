@@ -22,6 +22,7 @@ import {
 import { bookingShowName } from '@/lib/display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
 import { getDriveLink, rememberDriveLinks } from '@/lib/drive-links'
+import { noteResolve } from '@/lib/id-first-metrics'
 import { isFolderAlive } from '@/lib/google-drive'
 
 export interface SoundMergeResult {
@@ -129,8 +130,10 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       const code = b.bookingCode
       const stagingLink = getDriveLink(b.driveFolders, 'staging')
       let stagingId: string | null = stagingLink && await isFolderAlive(stagingLink) ? stagingLink : null
+      const stagingViaStored = !!stagingId
       if (!stagingId) stagingId = stagingChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
       if (!stagingId) { base.results.push({ bookingCode: b.bookingCode, skipped: 'no staging folder' }); continue }
+      noteResolve('sound-merge', 'staging', code, stagingViaStored) // v1.154 — id-first coverage gauge
       const stagingFiles = (await listFilesRecursive(stagingId, { maxFiles: 2000 })).filter(f => isAudio(f.name))
       base.staged += stagingFiles.length
       if (stagingFiles.length === 0) { base.results.push({ bookingCode: b.bookingCode, staged: 0 }); continue }
@@ -141,6 +144,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       let boxTargetId: string | null = null
       const boxLink = getDriveLink(b.driveFolders, 'box')
       if (boxLink && await isFolderAlive(boxLink)) boxTargetId = boxLink
+      const boxViaStored = !!boxTargetId
       if (!boxTargetId) {
         const layers = shootFolderLayers({
           outletCode: b.outlet.code,
@@ -166,6 +170,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
           boxTargetId = await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
         }
       }
+      noteResolve('sound-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
       if (!opts.dryRun) await rememberDriveLinks((b as any).id, { staging: stagingId, box: boxTargetId })
 
       // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);
@@ -234,6 +239,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   if (!bookingNeedsSound(b.crewRequired)) return { skipped: true, reason: 'งานนี้ไม่มีทีมเสียง', ...zero }
   const stagingLink = getDriveLink(b.driveFolders, 'staging')
   let stagingId: string | null = stagingLink && await isFolderAlive(stagingLink) ? stagingLink : null
+  const stagingViaStored = !!stagingId
   if (!stagingId) {
     const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
     if (!stagingRoot) return { skipped: true, reason: 'ยังไม่มี _SOUND-STAGING', ...zero }
@@ -241,6 +247,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
     stagingId = stagingChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
   }
   if (!stagingId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์เสียงใน staging', ...zero }
+  noteResolve('sound-merge', 'staging', code, stagingViaStored) // v1.154 — id-first coverage gauge
   const stagingFiles = (await listFilesRecursive(stagingId, { maxFiles: 2000 })).filter(f => isAudio(f.name))
   if (stagingFiles.length === 0) return { ...zero }
 
@@ -249,6 +256,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   let boxTargetId: string | null = null
   const boxLink = getDriveLink(b.driveFolders, 'box')
   if (boxLink && await isFolderAlive(boxLink)) boxTargetId = boxLink
+  const boxViaStored = !!boxTargetId
   if (!boxTargetId) {
     // v1.112 — AGN merges too (AUDIO inside the per-booking layer of the project box).
     const isAgency = b.outlet.code === 'AGN'
@@ -273,6 +281,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
       boxTargetId = await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
     }
   }
+  noteResolve('sound-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
   if (!dryRun && b.id) await rememberDriveLinks(b.id, { staging: stagingId, box: boxTargetId })
 
   // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);

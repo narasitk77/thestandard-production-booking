@@ -36,6 +36,7 @@
 import { prisma } from './db'
 import { logAudit } from './audit'
 import { notifyDiscord } from './notify'
+import { snapshotIdFirst, formatIdFirstDigest } from './id-first-metrics'
 import {
   hasDriveCredentials, findEpisodeFolderUrls, listChildFolders, getFileName, renameDriveItem,
   ensureFolderPath, ensureShootCameraFolders, ensureFlatShootFolders, findChildFolderByCode,
@@ -675,7 +676,15 @@ export async function maybeSendDailyDigest(now: Date = new Date()): Promise<bool
     select: { changes: true },
   })
   const { text } = buildDailyDigest(rows)
-  const sent = await notifyDiscord(text, 'footage')
+  // v1.154 — append the id-first coverage gauge (fallback counts since the last
+  // summary). Read WITHOUT clearing, and reset only after a confirmed send: the
+  // footage `text` self-heals from durable auditLog rows, but these in-memory
+  // counters have no backing, so clearing before a flaky webhook send would lose
+  // the day's numbers. A failed day rolls into the next digest instead.
+  const idFirst = formatIdFirstDigest(snapshotIdFirst(false))
+  const full = idFirst ? `${text}\n\n${idFirst}` : text
+  const sent = await notifyDiscord(full, 'footage')
+  if (sent) snapshotIdFirst(true) // clear the counters now that they've been reported
   // Mark the day done even if Discord is unset/failed, so a broken webhook
   // doesn't retry every hour for the rest of the day.
   await prisma.systemHeartbeat.upsert({

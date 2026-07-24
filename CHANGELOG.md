@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.154.0] — 2026-07-24
+
+### Added — วัด id-first ก่อน (ข้อ 2 ของแผนพัฒนา เริ่มด้วยการวัด)
+id-first เป็นเส้นทางหลักไปแล้วทั้งระบบ (อ่าน `driveFolders` ก่อนใน ~42 จุด) ที่เหลือ "จับด้วยชื่อ" คือ `folderNameMatchesCode` = จับด้วย **Production ID ที่ฝังในชื่อ (แก้ไม่ได้)** — เป็น fallback ปลอดภัยเมื่อ stored ID ยังว่าง ก่อนจะตัด fallback ทิ้ง ต้องรู้ก่อนว่ามัน **ยิงบ่อยแค่ไหน** จึงเพิ่มตัววัด
+- `id-first-metrics.ts` — ตัวนับ `noteResolve(subsystem, kind, code, usedStoredId)` แยก hit (ใช้ stored ID) / fallback (ตกไปจับด้วยชื่อ = booking ที่ยังไม่มี link → backfill candidate) เก็บ code ที่ fallback ไว้ด้วย
+- instrument 8 จุด resolve: video-merge {loop, per-booking} × {landing, box}, sound-merge {loop, per-booking} × {staging, box} — **observe ล้วน ไม่แตะ logic การ merge**
+- เสียบสรุปเข้า daily Discord digest ที่มีอยู่: `🔗 id-first — N% ใช้ stored ID` + รายชื่อ code ที่ยัง fallback (คือรายการที่ backfill แล้วจะหาย) ตัวเลขควรลดลงเรื่อยๆ จนเหลือ 0
+- อ่าน counters แบบไม่ล้าง แล้วล้างหลังส่ง Discord สำเร็จเท่านั้น (adversarial review จับ: ล้างก่อนส่งจะทำวันนับหายถ้า webhook ล่ม — ต่างจาก text ที่ self-heal จาก auditLog)
+- 9 unit tests (นับ hit/fallback, dedupe code, ล้าง, จัดอันดับ, format digest) — รวม 291 ผ่าน, tsc สะอาด
+- **ไม่เปลี่ยนพฤติกรรม production** — จะเห็นผลใน digest หลัง deploy; backfill endpoint (`/api/admin/drive-links/backfill`, มีตั้งแต่ v1.114) รัน dry-run ให้ตัวเลข coverage ได้เลยโดยไม่ต้อง deploy
+
+---
+
 ## [1.153.1] — 2026-07-23
 
 ### Added — เทสต์ระดับ integration ของ logic ที่คุยกับ Drive (ข้อ 1 ของแผนพัฒนา)

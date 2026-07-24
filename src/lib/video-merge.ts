@@ -37,6 +37,7 @@ import {
 import { bookingShowName } from './display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
 import { getDriveLink, rememberDriveLinks } from './drive-links'
+import { noteResolve } from './id-first-metrics'
 import { isFolderAlive } from './google-drive'
 
 // "Production Team" landing Shared Drive (NAS drop zone) — mirrors prep-folders.ts.
@@ -219,10 +220,12 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // v1.114 — id-first: stored landing ID wins; name match is the fallback.
       const landingLink = getDriveLink(b.driveFolders, 'landing')
       let flatId: string | null = landingLink && await isFolderAlive(landingLink) ? landingLink : null
+      const landingViaStored = !!flatId
       // v1.110 — match the landing folder by Production ID (legacy "<code> · …" OR
       // new "<show> · … (<code>)" shape).
       if (!flatId) flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
       if (!flatId) { base.results.push({ bookingCode: code, skipped: 'no landing folder' }); continue }
+      noteResolve('video-merge', 'landing', code, landingViaStored) // v1.154 — id-first coverage gauge
 
       // Resolve the box (read-only). If it hasn't landed yet → skip (try next run).
       // v1.112 — AGN merges too: the per-booking layer inside the project box is
@@ -232,6 +235,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       let destId: string | null = null
       const boxLink = getDriveLink(b.driveFolders, 'box')
       if (boxLink && await isFolderAlive(boxLink)) destId = boxLink
+      const boxViaStored = !!destId
       if (!destId) {
         const layers = shootFolderLayers({
           outletCode: b.outlet.code,
@@ -260,6 +264,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
           destId = opts.dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
         }
       }
+      noteResolve('video-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
       // self-heal: remember what we just resolved so next time skips the walk.
       if (!opts.dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
@@ -323,15 +328,18 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   // v1.114 — id-first for both sides; names are the fallback.
   const landingLink = getDriveLink(b.driveFolders, 'landing')
   let flatId: string | null = landingLink && await isFolderAlive(landingLink) ? landingLink : null
+  const landingViaStored = !!flatId
   if (!flatId) {
     const flatChildren = await listChildFolders(PRODUCTION_TEAM_ROOT)
     flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
   }
   if (!flatId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์ใน Production Team (NAS ยังไม่ sync?)', ...zero }
+  noteResolve('video-merge', 'landing', code, landingViaStored) // v1.154 — id-first coverage gauge
 
   let destId: string | null = null
   const boxLink = getDriveLink(b.driveFolders, 'box')
   if (boxLink && await isFolderAlive(boxLink)) destId = boxLink
+  const boxViaStored = !!destId
   if (!destId) {
     // v1.112 — AGN merges too (destination = per-booking layer inside the project box).
     const layers = shootFolderLayers({
@@ -356,6 +364,7 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
       destId = dryRun ? null : await ensureFolderPath(resolved.bookingFolderId, [layers.bookingSubfolderName])
     }
   }
+  noteResolve('video-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
   if (!dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
   const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
