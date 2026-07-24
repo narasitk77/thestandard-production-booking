@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.155.0] — 2026-07-24
+
+### Added — เพิ่ม รุจ (PMO) เข้า producer seed
+- เพิ่ม **รุจ** (รุจิรา เกิดแย้ม · TSD00330 · rujira.k@thestandard.co) ใน `OUTLET_PRODUCERS` → outlet **PM**, role **Co-Producer**, position `Project Coordinator` (ตามชีต outlet DB: Content Agency / Project Management Office / Project Coordinator — map เหมือน coordinator PM คนอื่น เช่น ใยไหม, มะเหมี่ยว)
+- อัปเดต invariant test: PM = 12 คน (เดิม 11) — 291 เทสต์ผ่าน, tsc สะอาด
+> ⚠️ **ต้องรัน `POST /api/admin/import-producers` หลัง deploy** (ปุ่มอยู่ที่ `/admin/permissions`) ถึงจะ upsert เข้า User table → รุจ ได้ account + โผล่ใน Co-Producer dropdown ของ PM
+
+---
+
 ## [1.154.0] — 2026-07-24
 
 ### Added — วัด id-first ก่อน (ข้อ 2 ของแผนพัฒนา เริ่มด้วยการวัด)

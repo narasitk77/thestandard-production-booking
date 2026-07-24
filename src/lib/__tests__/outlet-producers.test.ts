@@ -27,7 +27,7 @@ test('the Event + PM team members are seeded and tagged to EVT/PM', () => {
   const evt = OUTLET_PRODUCERS.filter(p => p.outlet === 'EVT')
   const pm = OUTLET_PRODUCERS.filter(p => p.outlet === 'PM')
   assert.equal(evt.length, 7, 'Event team should have 7 members')
-  assert.equal(pm.length, 11, 'PM team should have 11 members (v1.108 +ขวัญ)')
+  assert.equal(pm.length, 12, 'PM team should have 12 members (v1.155 +รุจ)')
   // emails are unique across the whole seed (the import upserts by email)
   const emails = OUTLET_PRODUCERS.map(p => p.email.toLowerCase())
   assert.equal(new Set(emails).size, emails.length, 'duplicate producer email in seed')

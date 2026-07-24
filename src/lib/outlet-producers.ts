@@ -70,4 +70,6 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   // v1.108 — added from sheet (per ops re-check 2026-06-30): ขวัญ (CEO Office, ทำหน้าที่ PM) → PM; ปู๊น (knd) → KND.
   { employeeId: 'TSD00325', thaiName: 'นางสาวกรุณา มาตี๋',         nickname: 'ขวัญ',   email: 'karuna.m@thestandard.co',     outlet: 'PM',  role: 'Producer',    position: 'Project Manager' },
   { employeeId: 'TSD00033', thaiName: 'นายอภิสิทธิ์ หรรษาภิรมย์โชค', nickname: 'ปู๊น',   email: 'aphisit.h@thestandard.co',    outlet: 'KND', role: 'Producer',    position: 'Assistant to KND Manager' },
+  // v1.155 — รุจ added from the ops outlet-DB sheet (2026-07-24): PMO Project Coordinator → PM Co-Producer.
+  { employeeId: 'TSD00330', thaiName: 'นางสาวรุจิรา เกิดแย้ม',      nickname: 'รุจ',    email: 'rujira.k@thestandard.co',     outlet: 'PM',  role: 'Co-Producer', position: 'Project Coordinator' },
 ]
