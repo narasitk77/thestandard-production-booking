@@ -4,11 +4,11 @@ import { requireAdmin } from '@/lib/session'
 import { mergeDriveLinks } from '@/lib/drive-links'
 import {
   findEpisodeFolderUrls, listChildFolders, findChildFolder, hasDriveCredentials, SOUND_STAGING_DIR,
-  listSoundStagingBookingFolders,
+  listSoundStagingBookingFolders, DRIVE_PHOTO_ROOT,
 } from '@/lib/google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName, legacyBookingFolderName,
-  buildEpisodeFolderName, folderNameMatchesCode,
+  buildEpisodeFolderName, folderNameMatchesCode, isPhotoAlbumBooking,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 
@@ -77,14 +77,19 @@ export async function POST(request: NextRequest) {
         id: true, bookingCode: true, driveFolders: true, projectId: true, projectName: true, category: true,
         outlet: { select: { code: true } },
         program: { select: { name: true } },
-        episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
+        // program.code is needed by isPhotoAlbumBooking (v1.155 photo backfill).
+        episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
       },
     })
 
-    // Landing + staging roots listed ONCE for the whole run.
+    // Landing + staging + photo roots listed ONCE for the whole run.
     const landingKids = await listChildFolders(PRODUCTION_TEAM_ROOT)
     const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR).catch(() => null)
     const stagingKids = stagingRoot ? await listSoundStagingBookingFolders(stagingRoot) : []
+    // v1.155 — photo albums live in their own Shared Drive. Backfill never filled
+    // the `photo` key, so photo bookings kept resolving by name forever no matter
+    // how often this ran; id-first could never complete for them.
+    const photoKids = DRIVE_PHOTO_ROOT ? await listChildFolders(DRIVE_PHOTO_ROOT).catch(() => []) : []
 
     const results: Array<{ code: string | null; links?: Record<string, string>; note?: string }> = []
     let stored = 0
@@ -120,6 +125,9 @@ export async function POST(request: NextRequest) {
           box: boxId ?? undefined,
           landing: landingKids.find(k => folderNameMatchesCode(k.name, code))?.id,
           staging: stagingKids.find(k => folderNameMatchesCode(k.name, code))?.id,
+          // Only photo-album bookings own a folder in the photographer drive —
+          // mirrors rename-folders' `metas.filter(m => m.isPhoto)` pool.
+          photo: isPhotoAlbumBooking(b.episodes) ? photoKids.find(k => folderNameMatchesCode(k.name, code))?.id : undefined,
         }
         const next = mergeDriveLinks(b.driveFolders, patch)
         if (!next) { results.push({ code, note: 'no change' }); continue }

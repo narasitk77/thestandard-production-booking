@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.155.1] — 2026-07-24
+
+### Fixed — backfill เติม `photo` ได้แล้ว (id-first ของงานภาพนิ่งเคยเติมไม่ได้เลย)
+`Booking.driveFolders` มี 4 คีย์ (box/landing/staging/photo) แต่ `POST /api/admin/drive-links/backfill` เติมแค่ **3** — `photo` ไม่เคยถูกเติม แปลว่างานภาพนิ่งจะ resolve โฟลเดอร์ด้วยชื่อไปตลอด **ต่อให้รัน backfill กี่รอบก็ตาม** (id-first ปิดจ็อบไม่ได้สำหรับงานกลุ่มนี้)
+- เพิ่มการไล่ `DRIVE_PHOTO_ROOT` หนึ่งครั้งต่อรอบ (เหมือน landing/staging) แล้ว match ด้วย Production ID
+- เติม `photo` เฉพาะ booking ที่เป็นอัลบั้มภาพ (`isPhotoAlbumBooking`) — mirror พูลของ rename-folders ไม่ให้งานวิดีโอไปแตะโฟลเดอร์ในไดรฟ์ช่างภาพ
+- ต้อง select `episodes.program.code` เพิ่ม (isPhotoAlbumBooking ใช้)
+- ยัง default dry-run เหมือนเดิม · 291 เทสต์ผ่าน · tsc สะอาด
+
+---
+
 ## [1.155.0] — 2026-07-24
 
 ### Added — เพิ่ม รุจ (PMO) เข้า producer seed
