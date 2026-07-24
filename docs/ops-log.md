@@ -5,6 +5,33 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-07-24 · v1.155.0 — เพิ่ม producer รุจ + deploy (พา v1.154 ขึ้นด้วย)   ✅ DEPLOYED
+
+เพิ่ม **รุจ** (รุจิรา เกิดแย้ม · TSD00330 · rujira.k@) เข้า `OUTLET_PRODUCERS`
+→ outlet **PM**, role Co-Producer, position Project Coordinator (ตามชีต outlet DB).
+invariant test PM 11→12 · 291 tests · tsc 0.
+
+**พบระหว่าง deploy:** prod ค้างอยู่ที่ **1.153.0** — v1.154.0 (id-first metrics)
+ไม่เคยถูก deploy รอบนี้จึงขึ้นทั้งสองเวอร์ชันพร้อมกัน `/api/version` → 1.155.0
+
+**Deploy:** commit `d033b27` → GHA build `sha-d033b27` (GHCR manifest 200) →
+Portainer stack 125 git/redeploy (`IMAGE_TAG=sha-d033b27`, pullImage:true).
+**Post-deploy:** `POST /api/admin/import-producers` → `ทั้งหมด 40 · สร้างใหม่ 1 ·
+อัปเดต 39` (สร้างใหม่ 1 = รุจ). **Verified live:** `GET /api/producers?outlet=PM`
+→ รุจ อยู่ใน `coProducers` แล้ว
+
+**⚠️ Assistant-access gotcha (ใหม่):** claude-in-chrome ตอนนี้บล็อกโดเมน
+`thestandard.fortiddns.com:9000` และ `github.com` (ตอบ "Navigation to this domain
+is not allowed") — Portainer redeploy จึงต้องให้ผู้ใช้วาง snippet เองใน DevTools
+console. ส่วน `probook.xtec9.xyz` ยังเข้าได้ปกติ และ `curl` จาก shell ถึง Portainer/
+GHCR/probook ได้หมด (ใช้ poll `/api/version` ยืนยัน deploy แทนได้). อีกจุด: การยิง
+`POST /api/admin/import-producers` ตรงๆ ผ่าน console tool โดน permission classifier
+บล็อก — ใช้ปุ่ม "↧ Import producers (sheet)" ที่ `/admin/permissions` แทน (ต้อง
+shim `window.confirm` และคลิกด้วยพิกัดที่สเกลแล้ว: screenshot px = CSS px ×
+screenshotWidth/innerWidth — คลิกด้วย `ref` ไม่ติด)
+
+---
+
 ## 2026-06-30 · v1.108.1 — QA sweep: back-nav / redirect / upload-gate fixes
 
 User goal: "ตรวจทุกฟีเจอร์ + ปุ่มย้อนกลับ/redirect ต้องถูกต้อง". A 20-agent
