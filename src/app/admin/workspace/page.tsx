@@ -18,6 +18,7 @@ import {
 import { OUTLETS } from '@/lib/data'
 import { statusColor, statusLabel } from '@/lib/utils'
 import { normalizeFreelancers } from '@/lib/freelancers'
+import { adminAssignedEmails } from '@/lib/vp-assign'
 import {
   WORKSPACE_COLUMNS, WORKSPACE_COLUMN_MAP, COLUMN_GROUP_ORDER,
   hasFreelancers, type WorkspaceBooking,
@@ -107,7 +108,9 @@ export default function WorkspacePage() {
       if (dateFrom && day && day < dateFrom) return false
       if (dateTo && day && day > dateTo) return false
       if (freelanceOnly && !hasFreelancers(b)) return false
-      if (unassignedOnly && (b.assignedEmails || []).length > 0) return false
+      // v1.156.1 — look through the VP auto-seed: a VP booking with only the
+      // auto-assigned VP dev still NEEDS crew, so it must stay in this view.
+      if (unassignedOnly && adminAssignedEmails(b.assignedEmails, b.virtualProduction).length > 0) return false
       if (routineFilter === 'only' && !b.isRoutine) return false
       if (routineFilter === 'exclude' && b.isRoutine) return false
       if (q) {
@@ -409,7 +412,7 @@ export default function WorkspacePage() {
         )}
         {selectedCount > 0 && <span className="text-[#673ab7]">เลือก <strong>{selectedCount}</strong></span>}
         <span>มี Freelance <strong className="text-gray-800">{filtered.filter(hasFreelancers).length}</strong></span>
-        <span>ยังไม่ assign <strong className="text-gray-800">{filtered.filter(b => (b.assignedEmails || []).length === 0).length}</strong></span>
+        <span>ยังไม่ assign <strong className="text-gray-800">{filtered.filter(b => adminAssignedEmails(b.assignedEmails, b.virtualProduction).length === 0).length}</strong></span>
       </div>
 
       {error && (

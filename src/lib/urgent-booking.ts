@@ -12,6 +12,7 @@
 
 import { prisma } from './db'
 import { notifyEmail, notifyLine } from './notify'
+import { isEmailConfigured } from './email'
 
 /** BKK calendar-day index (days since epoch in Asia/Bangkok, tz-fixed +07:00). */
 function bkkDayIndex(d: Date): number {
@@ -65,8 +66,16 @@ export interface UrgentBookingInput {
 
 export interface UrgentAlertResult {
   alerted: boolean
-  reason?: 'routine' | 'not-urgent' | 'already-alerted' | 'claim-lost'
+  reason?: 'routine' | 'not-urgent' | 'already-alerted' | 'claim-lost' | 'no-channel' | 'delivery-failed'
   leadDays?: number
+}
+
+/** True when at least one delivery channel is actually configured. Checked
+ *  BEFORE the send-once claim so an unconfigured env can't burn the claim on a
+ *  no-op (review finding, v1.156.1). */
+function anyChannelConfigured(): boolean {
+  if (isEmailConfigured()) return true
+  return !!(process.env.LINE_CHANNEL_TOKEN?.trim() && process.env.LINE_URGENT_USER_ID?.trim())
 }
 
 function buildMessage(b: UrgentBookingInput, leadDays: number): { subject: string; text: string } {
@@ -101,6 +110,13 @@ export async function maybeAlertUrgentBooking(b: UrgentBookingInput): Promise<Ur
       return { alerted: false, reason: 'not-urgent', leadDays }
     }
 
+    // No channel configured → don't claim (the claim would be burned on a
+    // no-op and the alert lost forever once email IS configured).
+    if (!anyChannelConfigured()) {
+      console.warn('[urgent-booking] no delivery channel configured — alert skipped:', b.bookingCode || b.id)
+      return { alerted: false, reason: 'no-channel', leadDays }
+    }
+
     // Atomic claim: only the caller that flips urgentAlertedAt from null wins, so
     // the alert can't double-send if the create path is ever retried/duplicated.
     const claim = await prisma.booking.updateMany({
@@ -112,10 +128,20 @@ export async function maybeAlertUrgentBooking(b: UrgentBookingInput): Promise<Ur
     const { subject, text } = buildMessage(b, leadDays)
     // Both arms are best-effort no-throw; LINE is a no-op until configured.
     // No Discord on purpose — that channel is footage-only (see file header).
-    await Promise.allSettled([
+    const [emailRes, lineRes] = await Promise.allSettled([
       notifyEmail(urgentEmailRecipients(), subject, text),
       notifyLine(text),
     ])
+    const delivered =
+      (emailRes.status === 'fulfilled' && emailRes.value === true) ||
+      (lineRes.status === 'fulfilled' && lineRes.value === true)
+    if (!delivered) {
+      // Nothing reached anyone — release the claim so the alert isn't silently
+      // lost behind a stamped urgentAlertedAt (review finding, v1.156.1).
+      await prisma.booking.updateMany({ where: { id: b.id }, data: { urgentAlertedAt: null } }).catch(() => {})
+      console.error('[urgent-booking] delivery failed on every channel — claim released:', b.bookingCode || b.id)
+      return { alerted: false, reason: 'delivery-failed', leadDays }
+    }
     return { alerted: true, leadDays }
   } catch (e: any) {
     console.error('[urgent-booking] alert failed (non-fatal):', b.bookingCode || b.id, e?.message || e)

@@ -5,6 +5,7 @@ import { updateBookingRow } from '@/lib/google-sheets'
 import { requireConsole } from '@/lib/session'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
+import { adminAssignedEmails } from '@/lib/vp-assign'
 import { sendBookingConfirmedEmail, sendAssignmentEmail } from '@/lib/email'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { getToken } from 'next-auth/jwt'
@@ -256,7 +257,10 @@ export async function POST(
           notes: booking.notes,
           adminNotes: booking.adminNotes,
         }, {
-          requireAttendees: booking.assignedEmails.length > 0,
+          // v1.156.1 — look through the VP auto-seed: a VP booking whose only
+          // "crew" is the auto-assigned VP dev should behave like an unassigned
+          // booking here (guestless event OK), not hard-require attendee support.
+          requireAttendees: adminAssignedEmails(booking.assignedEmails, booking.virtualProduction).length > 0,
         })
         if (calendarEventId) {
           // v1.54.1 — guarded persist: if the booking was cancelled or

@@ -12,6 +12,7 @@ import { appendBookingRow } from '@/lib/google-sheets'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
 import { maybeAlertUrgentBooking } from '@/lib/urgent-booking'
+import { vpAssigneeEmail } from '@/lib/vp-assign'
 import { deriveBookingCategory } from '@/lib/booking-category'
 import { isValidHHMM } from '@/lib/shoot-window'
 
@@ -146,8 +147,9 @@ export async function createBookingFromPayload(
   const blockShot = isBlockShot === true || isBlockShot === 'true' || isBlockShot === 1
   const isVirtualProduction = virtualProduction === true || virtualProduction === 'true' || virtualProduction === 1
   // v1.156 — who a Virtual Production shoot auto-assigns (the VP developer,
-  // Assawapol, per team-roster.ts). Env-overridable; empty env falls back.
-  const VP_ASSIGNEE = (process.env.VP_ASSIGNEE_EMAIL || 'assawapol.t@thestandard.co').trim()
+  // Assawapol, per team-roster.ts). Shared helper so admin surfaces can look
+  // through the seed when asking "did an admin assign crew yet?" (v1.156.1).
+  const VP_ASSIGNEE = vpAssigneeEmail()
   if (!blockShot) {
     const camNum = cameraCount === undefined || cameraCount === null || cameraCount === '' ? NaN : parseInt(cameraCount, 10)
     if (!Number.isInteger(camNum) || camNum < 0) return fail(400, 'cameraCount is required (use 0 for no camera) unless isBlockShot')

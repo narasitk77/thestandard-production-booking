@@ -46,6 +46,8 @@ export interface WorkspaceBooking {
   assignedEquipmentIds?: string[] | null
   freelancers?: unknown
   assignedEmails?: string[] | null
+  // v1.156.1 — needed so unassigned filters can look through the VP auto-seed
+  virtualProduction?: boolean | null
   mainVideographerEmail?: string | null
   agencyRef?: string | null
   projectId?: string | null

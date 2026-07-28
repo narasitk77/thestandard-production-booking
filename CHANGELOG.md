@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.156.1] — 2026-07-28
+
+### Fixed — เก็บ 4 ประเด็นจาก adversarial review ของ v1.156.0
+- **แจ้งเตือนงานด่วนหายเงียบถ้าอีเมลล่ม** — เดิม stamp `urgentAlertedAt` (สิทธิ์ยิงครั้งเดียว) *ก่อน* ส่งจริง → อีเมลล่ม = งานด่วนไม่ถึงใครเลยแต่ระบบคิดว่าส่งแล้ว ตอนนี้: เช็กว่ามีช่องทางส่งก่อน claim, ตรวจผลส่งจริง, ล้มเหลวทุกช่องทาง → คืน claim + log error
+- **งาน VP หายจากรายการ "ยังไม่ assign"** — seed อัศวพลตอนจองทำให้หน้า workspace มองว่างานมีครูแล้ว ทั้งที่ยังไม่มีตากล้อง/ทีมเสียง → helper ใหม่ `adminAssignedEmails()` (src/lib/vp-assign.ts) มองทะลุ seed ใช้ทั้ง filter และตัวนับ (อัศวพลที่ถูก assign มือในงานปกติยังนับเป็นครูตามเดิม)
+- **approve งาน VP เสี่ยง throw ใน env ไม่มี DWD** — `requireAttendees` เห็น seed เป็นครูจริง → มองทะลุ seed เช่นกัน (latent — prod ปัจจุบันมี DWD ไม่โดน)
+- **notifyEmail กลืน error เงียบ** — log ทุก rejection พร้อมที่อยู่ ให้วินิจฉัยอีเมลหายได้
+- 301 เทสต์ผ่าน (+5 vp-assign) · tsc สะอาด
+
+---
+
 ## [1.156.0] — 2026-07-28
 
 ### Added — แจ้งเตือนงานด่วน (ทางอีเมล) + Checkbox Virtual Production

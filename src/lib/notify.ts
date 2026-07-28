@@ -95,6 +95,14 @@ export async function notifyEmail(to: string | string[], subject: string, text: 
     return false
   }
   const results = await Promise.allSettled(list.map(addr => sendEmail({ to: [addr], subject, text })))
+  // sendEmail THROWS on terminal failure (it never resolves a failure value),
+  // so fulfilled === the provider accepted the message. Log each rejection —
+  // a silently-lost alert is undiagnosable in prod (review finding, v1.156.1).
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.error('[notify] email to', list[i], 'failed:', (r.reason as any)?.message || r.reason)
+    }
+  })
   return results.some(r => r.status === 'fulfilled')
 }
 
