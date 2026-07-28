@@ -22,11 +22,17 @@ import { prisma } from './db'
 import {
   listChildFolders, listFilesInFolder, listFilesRecursive, moveFileToFolder,
   findProgramFolderId, ensureFolderPath, trashDriveItem, renameDriveItem, hasDriveCredentials,
+  getFileName, getDriveParentFolderId, isFolderAlive,
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName, folderNameMatchesCode,
 } from './outlet-folders'
 import { CANONICAL_MARKER_NAME } from './shoot-marker'
+// v1.157 — id-first: stored Drive links recognize per-booking folders by ID
+// (rename-proof), so an ops-renamed booking layer is never mistaken for an
+// unknown folder (and never trashed-as-empty). Names remain the fallback.
+import { getDriveLink, rememberDriveLinks } from './drive-links'
+import { noteResolve } from './id-first-metrics'
 
 /** A pre-v1.112 box-level marker file ("_SHOOT-<code>.txt"). These must not
  *  survive under their legacy name after the move: the crawler matches
@@ -70,6 +76,7 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
       ...(opts.projectId ? { projectId: opts.projectId } : {}),
     },
     select: {
+      id: true, driveFolders: true, // v1.157 — id-first recognition + self-heal
       bookingCode: true, status: true, projectId: true, projectName: true, category: true,
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true } },
     },
@@ -92,13 +99,34 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
         shootFolderLayers({ outletCode: 'AGN', showName: '', category: b.category, projectId, projectName: b.projectName, bookingCode: b.bookingCode!, jobName: null }).programFolderName,
       )))
       let boxId: string | null = null, boxName = ''
-      for (const cat of catNames) {
-        const pid = await findProgramFolderId(root, canon, cat)
-        if (!pid) continue
-        const child = (await listChildFolders(pid)).find(f => folderNameMatchesCode(f.name, projectId))
-        if (child) { boxId = child.id; boxName = child.name; break }
+      // v1.157 — id-first shortcut: a booking's stored box (its layer inside the
+      // project box) has the project box as parent. Accepted only when the
+      // parent is ALIVE (files.get succeeds on trashed items — without this a
+      // trashed-and-recreated box would bind the sweep to the trash and no-op)
+      // AND its name still carries the project id, keeping the project-level
+      // trash ops code-gated as before. Deliberate relaxation vs the old walk:
+      // no outlet→category re-anchor, so a renamed category folder can't break
+      // resolution — a same-name box ops relocated wholesale would be accepted
+      // (unusual; trash-recoverable).
+      for (const b of group) {
+        const link = getDriveLink(b.driveFolders, 'box')
+        if (!link) continue
+        const pid = await getDriveParentFolderId(link).catch(() => null)
+        if (!pid || !(await isFolderAlive(pid))) continue
+        const pname = await getFileName(pid).catch(() => null)
+        if (pname && folderNameMatchesCode(pname, projectId)) { boxId = pid; boxName = pname; break }
+      }
+      const projectBoxViaStored = !!boxId
+      if (!boxId) {
+        for (const cat of catNames) {
+          const pid = await findProgramFolderId(root, canon, cat)
+          if (!pid) continue
+          const child = (await listChildFolders(pid)).find(f => folderNameMatchesCode(f.name, projectId))
+          if (child) { boxId = child.id; boxName = child.name; break }
+        }
       }
       if (!boxId) { base.results.push({ projectId, skipped: 'project box not found on Drive' }); continue }
+      noteResolve('agn-restructure', 'project-box', projectId, projectBoxViaStored)
 
       // EP ownership: episodeId → ACTIVE bookings that booked it. Cancelled
       // bookings never own an EP folder (their shoot didn't happen).
@@ -117,6 +145,17 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
       }
       const codes = group.map(b => b.bookingCode!)
       const targetName = (code: string) => buildBookingFolderName(code, jobOf.get(code) ?? null)
+      // v1.157 — stored booking-layer ids: recognize per-booking folders by ID
+      // even when their display name lost the code (ops rename). Without this an
+      // EMPTY renamed booking layer would be trashed as an unknown skeleton.
+      const storedBoxIdByCode = new Map<string, string>()
+      const bookingIdByCode = new Map<string, string>()
+      for (const b of group) {
+        bookingIdByCode.set(b.bookingCode!, b.id)
+        const link = getDriveLink(b.driveFolders, 'box')
+        if (link) storedBoxIdByCode.set(b.bookingCode!, link)
+      }
+      const storedBoxIds = new Set(Array.from(storedBoxIdByCode.values()))
 
       const kids = await listChildFolders(boxId)
       const boxFiles = await listFilesInFolder(boxId)
@@ -126,8 +165,10 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
       const unmapped: string[] = []
 
       for (const k of kids) {
-        // already a per-booking folder → leave (it IS the new layout)
-        if (codes.some(c => folderNameMatchesCode(k.name, c))) continue
+        // already a per-booking folder → leave (it IS the new layout).
+        // v1.157 — recognized by stored ID too, so a renamed booking layer is
+        // never scanned as unknown (or trashed if empty).
+        if (codes.some(c => folderNameMatchesCode(k.name, c)) || storedBoxIds.has(k.id)) continue
         // VERIFIED-EMPTY (no real file anywhere inside — _SHOOT txts don't count)
         // → duplicate/worker skeleton → trash. Emptiness is re-checked here on
         // the server at execution time, never assumed from an earlier listing.
@@ -164,10 +205,17 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
         if (base.dryRun) { base.moved++; continue }
         let tid = folderIdByCode.get(mv.toCode)
         if (!tid) {
-          // reuse an existing booking folder (matched by code) before creating
-          tid = kids.find(f => folderNameMatchesCode(f.name, mv.toCode))?.id
+          // v1.157 — id-first reuse: the stored booking-layer id wins when still
+          // inside this box; then the code match; create only as a last resort.
+          const storedTid = storedBoxIdByCode.get(mv.toCode)
+          const viaStored = !!storedTid && kids.some(k => k.id === storedTid)
+          tid = (viaStored ? storedTid : undefined)
+            ?? kids.find(f => folderNameMatchesCode(f.name, mv.toCode))?.id
             ?? await ensureFolderPath(boxId, [tname])
           folderIdByCode.set(mv.toCode, tid)
+          noteResolve('agn-restructure', 'box', mv.toCode, viaStored)
+          const bid = bookingIdByCode.get(mv.toCode)
+          if (!viaStored && bid) await rememberDriveLinks(bid, { box: tid })
         }
         try {
           // v1.149 — a legacy "_SHOOT-<code>.txt" must not keep its old name in

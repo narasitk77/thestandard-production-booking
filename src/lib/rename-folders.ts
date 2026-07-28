@@ -21,6 +21,13 @@ import {
   landingBookingFolderName, folderNameMatchesCode, isPhotoAlbumBooking,
 } from './outlet-folders'
 import { bookingShowName } from './display'
+// v1.157 — id-first: stored Drive links match children by ID (rename-proof);
+// names are the fallback. Renames stay gated on isAppShapedName so a name ops
+// deliberately set (code stripped) is never touched — it is REPORTED instead
+// of silently skipped like before.
+import { getDriveLink, rememberDriveLinks, type DriveLinkKey } from './drive-links'
+import { noteResolve } from './id-first-metrics'
+import { isAppShapedName } from './folder-integrity'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
 
@@ -36,6 +43,8 @@ export interface FolderRenameResult {
 }
 
 type Meta = {
+  bookingId: string
+  driveFolders: unknown
   code: string
   jobName: string | null
   showName: string
@@ -58,6 +67,7 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
   const bookings = await prisma.booking.findMany({
     where: { bookingCode: { not: null } },
     select: {
+      id: true, driveFolders: true, // v1.157 — id-first matching + self-heal
       bookingCode: true, projectId: true, projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
@@ -65,6 +75,8 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
     },
   })
   const metas: Meta[] = bookings.map(b => ({
+    bookingId: b.id,
+    driveFolders: b.driveFolders,
     code: b.bookingCode!,
     jobName: b.projectName?.trim() || b.episodes[0]?.title?.trim() || null,
     showName: bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes }),
@@ -102,15 +114,52 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
       { id: DRIVE_PHOTO_ROOT, label: 'photo', pool: metas.filter(m => m.isPhoto) },
       { id: stagingRoot, label: 'sound', pool: metas },
     ]
+    const linkKeyOf: Record<string, DriveLinkKey> = { landing: 'landing', photo: 'photo', sound: 'staging' }
     for (const fp of flatParents) {
       if (!fp.id) continue
       // v1.123 — sound staging is nested by show category; walk both shapes.
       const children = fp.label === 'sound' ? await listSoundStagingBookingFolders(fp.id) : await listChildFolders(fp.id)
+      // v1.157 — id-first: index the pool by stored folder id so a child whose
+      // display name lost its code still maps to its booking.
+      const linkKey = linkKeyOf[fp.label]
+      const byStoredId = new Map<string, Meta>()
+      for (const m of fp.pool) {
+        const lid = getDriveLink(m.driveFolders, linkKey)
+        if (lid) byStoredId.set(lid, m)
+      }
+      const childIds = new Set(children.map(c => c.id))
       for (const child of children) {
-        const m = fp.pool.find(x => folderNameMatchesCode(child.name, x.code))
+        const viaStored = byStoredId.has(child.id)
+        const m = byStoredId.get(child.id) ?? fp.pool.find(x => folderNameMatchesCode(child.name, x.code))
+        if (!m) continue
+        // v1.157 review fix — a name-matching child while the booking's REAL
+        // folder (its live stored id) is ALSO in this parent = a duplicate.
+        // Touching it would rename it into a same-name twin, and healing would
+        // steal the stored link from the real folder. Skip it entirely (the
+        // landing-dedup sweep owns duplicate cleanup).
+        if (!viaStored) {
+          const cur = getDriveLink(m.driveFolders, linkKey)
+          if (cur && cur !== child.id && childIds.has(cur)) {
+            rememberChange(m.code, `${fp.label}: ข้าม "${child.name}" — น่าจะเป็นโฟลเดอร์ซ้ำ (ตัวจริงของงานนี้อยู่ในโฟลเดอร์นี้แล้ว)`)
+            continue
+          }
+        }
+        noteResolve('rename-folders', fp.label, m.code, viaStored)
+        // Never fight a name ops set on purpose: report, don't rename. NOTE the
+        // gates differ — folderNameMatchesCode accepts "(CODE)" anywhere, but
+        // isAppShapedName needs it end-anchored, so a name CAN carry the code
+        // yet fail here (e.g. Drive copy artifact "… (CODE) (1)"). Report which.
+        if (!isAppShapedName(child.name, m.code)) {
+          rememberChange(m.code, folderNameMatchesCode(child.name, m.code)
+            ? `${fp.label}: ข้าม "${child.name}" — มีรหัสงานแต่รูปแบบชื่อไม่ใช่ของระบบ (ไม่แตะ)`
+            : `${fp.label}: ข้าม "${child.name}" — ชื่อถูกตั้งเอง (ไม่มีรหัสงานท้ายชื่อ) ไม่แตะ`)
+          continue
+        }
+        // Heal AFTER the gates so a skipped folder can never capture the link.
+        if (!viaStored && !base.dryRun) await rememberDriveLinks(m.bookingId, { [linkKey]: child.id })
         // v1.111 — landing AND sound-staging are crew-facing → display name;
         // photo keeps the box-style name.
-        if (m) await renameIfDiff(child.id, child.name, fp.label === 'photo' ? newFlatName(m) : m.landingName, m.code, fp.label)
+        await renameIfDiff(child.id, child.name, fp.label === 'photo' ? newFlatName(m) : m.landingName, m.code, fp.label)
       }
     }
 
@@ -134,8 +183,22 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
       if (!programId) continue
       const children = await listChildFolders(programId)
       for (const m of g.items) {
-        const child = children.find(c => folderNameMatchesCode(c.name, m.code))
-        if (child) await renameIfDiff(child.id, child.name, newFlatName(m), m.code, 'box')
+        // v1.157 — id-first: stored box id wins when it is a child of this
+        // program folder (rename-proof); the code match is the fallback.
+        const storedBox = getDriveLink(m.driveFolders, 'box')
+        const viaStored = !!storedBox && children.some(c => c.id === storedBox)
+        const child = (viaStored ? children.find(c => c.id === storedBox) : undefined)
+          ?? children.find(c => folderNameMatchesCode(c.name, m.code))
+        if (!child) continue
+        noteResolve('rename-folders', 'box', m.code, viaStored)
+        if (!viaStored && !base.dryRun) await rememberDriveLinks(m.bookingId, { box: child.id })
+        if (!isAppShapedName(child.name, m.code)) {
+          rememberChange(m.code, folderNameMatchesCode(child.name, m.code)
+            ? `box: ข้าม "${child.name}" — มีรหัสงานแต่รูปแบบชื่อไม่ใช่ของระบบ (ไม่แตะ)`
+            : `box: ข้าม "${child.name}" — ชื่อถูกตั้งเอง (ไม่มีรหัสงานท้ายชื่อ) ไม่แตะ`)
+          continue
+        }
+        await renameIfDiff(child.id, child.name, newFlatName(m), m.code, 'box')
       }
     }
 

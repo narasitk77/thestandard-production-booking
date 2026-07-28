@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.157.0] — 2026-07-28
+
+### Changed — id-first ครบทั้งระบบ: ย้าย 3 subsystem สุดท้ายที่ยังหาโฟลเดอร์ด้วยชื่อล้วน
+`agn-restructure` / `rename-folders` / `shoot-marker-reconcile` ไม่เคยอ่าน `driveFolders` เลย (name-based 100%) — ตอนนี้ทุกตัวใช้ pattern เดียวกับ video/sound-merge: **stored id นำ → ชื่อ (Production ID) เป็น fallback → self-heal link → นับเข้า gauge** ทำให้การวัด id-first ครอบคลุมทุก subsystem
+
+- **shoot-marker-reconcile** (worker กลางคืน): project box หาได้จาก parent ของ stored booking-layer (ข้าม category-name walk ที่เปราะ) แต่ยังบังคับชื่อต้องมี project id + ต้อง**มีชีวิต** (ไม่ยอมรับกล่องที่ถูก trash) เพราะ pass นี้ trash ของระดับ project; booking subfolder รับ stored id เฉพาะเมื่อยังเป็นลูกของกล่องนี้; generic pass ใช้ stored box/photo ตรงๆ (marker ควรอยู่ในโฟลเดอร์จริงของงานไม่ว่าอยู่ไหน)
+- **rename-folders** (ปุ่ม admin): จับคู่ลูกโฟลเดอร์ด้วย stored id ก่อน (ทนการเปลี่ยนชื่อ) — rename ยัง gate ด้วย `isAppShapedName` → **ชื่อที่ ops ตั้งเองไม่ถูกแตะเหมือนเดิม** แต่โผล่ในรายงานพร้อมเหตุผลแม่นๆ (แยก "มีรหัสแต่รูปแบบไม่ใช่ของระบบ" กับ "ไม่มีรหัสท้ายชื่อ")
+- **agn-restructure** (เครื่องมือ one-off): จำ booking layer ด้วย stored id — **ปิดบั๊กแฝงเดิม**: booking layer ที่ถูกเปลี่ยนชื่อ+ว่างเปล่า เคยเสี่ยงถูก trash เป็น "โครงไม่ทราบที่มา"
+
+**Adversarial review ก่อน commit จับได้ 5 ประเด็น — แก้ครบ:**
+1. (สูง) โฟลเดอร์ซ้ำใน landing แย่ง stored link จากโฟลเดอร์ตัวจริงได้ผ่านการ self-heal → กันด้วย duplicate check + ย้าย heal ไปหลัง gate ทั้งหมด
+2-3. (กลาง) stored-parent shortcut ยอมรับกล่องที่ถูก **trash** ได้ (`files.get` สำเร็จกับของใน trash) → เพิ่ม `isFolderAlive` ทั้งสองไฟล์
+4. (ต่ำ) ข้อความรายงาน skip ระบุเหตุผลผิด → แยกสองกรณีให้แม่น
+5. (ต่ำ) comment อ้างว่า "เข้มเท่าเดิม" ทั้งที่ผ่อน location anchor → เขียน trade-off ตรงๆ (จงใจผ่อนเพื่อให้ทนการ rename category folder; กล่องถูกลากออกไปทั้งใบเป็นเคสผิดปกติ + กู้จาก trash ได้)
+- 301 เทสต์ผ่าน · tsc สะอาด · มีผลเมื่อ redeploy
+
+---
+
 ## [1.156.1] — 2026-07-28
 
 ### Fixed — เก็บ 4 ประเด็นจาก adversarial review ของ v1.156.0

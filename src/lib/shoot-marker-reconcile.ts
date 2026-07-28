@@ -39,8 +39,12 @@ import {
   listChildFolders, listFilesInFolder, trashDriveItem, moveFileToFolder,
   renameDriveItem, findProgramFolderId, findChildFolderByCode, dedupeShootInfoFiles, upsertTextFile,
   readDriveTextFile, hasDriveCredentials, DRIVE_PHOTO_ROOT,
+  getFileName, getDriveParentFolderId, isFolderAlive,
 } from './google-drive'
 import { outletDriveFolderName, shootFolderLayers, folderNameMatchesCode, isPhotoAlbumBooking } from './outlet-folders'
+// v1.157 — id-first: stored Drive links resolve first; names are the fallback.
+import { getDriveLink, rememberDriveLinks } from './drive-links'
+import { noteResolve } from './id-first-metrics'
 import { bookingShowName } from './display'
 import { computeTypeDroppedId } from './id-migration'
 import { EPISODE_ID_RE_LOOSE } from './episode-id'
@@ -106,6 +110,8 @@ export function markerDateHasBuddhistYear(text: string): boolean {
 }
 
 type BookingFull = {
+  id: string
+  driveFolders?: unknown
   bookingCode: string | null
   status: string
   projectId: string | null
@@ -193,6 +199,7 @@ export async function reconcileShootMarkers(
       ...(opts.projectId ? { projectId: opts.projectId } : {}),
     },
     select: {
+      id: true, driveFolders: true, // v1.157 — id-first resolution + self-heal
       bookingCode: true, status: true, projectId: true, projectName: true, category: true,
       videoType: true, shootType: true, shootDate: true, shootEndDate: true,
       callTime: true, estimatedWrap: true, locationName: true,
@@ -227,13 +234,34 @@ export async function reconcileShootMarkers(
         shootFolderLayers({ outletCode: 'AGN', showName: '', category: b.category, projectId, projectName: b.projectName, bookingCode: b.bookingCode!, jobName: null }).programFolderName,
       )))
       let boxId: string | null = null, boxName = ''
-      for (const cat of catNames) {
-        const pid = await findProgramFolderId(root, canon, cat)
-        if (!pid) continue
-        const child = (await listChildFolders(pid)).find(f => folderNameMatchesCode(f.name, projectId))
-        if (child) { boxId = child.id; boxName = child.name; break }
+      // v1.157 — id-first shortcut: a booking's stored box (the booking layer)
+      // has the project box as its Drive parent. Accepted only when the parent
+      // is ALIVE (files.get succeeds on trashed items — without this check a
+      // trashed-and-recreated box would silently no-op the pass forever) AND its
+      // name still carries the project id, keeping the project-level trash/move
+      // ops code-gated as before. Deliberate relaxation vs the old walk: the
+      // parent is NOT re-anchored under outlet→category, so a renamed category
+      // folder can't break resolution — the trade-off is that a same-name box
+      // ops relocated wholesale would be accepted (unusual; trash-recoverable).
+      for (const b of group) {
+        const link = getDriveLink(b.driveFolders, 'box')
+        if (!link) continue
+        const pid = await getDriveParentFolderId(link).catch(() => null)
+        if (!pid || !(await isFolderAlive(pid))) continue
+        const pname = await getFileName(pid).catch(() => null)
+        if (pname && folderNameMatchesCode(pname, projectId)) { boxId = pid; boxName = pname; break }
+      }
+      const projectBoxViaStored = !!boxId
+      if (!boxId) {
+        for (const cat of catNames) {
+          const pid = await findProgramFolderId(root, canon, cat)
+          if (!pid) continue
+          const child = (await listChildFolders(pid)).find(f => folderNameMatchesCode(f.name, projectId))
+          if (child) { boxId = child.id; boxName = child.name; break }
+        }
       }
       if (!boxId) { base.details.push({ projectId, skipped: 'project box not found on Drive' }); continue }
+      noteResolve('shoot-marker', 'project-box', projectId, projectBoxViaStored)
 
       const bookingByCode = new Map(group.map(b => [b.bookingCode!.toUpperCase(), b]))
       const codes = Array.from(bookingByCode.keys())
@@ -243,8 +271,19 @@ export async function reconcileShootMarkers(
       // collapse duplicate `_SHOOT.txt` inside each so "hasCanonical" means one.
       const subByCode = new Map<string, { id: string; hasCanonical: boolean }>()
       for (const code of codes) {
-        const kid = kids.find(k => folderNameMatchesCode(k.name, code))
+        // v1.157 — id-first: the booking's stored box id wins when it is still a
+        // child of THIS project box (rename-proof; a moved-out folder is not
+        // accepted because everything below assumes we're inside the box).
+        const storedKidId = getDriveLink(bookingByCode.get(code)?.driveFolders, 'box')
+        let kid = storedKidId ? kids.find(k => k.id === storedKidId) ?? null : null
+        const kidViaStored = !!kid
+        if (!kid) kid = kids.find(k => folderNameMatchesCode(k.name, code)) ?? null
         if (!kid) continue
+        noteResolve('shoot-marker', 'box', code, kidViaStored)
+        if (!kidViaStored && !dryRun) {
+          const bid = bookingByCode.get(code)?.id
+          if (bid) await rememberDriveLinks(bid, { box: kid.id })
+        }
         const dd = await dedupeShootInfoFiles(kid.id, { dryRun })
         if (dd.totalTrashed > 0) {
           base.fixed.dedupedInSubfolder += dd.totalTrashed
@@ -443,6 +482,7 @@ export async function reconcileGenericMarkers(
       // program codes, which Prisma can't express in the where clause.
     },
     select: {
+      id: true, driveFolders: true, // v1.157 — id-first resolution + self-heal
       bookingCode: true, status: true, projectId: true, projectName: true, category: true,
       videoType: true, shootType: true, shootDate: true, shootEndDate: true,
       callTime: true, estimatedWrap: true, locationName: true,
@@ -476,12 +516,22 @@ export async function reconcileGenericMarkers(
     const actions: string[] = []
     try {
       // ── locate the booking's box (find-only) ─────────────────────────────
+      // v1.157 — id-first: the stored link wins (rename/move-proof — the marker
+      // belongs in the booking's REAL folder wherever it is); names fall back.
       let boxId: string | null = null
       let boxName = ''
-      if (isPhotoAlbumBooking(b.episodes)) {
+      let boxViaStored = false
+      const isPhoto = isPhotoAlbumBooking(b.episodes)
+      const storedLink = getDriveLink(b.driveFolders, isPhoto ? 'photo' : 'box')
+      if (storedLink && await isFolderAlive(storedLink)) {
+        boxId = storedLink
+        boxName = isPhoto ? `(photo) ${code}` : ((await getFileName(storedLink).catch(() => null)) || code)
+        boxViaStored = true
+      }
+      if (!boxId && isPhoto) {
         boxId = await findChildFolderByCode(DRIVE_PHOTO_ROOT, code)
         boxName = boxId ? `(photo) ${code}` : ''
-      } else {
+      } else if (!boxId) {
         const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
         const layers = shootFolderLayers({
           outletCode: b.outlet.code,
@@ -511,6 +561,8 @@ export async function reconcileGenericMarkers(
         base.details.push({ projectId: code, skipped: 'booking box not found on Drive (creation is approve/prep\'s job)' })
         continue
       }
+      noteResolve('shoot-marker', isPhoto ? 'photo' : 'box', code, boxViaStored)
+      if (!boxViaStored && !dryRun) await rememberDriveLinks(b.id, { [isPhoto ? 'photo' : 'box']: boxId })
 
       // ── one marker, canonical name ──────────────────────────────────────
       const dd = await dedupeShootInfoFiles(boxId, { dryRun })
