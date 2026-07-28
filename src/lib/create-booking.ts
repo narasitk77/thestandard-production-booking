@@ -11,6 +11,7 @@ import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
+import { maybeAlertUrgentBooking } from '@/lib/urgent-booking'
 import { deriveBookingCategory } from '@/lib/booking-category'
 import { isValidHHMM } from '@/lib/shoot-window'
 
@@ -57,6 +58,7 @@ export async function createBookingFromPayload(
     cameraCount,
     micCount,
     isBlockShot,
+    virtualProduction,
     vanCount,
     specialEquipment,
     agencyRef,
@@ -142,6 +144,10 @@ export async function createBookingFromPayload(
   // check and crew planning.
   // v1.67 — Block Shot bookings are exempt (gear isn't pinned down at booking).
   const blockShot = isBlockShot === true || isBlockShot === 'true' || isBlockShot === 1
+  const isVirtualProduction = virtualProduction === true || virtualProduction === 'true' || virtualProduction === 1
+  // v1.156 — who a Virtual Production shoot auto-assigns (the VP developer,
+  // Assawapol, per team-roster.ts). Env-overridable; empty env falls back.
+  const VP_ASSIGNEE = (process.env.VP_ASSIGNEE_EMAIL || 'assawapol.t@thestandard.co').trim()
   if (!blockShot) {
     const camNum = cameraCount === undefined || cameraCount === null || cameraCount === '' ? NaN : parseInt(cameraCount, 10)
     if (!Number.isInteger(camNum) || camNum < 0) return fail(400, 'cameraCount is required (use 0 for no camera) unless isBlockShot')
@@ -347,6 +353,11 @@ export async function createBookingFromPayload(
       cameraCount: cameraCount === undefined || cameraCount === null || cameraCount === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
       micCount: micCount === undefined || micCount === null || micCount === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
       isBlockShot: blockShot,
+      virtualProduction: isVirtualProduction,
+      // v1.156 — a VP shoot auto-puts the VP developer on the crew roster from
+      // booking time (email is the canonical crew id). No calendar invite yet —
+      // a REQUESTED booking has no event; approve/assign syncs him in later.
+      assignedEmails: isVirtualProduction && VP_ASSIGNEE ? [VP_ASSIGNEE] : [],
       vanCount: Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)),
       specialEquipment: Array.isArray(specialEquipment) ? specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') : [],
       agencyRef: agencyRef || null,
@@ -409,6 +420,24 @@ export async function createBookingFromPayload(
       }
     }).catch(() => {})
   }
+
+  // v1.156 — urgent-booking alert: a rush job (shoot within a day or two of now)
+  // emails the coordinator once (NOT Discord — that channel stays footage-only).
+  // Fire-and-forget so a notify hiccup never fails the booking; routine bulk
+  // rows are skipped inside.
+  maybeAlertUrgentBooking({
+    id: booking.id,
+    bookingCode: booking.bookingCode,
+    shootDate: booking.shootDate,
+    callTime: booking.callTime,
+    createdAt: booking.createdAt,
+    isRoutine: booking.isRoutine,
+    urgentAlertedAt: booking.urgentAlertedAt,
+    producer: booking.producer,
+    outlet: { code: booking.outlet.code, name: booking.outlet.name },
+    program: { name: booking.program.name },
+    virtualProduction: booking.virtualProduction,
+  }).catch(() => {})
 
   return { ok: true, booking }
 }

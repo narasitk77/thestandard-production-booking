@@ -22,6 +22,10 @@ import { sendEmail, isEmailConfigured } from './email'
  *   'footage' — files moved / footage ready / NAS sync drained
  *   'ops'     — reminders, worker-down alerts, anything not about files
  *
+ * v1.156 note: urgent-booking alerts deliberately do NOT post to Discord —
+ * the channel stays footage-only (ops decision 2026-07-28); they go by email
+ * (notifyEmail below) instead.
+ *
  * Set DISCORD_NOTIFY_SCOPE=all to put the ops chatter back on Discord.
  */
 export type NotifyCategory = 'footage' | 'ops'
@@ -73,6 +77,47 @@ export async function notifyEmailDigest(subject: string, text: string): Promise<
     return true
   } catch (err: any) {
     console.error('[notify] email digest failed:', err?.message || err)
+    return false
+  }
+}
+
+/**
+ * Email a SPECIFIC recipient (e.g. the coordinator for an urgent booking), not
+ * the fixed admin digest address. Best-effort: false when no recipient, email
+ * unconfigured, or send failed — never throws (callers fire-and-forget). One
+ * message per address so recipients aren't exposed to each other in a flat To:.
+ */
+export async function notifyEmail(to: string | string[], subject: string, text: string): Promise<boolean> {
+  const list = (Array.isArray(to) ? to : [to]).map(s => s.trim()).filter(Boolean)
+  if (!list.length) return false
+  if (!isEmailConfigured()) {
+    console.warn('[notify] email skipped — no non-interactive email provider configured (SMTP/Resend/SendGrid).')
+    return false
+  }
+  const results = await Promise.allSettled(list.map(addr => sendEmail({ to: [addr], subject, text })))
+  return results.some(r => r.status === 'fulfilled')
+}
+
+/**
+ * LINE — deliberate no-op seam (see file header). LINE Notify was shut down
+ * Mar 2025, so real delivery needs a Messaging-API bot: set LINE_CHANNEL_TOKEN
+ * and the recipient's LINE userId, then push here. Until then this returns false
+ * so callers can list it as a channel without any behavior change today.
+ */
+export async function notifyLine(_text: string, _toUserId?: string): Promise<boolean> {
+  const token = process.env.LINE_CHANNEL_TOKEN?.trim()
+  const to = (_toUserId || process.env.LINE_URGENT_USER_ID || '').trim()
+  if (!token || !to) return false // not configured — the expected state today
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to, messages: [{ type: 'text', text: _text.slice(0, 4990) }] }),
+    })
+    if (!res.ok) { console.error(`[notify] line ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`); return false }
+    return true
+  } catch (err: any) {
+    console.error('[notify] line failed:', err?.message || err)
     return false
   }
 }

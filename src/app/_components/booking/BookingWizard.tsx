@@ -187,6 +187,8 @@ export default function BookingWizard() {
   const [micCount, setMicCount] = useState('')
   // v1.67 — Block Shot: relaxes the camera/mic requirement for flexible-queue shoots.
   const [isBlockShot, setIsBlockShot] = useState(false)
+  // v1.156 — Virtual Production shoot: auto-assigns the VP developer on create.
+  const [virtualProduction, setVirtualProduction] = useState(false)
   // v1.131 — how many company vans (string for NumberStepper; '0'/'' = none).
   const [vanCount, setVanCount] = useState('0')
   // v1.101 — Event shoots are "office" by default; tick this when the event is at
@@ -377,7 +379,7 @@ export default function BookingWizard() {
     outletCode, programCode, shootDate, shootEndDate, category, shootType,
     locationId, locationCustom, mapLocation, callTime, estimatedWrap,
     producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
-    creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, vanCount, eventExternal,
+    creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, virtualProduction, vanCount, eventExternal,
     specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel,
     notes, epCount, epRows, step,
   })
@@ -397,7 +399,7 @@ export default function BookingWizard() {
     }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, vanCount, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, virtualProduction, vanCount, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
 
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
   const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
@@ -429,6 +431,7 @@ export default function BookingWizard() {
       if (d.cameraCount != null) setCameraCount(d.cameraCount)
       if (d.micCount != null) setMicCount(d.micCount)
       if (typeof d.isBlockShot === 'boolean') setIsBlockShot(d.isBlockShot)
+      if (typeof d.virtualProduction === 'boolean') setVirtualProduction(d.virtualProduction)
       if (d.vanCount != null) setVanCount(String(d.vanCount))
       // v1.131 — a draft saved before the needsVan→vanCount migration only has
       // the old boolean; carry it forward as 1 van so a resumed draft doesn't
@@ -707,6 +710,7 @@ export default function BookingWizard() {
           cameraCount: cameraCount.trim() === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0),
           micCount: micCount.trim() === '' ? null : Math.max(0, parseInt(micCount, 10) || 0),
           isBlockShot,
+          virtualProduction,
           vanCount: offsite ? Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)) : 0,
           specialEquipment,
           agencyRef: agencyRef || null,
@@ -794,6 +798,7 @@ export default function BookingWizard() {
       : '',
     equipment: [
       isBlockShot ? '📦 Block Shot (ไม่ระบุจำนวนกล้อง/ไมค์)' : '',
+      virtualProduction ? '🖥️ Virtual Production (assign ทีม VP อัตโนมัติ)' : '',
       cameraCount.trim() && Number(cameraCount) > 0 ? `🎥 ${parseInt(cameraCount, 10)}` : '',
       micCount.trim() && Number(micCount) > 0 ? `🎙 ${parseInt(micCount, 10)}` : '',
     ].filter(Boolean).join(' · '),
@@ -1563,6 +1568,16 @@ export default function BookingWizard() {
                       }}
                     />
                     <span className="text-sm text-gray-700">📦 จองเป็นคิว Block Shot — ยังไม่ต้องระบุจำนวนกล้อง/ไมค์</span>
+                  </label>
+                  {/* v1.156 — VP shoot: ติ๊กแล้วระบบ assign ทีม Virtual Production (แฟ้ม) ให้อัตโนมัติ */}
+                  <label className="flex items-center gap-2 mb-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="accent-[#673ab7]"
+                      checked={virtualProduction}
+                      onChange={e => setVirtualProduction(e.target.checked)}
+                    />
+                    <span className="text-sm text-gray-700">🖥️ Virtual Production — ระบบจะ assign ทีม VP (แฟ้ม · อัศวพล) ให้อัตโนมัติ</span>
                   </label>
                   <div className="grid grid-cols-2 gap-4">
                     <div>

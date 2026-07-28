@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.156.0] — 2026-07-28
+
+### Added — แจ้งเตือนงานด่วน (ทางอีเมล) + Checkbox Virtual Production
+สองฟีเจอร์ตามที่ ops ขอ (งานเริ่มจากอีก session — รอบนี้เก็บส่วนที่ค้าง + แก้ส่วนที่พัง + ทำ UI ให้จบ):
+
+**⚡ แจ้งเตือนงานด่วน** — จองปุ๊บระบบเช็คเลย: ถ้าวันถ่ายคือ "วันที่จองเอง หรือห่างไม่เกิน 1–2 วัน" (default ≤2, ปรับได้ผ่าน `URGENT_LEAD_DAYS`) ส่งอีเมลหา Production Coordinator (ตุ้ย ทศพล — override ได้ผ่าน `URGENT_NOTIFY_EMAIL`)
+- **ไม่เข้า Discord โดยตั้งใจ** — Discord คงกติกา "เรื่องไฟล์เท่านั้น" (ตัดสินใจ 2026-07-28); ถอด category `'urgent'` ที่เวอร์ชันร่างเคยเจาะช่องไว้ออกแล้ว
+- คำนวณวันแบบ Bangkok day-index (`urgentLeadDays`) — กัน off-by-one จาก shootDate ที่เป็น DATE (เที่ยงคืน UTC) ชน createdAt ที่เป็น timestamp (มีเทสต์เคสจองตี 00:30)
+- ยิงครั้งเดียวต่อ booking (atomic claim ผ่านคอลัมน์ใหม่ `urgentAlertedAt`) · ข้ามงาน routine (กันสแปมตอน bulk-generate) · งานย้อนหลัง (วันถ่ายผ่านไปแล้ว) ไม่นับว่าด่วน
+- แขน LINE ต่อท่อรอไว้ (no-op จนกว่าจะตั้ง `LINE_CHANNEL_TOKEN` — LINE Notify ปิดบริการแล้ว ต้องใช้ Messaging API)
+
+**🖥️ Virtual Production** — checkbox ใหม่ใน wizard (ข้างๆ Block Shot): ติ๊กแล้วระบบ auto-assign ทีม VP (แฟ้ม · อัศวพล ตุลานนท์ `assawapol.t@` — override ได้ผ่าน `VP_ASSIGNEE_EMAIL`) เข้า `assignedEmails` ตั้งแต่ตอนจอง
+- ยังไม่ invite ปฏิทินตอนจอง (booking REQUESTED ยังไม่มี event) — approve/assign จะ sync เขาเข้า event ให้เองตาม flow ปกติ
+- ไม่แตะ `mainVideographerEmail` (เขาเป็นทีม VP ไม่ใช่ตากล้องหลัก)
+- คอลัมน์ใหม่ `virtualProduction` (default false) + checkbox ครบวงจร draft autosave/restore
+
+**ซ่อมจากร่างเดิม:** Prisma client ไม่ได้ generate หลังแก้ schema → tsc พัง 10 จุด (type ของ `data` ไม่แมตช์ทำ include inference ล้มทั้งแถบ) — `prisma generate` แก้หมด; UI checkbox ที่ยังไม่ได้ทำ — ทำครบ 6 จุด (state/render/snapshot/dep/restore/POST+summary)
+- 296 เทสต์ผ่าน (+5 เทสต์ lead-day math) · tsc สะอาด · ต้อง redeploy ถึงจะมีผล (db push เพิ่มคอลัมน์อัตโนมัติ ไม่มี migration มือ)
+
+---
+
 ## [1.155.1] — 2026-07-24
 
 ### Fixed — backfill เติม `photo` ได้แล้ว (id-first ของงานภาพนิ่งเคยเติมไม่ได้เลย)
