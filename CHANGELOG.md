@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.157.1] — 2026-07-30
+
+### Added — ปุ่ม Backfill id-first Drive links บนหน้า /admin/footage-tools
+endpoint `POST /api/admin/drive-links/backfill` มีมาตั้งแต่ v1.114 แต่**เป็น API-only ไม่มีปุ่ม** — จึงไม่เคยถูกรันจริง (จะรันต้องวาง snippet ใน console ซึ่งไม่มีใครทำ) เพิ่ม `DriveLinksBackfillPanel`:
+- เลือกช่วง 60/180/365 วัน · **ดูก่อน (dry-run)** อ่านอย่างเดียว โชว์จำนวนงานที่ยังขาด link + รายชื่อ (40 แรก) · **เขียนจริง (apply)** มี confirm, เติมเฉพาะงานที่ขาด, ไม่แตะโฟลเดอร์บน Drive, รันซ้ำได้
+- จัดการ 504 ที่ proxy: แจ้งว่างานยังวิ่งต่อบนเซิร์ฟเวอร์ ให้กด dry-run ซ้ำเพื่อเช็คส่วนที่เหลือ (ตาม playbook เดิม — อย่ายิง apply ซ้ำรัว)
+- ปิดช่องว่างขั้น (b) ของแผน id-first: หลัง deploy กดปุ่มเดียวจบ แล้วดูตัวเลข fallback ใน Discord digest ลดลง
+
+---
+
 ## [1.157.0] — 2026-07-28
 
 ### Changed — id-first ครบทั้งระบบ: ย้าย 3 subsystem สุดท้ายที่ยังหาโฟลเดอร์ด้วยชื่อล้วน

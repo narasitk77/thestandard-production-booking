@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { requireAdmin } from '@/lib/session'
 import SystemMergeTools from '@/app/_components/admin/SystemMergeTools'
 import NasSyncPanel from '@/app/_components/admin/NasSyncPanel'
+import DriveLinksBackfillPanel from '@/app/_components/admin/DriveLinksBackfillPanel'
 
 // v1.111 — ADMIN-only home for the system-wide footage sweeps (moved off the
 // per-booking upload page). MOVE NAS footage into boxes / fold staged sound /
@@ -24,6 +25,7 @@ export default async function FootageToolsPage() {
       </div>
       <NasSyncPanel />
       <SystemMergeTools />
+      <DriveLinksBackfillPanel />
     </div>
   )
 }
