@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.158.0] — 2026-07-30
+
+### Added — id-first gauge อ่านจากภายนอกได้ (รอจังหวะตัด fallback — สเต็ป c)
+ตัวเลข hit/fallback อยู่ในหน่วยความจำ container และโผล่แค่ใน Discord — monitor ภายนอกอ่านไม่ได้ จึงตัดสิน "fallback นิ่งใกล้ 0 หรือยัง" แบบอัตโนมัติไม่ได้
+- `maybeSendDailyDigest` เก็บ snapshot รายวันลง auditLog (`drive.id_first_gauge`) — ประวัติทนการ restart (block นี้ gate วันละครั้งอยู่แล้ว)
+- `GET /api/internal/id-first-stats` — **public แบบ `/api/version`**: คืน `live` + `daily` (14 วันล่าสุด) เป็น **aggregate เท่านั้น** — `publicGaugeView` ตัดรหัสงานเหลือแค่จำนวน (มีเทสต์ยืนยันว่าไม่รั่ว) ห้ามเพิ่มข้อมูลอ่อนไหวโดยไม่ใส่ auth ก่อน
+- ใช้คู่กับ scheduled monitor รายวันฝั่งเครื่อง admin: streak fallback≈0 ครบ 3 วัน → แจ้งว่าพร้อมทำสเต็ป (c)
+- 304 เทสต์ผ่าน (+3) · tsc สะอาด · มีผลเมื่อ redeploy
+
+---
+
 ## [1.157.1] — 2026-07-30
 
 ### Added — ปุ่ม Backfill id-first Drive links บนหน้า /admin/footage-tools

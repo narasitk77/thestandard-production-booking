@@ -4,7 +4,7 @@
 
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { noteResolve, snapshotIdFirst, formatIdFirstDigest } from '../id-first-metrics'
+import { noteResolve, snapshotIdFirst, formatIdFirstDigest, publicGaugeView } from '../id-first-metrics'
 
 // The counters are module-level; clear them before each test by reading with reset.
 beforeEach(() => { snapshotIdFirst(true) })
@@ -81,4 +81,28 @@ test('formatIdFirstDigest caps the code sample at 6 and shows a +N overflow', ()
   for (let i = 0; i < 9; i++) noteResolve('sound-merge', 'staging', `C-${i}`, false)
   const text = formatIdFirstDigest(snapshotIdFirst())!
   assert.match(text, /\+3/) // 9 codes → 6 shown + "+3"
+})
+
+// ── v1.158: publicGaugeView — the unauthenticated stats endpoint's view ──────
+
+test('publicGaugeView NEVER leaks booking codes — only their count', () => {
+  noteResolve('video-merge', 'landing', 'SECRET-CODE-01', false)
+  const view = publicGaugeView(snapshotIdFirst())
+  assert.equal(JSON.stringify(view).includes('SECRET-CODE'), false)
+  assert.equal(view.buckets[0].codeCount, 1)
+  assert.equal(view.totalFallback, 1)
+})
+
+test('publicGaugeView tolerates junk shapes from old/corrupt audit rows', () => {
+  assert.deepEqual(publicGaugeView(null), { totalHit: 0, totalFallback: 0, buckets: [] })
+  assert.deepEqual(publicGaugeView('junk'), { totalHit: 0, totalFallback: 0, buckets: [] })
+  assert.deepEqual(publicGaugeView({ buckets: 'nope' }), { totalHit: 0, totalFallback: 0, buckets: [] })
+  const v = publicGaugeView({ totalHit: '5', totalFallback: 2, buckets: [{ key: 'a:b', hit: 1, fallback: 1, codes: ['X', 'Y'] }, { bad: true }] })
+  assert.equal(v.totalHit, 5)
+  assert.deepEqual(v.buckets, [{ key: 'a:b', hit: 1, fallback: 1, codeCount: 2 }])
+})
+
+test('publicGaugeView round-trips a persisted view (codeCount preserved)', () => {
+  const persisted = { totalHit: 3, totalFallback: 1, buckets: [{ key: 'k', hit: 3, fallback: 1, codeCount: 4 }] }
+  assert.deepEqual(publicGaugeView(persisted), persisted)
 })

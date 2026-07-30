@@ -70,6 +70,33 @@ export function snapshotIdFirst(reset = false): IdFirstSnapshot {
 }
 
 /**
+ * v1.158 — the PUBLIC view of a gauge snapshot (live or one persisted in the
+ * audit log): aggregates only, booking codes reduced to a count. Served by the
+ * unauthenticated /api/internal/id-first-stats endpoint so an external monitor
+ * can watch the fallback trend without a shared secret — so it must never leak
+ * codes or names. Tolerates junk shapes (returns zeros) because audit rows are
+ * read back as untyped JSON.
+ */
+export interface PublicGaugeView { totalHit: number; totalFallback: number; buckets: Array<{ key: string; hit: number; fallback: number; codeCount: number }> }
+export function publicGaugeView(snap: unknown): PublicGaugeView {
+  const s = (snap && typeof snap === 'object' ? snap : {}) as Record<string, any>
+  const rawBuckets = Array.isArray(s.buckets) ? s.buckets : []
+  const buckets = rawBuckets
+    .filter((b: any) => b && typeof b === 'object' && typeof b.key === 'string')
+    .map((b: any) => ({
+      key: b.key,
+      hit: Number(b.hit) || 0,
+      fallback: Number(b.fallback) || 0,
+      codeCount: Array.isArray(b.codes) ? b.codes.length : Number(b.codeCount) || 0,
+    }))
+  return {
+    totalHit: Number(s.totalHit) || 0,
+    totalFallback: Number(s.totalFallback) || 0,
+    buckets,
+  }
+}
+
+/**
  * Format the snapshot as a Discord digest section, or null when nothing was
  * measured (no merges ran this period → don't post an empty line).
  */

@@ -681,7 +681,16 @@ export async function maybeSendDailyDigest(now: Date = new Date()): Promise<bool
   // footage `text` self-heals from durable auditLog rows, but these in-memory
   // counters have no backing, so clearing before a flaky webhook send would lose
   // the day's numbers. A failed day rolls into the next digest instead.
-  const idFirst = formatIdFirstDigest(snapshotIdFirst(false))
+  const gauge = snapshotIdFirst(false)
+  // v1.158 — persist today's gauge (this block already runs once per day via
+  // the heartbeat gate above) so the fallback trend survives restarts and can
+  // be read back by /api/internal/id-first-stats — the signal that decides
+  // when the name fallbacks are dead code and can be removed.
+  await logAudit({
+    action: 'drive.id_first_gauge', entityType: 'system',
+    changes: { totalHit: gauge.totalHit, totalFallback: gauge.totalFallback, buckets: gauge.buckets },
+  })
+  const idFirst = formatIdFirstDigest(gauge)
   const full = idFirst ? `${text}\n\n${idFirst}` : text
   const sent = await notifyDiscord(full, 'footage')
   if (sent) snapshotIdFirst(true) // clear the counters now that they've been reported
