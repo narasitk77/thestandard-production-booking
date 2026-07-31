@@ -1,5 +1,6 @@
 import { google } from 'googleapis'
 import { format } from 'date-fns'
+import { stagingBlocksCalendar, stagingBlocksTarget } from './app-env'
 import { logAudit } from './audit'
 import { isEmailConfigured, sendEmail } from './email'
 import { normalizeFreelancers, formatFreelancerLines, type Freelancer } from './freelancers'
@@ -10,8 +11,8 @@ import { bookingDisplayName } from './display'
 // Calendar so it's obvious at a glance.
 const VAN_EMOJI = '🚐'
 
-const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID ||
-  '72bf6ae390fb09d1e0a117dbaf421799be6bcc3b21ec2b7c3e2d7a65e65f9dc5@group.calendar.google.com'
+const PROD_CALENDAR_FALLBACK = '72bf6ae390fb09d1e0a117dbaf421799be6bcc3b21ec2b7c3e2d7a65e65f9dc5@group.calendar.google.com'
+const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || PROD_CALENDAR_FALLBACK
 
 // v1.29.4 — hardcoded fallback for the impersonated Workspace user. Same
 // value as the default baked into docker-compose.portainer.yml. Single-tenant
@@ -152,6 +153,20 @@ function notifyCalendarAlert(input: {
  * attach attendees to events; a bare service account cannot.
  */
 export function getCalendarAuth() {
+  // v1.159 — staging: the calendar writes to a real Google calendar and EMAILS
+  // invites to real attendees, so it stays dead on staging until the operator
+  // points GOOGLE_CALENDAR_ID at a test calendar AND sets STAGING_ALLOW_CALENDAR=1.
+  // Throwing here surfaces as the normal "calendar not configured/failed" paths
+  // every caller already handles. No-op in production.
+  if (stagingBlocksCalendar()) {
+    throw new Error('[staging-guard] calendar is disabled on staging (set STAGING_ALLOW_CALENDAR=1 with a TEST calendar id to enable)')
+  }
+  // v1.159.1 — even opted-in, the target must not be the PRODUCTION calendar
+  // (its id is the in-repo fallback; Google emails real invites — a push
+  // channel the email sandbox cannot intercept).
+  if (stagingBlocksTarget(CALENDAR_ID, PROD_CALENDAR_FALLBACK)) {
+    throw new Error('[staging-guard] GOOGLE_CALENDAR_ID still points at the PRODUCTION calendar — set a TEST calendar id')
+  }
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {

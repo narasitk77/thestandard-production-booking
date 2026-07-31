@@ -1,0 +1,184 @@
+# Portainer Stack — Production Booking STAGING (v1.159)
+# ------------------------------------------------------
+# A parallel stack for testing against Google APIs WITHOUT touching anything
+# real. Same image as prod; isolation comes from config + in-code guards:
+#
+#   FAIL-CLOSED LAYERS (both must hold):
+#   1. This compose REQUIRES the three staging drive roots (`:?` — the stack
+#      refuses to start without them). No default can leak to a prod drive.
+#   2. In code (app-env.ts, v1.159): when APP_ENV=staging every Google Drive
+#      auth refuses to build if any root is missing OR equals a known
+#      production drive id. Email is redirected to the admin address with a
+#      [STAGING] subject. Calendar/Sheets are dead unless explicitly
+#      opted in (STAGING_ALLOW_CALENDAR=1 / STAGING_ALLOW_SHEETS=1).
+#
+#   Setup checklist: docs/staging-setup.md
+#
+# Deploy via: Portainer → Stacks → Add stack → Repository
+#   Compose path : docker-compose.staging.yml
+#   Env vars     : see docs/staging-setup.md (staging drive ids + secrets)
+
+services:
+  db-staging:
+    image: postgres:16-alpine
+    container_name: production-booking-staging-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: production_booking
+      POSTGRES_USER: prod_booking
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in stack env}
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prod_booking -d production_booking"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - staging-network
+
+  app-staging:
+    image: ghcr.io/narasitk77/thestandard-production-booking:${IMAGE_TAG:-latest}
+    container_name: production-booking-staging-app
+    restart: unless-stopped
+    depends_on:
+      db-staging:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3100}:3000"
+    environment:
+      NODE_OPTIONS: --dns-result-order=ipv4first
+
+      # ── THE SWITCH — activates every in-code staging guard ──────────────
+      APP_ENV: staging
+
+      DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD}@db-staging:5432/production_booking
+
+      # --- Auth (staging default: no login wall — trusted LAN testing) ---
+      AUTH_DISABLED: ${AUTH_DISABLED:-1}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-narasit.k@thestandard.co}
+      INITIAL_ADMIN_EMAILS: ${INITIAL_ADMIN_EMAILS:-}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — URL of the STAGING app}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET (any random string, NOT prod's)}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${NEXTAUTH_URL}}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+
+      # --- Google Service Account (same SA as prod is fine — access is
+      #     controlled by which drives/sheets you share to it) ---
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${GOOGLE_SERVICE_ACCOUNT_EMAIL:-}
+      GOOGLE_PRIVATE_KEY: ${GOOGLE_PRIVATE_KEY:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_IMPERSONATE_SUBJECT: ${GOOGLE_IMPERSONATE_SUBJECT:-narasit.k@thestandard.co}
+
+      # ── STAGING DRIVE TREE — ALL REQUIRED (fail-closed, no defaults) ────
+      # Create three NEW shared drives (see docs/staging-setup.md) and paste
+      # their ids here. The in-code guard ALSO rejects prod ids outright.
+      DRIVE_FOOTAGE_ROOT: ${DRIVE_FOOTAGE_ROOT:?set DRIVE_FOOTAGE_ROOT to the STAGING footage drive id}
+      DRIVE_PRODUCTION_TEAM_ROOT: ${DRIVE_PRODUCTION_TEAM_ROOT:?set DRIVE_PRODUCTION_TEAM_ROOT to the STAGING landing drive id}
+      DRIVE_PHOTO_ROOT: ${DRIVE_PHOTO_ROOT:?set DRIVE_PHOTO_ROOT to the STAGING photo drive id}
+      # docs uploads: dead on staging unless BOTH are set (in-code guard)
+      DRIVE_DOCS_ROOT: ${DRIVE_DOCS_ROOT:-}
+      STAGING_ALLOW_DOCS: ${STAGING_ALLOW_DOCS:-0}
+
+      # --- Calendar: DEAD on staging unless BOTH are set deliberately ---
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
+      STAGING_ALLOW_CALENDAR: ${STAGING_ALLOW_CALENDAR:-0}
+
+      # --- Sheets: leave empty on staging unless testing sheet flows with a
+      #     COPY of the dashboard sheet (never the real one) ---
+      STAGING_ALLOW_SHEETS: ${STAGING_ALLOW_SHEETS:-0}
+      PRODUCER_DASHBOARD_SHEET_ID: ${PRODUCER_DASHBOARD_SHEET_ID:-}
+      FOOTAGE_LOG_SHEET_ID: ${FOOTAGE_LOG_SHEET_ID:-}
+      FOOTAGE_LOG_TAB: ${FOOTAGE_LOG_TAB:-}
+      BOOKINGS_EXPORT_AGN_ONLY: ${BOOKINGS_EXPORT_AGN_ONLY:-0}
+
+      # --- Email: sandboxed in code (everything → REMINDER_ADMIN_EMAIL,
+      #     subject gets [STAGING]) — still needs a provider to send at all ---
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      REMINDER_ADMIN_EMAIL: ${REMINDER_ADMIN_EMAIL:-narasit.k@thestandard.co}
+
+      # --- Discord: leave the webhook EMPTY on staging (notify is a no-op) ---
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_NOTIFY_SCOPE: ${DISCORD_NOTIFY_SCOPE:-footage}
+
+      # --- Workers: everything allowed to RUN (that's what staging is for),
+      #     but Drive-mutating ones default to report-only until flipped ---
+      CALENDAR_RECONCILE_SECRET: ${CALENDAR_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
+      CALENDAR_RECONCILE_INTERVAL_MS: ${CALENDAR_RECONCILE_INTERVAL_MS:-600000}
+      FOOTAGE_WORKER_ENABLED: ${FOOTAGE_WORKER_ENABLED:-0}
+      FOOTAGE_WORKER_INTERVAL_MS: ${FOOTAGE_WORKER_INTERVAL_MS:-600000}
+      FOOTAGE_SYNC_SECRET: ${FOOTAGE_SYNC_SECRET:-${NEXTAUTH_SECRET}}
+      SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
+      SHOOT_MARKER_WORKER_HOUR: ${SHOOT_MARKER_WORKER_HOUR:-3}
+      SHOOT_MARKER_RECONCILE_SECRET: ${SHOOT_MARKER_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
+      SHOOT_MARKER_REPORT_EMAIL: ${SHOOT_MARKER_REPORT_EMAIL:-}
+      LANDING_WORKER_ENABLED: ${LANDING_WORKER_ENABLED:-1}
+      LANDING_WORKER_HOUR: ${LANDING_WORKER_HOUR:-19}
+      LANDING_KEEP_PAST_DAYS: ${LANDING_KEEP_PAST_DAYS:-3}
+      LANDING_REPORT_EMAIL: ${LANDING_REPORT_EMAIL:-}
+      REMINDERS_WORKER_ENABLED: ${REMINDERS_WORKER_ENABLED:-0}
+      REMINDERS_WORKER_INTERVAL_MS: ${REMINDERS_WORKER_INTERVAL_MS:-86400000}
+      REMINDERS_SECRET: ${REMINDERS_SECRET:-${NEXTAUTH_SECRET}}
+      FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
+      FOOTAGE_READY_INTERVAL_MS: ${FOOTAGE_READY_INTERVAL_MS:-1800000}
+      FOOTAGE_READY_AUDIENCE: ${FOOTAGE_READY_AUDIENCE:-admin}
+      FOOTAGE_READY_LOOKBACK_DAYS: ${FOOTAGE_READY_LOOKBACK_DAYS:-3}
+      FOOTAGE_READY_SETTLE_MS: ${FOOTAGE_READY_SETTLE_MS:-7200000}
+      FOOTAGE_READY_MAX_PER_RUN: ${FOOTAGE_READY_MAX_PER_RUN:-5}
+      FOOTAGE_READY_SECRET: ${FOOTAGE_READY_SECRET:-${NEXTAUTH_SECRET}}
+      FOLDER_INTEGRITY_WORKER_ENABLED: ${FOLDER_INTEGRITY_WORKER_ENABLED:-1}
+      FOLDER_INTEGRITY_APPLY: ${FOLDER_INTEGRITY_APPLY:-0}
+      FOLDER_INTEGRITY_RENAME: ${FOLDER_INTEGRITY_RENAME:-0}
+      FOLDER_INTEGRITY_INTERVAL_MS: ${FOLDER_INTEGRITY_INTERVAL_MS:-3600000}
+      FOLDER_INTEGRITY_START_DELAY_MS: ${FOLDER_INTEGRITY_START_DELAY_MS:-240000}
+      FOLDER_INTEGRITY_PAST_DAYS: ${FOLDER_INTEGRITY_PAST_DAYS:-14}
+      FOLDER_INTEGRITY_FUTURE_DAYS: ${FOLDER_INTEGRITY_FUTURE_DAYS:-30}
+      FOLDER_INTEGRITY_LIMIT: ${FOLDER_INTEGRITY_LIMIT:-60}
+      FOLDER_INTEGRITY_MAX_WRITES: ${FOLDER_INTEGRITY_MAX_WRITES:-120}
+      FOLDER_INTEGRITY_REPORT_EMAIL: ${FOLDER_INTEGRITY_REPORT_EMAIL:-}
+      FOLDER_INTEGRITY_DIGEST_HOUR: ${FOLDER_INTEGRITY_DIGEST_HOUR:-9}
+
+      # --- Rush alert + VP assign (safe: email is sandboxed anyway) ---
+      URGENT_LEAD_DAYS: ${URGENT_LEAD_DAYS:-2}
+      URGENT_NOTIFY_EMAIL: ${URGENT_NOTIFY_EMAIL:-}
+      VP_ASSIGNEE_EMAIL: ${VP_ASSIGNEE_EMAIL:-}
+
+      # --- Backup: OFF on staging (nothing worth backing up) ---
+      BACKUP_WORKER_ENABLED: ${BACKUP_WORKER_ENABLED:-0}
+
+      # --- NAS agent: never point the real agent here; leave unset ---
+      NAS_MANIFEST_SECRET: ${NAS_MANIFEST_SECRET:-}
+      NAS_REPORT_EMAIL: ${NAS_REPORT_EMAIL:-}
+
+      # --- App ---
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - staging_uploads:/app/uploads
+    networks:
+      - staging-network
+      # Join the Nginx Proxy Manager network only if you want a staging domain
+      # (see docs/staging-setup.md); port ${APP_PORT:-3100} works without it.
+      - npm-network
+
+volumes:
+  staging_postgres_data:
+    driver: local
+  staging_uploads:
+    driver: local
+
+networks:
+  staging-network:
+    driver: bridge
+  npm-network:
+    external: true
+    name: management_default

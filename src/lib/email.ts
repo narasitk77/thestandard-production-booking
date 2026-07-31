@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer'
+import { isStaging } from './app-env'
 
 type EmailProvider = 'resend' | 'sendgrid' | 'gmail-oauth' | 'smtp'
 
@@ -365,6 +366,22 @@ export function getEmailConfigSummary(provider = getPreferredProvider()) {
 }
 
 export async function sendEmail(message: EmailMessage, context: EmailContext = {}): Promise<EmailSendResult> {
+  // v1.159 — staging sandbox: NO email ever reaches real crew/producers from a
+  // staging stack. Everything is redirected to the admin address with a
+  // [STAGING] subject prefix (original recipients noted in the body head).
+  // No-op in production.
+  if (isStaging()) {
+    const admin = process.env.REMINDER_ADMIN_EMAIL?.trim() || process.env.EMAIL_FROM?.trim()
+    if (!admin) throw new Error('[staging-guard] email sandbox has no REMINDER_ADMIN_EMAIL/EMAIL_FROM to redirect to')
+    const original = (Array.isArray(message.to) ? message.to : [message.to]).join(', ')
+    message = {
+      ...message,
+      to: [admin],
+      subject: `[STAGING] ${message.subject}`,
+      text: `(staging — เดิมจะส่งถึง: ${original})\n\n${message.text}`,
+      ...(message.html ? { html: `<p><em>(staging — เดิมจะส่งถึง: ${original})</em></p>${message.html}` } : {}),
+    }
+  }
   const provider = getPreferredProvider(context)
   if (!provider) {
     throw new Error('Email provider not configured. Set SMTP_USER + SMTP_PASS in Render environment variables, or configure RESEND_API_KEY / SENDGRID_API_KEY.')

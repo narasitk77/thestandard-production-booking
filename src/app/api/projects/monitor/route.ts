@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertStagingSheetsAllowed } from '@/lib/google-sheets'
 import { google } from 'googleapis'
 import { getProducerDashboardSheetId } from '@/lib/google-config'
 import { getSession } from '@/lib/session'
@@ -12,6 +13,7 @@ const PROJECT_ID_RE = /^PP-\d{2}-\d{3}$/
 const EPISODE_ID_RE = /^(PP-\d{2}-\d{3})-[A-Z]\d{2,}$/
 
 function getAuth() {
+  assertStagingSheetsAllowed() // v1.159.1 — this module builds its own JWT; must pass the same staging gate
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {

@@ -23,6 +23,12 @@ import { prisma } from '../src/lib/db'
 import { cleanStr, decOrNull } from '../src/lib/admin-parse'
 import type { EquipmentCategory, PaymentStatus, RentalStatus } from '@prisma/client'
 
+// v1.159.1 — the fallbacks below are the PRODUCTION equipment/finance sheets;
+// a staging container must name explicit copies or refuse (read-only, but
+// staging must never touch live resources by default).
+if ((process.env.APP_ENV || '').trim().toLowerCase() === 'staging' && !(process.env.EQUIP_SHEET_ID?.trim() && process.env.FINANCE_SHEET_ID?.trim())) {
+  throw new Error('[staging-guard] import-workspace on staging requires explicit EQUIP_SHEET_ID + FINANCE_SHEET_ID (copies) — the defaults are the production sheets')
+}
 const EQUIP_SHEET_ID = process.env.EQUIP_SHEET_ID?.trim() || '1U5YhdsoVcILIQHzY-mdGkkqYBRpddgrazBnR1Ou-Xy4'
 const FINANCE_SHEET_ID = process.env.FINANCE_SHEET_ID?.trim() || '1MQMuTq-tkqgQVreyn1sZn-TYvQZFO0cto1SRLi9t59M'
 

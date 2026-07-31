@@ -18,6 +18,7 @@
 import { Readable } from 'stream'
 import { google, drive_v3 } from 'googleapis'
 import { getCalendarImpersonateSubject } from './google-calendar'
+import { assertStagingDriveIsolation } from './app-env'
 import { folderNameMatchesCode, PRODUCTION_ID_IN_NAME_RE } from './outlet-folders'
 export { PRODUCTION_ID_IN_NAME_RE }
 
@@ -45,6 +46,9 @@ const DRIVE_WRITE_SCOPES = ['https://www.googleapis.com/auth/drive']
  * "Drive not configured" behavior (e.g. the worker logs once and idles).
  */
 export function getDriveReadAuth() {
+  // v1.159 — staging fail-closed: refuse to build ANY Drive client while the
+  // staging stack could reach a production drive (see app-env.ts). No-op in prod.
+  assertStagingDriveIsolation()
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {
@@ -70,6 +74,7 @@ export function hasDriveCredentials(): boolean {
  * path can create folders + initiate resumable upload sessions.
  */
 export function getDriveWriteAuth(subjectOverride?: string) {
+  assertStagingDriveIsolation() // v1.159 — staging fail-closed (see getDriveReadAuth)
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {

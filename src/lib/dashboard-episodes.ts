@@ -14,6 +14,7 @@
  * a foot-gun. Episode creation stays where it belongs: the Dashboard UI.
  */
 import { google } from 'googleapis'
+import { assertStagingSheetsAllowed } from './google-sheets'
 import { getProducerDashboardSheetId } from './google-config'
 
 // Sheet id moved to src/lib/google-config.ts (v1.30 consolidation).
@@ -27,6 +28,7 @@ function hasCredentials(): boolean {
 }
 
 function getAuth() {
+  assertStagingSheetsAllowed() // v1.159.1 — this module builds its own JWT; must pass the same staging gate
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {

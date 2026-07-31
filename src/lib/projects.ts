@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import { assertStagingSheetsAllowed } from './google-sheets'
 import { getProducerDashboardSheetId } from './google-config'
 import { fetchAllEpisodeRows, isPublishedStatus } from './dashboard-episodes'
 
@@ -41,6 +42,7 @@ export type ProjectOption = {
 let cache: { ts: number; rows: ProjectOption[] } | null = null
 
 function getDashboardAuth() {
+  assertStagingSheetsAllowed() // v1.159.1 — this module builds its own JWT; must pass the same staging gate
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {

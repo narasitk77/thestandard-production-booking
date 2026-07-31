@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.159.0] — 2026-07-31
+
+### Added — Staging environment (ข้อ 3 ของแผน robustness): stack ทดสอบที่แตะของจริงไม่ได้
+image เดิม + `APP_ENV=staging` = การ์ดทุกชั้นทำงาน (prod เป็น no-op ทุกจุด — review ยืนยัน):
+- **fail-closed 2 ชั้น**: `docker-compose.staging.yml` บังคับ staging drive root ทั้ง 3 ด้วย `:?` (ไม่ตั้ง = ไม่ start) + ในโค้ด (`app-env.ts`) Drive auth ทุกตัวปฏิเสธถ้า root ว่าง/เป็น id ไดรฟ์จริง (blocklist ฝังในโค้ด) — เสียบที่ `getDriveReadAuth`/`getDriveWriteAuth` ซึ่งทุก Drive call ต้องผ่าน
+- **อีเมล sandbox**: ทุกฉบับจาก staging เด้งเข้า `REMINDER_ADMIN_EMAIL` + หัวเรื่อง `[STAGING]` (บอกผู้รับเดิมในเนื้อความ) — ครูจริงไม่มีทางได้เมลจาก staging
+- **Calendar/Sheets/Docs ตายสนิทจนกว่าจะ opt-in** (`STAGING_ALLOW_CALENDAR/SHEETS/DOCS=1`) และแม้ opt-in แล้ว **ปลายทางที่เป็นของจริงถูกปฏิเสธ** (id ปฏิทิน+ชีทจริงอยู่ในโค้ด → blocklist ได้)
+- แบนเนอร์เหลือง "⚠️ STAGING" ทุกหน้า · `docs/staging-setup.md` เช็คลิสต์ ~30 นาที
+
+**Adversarial review 2 เลนส์จับได้ 6 รู — อุดครบก่อน commit:**
+1. (สูง) `DRIVE_DOCS_ROOT` ไม่ถูกตรวจ → staging เขียนไดรฟ์เอกสารจริงได้ → ต้องว่างหรือ opt-in
+2. (กลาง) 4 โมดูลสร้าง Sheets client เอง ข้ามการ์ด (people/projects/dashboard-episodes/monitor) → เสียบ `assertStagingSheetsAllowed()` ครบ
+3. (กลาง) เปิด `STAGING_ALLOW_SHEETS=1` โดยไม่เปลี่ยน sheet id → เขียนชีทจริง → เช็คปลายทางเพิ่ม (id จริงอยู่ใน repo — comment เดิมที่ว่า blocklist ไม่ได้นั้นผิด)
+4. (กลาง) เปิด `STAGING_ALLOW_CALENDAR=1` โดยไม่ตั้ง calendar id → เขียนปฏิทินจริง + Google ส่ง invite จริง → เช็คปลายทางเพิ่ม
+5. (กลาง/โครงสร้าง) **restore prod DB dump เข้า staging = id-first พาไปแก้โฟลเดอร์จริง** การ์ด env ช่วยไม่ได้ → ห้ามเด็ดขาด (เตือนแดงใน docs; ซ้อม migration ให้ใช้ dump ที่ล้าง `driveFolders`)
+6. (ต่ำ) `scripts/import-workspace.ts` default เป็นชีทอุปกรณ์/การเงินจริง → staging ต้องระบุสำเนาเอง
+- เทสต์การ์ด +12 (รวม "no-op ใน prod" + "id จริงทุกตัวถูกปฏิเสธ") · 316 ผ่าน · tsc สะอาด
+
+---
+
 ## [1.158.0] — 2026-07-30
 
 ### Added — id-first gauge อ่านจากภายนอกได้ (รอจังหวะตัด fallback — สเต็ป c)

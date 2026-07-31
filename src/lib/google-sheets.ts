@@ -1,4 +1,6 @@
 import { google } from 'googleapis'
+import { stagingBlocksSheets, stagingBlocksTarget } from './app-env'
+import { PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID } from './google-config'
 import { getProducerDashboardSheetId, getBookingsTabName } from './google-config'
 
 /**
@@ -65,7 +67,23 @@ const COL = {
  * Trying to impersonate causes `unauthorized_client` because the DWD
  * grant in Workspace is scoped to calendar only.
  */
+/**
+ * v1.159.1 — the ONE gate every sheets client must pass on staging:
+ *   1. sheets are dead until STAGING_ALLOW_SHEETS=1 (opt-in), AND
+ *   2. even opted-in, the active dashboard id must NOT be the production sheet
+ *      (its id IS in the repo — flipping the flag without repointing refuses).
+ * No-op in production. Modules that build their own JWT (people/projects/
+ * dashboard-episodes/monitor) must call this too — review finding v1.159.1.
+ */
+export function assertStagingSheetsAllowed(): void {
+  if (stagingBlocksSheets()) throw new Error('[staging-guard] sheets are disabled on staging (set STAGING_ALLOW_SHEETS=1 with a COPY of the dashboard sheet)')
+  if (stagingBlocksTarget(getProducerDashboardSheetId(), PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID)) {
+    throw new Error('[staging-guard] PRODUCER_DASHBOARD_SHEET_ID still points at the PRODUCTION dashboard sheet — set it to a COPY')
+  }
+}
+
 export function getSheetsWriteAuth() {
+  assertStagingSheetsAllowed() // v1.159.1 — staging opt-in + destination check
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {
@@ -98,6 +116,7 @@ const getAuth = getSheetsWriteAuth
  * this directly to verify the read auth model.
  */
 export function getSheetsReadAuth() {
+  assertStagingSheetsAllowed() // v1.159.1
   const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     : {
