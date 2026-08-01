@@ -195,6 +195,19 @@ function fmtDateTime(d: Date | string | null | undefined): string {
   return new Date(d).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })
 }
 
+/**
+ * v1.160 (PR #17 review fix) — Gregorian variant for the Delivered At cell
+ * (col AE): the deliver route + backfill pass-4 patch with th-TH-u-ca-gregory
+ * (ค.ศ.), so the append path must match or the SAME column mixes 2569/2026
+ * years and breaks PMDC's date parsing (the v1.134 Buddhist-year bug class).
+ * Legacy columns (Created At etc.) keep fmtDateTime — changing their historic
+ * format would break existing consumers instead.
+ */
+function fmtDateTimeGregory(d: Date | string | null | undefined): string {
+  if (!d) return ''
+  return new Date(d).toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' })
+}
+
 export type BookingRow = {
   id: string
   bookingCode?: string | null
@@ -297,7 +310,7 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       // Cols AE–AI — blank on a fresh booking (deliver/cancel/approve routes
       // patch them later); the backfill route passes full DB rows so old
       // bookings land with these filled.
-      fmtDateTime(booking.deliveredAt), // Delivered At
+      fmtDateTimeGregory(booking.deliveredAt), // Delivered At — ค.ศ. to match the patch paths (review fix)
       booking.deliveredBy || '', // Delivered By
       booking.cancelReason || '', // Cancel Reason
       joinEpisodeTitles(booking.episodes), // Episode Titles

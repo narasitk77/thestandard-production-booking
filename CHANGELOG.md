@@ -19,6 +19,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.160.0] — 2026-08-01
+
+### Added — merge PR #17 (ปุ๊ก): Bookings-tab export +5 คอลัมน์ AE–AI
+เพิ่มท้ายชีท Bookings (additive ล้วน คอลัมน์เดิมไม่ขยับ): **Delivered At · Delivered By · Cancel Reason · Episode Titles · Drive Box ID** — ปิด gap ให้ PMDC→Airtable sync: หลักฐานส่งงาน, เหตุยกเลิก, ชื่อตอนไว้ match Deliverable, และ box id ให้ join แบบ id-first
+- ปุ่มส่งงาน → patch AE/AF · เส้นทาง cancel → AG · approve → AI · แก้ชื่อ EP → AH
+- backfill-bookings-sheet เพิ่ม pass 4 (fill-blank-only — ไม่ทับค่าที่คนแก้มือ)
+- **Review fix ตอน merge**: unify คอลัมน์ AE เป็น ค.ศ. ทั้งสองเส้นทาง (`fmtDateTimeGregory`) — เดิม append path ใช้ พ.ศ. ↔ patch path ใช้ ค.ศ. จะได้ปี 2569/2026 ปนกันในคอลัมน์เดียว (บั๊กตระกูล Buddhist-year v1.134) — ตามที่ปุ๊กแขวนไว้ในหมายเหตุรีวิว
+- +3 เทสต์ `joinEpisodeTitles` · รวม 319 ผ่าน · tsc สะอาด
+- หลัง deploy: รัน backfill dry-run ดู `summary.patchExtras` ก่อนค่อย apply (ปุ่ม/สั่งได้ตามเดิม)
+
+---
+
 ## [1.159.0] — 2026-07-31
 
 ### Added — Staging environment (ข้อ 3 ของแผน robustness): stack ทดสอบที่แตะของจริงไม่ได้
