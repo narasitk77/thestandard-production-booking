@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added — Bookings-tab export +5 คอลัมน์ (delivery evidence + metadata, คอลัมน์ AE–AI)
+ต่อท้ายแบบ **additive ล้วน** (A..AD เดิมไม่ขยับ, ไม่แตะ schema — ทุก field มีใน DB แล้ว) เพื่อให้ PMDC's Airtable sync อ่านหลักฐานส่งงาน/เหตุยกเลิก/ชื่อตอน/กล่อง Drive ได้จากชีทตรงๆ:
+- **AE `Delivered At` + AF `Delivered By`** — ปุ่มส่งงาน (v1.89) patch ลงชีทหลัง mark delivered สำเร็จ (fire-and-forget แบบเดียวกับ patch ของ approve; format datetime เหมือน `approvedAt`)
+- **AG `Cancel Reason`** — เส้นทาง cancel ทั้ง PATCH/DELETE แนบเหตุผลจาก request-cancel flow ไปกับ patch `status: CANCELLED` เดิม (เฉพาะเมื่อมีค่า — cancel ตรงไม่มีเหตุผลก็เว้นว่างตามจริง)
+- **AH `Episode Titles`** — ชื่อตอนทุก EP join ด้วย `" | "` เรียงตาม sequence (col Q มีแค่ IDs); helper ใหม่ `joinEpisodeTitles` ใช้ร่วมกันทั้ง append/backfill/PATCH — แก้ชื่อ EP หลังสร้าง (booking PATCH `episodeTitles`) ก็ patch เซลล์นี้ตามด้วย
+- **AI `Drive Box ID`** — id-first (v1.114): approve route patch `driveFolders.box` ลงชีทตรงจุดที่ `rememberDriveLinks` บันทึก id (เฉพาะ video box — photo/staging ไม่ใช่ box จึงไม่เขียน)
+- **backfill-bookings-sheet เพิ่ม pass 4 (EXTRAS PATCH)** — เติมเซลล์ AE–AI ที่ว่างให้แถวเก่าจาก DB แบบ fill-blank-only (ไม่ทับค่าที่มีคนแก้มือในชีท); แถวที่ append ใหม่ได้ 5 ช่องครบผ่านตัวประกอบแถวเดียวกันอยู่แล้ว — ข้อจำกัด: query ของ route ยังกรอง CANCELLED ออก (scope เดิมของ pass 1) → Cancel Reason backfill ได้เฉพาะงานขอยกเลิกแล้วถูกเก็บไว้
+- header row ถูก rewrite ทุก append อยู่แล้ว (`ensureSheetTab`) → หัวคอลัมน์ใหม่โผล่เองหลัง deploy · staging guards v1.159 ไม่ถูกแตะ
+- 316 เทสต์ผ่าน · tsc สะอาด · lint 6 warnings เท่า baseline เดิม · มีผลเมื่อ redeploy
+
+---
+
 ## [1.159.0] — 2026-07-31
 
 ### Added — Staging environment (ข้อ 3 ของแผน robustness): stack ทดสอบที่แตะของจริงไม่ได้

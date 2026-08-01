@@ -5,7 +5,7 @@ import { hasConsoleAccess } from '@/lib/roles'
 import { canViewBooking } from '@/lib/booking-access'
 import { resolveBookingCrew } from '@/lib/crew-names'
 import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
-import { updateBookingRow } from '@/lib/google-sheets'
+import { updateBookingRow, joinEpisodeTitles } from '@/lib/google-sheets'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
 import { isShootOver } from '@/lib/booking-complete'
@@ -303,7 +303,13 @@ export async function PATCH(
         // v1.148.0 — also blank col W: the event above was just deleted, and a
         // stale event id on a CANCELLED row can mislead PMDC's Airtable sync
         // (it merges Service Jobs by Calendar Event ID).
-        updateBookingRow(existing.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
+        // Cancel Reason (col AG) rides along when the booking has one (set by
+        // the request-cancel flow; a direct staff cancel has none).
+        updateBookingRow(existing.bookingCode || '', {
+          status: 'CANCELLED',
+          calendarEventId: '',
+          ...(booking.cancelReason ? { cancelReason: booking.cancelReason } : {}),
+        }).catch(() => {})
       }
       await prisma.booking.update({
         where: { id: params.id },
@@ -320,6 +326,16 @@ export async function PATCH(
       updateCalendarEventDetails(booking.calendarEventId, booking).catch(e =>
         console.error('updateCalendarEventDetails error:', e?.message || e),
       )
+    }
+
+    // Episode-title edits flow to the sheet's Episode Titles cell (col AH) —
+    // col Q keeps only the IDs, so a renamed EP would otherwise go stale in
+    // the Bookings tab forever. Same fire-and-forget shape as the cancel
+    // patch above; `booking.episodes` is the post-update, sequence-ordered set.
+    if (Array.isArray(episodeTitles) && existing.sheetRowIndex) {
+      updateBookingRow(existing.bookingCode || '', {
+        episodeTitles: joinEpisodeTitles(booking.episodes),
+      }).catch(e => console.error('updateBookingRow (episodeTitles) error:', e?.message || e))
     }
 
     // Re-sync OT if scheduling fields changed and booking is active
@@ -401,6 +417,7 @@ export async function DELETE(
       select: {
         id: true, status: true, bookingCode: true, createdByEmail: true,
         deletedAt: true, calendarEventId: true, sheetRowIndex: true,
+        cancelReason: true,
       },
     })
     if (!before) {
@@ -447,8 +464,13 @@ export async function DELETE(
       deleteCalendarEvent(before.calendarEventId).catch(() => {})
     }
     if (before.sheetRowIndex) {
-      // v1.148.0 — blank col W too (see PATCH cancel path above).
-      updateBookingRow(before.bookingCode || '', { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
+      // v1.148.0 — blank col W too (see PATCH cancel path above). Cancel
+      // Reason (col AG) rides along when set by the request-cancel flow.
+      updateBookingRow(before.bookingCode || '', {
+        status: 'CANCELLED',
+        calendarEventId: '',
+        ...(before.cancelReason ? { cancelReason: before.cancelReason } : {}),
+      }).catch(() => {})
     }
     clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
 

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
 import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
-import { appendBookingRow, updateBookingRow, getSheetsReadAuth } from '@/lib/google-sheets'
+import { appendBookingRow, updateBookingRow, getSheetsReadAuth, joinEpisodeTitles } from '@/lib/google-sheets'
+import { getDriveLink } from '@/lib/drive-links'
 import { getProducerDashboardSheetId, getBookingsTabName, isUsingSandboxSheet } from '@/lib/google-config'
 
 export const dynamic = 'force-dynamic'
@@ -24,6 +25,12 @@ export const maxDuration = 300
  *  3. EVENT-ID PATCH — rows whose Calendar Event ID cell (col W) is blank
  *     while the DB knows the id (events created by the calendar reconciler or
  *     the assign auto-recover before v1.148 backfilled them) get patched.
+ *  4. EXTRAS PATCH — the delivery-evidence/metadata cells (cols AE–AI:
+ *     Delivered At/By, Cancel Reason, Episode Titles, Drive Box ID) that are
+ *     blank while the DB has a value get filled — brings pre-existing rows in
+ *     line with the widened export. Fill-blank-only, same shape as pass 3.
+ *     NOTE: the query below excludes CANCELLED bookings (pass-1 scope), so
+ *     Cancel Reason backfills only requested-but-kept rows.
  *
  * Default is a DRY RUN returning the full plan; pass { apply: true } to
  * execute. Honors BOOKINGS_EXPORT_AGN_ONLY=1 (appends AGN only). Admin-only.
@@ -67,17 +74,24 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Read the tab once: col A (Production ID) + col W (Calendar Event ID)
+    //    + cols AE–AI (delivery evidence/metadata, for the pass-4 fill-blank)
     const sheets = google.sheets({ version: 'v4', auth: getSheetsReadAuth() })
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: getProducerDashboardSheetId(),
-      range: `${getBookingsTabName()}!A2:W`,
+      range: `${getBookingsTabName()}!A2:AI`,
     })
     const sheetRows = res.data.values || []
-    const byCode = new Map<string, { rowIndex: number; eventId: string }>()
+    const byCode = new Map<string, { rowIndex: number; eventId: string; extras: string[] }>()
     sheetRows.forEach((row, i) => {
       const code = String(row[0] || '').trim()
       if (code && !byCode.has(code)) {
-        byCode.set(code, { rowIndex: i + 2, eventId: String(row[22] || '').trim() })
+        byCode.set(code, {
+          rowIndex: i + 2,
+          eventId: String(row[22] || '').trim(),
+          // cols AE–AI = 0-based 30–34 (Delivered At, Delivered By,
+          // Cancel Reason, Episode Titles, Drive Box ID)
+          extras: [30, 31, 32, 33, 34].map(c => String(row[c] || '').trim()),
+        })
       }
     })
 
@@ -97,6 +111,7 @@ export async function POST(request: NextRequest) {
       append: [] as Array<{ code: string; outlet: string; status: string; appended?: boolean }>,
       claim: [] as Array<{ code: string; rowIndex: number; claimed?: boolean }>,
       patchEventId: [] as Array<{ code: string; eventId: string; patched?: boolean }>,
+      patchExtras: [] as Array<{ code: string; fields: string[]; patched?: boolean }>,
       skippedAgnOnly: 0,
       errors: [] as string[],
     }
@@ -150,6 +165,31 @@ export async function POST(request: NextRequest) {
           if (result === 'error') plan.errors.push(`patchEventId ${code}: sheet write failed`)
         }
       }
+
+      // Pass 4 — fill the blank AE–AI cells from the DB (fill-blank only, so a
+      // value someone hand-fixed in the sheet is never overwritten). Datetime
+      // format matches the deliver route's live patch (th-TH gregory, BKK).
+      const [cellDeliveredAt, cellDeliveredBy, cellCancelReason, cellEpisodeTitles, cellDriveBoxId] = inSheet.extras
+      const episodeTitlesJoined = joinEpisodeTitles(booking.episodes)
+      const driveBoxId = getDriveLink(booking.driveFolders, 'box')
+      const extraFields: Parameters<typeof updateBookingRow>[1] = {
+        ...(booking.deliveredAt && !cellDeliveredAt
+          ? { deliveredAt: new Date(booking.deliveredAt).toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }) }
+          : {}),
+        ...(booking.deliveredBy && !cellDeliveredBy ? { deliveredBy: booking.deliveredBy } : {}),
+        ...(booking.cancelReason && !cellCancelReason ? { cancelReason: booking.cancelReason } : {}),
+        ...(episodeTitlesJoined && !cellEpisodeTitles ? { episodeTitles: episodeTitlesJoined } : {}),
+        ...(driveBoxId && !cellDriveBoxId ? { driveBoxId } : {}),
+      }
+      if (Object.keys(extraFields).length > 0) {
+        const entry = { code, fields: Object.keys(extraFields) } as (typeof plan.patchExtras)[number]
+        plan.patchExtras.push(entry)
+        if (apply) {
+          const result = await updateBookingRow(code, extraFields)
+          entry.patched = result === 'updated'
+          if (result === 'error') plan.errors.push(`patchExtras ${code}: sheet write failed`)
+        }
+      }
     }
 
     return NextResponse.json({
@@ -159,6 +199,7 @@ export async function POST(request: NextRequest) {
         append: plan.append.length,
         claim: plan.claim.length,
         patchEventId: plan.patchEventId.length,
+        patchExtras: plan.patchExtras.length,
         skippedAgnOnly: plan.skippedAgnOnly,
         errors: plan.errors.length,
       },

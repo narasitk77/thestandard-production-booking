@@ -5,6 +5,7 @@ import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { buildFootageReport, renderReportText, formatBytes } from '@/lib/footage-report'
 import { bookingDisplayName } from '@/lib/display'
+import { updateBookingRow } from '@/lib/google-sheets'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       select: {
         id: true, bookingCode: true, status: true, assignedEmails: true, deletedAt: true,
         producer: true, producerEmail: true, projectName: true, category: true,
-        callTime: true, shootDate: true,
+        callTime: true, shootDate: true, sheetRowIndex: true,
         outlet: { select: { name: true } },
         program: { select: { name: true } },
         episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { name: true } } } },
@@ -81,10 +82,20 @@ THE STANDARD Production Booking`
       }
     }
 
+    const deliveredAt = new Date()
     await prisma.booking.update({
       where: { id: booking.id },
-      data: { deliveredAt: new Date(), deliveredBy: session.email },
+      data: { deliveredAt, deliveredBy: session.email },
     })
+    // Delivery evidence → Bookings tab cols AE/AF — fire-and-forget like the
+    // other sheet patches (approve/cancel); a sheet blip must not fail the
+    // delivery. Datetime format mirrors the approve route's approvedAt patch.
+    if (booking.sheetRowIndex) {
+      updateBookingRow(booking.bookingCode || booking.id, {
+        deliveredAt: deliveredAt.toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }),
+        deliveredBy: session.email,
+      }).catch(e => console.error('[deliver] updateBookingRow error:', e?.message || e))
+    }
     logAudit({
       actorEmail: session.email,
       action: 'booking.delivered',
