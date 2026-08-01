@@ -148,6 +148,13 @@ export async function POST(
           episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,
         })
         await rememberDriveLinks(updated.id, { box: bookingFolderId })
+        // Drive Box ID → Bookings tab col AI (id-first spine for PMDC's
+        // Airtable sync). Lives here — not in the calendar IIFE that patches
+        // eventId/approvedAt — because only this branch knows the folder id.
+        if (updated.sheetRowIndex) {
+          await updateBookingRow(updated.bookingCode || '', { driveBoxId: bookingFolderId })
+            .catch(e => console.error('updateBookingRow (driveBoxId) error:', e?.message))
+        }
         await upsertTextFile({
           parentFolderId: bookingFolderId,
           // v1.112 — AGN now gets its own booking layer, so a plain _SHOOT.txt

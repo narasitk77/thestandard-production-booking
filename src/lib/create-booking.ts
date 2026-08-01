@@ -412,6 +412,9 @@ export async function createBookingFromPayload(
   // Kill-switch: set BOOKINGS_EXPORT_AGN_ONLY=1 to restore the old behavior.
   const agnOnlyExport = process.env.BOOKINGS_EXPORT_AGN_ONLY === '1'
   if (!agnOnlyExport || outletCode === 'AGN') {
+    // Cols AE–AI (Delivered At/By, Cancel Reason, Episode Titles, Drive Box
+    // ID) ride the same spread: fresh bookings carry them null → blank cells,
+    // except Episode Titles which appendBookingRow joins from the episodes.
     appendBookingRow({
       ...booking,
       shootDate: booking.shootDate,

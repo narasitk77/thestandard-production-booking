@@ -2,6 +2,9 @@ import { google } from 'googleapis'
 import { stagingBlocksSheets, stagingBlocksTarget } from './app-env'
 import { PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID } from './google-config'
 import { getProducerDashboardSheetId, getBookingsTabName } from './google-config'
+// Drive Box ID (col AI) — read the stored id-first box link off the booking's
+// driveFolders json (v1.114). Pure helper: no Drive/API call happens here.
+import { getDriveLink } from './drive-links'
 
 /**
  * Bookings → Producer Dashboard sync
@@ -23,7 +26,7 @@ import { getProducerDashboardSheetId, getBookingsTabName } from './google-config
 const getSheetId = getProducerDashboardSheetId
 const SHEET_TAB = getBookingsTabName()
 
-// 30 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
+// 35 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
 // *Email columns keep the canonical id so Airtable can join on either.
 // PD Phone is filled only for non-Content-Agency outlets (free-text producer).
 const HEADERS = [
@@ -36,6 +39,13 @@ const HEADERS = [
   'Episode IDs', 'Crew Required', 'Category', 'Creative/Host', 'Assigned Emails',
   'Status', 'Calendar Event ID', 'Notes', 'Created By', 'Created At',
   'Approved At', 'Updated At', 'Video Type', 'Main Videographer',
+  // Delivery evidence + metadata (append-only, cols AE–AI): Delivered At/By
+  // from the "ส่งงาน" button (v1.89), Cancel Reason from the request-cancel
+  // flow, Episode Titles (names — col Q has only the IDs), and the id-first
+  // Drive box folder id (driveFolders.box, v1.114) so PMDC's Airtable sync
+  // can link footage without a name walk.
+  'Delivered At', 'Delivered By', 'Cancel Reason', 'Episode Titles',
+  'Drive Box ID',
 ]
 
 // 1-indexed column positions for partial updates.
@@ -53,6 +63,12 @@ const COL = {
   approvedAt: 27,
   updatedAt: 28,
   mainVideographer: 30,
+  // Delivery evidence + metadata (cols AE–AI, appended right of Main Videographer).
+  deliveredAt: 31,
+  deliveredBy: 32,
+  cancelReason: 33,
+  episodeTitles: 34,
+  driveBoxId: 35,
 } as const
 
 /**
@@ -197,7 +213,9 @@ export type BookingRow = {
   producerPhone?: string | null
   director?: string | null
   directorEmail?: string | null
-  episodes: Array<{ episodeId: string }>
+  // title/sequence optional so legacy callers that only carry ids still
+  // compile — they just produce an empty Episode Titles cell (col AH).
+  episodes: Array<{ episodeId: string; title?: string | null; sequence?: number | null }>
   crewRequired: string[]
   category: string
   videoType?: string | null
@@ -209,6 +227,29 @@ export type BookingRow = {
   notes?: string | null
   createdByEmail?: string | null
   createdAt: Date | string
+  // Delivery evidence + metadata (cols AE–AI). All optional: a fresh booking
+  // has none of them, so create-time appends leave the cells blank; the
+  // backfill route passes full DB rows and fills them in.
+  deliveredAt?: Date | string | null
+  deliveredBy?: string | null
+  cancelReason?: string | null
+  driveFolders?: unknown
+}
+
+/**
+ * Episode Titles (col AH) — every episode's title joined with " | ", ordered
+ * by sequence when present (backfill's `episodes: true` include has no
+ * orderBy; the create path is already sequence-ordered). Shared with the
+ * booking PATCH route so title edits patch the same cell shape.
+ */
+export function joinEpisodeTitles(
+  episodes: Array<{ title?: string | null; sequence?: number | null }>,
+): string {
+  return [...episodes]
+    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    .map(e => (e.title || '').trim())
+    .filter(Boolean)
+    .join(' | ')
 }
 
 export async function appendBookingRow(booking: BookingRow): Promise<number | null> {
@@ -253,6 +294,14 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       now,
       booking.videoType || '', // Video Type — appended right of Updated At
       booking.mainVideographerEmail || '', // Main Videographer — set later at assign-time
+      // Cols AE–AI — blank on a fresh booking (deliver/cancel/approve routes
+      // patch them later); the backfill route passes full DB rows so old
+      // bookings land with these filled.
+      fmtDateTime(booking.deliveredAt), // Delivered At
+      booking.deliveredBy || '', // Delivered By
+      booking.cancelReason || '', // Cancel Reason
+      joinEpisodeTitles(booking.episodes), // Episode Titles
+      getDriveLink(booking.driveFolders, 'box') || '', // Drive Box ID
     ]
 
     const appendRes = await sheets.spreadsheets.values.append({
@@ -293,6 +342,13 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
   calendarEventId: string
   approvedAt: string
   mainVideographer: string
+  /** Cols AE–AI (delivery evidence + metadata). Pre-formatted strings —
+   *  callers format datetimes th-TH BKK like the approve route's approvedAt. */
+  deliveredAt: string
+  deliveredBy: string
+  cancelReason: string
+  episodeTitles: string
+  driveBoxId: string
 }>): Promise<SheetUpdateResult> {
   if (!hasCredentials() || !bookingCode) return 'skipped'
   try {
