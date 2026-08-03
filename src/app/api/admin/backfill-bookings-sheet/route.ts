@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
 import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
-import { appendBookingRow, updateBookingRow, getSheetsReadAuth, joinEpisodeTitles } from '@/lib/google-sheets'
+import { appendBookingRow, updateBookingRow, getSheetsReadAuth, getSheetsWriteAuth, joinEpisodeTitles } from '@/lib/google-sheets'
 import { getDriveLink } from '@/lib/drive-links'
 import { getProducerDashboardSheetId, getBookingsTabName, isUsingSandboxSheet } from '@/lib/google-config'
 
@@ -112,9 +112,11 @@ export async function POST(request: NextRequest) {
       claim: [] as Array<{ code: string; rowIndex: number; claimed?: boolean }>,
       patchEventId: [] as Array<{ code: string; eventId: string; patched?: boolean }>,
       patchExtras: [] as Array<{ code: string; fields: string[]; patched?: boolean }>,
+      // v1.161.1 — คิวของ pass-4 apply (ยิงเป็น batch หลังจบ loop)
       skippedAgnOnly: 0,
       errors: [] as string[],
     }
+    const pendingExtras: Array<{ entry: (typeof plan.patchExtras)[number]; rowIndex: number; extraFields: Record<string, string> }> = []
 
     for (const booking of bookings) {
       const code = (booking.bookingCode || booking.id).trim()
@@ -184,11 +186,41 @@ export async function POST(request: NextRequest) {
       if (Object.keys(extraFields).length > 0) {
         const entry = { code, fields: Object.keys(extraFields) } as (typeof plan.patchExtras)[number]
         plan.patchExtras.push(entry)
-        if (apply) {
-          const result = await updateBookingRow(code, extraFields)
-          entry.patched = result === 'updated'
-          if (result === 'error') plan.errors.push(`patchExtras ${code}: sheet write failed`)
+        // v1.161.1 — สะสมไว้ยิงเป็น batch เดียว (เดิมเรียก updateBookingRow รายแถว
+        // = read+write ต่อแถว ~470 API calls สำหรับ 235 แถว → ชน Sheets quota
+        // 60 write/นาที → GaxiosError ทุกแถว ไม่มีอะไรถูกเขียนเลย. rowIndex รู้
+        // อยู่แล้วจากการอ่าน A2:AI ข้างบน จึงไม่ต้อง read ซ้ำ)
+        if (apply) pendingExtras.push({ entry, rowIndex: inSheet.rowIndex, extraFields })
+      }
+    }
+
+    // Pass 4 (apply) — ยิงทุก cell เป็น values.batchUpdate เป็นก้อน ๆ ละ ~100
+    // ranges (≈20 แถว) พร้อมหน่วงเบา ๆ กัน quota: 235 แถว ≈ 12 calls แทน 470
+    if (apply && pendingExtras.length > 0) {
+      const COL_LETTER: Record<string, string> = { deliveredAt: 'AE', deliveredBy: 'AF', cancelReason: 'AG', episodeTitles: 'AH', driveBoxId: 'AI' }
+      const tab = getBookingsTabName()
+      const sheetsW = google.sheets({ version: 'v4', auth: getSheetsWriteAuth() })
+      const allRanges: Array<{ range: string; values: string[][]; entry: (typeof plan.patchExtras)[number] }> = []
+      for (const pe of pendingExtras) {
+        for (const [k, v] of Object.entries(pe.extraFields)) {
+          const col = COL_LETTER[k]
+          if (!col || v === undefined) continue
+          allRanges.push({ range: `${tab}!${col}${pe.rowIndex}`, values: [[String(v)]], entry: pe.entry })
         }
+      }
+      const CHUNK = 100
+      for (let i = 0; i < allRanges.length; i += CHUNK) {
+        const chunk = allRanges.slice(i, i + CHUNK)
+        try {
+          await sheetsW.spreadsheets.values.batchUpdate({
+            spreadsheetId: getProducerDashboardSheetId(),
+            requestBody: { valueInputOption: 'RAW', data: chunk.map(c => ({ range: c.range, values: c.values })) },
+          })
+          for (const c of chunk) c.entry.patched = true
+        } catch (e: any) {
+          plan.errors.push(`patchExtras batch ${i / CHUNK + 1}: ${e?.message || e}`)
+        }
+        if (i + CHUNK < allRanges.length) await new Promise(r => setTimeout(r, 1200))
       }
     }
 

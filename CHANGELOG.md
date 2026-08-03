@@ -19,6 +19,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.161.1] — 2026-08-03
+
+### Fixed — backfill-bookings-sheet pass 4 ชน Sheets rate limit จนเขียนอะไรไม่ได้เลย
+apply บน prod (235 แถว) ล้มเหลวเงียบ: `updateBookingRow` ต่อแถว = read+write ~470 API calls รัวๆ → 429 GaxiosError ที่ `values:batchUpdate` ทุกแถว (เห็นใน container log), `patchExtras` ค้าง 235 ตลอด
+- pass-4 apply เปลี่ยนเป็น **values.batchUpdate เป็นก้อน** (~100 ranges/call + หน่วง 1.2s) — ใช้ rowIndex ที่รู้อยู่แล้วจากการอ่าน `A2:AI` ตอนต้น ไม่ต้อง read ซ้ำรายแถว: 235 แถว ≈ 12 calls แทน 470
+- dry-run เหมือนเดิมทุกอย่าง · 322 เทสต์ผ่าน · tsc สะอาด
+
+---
+
 ## [1.161.0] — 2026-08-03
 
 ### Added — กฏ Agency ref ต้องเป็นเลข QU + ดึงจาก DB อัตโนมัติ (คำสั่ง operator)
