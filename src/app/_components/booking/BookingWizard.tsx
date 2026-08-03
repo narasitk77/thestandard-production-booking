@@ -1487,7 +1487,9 @@ export default function BookingWizard() {
                       only relevant for Advertorial work — hidden for Original Content. */}
                   {isAdvertorialBooking && (
                     <div>
-                      <Label htmlFor="agencyRef">Product Code <span className="ml-1 text-[11px] font-normal text-gray-500">(optional)</span></Label>
+                      <Label htmlFor="agencyRef">Product Code {isContentAgency
+                        ? <span className="ml-1 text-[11px] font-normal text-amber-600">ต้องเป็นเลข QU — เว้นว่างได้ถ้าโปรเจกต์เคยมีคิว (ระบบดึงให้)</span>
+                        : <span className="ml-1 text-[11px] font-normal text-gray-500">(optional)</span>}</Label>
                       <input
                         id="agencyRef"
                         type="text"
@@ -1496,6 +1498,10 @@ export default function BookingWizard() {
                         value={agencyRef}
                         onChange={e => setAgencyRef(e.target.value)}
                       />
+                      {/* v1.161 — กฏ QU: เตือนตั้งแต่พิมพ์ (ตัวตัดสินจริงอยู่ฝั่ง server) */}
+                      {isContentAgency && agencyRef.trim() !== '' && !/^QU-?\d+[A-Za-z0-9/-]*$/i.test(agencyRef.trim().replace(/\s+/g, '')) && (
+                        <p className="text-[11px] text-red-600 mt-1">รูปแบบต้องเป็น QU ตามด้วยตัวเลข เช่น QU-4289 (ไม่ใช่เลข EP/แคมเปญ)</p>
+                      )}
                       <FieldHelp>เขียนลงคอลัมน์ &ldquo;Product Code&rdquo; (F) ของ PD tab</FieldHelp>
                     </div>
                   )}

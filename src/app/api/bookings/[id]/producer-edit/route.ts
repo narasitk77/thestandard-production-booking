@@ -16,6 +16,7 @@
  * truth for authorization.
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { quRuleEnabled, isValidQuRef, normalizeQuRef } from '@/lib/agency-ref'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
@@ -77,6 +78,17 @@ export async function PATCH(
       specialEquipment, agencyRef, notes, episodeTitles,
     } = src
 
+    // v1.161 — กฏ QU (เหมือน create/PATCH): งาน Agency (Advertorial) แก้ Agency ref
+    // ได้เฉพาะรูปแบบ QU
+    let agencyRefValidated: string | null = agencyRef || null
+    if (agencyRef !== undefined && agencyRef && quRuleEnabled()
+        && existing.outlet.code === 'AGN' && existing.category === 'ADVERTORIAL') {
+      if (!isValidQuRef(agencyRef)) {
+        return NextResponse.json({ error: `Agency ref ต้องเป็นเลขใบเสนอราคารูปแบบ QU (เช่น QU-4289) — ค่าที่ส่งมา: "${agencyRef}"` }, { status: 400 })
+      }
+      agencyRefValidated = normalizeQuRef(agencyRef)
+    }
+
     // v1.146 review fix — same HH:MM guard as createBookingFromPayload.
     if (callTime && !isValidHHMM(callTime)) {
       return NextResponse.json({ error: `Invalid callTime "${callTime}" — must be 24h HH:MM (e.g. 09:00)` }, { status: 400 })
@@ -108,7 +120,7 @@ export async function PATCH(
           ...(micCount !== undefined && { micCount: micCount === null || micCount === '' ? null : Math.max(0, parseInt(micCount, 10) || 0) }),
           ...(vanCount !== undefined && { vanCount: vanCount === null || vanCount === '' ? 0 : Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)) }),
           ...(Array.isArray(specialEquipment) && { specialEquipment: specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
-          ...(agencyRef !== undefined && { agencyRef: agencyRef || null }),
+          ...(agencyRef !== undefined && { agencyRef: agencyRefValidated }),
           ...(notes !== undefined && { notes: notes || null }),
         },
         include: { episodes: true, outlet: true, program: true },

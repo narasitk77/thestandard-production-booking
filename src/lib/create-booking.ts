@@ -14,6 +14,7 @@ import { logAudit } from '@/lib/audit'
 import { maybeAlertUrgentBooking } from '@/lib/urgent-booking'
 import { vpAssigneeEmail } from '@/lib/vp-assign'
 import { deriveBookingCategory } from '@/lib/booking-category'
+import { quRuleEnabled, isValidQuRef, normalizeQuRef, pullQuRefFromProject } from '@/lib/agency-ref'
 import { isValidHHMM } from '@/lib/shoot-window'
 
 export type CreateBookingResult =
@@ -240,6 +241,22 @@ export async function createBookingFromPayload(
   // (radio removed), explicit for AGN (drives folder routing). See booking-category.ts.
   const bookingCategory = deriveBookingCategory(isAgency, category, episodeInputs)
 
+  // v1.161 — กฏ Agency ref (คำสั่ง operator): งาน Agency (Advertorial) ต้องมี
+  // เลขใบเสนอราคารูปแบบ QU เท่านั้น; เว้นว่าง → ดึงจากคิวก่อนหน้าของโปรเจกต์
+  // เดียวกันใน DB ให้อัตโนมัติ. ปิดกฏชั่วคราว: AGENCY_REF_QU_RULE=0
+  let agencyRefFinal: string | null = agencyRef || null
+  if (quRuleEnabled() && isAgency && String(bookingCategory).toUpperCase() === 'ADVERTORIAL') {
+    let ref = String(agencyRef || '').trim()
+    if (ref && !isValidQuRef(ref)) {
+      return fail(400, `Agency ref/Product Code ต้องเป็นเลขใบเสนอราคารูปแบบ QU (เช่น QU-4289) — ค่าที่ส่งมา: "${ref}"`)
+    }
+    if (!ref && projectId) ref = (await pullQuRefFromProject(String(projectId))) || ''
+    if (!ref) {
+      return fail(400, 'งาน Agency ต้องมีเลขใบเสนอราคา (Product Code รูปแบบ QU-xxxx) — โปรเจกต์นี้ยังไม่เคยมีเลข QU ในระบบ กรุณาใส่มากับการจอง')
+    }
+    agencyRefFinal = normalizeQuRef(ref)
+  }
+
   const dateStr = formatShootDateForId(parsedDate)
   // v1.146 review fix — sequence allocation used to be a plain read-then-create
   // (findMany → reduce → create) with no lock: two bookings submitted at the
@@ -362,7 +379,7 @@ export async function createBookingFromPayload(
       assignedEmails: isVirtualProduction && VP_ASSIGNEE ? [VP_ASSIGNEE] : [],
       vanCount: Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)),
       specialEquipment: Array.isArray(specialEquipment) ? specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') : [],
-      agencyRef: agencyRef || null,
+      agencyRef: agencyRefFinal,
       projectId: projectId || null,
       projectName: projectName || null,
       notes: notes || null,

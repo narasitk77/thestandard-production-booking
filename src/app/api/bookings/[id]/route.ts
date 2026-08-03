@@ -6,6 +6,7 @@ import { canViewBooking } from '@/lib/booking-access'
 import { resolveBookingCrew } from '@/lib/crew-names'
 import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
 import { updateBookingRow, joinEpisodeTitles } from '@/lib/google-sheets'
+import { quRuleEnabled, isValidQuRef, normalizeQuRef } from '@/lib/agency-ref'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
 import { isShootOver } from '@/lib/booking-complete'
@@ -145,9 +146,20 @@ export async function PATCH(
 
     const existing = await prisma.booking.findUnique({
       where: { id: params.id },
-      include: { episodes: true },
+      include: { episodes: true, outlet: { select: { code: true } } },
     })
     if (!existing) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+
+    // v1.161 — กฏ QU: แก้ไข Agency ref ของงาน Agency (Advertorial) ต้องเป็น
+    // รูปแบบ QU เท่านั้น (สอดคล้อง create); ค่าว่าง = ลบได้ตามเดิม
+    let agencyRefValidated: string | null = agencyRef || null
+    if (agencyRef !== undefined && agencyRef && quRuleEnabled()
+        && (existing as any).outlet?.code === 'AGN' && existing.category === 'ADVERTORIAL') {
+      if (!isValidQuRef(agencyRef)) {
+        return NextResponse.json({ error: `Agency ref ต้องเป็นเลขใบเสนอราคารูปแบบ QU (เช่น QU-4289) — ค่าที่ส่งมา: "${agencyRef}"` }, { status: 400 })
+      }
+      agencyRefValidated = normalizeQuRef(agencyRef)
+    }
 
     // v1.51 — a soft-deleted booking is frozen: restore it first (undelete)
     if (existing.deletedAt) {
@@ -238,7 +250,7 @@ export async function PATCH(
           ...(director !== undefined && { director: director || null }),
           ...(directorEmail !== undefined && { directorEmail: directorEmail || null }),
           ...(creative && Array.isArray(creative) && { creative }),
-          ...(agencyRef !== undefined && { agencyRef: agencyRef || null }),
+          ...(agencyRef !== undefined && { agencyRef: agencyRefValidated }),
           ...(adminNotes !== undefined && { adminNotes: adminNotes || null }),
           ...(assignedEmails && Array.isArray(assignedEmails) && { assignedEmails }),
           ...(cameraCount !== undefined && { cameraCount: cameraCount === null || cameraCount === '' ? null : Math.max(0, parseInt(cameraCount, 10) || 0) }),
