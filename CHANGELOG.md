@@ -11,6 +11,16 @@ _(ว่าง)_
 
 ---
 
+## [1.162.1] — 2026-08-04
+
+### Added — แก้ว (เพิ่มศิริ) TSS Co-Producer จากชีท outlet DB
+seed `outlet-producers.ts` เพิ่ม TSD00334 phoemsiri.p@thestandard.co (Section
+The Secret Sauce → TSS, Co-Producer) ตามชีท ops 2026-08-04 — account ถูกสร้าง
+ผ่าน /admin/permissions ไปก่อนแล้ว รอบ import หลัง deploy เติม nickname ให้
+dropdown แสดง "แก้ว"
+
+---
+
 ## [1.162.0] — 2026-08-04
 
 ### Added — auto-tick "ส่งงานแล้ว" ลงชีท footage log ของทีม content (คำขอปุ๊ก)

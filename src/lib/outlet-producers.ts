@@ -72,4 +72,6 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   { employeeId: 'TSD00033', thaiName: 'นายอภิสิทธิ์ หรรษาภิรมย์โชค', nickname: 'ปู๊น',   email: 'aphisit.h@thestandard.co',    outlet: 'KND', role: 'Producer',    position: 'Assistant to KND Manager' },
   // v1.155 — รุจ added from the ops outlet-DB sheet (2026-07-24): PMO Project Coordinator → PM Co-Producer.
   { employeeId: 'TSD00330', thaiName: 'นางสาวรุจิรา เกิดแย้ม',      nickname: 'รุจ',    email: 'rujira.k@thestandard.co',     outlet: 'PM',  role: 'Co-Producer', position: 'Project Coordinator' },
+  // v1.162.1 — แก้ว added from the ops outlet-DB sheet (2026-08-04): TSS Co-Producer.
+  { employeeId: 'TSD00334', thaiName: 'นางสาวเพิ่มศิริ เพิ่มคูณสมบัติ', nickname: 'แก้ว',  email: 'phoemsiri.p@thestandard.co',  outlet: 'TSS', role: 'Co-Producer', position: 'Co-Producer' },
 ]
