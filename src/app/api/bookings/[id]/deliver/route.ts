@@ -6,6 +6,7 @@ import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { buildFootageReport, renderReportText, formatBytes } from '@/lib/footage-report'
 import { bookingDisplayName } from '@/lib/display'
 import { updateBookingRow } from '@/lib/google-sheets'
+import { tickDeliveredBooking } from '@/lib/delivery-tick'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       select: {
         id: true, bookingCode: true, status: true, assignedEmails: true, deletedAt: true,
         producer: true, producerEmail: true, projectName: true, category: true,
-        callTime: true, shootDate: true, sheetRowIndex: true,
+        callTime: true, shootDate: true, sheetRowIndex: true, driveFolders: true,
         outlet: { select: { name: true } },
         program: { select: { name: true } },
         episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { name: true } } } },
@@ -96,6 +97,14 @@ THE STANDARD Production Booking`
         deliveredBy: session.email,
       }).catch(e => console.error('[deliver] updateBookingRow error:', e?.message || e))
     }
+    // v1.162 — ติ๊กชีท footage log ของทีม content (คำขอปุ๊ก 2026-08-04):
+    // แถวไหนในชีทผูกกับงานนี้ได้ (Production ID/box folder id) ใส่ ✅ ให้เอง
+    tickDeliveredBooking({
+      bookingCode: booking.bookingCode,
+      driveFolders: booking.driveFolders,
+      deliveredAt,
+      deliveredBy: session.email,
+    })
     logAudit({
       actorEmail: session.email,
       action: 'booking.delivered',

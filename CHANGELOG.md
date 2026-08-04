@@ -7,15 +7,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Added — Bookings-tab export +5 คอลัมน์ (delivery evidence + metadata, คอลัมน์ AE–AI)
-ต่อท้ายแบบ **additive ล้วน** (A..AD เดิมไม่ขยับ, ไม่แตะ schema — ทุก field มีใน DB แล้ว) เพื่อให้ PMDC's Airtable sync อ่านหลักฐานส่งงาน/เหตุยกเลิก/ชื่อตอน/กล่อง Drive ได้จากชีทตรงๆ:
-- **AE `Delivered At` + AF `Delivered By`** — ปุ่มส่งงาน (v1.89) patch ลงชีทหลัง mark delivered สำเร็จ (fire-and-forget แบบเดียวกับ patch ของ approve; format datetime เหมือน `approvedAt`)
-- **AG `Cancel Reason`** — เส้นทาง cancel ทั้ง PATCH/DELETE แนบเหตุผลจาก request-cancel flow ไปกับ patch `status: CANCELLED` เดิม (เฉพาะเมื่อมีค่า — cancel ตรงไม่มีเหตุผลก็เว้นว่างตามจริง)
-- **AH `Episode Titles`** — ชื่อตอนทุก EP join ด้วย `" | "` เรียงตาม sequence (col Q มีแค่ IDs); helper ใหม่ `joinEpisodeTitles` ใช้ร่วมกันทั้ง append/backfill/PATCH — แก้ชื่อ EP หลังสร้าง (booking PATCH `episodeTitles`) ก็ patch เซลล์นี้ตามด้วย
-- **AI `Drive Box ID`** — id-first (v1.114): approve route patch `driveFolders.box` ลงชีทตรงจุดที่ `rememberDriveLinks` บันทึก id (เฉพาะ video box — photo/staging ไม่ใช่ box จึงไม่เขียน)
-- **backfill-bookings-sheet เพิ่ม pass 4 (EXTRAS PATCH)** — เติมเซลล์ AE–AI ที่ว่างให้แถวเก่าจาก DB แบบ fill-blank-only (ไม่ทับค่าที่มีคนแก้มือในชีท); แถวที่ append ใหม่ได้ 5 ช่องครบผ่านตัวประกอบแถวเดียวกันอยู่แล้ว — ข้อจำกัด: query ของ route ยังกรอง CANCELLED ออก (scope เดิมของ pass 1) → Cancel Reason backfill ได้เฉพาะงานขอยกเลิกแล้วถูกเก็บไว้
-- header row ถูก rewrite ทุก append อยู่แล้ว (`ensureSheetTab`) → หัวคอลัมน์ใหม่โผล่เองหลัง deploy · staging guards v1.159 ไม่ถูกแตะ
-- 316 เทสต์ผ่าน · tsc สะอาด · lint 6 warnings เท่า baseline เดิม · มีผลเมื่อ redeploy
+_(ว่าง)_
+
+---
+
+## [1.162.0] — 2026-08-04
+
+### Added — auto-tick "ส่งงานแล้ว" ลงชีท footage log ของทีม content (คำขอปุ๊ก)
+ปุ๊กขอให้เด็กหน้างานมาติ๊กชีท footage log เมื่ออัพครบ — แต่เด็กกดปุ่ม "ส่งงาน" ใน probook อยู่แล้ว ระบบเลยติ๊กแทน (อัตโนมัติ ไม่มีลืม):
+- `src/lib/delivery-tick.ts` — จับคู่แถวชีท↔booking 2 ชั้น: **Production ID (คอลัมน์ H)** แล้วค่อย **Folder ID (คอลัมน์ A) ↔ `driveFolders.box`** (id-first v1.114 — ทนเปลี่ยนชื่อโฟลเดอร์); เขียนเฉพาะ**คอลัมน์ P** ต่อท้ายโครงเดิม 15 คอลัมน์ (สัญญาเดียวกับ `footage-sheet.ts`: ไม่แตะโครงของเจ้าของชีท) ค่า = `✅ <วันเวลา ค.ศ. BKK> · <คนส่ง>`
+- **ไม่ทับของเดิม**: แถวที่มีติ๊กอยู่แล้ว (คนติ๊กมือ/รอบก่อน) ถูกข้ามเสมอ → ยิงซ้ำปลอดภัย; แถวยุคเก่าที่ไม่มีทั้ง Production ID และ box id ไม่ถูกแตะ (ปุ๊กจัดการมือได้ตามเดิม)
+- hook ในปุ่มส่งงาน (deliver route) — fire-and-forget: ชีทล่มไม่ทำให้การส่งงานพัง; เขียนเป็น batchUpdate เสมอ (บทเรียน 429 จาก v1.161.1)
+- `POST /api/admin/delivery-tick` — backfill/sweep ย้อนหลัง (dry-run default, `{apply:true}` ถึงเขียน) อ่านชีท 1 ครั้ง เขียน 1 batch
+- config: sheet id ปุ๊กเป็น default, override ด้วย `DELIVERY_TICK_SHEET_ID`, ปิดด้วย `DELIVERY_TICK_ENABLED=0`; บน staging โดน sheets-guard v1.159 ตัดอยู่แล้ว
+- +7 เทสต์ (จับคู่/ไม่ทับ/พ.ศ.-ค.ศ./env) · รวม 329 ผ่าน · tsc สะอาด · ต้องแชร์ชีทเป็น Editor ให้ SA ก่อนใช้งานจริง
 
 ---
 
