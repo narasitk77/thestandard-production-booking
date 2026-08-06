@@ -82,3 +82,34 @@ test('the notice shown to raters states the real audience, not "fully anonymous"
   assert.match(ANONYMITY_NOTICE_TH, /ผู้ดูแลระบบ 3 คน/)
   assert.match(ANONYMITY_NOTICE_TH, /ไม่ถูกเปิดเผยต่อผู้ถูกประเมิน/)
 })
+
+// ── v1.166.1 — the anonymity promise, pinned against the way it actually broke ──
+
+test('REGRESSION: review audit actions must never be readable on a booking timeline', async () => {
+  // How the leak worked: POST /api/review/:token wrote entityType 'Booking' +
+  // { raterRole } into AuditLog, and GET /api/bookings/:id/history returns every
+  // 'Booking' row — changes payload included — to ANY signed-in user. One sound
+  // engineer on a shoot means "the sound team rated you" names a person.
+  const { isPubliclyVisibleAction } = await import('../booking-history-visibility')
+  assert.equal(isPubliclyVisibleAction('review.submitted'), false)
+
+  // And the row is no longer written against the booking at all — belt and
+  // braces, because the filter above protects only THIS endpoint.
+  const fs = await import('fs')
+  const src = fs.readFileSync(new URL('../../app/api/review/[token]/route.ts', import.meta.url), 'utf8')
+  const auditBlock = src.slice(src.indexOf('logAudit('), src.indexOf('logAudit(') + 500)
+  assert.doesNotMatch(auditBlock, /entityType:\s*'Booking'/, 'review audit must not use entityType Booking')
+  assert.doesNotMatch(auditBlock, /raterRole/, 'review audit must not carry the rater team')
+  assert.doesNotMatch(auditBlock, /bookingCode/, 'review audit must not carry a bookingCode (history matches on it)')
+})
+
+test('REGRESSION: the raw token is never written into an audit payload', async () => {
+  const fs = await import('fs')
+  for (const f of ['../../app/api/review/[token]/route.ts', '../../app/api/internal/shoot-reviews/send/route.ts']) {
+    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8')
+    const blocks = src.split('logAudit(').slice(1).map(b => b.slice(0, 500))
+    for (const b of blocks) {
+      assert.doesNotMatch(b, /token:\s*(params\.)?token\b/, `raw token in an audit payload in ${f}`)
+    }
+  }
+})

@@ -155,10 +155,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (!dryRun && invited > 0) {
+    // Not entityType 'Booking': the booking-history endpoint matches on that
+    // type, and a per-booking review row there is what leaked a rater's team in
+    // the first cut of this feature. 'batch' would not match today, but the
+    // next person to touch this should not have to know that.
     logAudit({
       actorEmail: 'shoot-review-worker',
       action: 'review.invites_sent',
-      entityType: 'Booking',
+      entityType: 'ShootReviewInvite',
       entityId: 'batch',
       changes: { shootDate: target.toISOString().slice(0, 10), bookings: details.length, invited, mailed },
     })

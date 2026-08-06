@@ -4,11 +4,19 @@
  * Returns the audit trail for one booking, newest first. Anyone who can see
  * the booking detail page can see its history (no extra admin gate) — the
  * sensitive bits (admin notes) are already filtered out at the booking GET.
+ *
+ * v1.166.1 — but "anyone who can see the booking" is EVERY signed-in user
+ * (canViewBooking is open by design since v1.152), and this returns each row's
+ * `changes` payload verbatim. So the result is now filtered fail-closed for
+ * non-console viewers: only the booking's own lifecycle actions. See
+ * src/lib/booking-history-visibility.ts for the leak that taught us this.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
+import { hasConsoleAccess } from '@/lib/roles'
+import { visibleHistory } from '@/lib/booking-history-visibility'
 
 export async function GET(
   _request: NextRequest,
@@ -59,7 +67,7 @@ export async function GET(
       take: 200,
     })
 
-    return NextResponse.json({ history: logs })
+    return NextResponse.json({ history: visibleHistory(logs, hasConsoleAccess(session.role)) })
   } catch (error) {
     console.error('GET /api/bookings/[id]/history error:', error)
     return NextResponse.json({ error: 'Failed to fetch history' }, { status: 500 })
