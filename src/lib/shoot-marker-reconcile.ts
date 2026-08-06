@@ -188,6 +188,36 @@ export async function reconcileShootMarkers(
     return { ...base, skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials' }
   }
 
+  // v1.164 (§9 ข้อ 8, operator 2026-08-06) — window the project pass.
+  // It used to walk EVERY AGN project every night, so the cost grew forever
+  // while old projects, whose folders nobody touches any more, produced no work.
+  // Scope: projects with at least one booking shot in the last N days (no upper
+  // bound, so upcoming shoots are always in). ALL of a matched project's
+  // bookings are then loaded — a project box's markers must be reconciled as a
+  // SET, or an older sibling's marker would look like a stray. An explicit
+  // `projectId` (manual admin run) bypasses the window entirely.
+  // Override with AGN_MARKER_WINDOW_DAYS; 0 = no window (old behaviour).
+  const windowDays = Number(process.env.AGN_MARKER_WINDOW_DAYS ?? 90)
+  let windowedProjectIds: string[] | null = null
+  if (!opts.projectId && Number.isFinite(windowDays) && windowDays > 0) {
+    const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
+    const recent = await prisma.booking.findMany({
+      where: {
+        outlet: { code: 'AGN' }, projectId: { not: null }, bookingCode: { not: null },
+        deletedAt: null, shootDate: { gte: since },
+      },
+      select: { projectId: true },
+      distinct: ['projectId'],
+    })
+    windowedProjectIds = recent.map(r => r.projectId!).filter(Boolean)
+    // No AGN project shot recently → nothing to reconcile, and an empty `in: []`
+    // would be a full-table scan's opposite (matches nothing) which is correct,
+    // but skip the big select entirely.
+    if (windowedProjectIds.length === 0) {
+      base.details.push({ projectId: '—', skipped: `no AGN project with a shoot in the last ${windowDays}d` })
+    }
+  }
+
   // AGN project bookings — the only layout with a shared box + sibling markers.
   // Full field set so a drifted marker can be regenerated verbatim from the DB.
   const bookings = await prisma.booking.findMany({
@@ -197,6 +227,7 @@ export async function reconcileShootMarkers(
       bookingCode: { not: null },
       deletedAt: null,
       ...(opts.projectId ? { projectId: opts.projectId } : {}),
+      ...(windowedProjectIds ? { projectId: { in: windowedProjectIds } } : {}),
     },
     select: {
       id: true, driveFolders: true, // v1.157 — id-first resolution + self-heal

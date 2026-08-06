@@ -11,6 +11,18 @@ _(ว่าง)_
 
 ---
 
+## [1.164.0] — 2026-08-06
+
+### Changed — ปิด §9 ของแผน reconciler (ข้อ 4) + ลงมือ Stage 0
+operator ตัดสินคำถามเปิดครบทั้ง 8 ข้อ บันทึกใน `docs/reconciler-design.md` §9 (ห้าม re-litigate) — 4 ข้อตัดสินจากหลักฐานบน stack 125 โดยตรง:
+- **ลบ `cleanupLandingShell` ทิ้ง** (§9 ข้อ 4) — เป็น code path เดียวใน merge ที่ trash โฟลเดอร์ได้ ปิดมาตั้งแต่ v1.137 (`VIDEO_MERGE_TRASH_LANDING` ไม่เคยตั้งบน prod อีกเลย) และขัด `docs/landing-folder-policy.md` · เก็บไว้มีแต่ความเสี่ยงว่าจะเผลอเปิด และสัญญา §0 บอกว่า reconciler ห้ามลบเกินต้นแบบ — ต้นแบบจึงต้องไม่มีอันนี้ (ลบ field `landingCleaned` ที่ตายแล้วออกด้วย)
+- **AGN project marker pass จำกัด window 90 วัน** (§9 ข้อ 8) — เดิมเดินทุก project ทุกคืน ต้นทุนโตไปเรื่อยๆ ทั้งที่โปรเจกต์เก่าไม่มีงานให้ทำ · เลือก project ที่มีคิวถ่ายใน −90 วัน (ไม่มีขอบบน = งานอนาคตติดเสมอ) แล้วโหลด **ทุก** booking ของ project นั้น (marker ในกล่องต้อง reconcile เป็นชุด ไม่งั้นพี่น้องที่เก่ากว่าจะดูเหมือน stray) · `AGN_MARKER_WINDOW_DAYS=0` = พฤติกรรมเดิม · การสั่งรันราย project ด้วยมือข้าม window เสมอ
+- **Stage 0: kill-switch 3 ตัวใช้ได้จริงแล้ว** (§9 ข้อ 7) — `prep-folders` / `sound-merge` / `video-merge` เช็ค `*_WORKER_ENABLED` ของตัวเองถูกต้องอยู่แล้ว แต่ **compose ไม่เคยส่ง env พวกนี้เข้า container** ตั้งใน Portainer จึงไม่มีผลและปิด worker ไม่ได้จริง — เพิ่ม passthrough ทั้ง `docker-compose.portainer.yml` และ `docker-compose.staging.yml` (default = พฤติกรรมเดิมเป๊ะ, `VIDEO_MERGE_FALLBACK_MS` ตรงกับ default ในโค้ดคือ 6 ชม.) · นี่คือ prerequisite ของ parallel-run ที่ต้อง "ปิด legacy ทีละตัว"
+- ตัดสินอื่น: footage-sheet-sync **ลบทิ้ง** (ไม่เคยตั้ง `FOOTAGE_LOG_SHEET_ID` บน prod + เป็น logger ราย*ไฟล์* คนละใบกับชีทราย*โฟลเดอร์*ที่ `delivery-tick` ดูแล) · reminders แยกไว้ตามเดิม · NAS event-driven merge **ตัดทิ้ง** ใช้ hourly (`NAS_DSM_USER/PASS` ไม่เคยตั้ง = ไม่เคยทำงาน) · footage-ready คง staged rollout จนจบก่อนค่อยโอนให้ reconciler · name-fallback **ตัดก่อน cutover** (กลับดีไซน์เดิม — parallel-run ต้องเทียบกับต้นแบบที่มี resolution ทางเดียว)
+- 341 เทสต์ผ่าน · tsc สะอาด · lint 6 warnings เท่า baseline · ยังไม่แตะพฤติกรรม runtime ใดๆ (default ทุกตัวเท่าเดิม)
+
+---
+
 ## [1.163.1] — 2026-08-06
 
 ### Fixed — image ถูก build ด้วย dependency ที่ไม่ได้ล็อก (ของจริงมานานแล้ว)

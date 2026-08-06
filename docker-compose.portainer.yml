@@ -227,6 +227,27 @@ services:
       # on): set to 0 if a rename ever fights an ops naming convention.
       FOLDER_INTEGRITY_RENAME: ${FOLDER_INTEGRITY_RENAME:-0}
 
+      # --- Drive-tree worker kill switches (v1.164, reconciler Stage 0) ---
+      # These three workers read their own *_WORKER_ENABLED flag and exit when it
+      # is off — but compose never PASSED the vars into the container, so setting
+      # them in Portainer did nothing and the workers could not actually be turned
+      # off. The reconciler rollout promotes by disabling legacy workers one at a
+      # time, so a kill switch that does not work is a blocker. Defaults keep
+      # today's behaviour exactly (all three ON).
+      # NOTE: a disabled worker exits and its supervisor relaunches it every 5s —
+      # noisy in the log, harmless by design (the script exits immediately).
+      PREP_FOLDERS_WORKER_ENABLED: ${PREP_FOLDERS_WORKER_ENABLED:-1}
+      PREP_FOLDERS_INTERVAL_MS: ${PREP_FOLDERS_INTERVAL_MS:-3600000}
+      SOUND_MERGE_WORKER_ENABLED: ${SOUND_MERGE_WORKER_ENABLED:-1}
+      SOUND_MERGE_INTERVAL_MS: ${SOUND_MERGE_INTERVAL_MS:-3600000}
+      VIDEO_MERGE_WORKER_ENABLED: ${VIDEO_MERGE_WORKER_ENABLED:-1}
+      VIDEO_MERGE_POLL_MS: ${VIDEO_MERGE_POLL_MS:-60000}
+      VIDEO_MERGE_MIN_GAP_MS: ${VIDEO_MERGE_MIN_GAP_MS:-600000}
+      VIDEO_MERGE_FALLBACK_MS: ${VIDEO_MERGE_FALLBACK_MS:-21600000}
+      # v1.164 (§9 ข้อ 8) — AGN project marker pass only walks projects with a
+      # shoot in the last N days. 0 = no window (pre-v1.164 behaviour).
+      AGN_MARKER_WINDOW_DAYS: ${AGN_MARKER_WINDOW_DAYS:-90}
+
       # --- Automated DB backup (v1.77) ---
       # Supervised worker (scripts/backup-worker.js) pg_dumps the DB daily, gzips
       # it, and uploads to BACKUP_DRIVE_FOLDER_ID (service account needs edit

@@ -55,7 +55,7 @@ export interface VideoMergeResult {
   moved: number         // files moved into a box (or would-move in dryRun)
   movedFolders: number  // v1.127 — whole subfolders relocated in one call (contents uncounted)
   errors: number
-  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; landingCleaned?: boolean; skipped?: string }>
+  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; skipped?: string }>
 }
 
 type Stats = { seen: number; moved: number; movedFolders: number; dup: number; err: number }
@@ -159,30 +159,16 @@ async function isLandingShell(folderId: string, depth = 0): Promise<boolean> {
   return true
 }
 
-/**
- * Trash the emptied landing shell after a merge that actually moved something.
+/*
+ * v1.164 — `cleanupLandingShell` ถูกลบทิ้ง (§9 ข้อ 4, operator 2026-08-06).
  *
- * v1.137 — DISABLED BY DEFAULT. The "Production Team" landing folders are a
- * PERSISTENT crew drop zone: trashing the shell right after the first merge made
- * a shoot's drop folder VANISH, so crew couldn't upload later batches (and
- * prep-folders won't recreate it once footage is delivered — the two together
- * deleted the daily folders for good). The footage is already safe in the box, so
- * keeping the empty shell costs only a little landing-drive clutter and keeps the
- * drop target alive. Set VIDEO_MERGE_TRASH_LANDING=1 to restore the old cleanup.
- * Trash is recoverable ~30 days. Exported for the live e2e check alongside mirrorMove.
+ * มันคือ code path เดียวใน merge ที่ "ลบ" ได้ (trash โฟลเดอร์ drop ที่ว่างแล้ว)
+ * ปิดมาตั้งแต่ v1.137 เพราะทำให้โฟลเดอร์ drop ของทีมหายกลางคัน แล้วขัดกับ
+ * docs/landing-folder-policy.md ที่ระบุว่า landing เป็น drop zone ถาวร
+ * `VIDEO_MERGE_TRASH_LANDING` ไม่เคยถูกตั้งบน prod อีกเลย — เก็บโค้ดที่ลบได้
+ * ไว้เฉย ๆ มีแต่ความเสี่ยงว่าใครจะเผลอเปิด จึงตัดออกทั้งชุดก่อนยุบเข้า reconciler
+ * (สัญญาความปลอดภัย §0: reconciler ห้ามลบเกินต้นแบบ — ต้นแบบจึงต้องไม่มีอันนี้)
  */
-export async function cleanupLandingShell(flatId: string, stats: Stats): Promise<boolean> {
-  if (process.env.VIDEO_MERGE_TRASH_LANDING !== '1') return false
-  if (stats.err > 0 || stats.moved + stats.movedFolders === 0) return false
-  try {
-    if (!(await isLandingShell(flatId))) return false
-    await trashDriveItem(flatId)
-    return true
-  } catch (e: any) {
-    console.warn('[video-merge] landing cleanup skipped:', e?.message || e)
-    return false
-  }
-}
 
 export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
   const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, results: [] as VideoMergeResult['results'] }
@@ -270,9 +256,8 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
 
       const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
       await mirrorMove(flatId, destId, code, stats, !!opts.dryRun)
-      const landingCleaned = !opts.dryRun && await cleanupLandingShell(flatId, stats)
       base.landed += stats.seen; base.moved += stats.moved; base.movedFolders += stats.movedFolders; base.errors += stats.err
-      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, movedFolders: stats.movedFolders, dup: stats.dup, err: stats.err, landingCleaned })
+      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, movedFolders: stats.movedFolders, dup: stats.dup, err: stats.err })
     } catch (e: any) {
       base.errors++
       base.results.push({ bookingCode: code, skipped: `error: ${e?.message || String(e)}` })
@@ -308,7 +293,6 @@ export interface BookingVideoMergeResult {
   movedFolders: number
   dup: number
   err: number
-  landingCleaned?: boolean
   boxFolderUrl?: string | null
 }
 
@@ -369,6 +353,5 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
 
   const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
   await mirrorMove(flatId, destId, code, stats, dryRun)
-  const landingCleaned = !dryRun && await cleanupLandingShell(flatId, stats)
-  return { ...stats, landingCleaned, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
+  return { ...stats, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
 }

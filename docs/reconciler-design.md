@@ -401,16 +401,16 @@ map ชี้ว่า landing-lifecycle **ไม่มี test file เลย**
 
 **ตัดสินใจแล้วใน v2 (เดิมเป็น open question ใน v1)** — บันทึกไว้กัน re-litigate: prune absorb เป็น tick 12:00 predicate past-only + เลิก local task ที่ 4c (§2.6, §6.5); merge lookback −45d คงตั้งแต่วันแรก (§3.3); advisory lock ถูกแทนด้วย DB lease ซึ่ง cross-process อยู่แล้ว — คำถาม blue/green จึงไม่มีผลต่อ design (§4.3); cursor persist ลง SystemHeartbeat ทำเลย (§3.2, ความเสี่ยงข้อ 6)
 
-ที่ยังเปิดอยู่:
+**ปิดครบแล้ว 2026-08-06 (operator ตัดสิน + หลักฐานจาก stack 125)** — ห้าม re-litigate:
 
-1. **reminders / footage-sheet-sync แยกไว้** ตาม §1.2 — โอเคไหม หรืออยากให้ sheet-sync ตายไปเลย (dormant มานาน)
-2. **notify cutover (4e)**: ให้ reconciler เป็นเจ้าของ footage-ready แต่แรก หรือคง staged rollout v1.147 แยกจนจบก่อนค่อยย้าย
-3. **NAS DSM gate**: ยังต้องการ event-driven merge อยู่ไหม (ต้องมี NAS_DSM_* creds ใน stack — ตอนนี้ยังไม่ได้ใส่ตาม memory v1.127) หรือ hourly พอ
-4. **`VIDEO_MERGE_TRASH_LANDING`**: ปิดถาวรตั้งแต่ v1.137 + ขัดกับ landing-policy — ขอลบ code path `cleanupLandingShell` ทิ้งใน reconciler เลยไหม
-5. **Landing rename report-only**: NAS SMB mirror ยังใช้อยู่ใช่ไหม → invariant ข้อ 16 ถาวร
-6. **Name-fallback removal**: ลบก่อนหรือหลัง cutover? เสนอ: คงไว้ตลอด parallel-run (convergence gate ต้องเห็น path เดิม) แล้วลบเป็น step แรกหลัง Stage 4 นิ่ง — สอดคล้อง improvement-plan ("watch digest fallback≈0 then remove") ซึ่ง gauge ย้ายมาอยู่กับ reconciler แล้ว (§3.4)
-7. **Compose passthrough (Stage 0)** ต้องแก้ stack 125 + staging แล้ว redeploy — ทำคืนไหน (จำ: Drive-mutating endpoint 504 ที่ proxy ห้าม re-fire)
-8. **AGN project marker pass ไม่มี date bound** (เดินทุก project ทุกคืน) — ตัด window เหลือ project ที่มี booking ใน −90d ได้ไหม หรือมีเหตุผล ops ให้เดินทั้งหมด
+1. **reminders / footage-sheet-sync** → reminders **แยกไว้ตามเดิม** (ไม่ใช่ Drive-tree); footage-sheet-sync **ลบทิ้ง** (worker + respawn loop + route). หลักฐาน: `FOOTAGE_LOG_SHEET_ID` ไม่เคยตั้งบน prod = ไม่เคยทำงานจริง และมันเป็น logger ราย**ไฟล์** ไม่เกี่ยวกับชีทราย**โฟลเดอร์**ของปุ๊ก (ซึ่ง `delivery-tick` v1.162 ดูแลอยู่แล้ว) — ลบแล้วชีทปุ๊กไม่กระทบ
+2. **notify cutover (4e)** → **คง staged rollout v1.147 แยกจนจบก่อน** (ตอนนี้ `FOOTAGE_READY_AUDIENCE=admin` — ต้องขยายเป็นทีมและนิ่งก่อน) แล้วค่อยโอนเจ้าของให้ reconciler ที่ Stage 4 · เหตุผล: ถ้าพังจะแยกไม่ออกว่าเพราะ rollout หรือ refactor
+3. **NAS DSM gate** → **ตัดทิ้ง ไม่ port เข้า reconciler** ใช้ hourly ล้วน. หลักฐาน: `NAS_DSM_URL` ตั้งไว้แต่ `NAS_DSM_USER/PASS` ไม่มี = event-driven merge ไม่เคยทำงานจริง และ hourly ทำงานได้มาตลอด — ตัด dependency กับ creds NAS ออกทั้งชุด
+4. **`VIDEO_MERGE_TRASH_LANDING`** → **ลบ `cleanupLandingShell` ทิ้ง**. หลักฐาน: env ไม่ได้ตั้งบน prod (ปิดตั้งแต่ v1.137) + ขัด `docs/landing-folder-policy.md` — การตัด code path ที่ลบโฟลเดอร์ได้ออก สอดคล้องกับกฎสูงสุด §0 โดยตรง
+5. **Landing rename report-only** → **invariant 16 ถาวร**. หลักฐาน: `NAS_MANIFEST_SECRET` ตั้งอยู่บน stack + `scripts/nas-manifest-agent.sh` ยัง POST manifest = SMB mirror ยังทำงาน ชื่อโฟลเดอร์ฝั่ง NAS เปลี่ยนตาม Drive ไม่ได้
+6. **Name-fallback removal** → **ตัด*ก่อน* cutover** (กลับดีไซน์ v2 ที่เสนอให้ตัดทีหลัง). เหตุผล: parallel-run เอาไว้เทียบว่า reconciler ให้ผลเท่าต้นแบบ ถ้าต้นแบบยังมี resolution สองทางอยู่ ความต่างที่เจอจะแยกไม่ออกว่ามาจาก refactor หรือมาจาก fallback — ตัดให้เหลือทางเดียวก่อน แล้วค่อยเทียบ · gate เดิมยังใช้: รอ gauge fallback ≈ 0 ติดกัน 3 วัน (ล่าสุด 6755 hit / 1 fallback)
+7. **Compose passthrough (Stage 0)** → **แนบไปกับ deploy รอบถัดไป** ไม่ต้องจัดคืน deploy แยก (แก้ env passthrough อย่างเดียว ความเสี่ยงต่ำ)
+8. **AGN project marker pass** → **จำกัดที่ project ที่มี booking ใน −90 วัน** (เดิมเดินทุก project ทุกคืน)
 
 ---
 
