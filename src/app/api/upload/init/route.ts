@@ -11,7 +11,10 @@ import { bookingShowName } from '@/lib/display'
 import {
   ensureUploadFolderPath,
   createResumableUploadSession,
+  isFolderAlive,
+  classifyFootageTreeFolder,
 } from '@/lib/google-drive'
+import { getDriveLink } from '@/lib/drive-links'
 import { isDriveAccessError } from '@/lib/drive-access'
 
 export const dynamic = 'force-dynamic'
@@ -112,6 +115,7 @@ export async function POST(request: NextRequest) {
         status: true,
         assignedEmails: true,
         deletedAt: true, // v1.51 — canUploadToBooking rejects deleted bookings
+        driveFolders: true, // v1.163 — id-first upload target (see setupDrive)
         // --- booking-info.txt context ---
         projectName: true,
         projectId: true,
@@ -255,8 +259,34 @@ export async function POST(request: NextRequest) {
       || process.env.NEXT_PUBLIC_APP_URL
       || undefined
 
+    // v1.163 — id-first upload target. `resolveShootFolder` (the name walk
+    // below) is CREATE-ON-MISS: if the booking's box has been renamed or moved
+    // — an ops rename, or the v1.163 cross-outlet move — the walk would mint a
+    // SECOND box at the old path and split the shoot's footage across two
+    // folders that no worker reconciles. Trusting the stored id closes that
+    // window entirely. Guards mirror the rest of the id-first call sites:
+    // alive + genuinely inside the footage tree; anything else falls back to
+    // the legacy walk. Kill switch: UPLOAD_ID_FIRST=0.
+    const resolveKnownBox = async (): Promise<string | undefined> => {
+      if (process.env.UPLOAD_ID_FIRST === '0') return undefined
+      // AGN uploads land in a per-booking layer INSIDE the shared project box,
+      // so the stored box id is not the upload parent — leave those to the walk.
+      if (booking.outlet.code === 'AGN') return undefined
+      const stored = getDriveLink(booking.driveFolders, 'box')
+      if (!stored) return undefined
+      try {
+        if (!(await isFolderAlive(stored))) return undefined
+        if ((await classifyFootageTreeFolder(stored)) !== 'in-tree') return undefined
+        return stored
+      } catch {
+        return undefined // transient Drive error → legacy walk, never block an upload
+      }
+    }
+    const knownBookingFolderId = await resolveKnownBox()
+
     const setupDrive = async (subject?: string) => {
       const { cameraFolderId } = await ensureUploadFolderPath({
+        knownBookingFolderId,
         rootFolderId: process.env.DRIVE_FOOTAGE_ROOT!.trim(),
         outletCanonicalName: outletDriveFolderName(booking.outlet.code),
         programFolderName: driveProgramFolder,

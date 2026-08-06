@@ -714,9 +714,17 @@ export async function ensureUploadFolderPath(input: ShootFolderInput & {
   episodeFolderName?: string
   /** v1.84 — impersonate this user so the folders show them as creator. */
   subject?: string
+  /** v1.163 — id-first: the booking's stored `driveFolders.box`, already
+   *  verified alive + in-tree by the caller. When given we upload straight into
+   *  it and NEVER run the name walk, which is create-on-miss: if the folder has
+   *  been renamed or moved (a cross-outlet move, an ops rename) the walk would
+   *  mint a SECOND box at the old path and split the shoot's footage. */
+  knownBookingFolderId?: string
 }): Promise<UploadFolderTarget> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(input.subject) })
-  const { bookingFolderId } = await resolveShootFolder(drive, input)
+  const { bookingFolderId } = input.knownBookingFolderId
+    ? { bookingFolderId: input.knownBookingFolderId }
+    : await resolveShootFolder(drive, input)
   const cameraParent = input.episodeFolderName
     ? await ensureEpisodeFolder(drive, bookingFolderId, input.episodeFolderName)
     : bookingFolderId
@@ -1131,14 +1139,16 @@ export async function moveFileToFolder(fileId: string, targetFolderId: string, r
  */
 export async function moveAndRenameFile(fileId: string, targetFolderId: string, removeParentId: string, newName: string, subject?: string): Promise<void> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
-  await drive.files.update({
+  // v1.163 — the one Drive mutator that was still unwrapped (moveFileToFolder
+  // already retries). A 429 here used to surface as a hard failure mid-move.
+  await withDriveRetry(`moveAndRename ${fileId}`, () => drive.files.update({
     fileId,
     addParents: targetFolderId,
     removeParents: removeParentId,
     requestBody: { name: newName },
     fields: 'id, parents',
     supportsAllDrives: true,
-  })
+  }))
 }
 
 /**

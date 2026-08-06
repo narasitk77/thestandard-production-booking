@@ -54,6 +54,11 @@ const COL = {
   // ID-regeneration flow can rewrite a booking's Production ID in place. The
   // row is still LOCATED by the OLD code (col A) before col A is overwritten.
   productionId: 1,
+  // v1.163 — Outlet (D) / Program (E) became writable when bookings gained the
+  // ability to MOVE between outlets (a mis-filed booking used to leave "PM"
+  // frozen in the sheet forever while col A already read NWS-…).
+  outlet: 4,
+  program: 5,
   shootDate: 6,
   shootEndDate: 7,
   episodeIds: 17,
@@ -347,6 +352,11 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
   productionId: string
   /** v1.109 — rewrite col Q (Episode IDs), comma-joined. */
   episodeIds: string
+  /** v1.163 — rewrite col D/E (Outlet / Program) when a booking moves outlet.
+   *  Values are the DISPLAY names (outlet.name / program.name), matching what
+   *  the append path writes — not the codes. */
+  outlet: string
+  program: string
   /** v1.109 — rewrite col F/G (Shoot Date / Shoot End Date), "YYYY-MM-DD". */
   shootDate: string
   shootEndDate: string

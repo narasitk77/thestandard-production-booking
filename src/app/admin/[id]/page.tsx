@@ -4,7 +4,7 @@ import { bookingDisplayName } from '@/lib/display'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
-import { programsForOutlet, SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
+import { programsForOutlet, SPECIAL_EQUIPMENT_OPTIONS, OUTLETS } from '@/lib/data'
 import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
@@ -131,6 +131,17 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({})
   const [titleSaving, setTitleSaving] = useState(false)
   // v1.109 — reprogram: change an episode's show/รายการ, then regen its ID.
+  // v1.163 — ย้ายสังกัด (cross-outlet move). Two-step: a dry-run must succeed
+  // for the EXACT current selection before "ย้ายจริง" unlocks, so the operator
+  // can never apply a plan they didn't just see.
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [moveOutlet, setMoveOutlet] = useState('')
+  const [moveProgDrafts, setMoveProgDrafts] = useState<Record<string, string>>({})
+  const [movePlan, setMovePlan] = useState<any>(null)
+  const [movePlanKey, setMovePlanKey] = useState('')
+  const [moveBusy, setMoveBusy] = useState(false)
+  const [moveResult, setMoveResult] = useState<any>(null)
+
   const [progEdit, setProgEdit] = useState(false)
   const [progDrafts, setProgDrafts] = useState<Record<string, string>>({})
   const [progSaving, setProgSaving] = useState(false)
@@ -614,6 +625,50 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // v1.163 — ย้ายสังกัด. `moveKey` is the identity of the current selection; the
+  // plan is discarded whenever it changes, so "ย้ายจริง" can only ever fire on a
+  // preview the operator is looking at right now.
+  const moveKey = JSON.stringify({ moveOutlet, moveProgDrafts })
+  const moveDirty = () => { setMovePlan(null); setMovePlanKey(''); setMoveResult(null) }
+
+  const runMove = async (apply: boolean) => {
+    if (!moveOutlet || moveBusy) return
+    if (apply && !confirm(
+      `ย้าย booking นี้จาก ${booking.outlet.code} → ${moveOutlet} และเปลี่ยนเลข ID เป็น ${movePlan?.newBookingCode}?\n\n` +
+      'ระบบจะย้ายโฟลเดอร์ Drive (id เดิม ไฟล์ไม่หาย) + แก้ Sheet/Calendar/_SHOOT ให้ตรงกัน · บันทึก audit log · ' +
+      'ย้อนกลับได้แต่ต้องสั่งย้ายกลับอีกรอบ — ยืนยันหรือไม่?')) return
+    setError('')
+    setMoveBusy(true)
+    try {
+      const res = await fetch(`/api/admin/${id}/move-outlet`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetOutlet: moveOutlet,
+          programByEpisode: moveProgDrafts,
+          dryRun: !apply,
+          ...(apply ? { expectedOldCode: booking.bookingCode } : {}),
+        }),
+      })
+      if (res.status === 504) {
+        throw new Error('หมดเวลาที่ proxy (504) — งานอาจยังวิ่งต่อบนเซิร์ฟเวอร์ อย่ากดซ้ำ รอสัก 1 นาทีแล้วกด "ดูก่อน" ใหม่เพื่อเช็คว่าเลข ID เปลี่ยนแล้วหรือยัง')
+      }
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'ย้ายสังกัดไม่สำเร็จ')
+      if (apply) {
+        setMoveResult(data.result)
+        showSaved(`✓ ย้ายไป ${moveOutlet} แล้ว (${data.plan.oldBookingCode} → ${data.plan.newBookingCode}) — กำลังรีเฟรช…`)
+        setTimeout(() => window.location.reload(), 2200)
+      } else {
+        setMovePlan(data.plan)
+        setMovePlanKey(moveKey)
+      }
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setMoveBusy(false)
+    }
+  }
+
   // v1.95.0 — open the "link project episode" picker: fetch the project's
   // episodes (Sheet) and hide ones already on this booking.
   const openEpPicker = async () => {
@@ -933,6 +988,99 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         )}
       </div>
 
+      {/* v1.163 — ย้ายสังกัด: the escape hatch for a booking filed under the wrong
+          outlet. Collapsed by default (rare operation), preview-gated, and
+          hidden for AGN + deleted bookings, which the API refuses anyway. */}
+      {booking.outlet.code !== 'AGN' && !booking.deletedAt && (
+        <div className="gf-card p-4 sm:p-5">
+          <button onClick={() => setMoveOpen(!moveOpen)}
+            className="w-full flex items-center justify-between text-sm font-medium text-gray-700">
+            <span>🚚 ย้ายสังกัด (outlet) — ใช้เมื่องานถูกลงผิดบ้าน</span>
+            <span className="text-xs text-gray-400">{moveOpen ? 'ซ่อน' : 'เปิด'}</span>
+          </button>
+
+          {moveOpen && (
+            <div className="mt-3 space-y-3 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-gray-500">จาก</span>
+                <span className="episode-badge">{booking.outlet.code} · {booking.outlet.name}</span>
+                <span className="text-gray-400">→</span>
+                <select value={moveOutlet}
+                  onChange={e => { setMoveOutlet(e.target.value); setMoveProgDrafts({}); moveDirty() }}
+                  className="border border-gray-300 rounded px-2 py-1 text-xs">
+                  <option value="">— เลือกสังกัดปลายทาง —</option>
+                  {OUTLETS.filter(o => o.code !== 'AGN' && o.code !== booking.outlet.code)
+                    .map(o => <option key={o.code} value={o.code}>{o.code} · {o.name}</option>)}
+                </select>
+              </div>
+
+              {moveOutlet && (
+                <div className="space-y-1.5">
+                  <div className="text-gray-500">รายการปลายทางของแต่ละตอน (เว้นว่าง = ใช้รายการเดิมถ้าบ้านใหม่มี)</div>
+                  {booking.episodes.map(ep => (
+                    <div key={ep.id} className="flex items-center gap-2 flex-wrap">
+                      <span className="episode-badge">{ep.episodeId}</span>
+                      <select value={moveProgDrafts[ep.id] || ''}
+                        onChange={e => { setMoveProgDrafts({ ...moveProgDrafts, [ep.id]: e.target.value }); moveDirty() }}
+                        className="border border-gray-300 rounded px-2 py-1 text-xs">
+                        <option value="">— ใช้รายการเดิม —</option>
+                        {programsForOutlet(moveOutlet).map(pg => (
+                          <option key={pg.code} value={pg.code}>{pg.code} · {pg.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button onClick={() => runMove(false)} disabled={!moveOutlet || moveBusy}
+                  className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-1">
+                  {moveBusy && !movePlan ? <Loader2 className="w-3 h-3 animate-spin" /> : null} ดูก่อน (ยังไม่แก้อะไร)
+                </button>
+                <button onClick={() => runMove(true)}
+                  disabled={moveBusy || !movePlan || movePlanKey !== moveKey}
+                  className="px-2.5 py-1 border border-amber-600 text-amber-700 rounded hover:bg-amber-50 disabled:opacity-40 inline-flex items-center gap-1">
+                  {moveBusy && movePlan ? <Loader2 className="w-3 h-3 animate-spin" /> : null} 🚚 ย้ายจริง
+                </button>
+                {movePlan && movePlanKey !== moveKey && (
+                  <span className="text-amber-700">เปลี่ยนตัวเลือกแล้ว — กด "ดูก่อน" ใหม่</span>
+                )}
+              </div>
+
+              {movePlan && movePlanKey === moveKey && (
+                <div className="border border-gray-200 rounded p-2.5 space-y-1 bg-gray-50">
+                  <Row k="เลข ID" v={`${movePlan.oldBookingCode} → ${movePlan.newBookingCode}`} mono />
+                  {movePlan.episodeChanges.map((c: any) => (
+                    <Row key={c.episodeDbId} k="EP" v={`${c.oldEpisodeId} → ${c.newEpisodeId}`} mono />
+                  ))}
+                  <Row k="โฟลเดอร์" v={`${movePlan.drive.fromPath} → ${movePlan.drive.toPath}`} />
+                  <Row k="ชื่อกล่อง" v={`${movePlan.drive.oldBoxName} → ${movePlan.drive.newBoxName}`} />
+                  <Row k="วิธีย้าย" v={movePlan.drive.boxIdStored
+                    ? 'ย้ายกล่องเดิมด้วย Drive id — ไฟล์ไม่หาย ลิงก์เก่ายังใช้ได้'
+                    : 'ยังไม่มี Drive id เก็บไว้ — ระบบจะหาโฟลเดอร์จากชื่อ/รหัสเดิมให้'} />
+                  <Row k="Sheet" v="คอลัมน์ A (Production ID), D (Outlet), E (Program), Q (Episode IDs)" />
+                  <Row k="Calendar" v={`หัวข้อเปลี่ยนเป็น [${movePlan.to.outletCode}] · ไม่ส่งอีเมลแจ้งทีม`} />
+                  {movePlan.warnings.map((w: any) => (
+                    <div key={w.code} className="text-amber-700 pt-1">⚠️ {w.th}</div>
+                  ))}
+                </div>
+              )}
+
+              {moveResult && (
+                <div className="border border-green-200 bg-green-50 rounded p-2.5 space-y-0.5 text-green-800">
+                  <div>โฟลเดอร์ Drive: {EFFECT_TH[moveResult.effects.driveBookingFolder] || moveResult.effects.driveBookingFolder}</div>
+                  <div>Sheet: {EFFECT_TH[moveResult.effects.sheet] || moveResult.effects.sheet}</div>
+                  <div>Calendar: {EFFECT_TH[moveResult.effects.calendar] || moveResult.effects.calendar}</div>
+                  <div>_SHOOT.txt: {EFFECT_TH[moveResult.effects.driveMarker] || moveResult.effects.driveMarker}</div>
+                  <div>โฟลเดอร์ NAS: {EFFECT_TH[moveResult.effects.driveLandingFolder] || moveResult.effects.driveLandingFolder}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Booking details — view or edit mode */}
       <div className="gf-card p-4 sm:p-5">
         <div className="flex items-center justify-between mb-3">
@@ -1003,7 +1151,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           <div className="space-y-3 text-sm">
             <div className="bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-500 flex items-start gap-2">
               <Lock className="w-3 h-3 mt-0.5 flex-shrink-0" />
-              <span>ห้ามแก้: Outlet · Program · Shoot Date · Episode ID · ลำดับ EP (เพราะกระทบ Booking number)</span>
+              <span>ห้ามแก้ตรงนี้: Outlet · Program · Shoot Date · Episode ID · ลำดับ EP (เพราะกระทบ Booking number) — ถ้าลงผิดบ้าน ใช้ปุ่ม &quot;🚚 ย้ายสังกัด&quot; ด้านบน</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1758,4 +1906,23 @@ function compactRelativeTime(iso: string): string {
   const hr = Math.floor(min / 60)
   if (hr < 24) return `${hr}h ago`
   return `${Math.floor(hr / 24)}d ago`
+}
+
+/** v1.163 — one label/value line in the ย้ายสังกัด preview. */
+function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+  return (
+    <div className="flex gap-2">
+      <span className="text-gray-500 shrink-0 w-20">{k}</span>
+      <span className={mono ? 'font-mono text-gray-800 break-all' : 'text-gray-800 break-all'}>{v}</span>
+    </div>
+  )
+}
+
+const EFFECT_TH: Record<string, string> = {
+  moved: 'ย้ายแล้ว ✓',
+  renamed: 'เปลี่ยนชื่อแล้ว ✓',
+  updated: 'อัปเดตแล้ว ✓',
+  skipped: 'ไม่ต้องแก้',
+  'not-found': 'ไม่พบ (ยังไม่มีโฟลเดอร์)',
+  error: 'ไม่สำเร็จ ✗',
 }
