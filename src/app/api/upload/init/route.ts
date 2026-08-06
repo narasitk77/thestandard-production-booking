@@ -11,7 +11,7 @@ import { bookingShowName } from '@/lib/display'
 import {
   ensureUploadFolderPath,
   createResumableUploadSession,
-  isFolderAlive,
+  folderLiveness,
   classifyFootageTreeFolder,
 } from '@/lib/google-drive'
 import { getDriveLink } from '@/lib/drive-links'
@@ -275,11 +275,16 @@ export async function POST(request: NextRequest) {
       const stored = getDriveLink(booking.driveFolders, 'box')
       if (!stored) return undefined
       try {
-        if (!(await isFolderAlive(stored))) return undefined
-        if ((await classifyFootageTreeFolder(stored)) !== 'in-tree') return undefined
+        // v1.165 — 'unknown' (a Drive blip) must NOT send us down the name walk:
+        // that walk CREATES the folder when the name misses, so one 429 could
+        // fork a shoot's footage into a second box. Only a folder Drive says is
+        // genuinely gone falls back. A stale id at worst fails the upload loudly.
+        const live = await folderLiveness(stored)
+        if (live === 'dead') return undefined
+        if (live === 'alive' && (await classifyFootageTreeFolder(stored)) !== 'in-tree') return undefined
         return stored
       } catch {
-        return undefined // transient Drive error → legacy walk, never block an upload
+        return undefined // unexpected error → legacy walk, never block an upload
       }
     }
     const knownBookingFolderId = await resolveKnownBox()

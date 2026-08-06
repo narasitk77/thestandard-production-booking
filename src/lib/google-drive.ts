@@ -1053,14 +1053,58 @@ export async function renameDriveItem(fileId: string, newName: string, subject?:
  * id-first readers before trusting a stored Booking.driveFolders link; a dead
  * id falls back to the legacy name walk.
  */
-export async function isFolderAlive(folderId: string): Promise<boolean> {
+/**
+ * v1.165 — tri-state liveness. `isFolderAlive` collapsed EVERY failure to
+ * `false`, and it did not retry, so one 429 (which this app hits routinely once
+ * a sweep speeds up — the reason `withDriveRetry` exists) made a perfectly good
+ * stored folder id look DEAD. Callers then fell back to matching folder NAMES,
+ * and the id-first gauge counted that as a "still needs backfill" event, so the
+ * number we were using to decide when it is safe to delete the name fallbacks
+ * was measuring Drive weather as much as missing links.
+ *
+ * Worse for the create-on-miss callers: a blip could send an upload down the
+ * name walk, which CREATES the folder when the name misses — forking one
+ * shoot's footage across two boxes (the v1.163 blocker, re-opened by a flaky
+ * probe). So the distinction has to be explicit:
+ *   'alive'   — read succeeded, folder exists, not trashed
+ *   'dead'    — read succeeded and it is trashed/not a folder, or 404/410
+ *   'unknown' — could not be determined after retries; the caller must NOT
+ *               treat this as "gone". Trusting a possibly-stale id fails loudly;
+ *               guessing by name fails silently and duplicates data.
+ */
+export type FolderLiveness = 'alive' | 'dead' | 'unknown'
+
+export async function folderLiveness(folderId: string): Promise<FolderLiveness> {
+  if (!folderId) return 'dead'
   try {
     const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
-    const res = await drive.files.get({ fileId: folderId, fields: 'id, trashed, mimeType', supportsAllDrives: true })
-    return !res.data.trashed && res.data.mimeType === FOLDER_MIME
-  } catch {
-    return false
+    const res = await withDriveRetry(`folderLiveness ${folderId}`, () => drive.files.get({
+      fileId: folderId, fields: 'id, trashed, mimeType', supportsAllDrives: true,
+    }))
+    return (!res.data.trashed && res.data.mimeType === FOLDER_MIME) ? 'alive' : 'dead'
+  } catch (e: any) {
+    const status = driveErrorStatus(e)
+    // Only a definitive "it is not there" counts as dead. 403 stays unknown:
+    // Drive returns 403 for rateLimitExceeded as well as for permission.
+    if (status === 404 || status === 410) return 'dead'
+    console.warn(`[drive] folderLiveness ${folderId} indeterminate (status ${status ?? '?'}): ${e?.message || e}`)
+    return 'unknown'
   }
+}
+
+/**
+ * Boolean view — semantics UNCHANGED (only `'alive'` is true), because several
+ * call sites use this as a fail-closed guard before mutating
+ * (`agn-restructure.ts:115`, `shoot-marker-reconcile.ts:281`,
+ * `admin/audio-relocate:44` all `continue` when it is false). Flipping those to
+ * "proceed when unsure" would act on unverified folders — the wrong direction.
+ *
+ * What DID change is that it now retries, so a 429 no longer reads as "gone".
+ * Call sites that choose between a stored id and a NAME WALK should use
+ * `folderLiveness` directly and treat `'unknown'` as trust-the-id.
+ */
+export async function isFolderAlive(folderId: string): Promise<boolean> {
+  return (await folderLiveness(folderId)) === 'alive'
 }
 
 /**
