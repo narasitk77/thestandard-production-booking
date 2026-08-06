@@ -74,4 +74,8 @@ export const OUTLET_PRODUCERS: OutletProducerSeed[] = [
   { employeeId: 'TSD00330', thaiName: 'นางสาวรุจิรา เกิดแย้ม',      nickname: 'รุจ',    email: 'rujira.k@thestandard.co',     outlet: 'PM',  role: 'Co-Producer', position: 'Project Coordinator' },
   // v1.162.1 — แก้ว added from the ops outlet-DB sheet (2026-08-04): TSS Co-Producer.
   { employeeId: 'TSD00334', thaiName: 'นางสาวเพิ่มศิริ เพิ่มคูณสมบัติ', nickname: 'แก้ว',  email: 'phoemsiri.p@thestandard.co',  outlet: 'TSS', role: 'Co-Producer', position: 'Co-Producer' },
+  // v1.163.1 — หวาน added from the ops outlet-DB sheet (2026-08-06): Section
+  // "Content Agency" → AGN. Video Production Manager is a lead role, so she
+  // lands in the Producer column (isCoProducer only matches co-producer/coordinator).
+  { employeeId: 'TSD00052', thaiName: 'นางสาวชลธร จารุสุวรรณวงค์',    nickname: 'หวาน', email: 'chonlathorn.j@thestandard.co', outlet: 'AGN', role: 'Producer',    position: 'Video Production Manager' },
 ]

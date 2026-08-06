@@ -11,6 +11,18 @@ _(ว่าง)_
 
 ---
 
+## [1.163.1] — 2026-08-06
+
+### Fixed — image ถูก build ด้วย dependency ที่ไม่ได้ล็อก (ของจริงมานานแล้ว)
+`Dockerfile` ไม่เคยก๊อป `package-lock.json` เข้า build context และใช้ `npm install` → **ทุก image ที่ขึ้น prod ตลอดมาถูก build ด้วย dependency เวอร์ชันล่าสุด ณ นาทีที่ build ไม่ใช่เวอร์ชันที่เราเทสต์** เจอเพราะ `tsx` ปล่อย 4.23.6–4.23.9 (5–6 ส.ค.) แล้ว `--experimental-test-module-mocks` พังบน alpine → build ล้มที่ `video-merge-mirror.test.ts` ทั้งที่ commit ไม่ได้แตะส่วนนั้นเลย (เครื่อง dev ผ่านหมดเพราะ lockfile ตรึง tsx 4.22.2 ไว้)
+- `COPY package.json package-lock.json ./` + `npm ci --legacy-peer-deps` — image ตรงกับที่เทสต์เป๊ะ
+- พิสูจน์ด้วยการ build image จริงในเครื่อง (linux/amd64): ผ่านทั้ง `npm test` + `next build`, ยืนยัน tsx ใน image = 4.22.2
+
+### Added — หวาน (ชลธร) เข้าทีม Content Agency
+seed `outlet-producers.ts` เพิ่ม TSD00052 chonlathorn.j@thestandard.co (Section Content Agency → AGN, Video Production Manager → คอลัมน์ Producer) ตามชีท ops 2026-08-06 — account สร้างบน prod ไปแล้ว รอบ import หลัง deploy จะเติมชื่อเล่น "หวาน"
+
+---
+
 ## [1.163.0] — 2026-08-06
 
 ### Added — ย้ายสังกัด (cross-outlet move): แก้งานที่ลงผิดบ้านได้เองจากหน้าแอดมิน

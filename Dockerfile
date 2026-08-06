@@ -4,9 +4,15 @@ RUN apk add --no-cache openssl libc6-compat postgresql-client
 
 WORKDIR /app
 
-# Install dependencies
-COPY package.json ./
-RUN npm install --legacy-peer-deps
+# Install dependencies.
+# v1.163.1 — the lockfile is COPIED and `npm ci` is used so the image is built
+# from the EXACT dependency versions this repo was tested against. Before this,
+# every image ran `npm install` against package.json alone, so each build silently
+# picked up whatever had been published since the last one: a tsx 4.23.x release
+# broke `--experimental-test-module-mocks` inside alpine and failed the build on
+# a commit that touched none of it. Unpinned prod images were the real bug.
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps
 
 # Copy source
 COPY . .
