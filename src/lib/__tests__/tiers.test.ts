@@ -107,3 +107,16 @@ test('tierHome targets each tier’s main surface', () => {
   assert.equal(tierHome('admin'), '/')
   assert.equal(tierHome('coordinator'), '/')
 })
+
+// ── v1.166 — the two new self-service pages must be reachable by CREW ────────
+
+test('/review and /feedback are open to every tier — crew are the whole audience', () => {
+  // The review form arrives by email to camera/sound crew (tier "crew") and the
+  // feedback page is for everyone who ever used the floating box. Both authorize
+  // at the data layer (token / session-scoped query), so the tier gate must not
+  // bounce them to /admin — that would make the emailed link dead on arrival.
+  for (const tier of ['crew', 'producer', 'sound-mgmt', 'coordinator'] as const) {
+    assert.equal(tierAllows(tier, '/review/sometoken'), true, `${tier} → /review`)
+    assert.equal(tierAllows(tier, '/feedback'), true, `${tier} → /feedback`)
+  }
+})

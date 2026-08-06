@@ -53,7 +53,13 @@ export function tierHome(tier: Tier): string {
 // update/time-change requests). The page + its APIs already scope everything
 // by the session's own producerEmail, so opening it with zero bookings just
 // shows an empty list. Same lesson as /new and /dashboard above.
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer']
+// v1.166 — '/review' (post-shoot peer review, opened from an emailed token
+// link) and '/feedback' ("เรื่องที่ฉันแจ้งไว้") join ALWAYS for the same reason
+// as '/ot' and '/producer': both authorize at the data layer — /review is
+// token-only and never trusts the session, /feedback scopes every query to the
+// session's own email server-side. Leaving them out bounced exactly the people
+// the feature exists for (crew tier) straight to /admin.
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer', '/review', '/feedback']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],

@@ -386,6 +386,19 @@ echo "==> Starting sound-merge worker (supervised)..."
   done
 ) &
 
+# v1.166 — post-shoot peer review sender. DORMANT until SHOOT_REVIEW_ENABLED=1
+# (both the worker and the endpoint check it). Sends the rating form to everyone
+# who worked a shoot that ended SHOOT_REVIEW_DELAY_DAYS ago; invites are unique
+# per person per booking so a restart can never double-mail anyone.
+echo "==> Starting shoot-review worker (supervised)..."
+(
+  while true; do
+    node scripts/shoot-review-worker.js
+    echo "[shoot-review] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 # v1.127 — video-merge worker. ON BY DEFAULT (idempotent MOVE; re-runs only handle
 # the remainder). With NAS_DSM_URL/USER/PASS set it fires the merge the moment the
 # NAS Cloud Sync turns green (uptodate); without them it falls back to a plain

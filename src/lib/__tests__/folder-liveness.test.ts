@@ -53,5 +53,5 @@ test('isFolderAlive keeps its fail-closed meaning: only a confirmed live folder 
 test('every status the retry helper retries maps to unknown, not dead', () => {
   // If a retryable status ever mapped to `dead`, exhausting retries during a
   // quota spike would look like mass folder deletion to the resolvers.
-  for (const s of RETRYABLE) assert.equal(classify(null, { status: s }), 'unknown')
+  for (const s of Array.from(RETRYABLE)) assert.equal(classify(null, { status: s }), 'unknown')
 })

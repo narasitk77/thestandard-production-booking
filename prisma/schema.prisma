@@ -365,6 +365,8 @@ model Booking {
   // table scan that only gets worse as bookings accumulate across years.
   @@index([deletedAt, status, shootDate])
   @@map("bookings")
+  // v1.166 — post-shoot peer review (append-only; see ShootReview)
+  shootReviewInvites ShootReviewInvite[]
 }
 
 model Episode {
@@ -867,4 +869,116 @@ model NasSyncState {
   updatedAt DateTime @updatedAt
 
   @@map("nas_sync_state")
+}
+
+// ─── v1.166 — feedback tickets ────────────────────────────────────────────────
+// The floating "ติชม/แจ้งปัญหา" box (v1.133) emailed the admin and stopped
+// there: the reporter never learned whether anyone looked, and nothing tracked
+// what was still open. These two tables turn each submission into a ticket the
+// admin works and the reporter can follow, with a real conversation attached.
+model FeedbackTicket {
+  id            String  @id @default(cuid())
+  /// Human-facing number — rendered FB-001. Sequential so people can quote it.
+  number        Int     @unique @default(autoincrement())
+  reporterEmail String
+  mood          String? // love | problem | idea
+  page          String? // the route they were on when they submitted
+  subject       String  // first line of the message, for the list view
+  status        String  @default("NEW") // NEW | IN_PROGRESS | RESOLVED
+  /// What was actually done — sent to the reporter when the ticket is closed.
+  resolution    String?
+  resolvedAt    DateTime?
+  resolvedBy    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  /// Bumped by any new message so the admin list can sort by "needs attention".
+  lastMessageAt DateTime @default(now())
+
+  messages FeedbackMessage[]
+
+  @@index([status, lastMessageAt])
+  @@index([reporterEmail, createdAt])
+  @@map("feedback_tickets")
+}
+
+model FeedbackMessage {
+  id          String   @id @default(cuid())
+  ticketId    String
+  ticket      FeedbackTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorEmail String
+  /// true = written by an admin in the console; false = the reporter replying.
+  fromAdmin   Boolean  @default(false)
+  body        String
+  createdAt   DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+  @@map("feedback_messages")
+}
+
+// ─── v1.166 — post-shoot peer review ──────────────────────────────────────────
+// One day after a shoot, everyone who worked it is invited to rate the OTHER
+// teams (producer ↔ camera ↔ sound). Ratings are hidden from the people being
+// rated and from every other colleague; only the review owners (see
+// src/lib/review-access.ts) can read them.
+//
+// APPEND-ONLY BY OPERATOR RULE: nothing in the app deletes a ShootReview, and
+// there is deliberately no delete/edit endpoint. A rater may submit once per
+// (booking, target team) — the unique index is what enforces that, not a
+// mutable "submitted" flag.
+model ShootReview {
+  id         String   @id @default(cuid())
+  /// Plain column, NO foreign key: a `Cascade` here meant a booking hard-delete
+  /// (purge-bookings) silently deleted ratings, which contradicts the
+  /// append-only rule this table exists to keep. The booking context that the
+  /// export needs is denormalised below instead.
+  bookingId  String
+  /// Snapshotted at write time so a report still reads correctly after the
+  /// booking is renamed (v1.163 outlet moves rewrite bookingCode) or removed.
+  bookingCode String?
+  shootDate   DateTime?
+  /// WHO rated. Readable only by the review owners — never returned by any
+  /// endpoint a normal user can reach. Stored (not hashed) because the operator
+  /// needs to act on repeat problems and export the raw log.
+  raterEmail String
+  raterRole  String   // producer | camera | sound | other
+  /// WHICH TEAM this row rates. Mutual review = one row per rater per team.
+  targetRole String   // producer | camera | sound
+  score      Int      // 1..5 overall
+  /// Per-criterion scores, e.g. {"onTime":5,"communication":4}. Shape may grow;
+  /// the overall `score` is the stable field reports key off.
+  scores     Json?
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([bookingId, raterEmail, targetRole])
+  @@index([bookingId])
+  @@index([createdAt])
+  @@map("shoot_reviews")
+}
+
+// The invitation itself — one row per (booking, person), carrying the token the
+// emailed link uses. Separate from ShootReview so "who was asked" and "who
+// answered" stay distinguishable, and so a reminder can be sent without
+// touching any rating.
+model ShootReviewInvite {
+  id          String   @id @default(cuid())
+  bookingId   String
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  email       String
+  role        String   // the rater's own role on this shoot
+  /// The teams THIS person was asked about, decided once by buildInvites when
+  /// the invite was minted. Persisted rather than recomputed: the form must ask
+  /// exactly what the email promised, and a later crew change must not silently
+  /// add or remove a question.
+  targets     String[]
+  token       String   @unique
+  sentAt      DateTime @default(now())
+  /// Set only after the invite email actually left. Null = created but never
+  /// delivered, which the next run re-sends (re-using the same token).
+  mailedAt    DateTime?
+  submittedAt DateTime?
+
+  @@unique([bookingId, email])
+  @@index([bookingId])
+  @@map("shoot_review_invites")
 }

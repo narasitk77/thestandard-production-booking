@@ -25,6 +25,7 @@ export default function FeedbackWidget() {
   const [message, setMessage] = useState('')
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+  const [ticketRef, setTicketRef] = useState('')
 
   if (pathname?.startsWith('/new')) return null
 
@@ -42,11 +43,14 @@ export default function FeedbackWidget() {
       const d = await res.json().catch(() => ({}))
       if (res.status === 401) throw new Error('เซสชันหมดอายุ — รีเฟรชหน้าแล้วลองส่งใหม่นะครับ')
       if (!res.ok) throw new Error(d.error || 'ส่งไม่สำเร็จ ลองใหม่อีกครั้งนะครับ')
+      // v1.166 — hand back the ticket number so the sender knows this went into
+      // a queue somebody works, not into a mailbox.
+      setTicketRef(typeof d.ref === 'string' ? d.ref : '')
       setState('sent')
       setMessage('')
       setMood(null)
       // ปิดเองหลังโชว์คำขอบคุณสักครู่
-      setTimeout(() => { setOpen(false); setState('idle') }, 2500)
+      setTimeout(() => { setOpen(false); setState('idle'); setTicketRef('') }, 4000)
     } catch (e: any) {
       setState('error')
       setErrorMsg(e?.message || 'ส่งไม่สำเร็จ ลองใหม่อีกครั้งนะครับ')
@@ -87,7 +91,18 @@ export default function FeedbackWidget() {
             <div className="p-6 text-center space-y-1">
               <div className="text-3xl">🙏</div>
               <div className="text-sm font-medium text-gray-800">ส่งถึงทีมแล้ว ขอบคุณมากครับ!</div>
-              <div className="text-xs text-gray-500">ทุกข้อความมีคนอ่านจริง ๆ</div>
+              {ticketRef ? (
+                <>
+                  <div className="text-xs text-gray-500">
+                    เลขที่เรื่อง <span className="font-mono text-gray-700">{ticketRef}</span> — ติดตามได้ว่าไปถึงไหนแล้ว
+                  </div>
+                  <a href="/feedback" className="inline-block text-xs text-blue-600 hover:underline pt-1">
+                    ดูเรื่องที่ฉันแจ้งไว้ →
+                  </a>
+                </>
+              ) : (
+                <div className="text-xs text-gray-500">ทุกข้อความมีคนอ่านจริง ๆ</div>
+              )}
             </div>
           ) : (
             <div className="p-4 space-y-3">

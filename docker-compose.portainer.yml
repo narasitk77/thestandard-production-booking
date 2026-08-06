@@ -248,6 +248,16 @@ services:
       # shoot in the last N days. 0 = no window (pre-v1.164 behaviour).
       AGN_MARKER_WINDOW_DAYS: ${AGN_MARKER_WINDOW_DAYS:-90}
 
+      # --- Post-shoot peer review (v1.166) ---
+      # Ratings between teams, one day after the shoot. DORMANT by default: this
+      # feature emails real crew, so it turns on only when the operator says so.
+      # Results are readable by REVIEW_OWNER_EMAILS only (default: the three
+      # named people, enforced server-side in src/lib/review-access.ts).
+      SHOOT_REVIEW_ENABLED: ${SHOOT_REVIEW_ENABLED:-0}
+      SHOOT_REVIEW_DELAY_DAYS: ${SHOOT_REVIEW_DELAY_DAYS:-1}
+      SHOOT_REVIEW_WORKER_HOUR: ${SHOOT_REVIEW_WORKER_HOUR:-10}
+      REVIEW_OWNER_EMAILS: ${REVIEW_OWNER_EMAILS:-}
+
       # --- Automated DB backup (v1.77) ---
       # Supervised worker (scripts/backup-worker.js) pg_dumps the DB daily, gzips
       # it, and uploads to BACKUP_DRIVE_FOLDER_ID (service account needs edit
