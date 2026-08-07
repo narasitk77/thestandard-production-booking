@@ -1,10 +1,10 @@
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const intervalMs = Math.max(
   60_000,
   parsePositiveInt(process.env.CALENDAR_RECONCILE_INTERVAL_MS, 10 * 60_000),
 )
-const baseUrl = (process.env.CALENDAR_RECONCILE_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.CALENDAR_RECONCILE_URL)
 const secret = (
   process.env.CALENDAR_RECONCILE_SECRET ||
   process.env.NEXTAUTH_SECRET ||

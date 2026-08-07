@@ -7,7 +7,7 @@
 // PREP_FOLDERS_WORKER_ENABLED=0 / false / no to disable. Mirrors
 // scripts/reminders-worker.js for interval / secret / SIGTERM handling.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const flag = String(process.env.PREP_FOLDERS_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
@@ -20,7 +20,7 @@ const intervalMs = Math.max(
   300_000,
   parsePositiveInt(process.env.PREP_FOLDERS_INTERVAL_MS, 60 * 60_000), // hourly
 )
-const baseUrl = (process.env.PREP_FOLDERS_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.PREP_FOLDERS_URL)
 const secret = (
   process.env.PREP_FOLDERS_SECRET ||
   process.env.NEXTAUTH_SECRET ||

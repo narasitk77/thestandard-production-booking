@@ -227,6 +227,11 @@ services:
       # on): set to 0 if a rename ever fights an ops naming convention.
       FOLDER_INTEGRITY_RENAME: ${FOLDER_INTEGRITY_RENAME:-0}
 
+      # v1.168 — set to 0 when the `worker` service (profile: workers) is up,
+      # or every scheduled job runs twice: two containers merging the same
+      # footage into the same folders.
+      RUN_WORKERS: ${RUN_WORKERS:-1}
+
       # --- Drive-tree worker kill switches (v1.164, reconciler Stage 0) ---
       # These three workers read their own *_WORKER_ENABLED flag and exit when it
       # is off — but compose never PASSED the vars into the container, so setting
@@ -291,6 +296,65 @@ services:
       # container name. Declaring it here (not a manual `docker network
       # connect`) keeps the attachment across redeploys.
       - npm-network
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # v1.168 — the supervised workers as their OWN service. Same image, different
+  # role. NOT started by default: it only comes up with
+  #   docker compose --profile workers up -d
+  # (or by adding `workers` to the stack's profiles in Portainer).
+  #
+  # THE ONE THING TO GET RIGHT: when this service runs, set RUN_WORKERS=0 on the
+  # `app` service. Otherwise every job runs twice — two containers, both merging
+  # the same footage into the same folders. The pass lease (v1.167) makes that
+  # survivable rather than corrupting, but it is still wasted Drive quota and
+  # doubled email.
+  #
+  # It talks to the app over the compose network (`http://app:3000`), NOT the
+  # public URL: the reverse proxy times out long Drive-mutating endpoints at
+  # ~60s, which is the 504 we keep hitting from a browser.
+  worker:
+    image: ghcr.io/narasitk77/thestandard-production-booking:${IMAGE_TAG:-latest}
+    container_name: production-booking-worker
+    profiles: ["workers"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      APP_ROLE: worker
+      WORKER_APP_URL: ${WORKER_APP_URL:-http://app:3000}
+      # The workers authenticate to /api/internal/* with this. Same value as the
+      # app, or every request comes back 401/403.
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      RECONCILE_SECRET: ${RECONCILE_SECRET:-}
+      NAS_MANIFEST_SECRET: ${NAS_MANIFEST_SECRET:-}
+      # Which workers are on. Mirror these with the app's values so flipping one
+      # place does not leave the other running the same job.
+      CALENDAR_RECONCILE_WORKER_ENABLED: ${CALENDAR_RECONCILE_WORKER_ENABLED:-1}
+      PREP_FOLDERS_WORKER_ENABLED: ${PREP_FOLDERS_WORKER_ENABLED:-1}
+      SOUND_MERGE_WORKER_ENABLED: ${SOUND_MERGE_WORKER_ENABLED:-1}
+      VIDEO_MERGE_WORKER_ENABLED: ${VIDEO_MERGE_WORKER_ENABLED:-1}
+      FOLDER_INTEGRITY_WORKER_ENABLED: ${FOLDER_INTEGRITY_WORKER_ENABLED:-1}
+      LANDING_WORKER_ENABLED: ${LANDING_WORKER_ENABLED:-1}
+      SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
+      FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
+      FOOTAGE_WORKER_ENABLED: ${FOOTAGE_WORKER_ENABLED:-0}
+      REMINDERS_WORKER_ENABLED: ${REMINDERS_WORKER_ENABLED:-0}
+      BACKUP_WORKER_ENABLED: ${BACKUP_WORKER_ENABLED:-0}
+      SHOOT_REVIEW_ENABLED: ${SHOOT_REVIEW_ENABLED:-0}
+      # Timing knobs, same defaults as the app.
+      PREP_FOLDERS_INTERVAL_MS: ${PREP_FOLDERS_INTERVAL_MS:-3600000}
+      SOUND_MERGE_INTERVAL_MS: ${SOUND_MERGE_INTERVAL_MS:-3600000}
+      VIDEO_MERGE_POLL_MS: ${VIDEO_MERGE_POLL_MS:-60000}
+      VIDEO_MERGE_MIN_GAP_MS: ${VIDEO_MERGE_MIN_GAP_MS:-600000}
+      VIDEO_MERGE_FALLBACK_MS: ${VIDEO_MERGE_FALLBACK_MS:-21600000}
+      FOLDER_INTEGRITY_INTERVAL_MS: ${FOLDER_INTEGRITY_INTERVAL_MS:-3600000}
+      SHOOT_REVIEW_WORKER_HOUR: ${SHOOT_REVIEW_WORKER_HOUR:-10}
+      # Backup is the ONE worker that needs the database and Drive directly
+      # (pg_dump + upload). Leave BACKUP_WORKER_ENABLED=0 here and keep it on
+      # the app, or give this container DATABASE_URL too.
+      TZ: ${TZ:-Asia/Bangkok}
+    networks:
+      - app-network
 
 volumes:
   postgres_data:

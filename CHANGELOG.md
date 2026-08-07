@@ -11,6 +11,20 @@ _(ว่าง)_
 
 ---
 
+## [1.168.0] — 2026-08-07
+
+### Added — worker แยกเป็น service ของตัวเองได้ (เตรียมย้าย workspace) — ปิดไว้ default ไม่กระทบ deploy เดิม
+เตรียมทางให้ย้าย worker ออกจาก container ของเว็บ · **ค่า default ทุกตัวเท่าเดิมเป๊ะ** deploy ปกติไม่มีอะไรเปลี่ยน
+- **ที่ทำให้ง่าย**: worker ทั้ง 12 ตัวเป็น *นาฬิกาปลุก* ล้วนๆ — ไม่มีตัวไหนแตะ Postgres หรือ Drive เลย แค่ยิง HTTP ไป `/api/internal/...` ของแอปพร้อม secret ย้ายจึงเท่ากับ "เปลี่ยนปลายทาง + แจก secret" ไม่ต้องแก้ตรรกะ (ยกเว้น `backup-worker` ที่ต้องใช้ DB จริง — ควรอยู่กับแอปต่อ)
+- `scripts/lib/env.js` เพิ่ม `appBaseUrl()` — ลำดับ: URL เฉพาะตัว → `WORKER_APP_URL` → `127.0.0.1:3000` (เดิม) · rewire ครบทั้ง 12 worker
+- `start.sh` มี 2 โหมดผ่าน `APP_ROLE`: `web` (เดิมทุกอย่าง) / `worker` (**ข้าม schema push + seed + Next.js ทั้งหมด** เหลือแต่ supervisor) · `RUN_WORKERS=0` ปิด worker ฝั่งแอปเมื่อแยกออกไปแล้ว
+- **กฎเหล็ก**: มีเพียง web ที่แตะ schema — สอง container รัน `prisma db push --accept-data-loss` พร้อมกันบนฐานเดียวคือทางที่คอลัมน์หาย · `APP_ROLE=worker` ที่ไม่ตั้ง `WORKER_APP_URL` **FATAL ไม่ยอมบูต** (ปล่อยผ่านแล้วมันจะยิงหาตัวเองแล้วเงียบ)
+- compose: service `worker` แบบ `profiles: ["workers"]` — default ไม่ขึ้น (พิสูจน์แล้วว่า `config --services` ให้ db+app เท่านั้น) · คุยกันผ่าน `http://app:3000` ในเน็ตเวิร์ก **ไม่ผ่าน public URL** เพราะ proxy ตัดที่ ~60 วิ ซึ่งคือ 504 ที่เจอประจำ
+- `docs/worker-service-split.md` — ขั้นตอนเปิดใช้ ลำดับที่ปลอดภัย และวิธีย้อนกลับ
+- **พิสูจน์ด้วย container จริง** (build amd64 แล้วรัน): ไม่มี `WORKER_APP_URL` → FATAL ✓ · `APP_ROLE` มั่ว → FATAL ✓ · โหมด worker ข้าม DB/seed/Next.js ✓ · PID 1 อยู่ยาว ✓ · worker ที่เปิดไว้ขึ้นครบและ log baseUrl ถูกต้อง ✓
+
+---
+
 ## [1.167.0] — 2026-08-07
 
 ### Added — ฐานของ reconciler (ข้อ 4 ของแผน robustness) — ยังไม่มีอะไรเรียกใช้

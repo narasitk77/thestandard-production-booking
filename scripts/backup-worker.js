@@ -8,7 +8,7 @@
 //
 // Mirrors scripts/reminders-worker.js (interval, secret resolution, SIGTERM).
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const enabled = String(process.env.BACKUP_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -21,7 +21,7 @@ const intervalMs = Math.max(
   60 * 60_000, // never tighter than hourly
   parsePositiveInt(process.env.BACKUP_INTERVAL_MS, 24 * 60 * 60_000),
 )
-const baseUrl = (process.env.BACKUP_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.BACKUP_URL)
 const secret = (
   process.env.BACKUP_SECRET ||
   process.env.NEXTAUTH_SECRET ||

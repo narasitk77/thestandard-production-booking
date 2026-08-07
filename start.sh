@@ -2,6 +2,43 @@
 set -e
 
 # ──────────────────────────────────────────────────────────────────────────────
+# v1.168 — CONTAINER ROLE. One image, two jobs.
+#
+#   APP_ROLE=web     (default) everything as before: migrations, seed, the
+#                    supervised workers, then Next.js. Nothing changes for an
+#                    existing deploy that sets nothing.
+#   APP_ROLE=worker  the supervised workers ONLY — no schema push, no seed, no
+#                    web server. For running the workers as their own service
+#                    (their own container, stack, or host).
+#
+# Two rules make the split safe:
+#   1. ONLY the web role touches the schema. Two containers racing
+#      `prisma db push` on one database is how you lose a column.
+#   2. The workers are thin HTTP schedulers — they call the app, they never talk
+#      to Postgres or Drive themselves — so a worker container needs WORKER_APP_URL
+#      and the shared secret, and nothing else.
+#
+# RUN_WORKERS=0 turns the workers OFF in the web role. Set that on the app the
+# moment a separate worker service exists, or every job runs twice.
+# ──────────────────────────────────────────────────────────────────────────────
+APP_ROLE="${APP_ROLE:-web}"
+RUN_WORKERS="${RUN_WORKERS:-1}"
+
+case "$APP_ROLE" in
+  web|worker) ;;
+  *) echo "FATAL: APP_ROLE must be 'web' or 'worker' (got '$APP_ROLE')"; exit 1 ;;
+esac
+
+if [ "$APP_ROLE" = "worker" ]; then
+  if [ -z "$WORKER_APP_URL" ]; then
+    echo "FATAL: APP_ROLE=worker requires WORKER_APP_URL (e.g. http://app:3000)"
+    echo "       Without it the workers would call 127.0.0.1 — themselves — and do nothing."
+    exit 1
+  fi
+  RUN_WORKERS=1
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 0) Diagnostics — print the key env at boot. Shows up as the first lines of
 #    `docker logs production-booking-app`.
 # ──────────────────────────────────────────────────────────────────────────────
@@ -22,6 +59,14 @@ fi
 # ──────────────────────────────────────────────────────────────────────────────
 # 1) Wait for Postgres to accept connections
 # ──────────────────────────────────────────────────────────────────────────────
+if [ "$APP_ROLE" = "web" ]; then
+# ══ WEB ROLE ONLY ═══════════════════════════════════════════════════════════
+# Schema push, enum pre-migrations and the seed live here and NOWHERE else.
+# A worker container must never reach this: two containers running
+# `prisma db push --accept-data-loss` against one database can drop a column
+# between each other's reads. The workers do not need Postgres at all — they
+# only speak HTTP to the app.
+
 if [ -z "$DATABASE_URL" ]; then
   echo "FATAL: DATABASE_URL is not set"
   exit 1
@@ -301,6 +346,35 @@ SQL
 echo "==> Seeding database (idempotent)..."
 npx tsx prisma/seed.ts || echo "Seed skipped or already done"
 
+else
+# ══ WORKER ROLE ═════════════════════════════════════════════════════════════
+# No database work of any kind. Wait for the APP instead — every worker's first
+# act is an HTTP call, and firing them at a server that is still booting just
+# burns their first tick.
+echo "==> Worker role — skipping schema/seed (the web container owns those)."
+echo "==> Waiting for the app at ${WORKER_APP_URL} ..."
+RETRIES=60
+until wget -q -O /dev/null "${WORKER_APP_URL}/api/version" 2>/dev/null \
+   || curl -sf -o /dev/null "${WORKER_APP_URL}/api/version" 2>/dev/null; do
+  RETRIES=$((RETRIES - 1))
+  if [ "$RETRIES" -le 0 ]; then
+    echo "WARN: app not reachable yet — starting workers anyway (each retries on its own schedule)"
+    break
+  fi
+  sleep 2
+done
+echo "    app reachable"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Supervised workers. Each is a restart loop: a crash costs 5 seconds, not the
+# rest of the container's life. In the worker role this is the whole program.
+# ──────────────────────────────────────────────────────────────────────────────
+if [ "$RUN_WORKERS" != "1" ]; then
+  echo "==> RUN_WORKERS=$RUN_WORKERS — skipping every supervised worker in this container."
+  echo "    (Expected when the workers run as their own service.)"
+else
+
 echo "==> Starting calendar guest reconcile worker (supervised)..."
 # Wrap the worker in a tiny restart loop so a crash doesn't take it out for
 # the rest of the container's lifetime. 5s back-off prevents a hot loop if
@@ -453,6 +527,16 @@ echo "==> Starting landing drop-folder lifecycle worker (supervised)..."
     sleep 5
   done
 ) &
+
+fi  # end RUN_WORKERS
+
+if [ "$APP_ROLE" = "worker" ]; then
+  echo "==> Worker role: no web server. Supervising $(ls scripts/*-worker.js | wc -l | tr -d ' ') workers against ${WORKER_APP_URL}."
+  # Keep PID 1 alive so the container stays up and the supervisors keep running.
+  # `wait` returns when a signal arrives, which is exactly when we should exit.
+  wait
+  exit 0
+fi
 
 echo "==> Starting Next.js..."
 exec npm start

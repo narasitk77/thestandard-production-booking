@@ -6,7 +6,7 @@
 // ON BY DEFAULT (idempotent + safe). Set SOUND_MERGE_WORKER_ENABLED=0 / false / no
 // to disable. Mirrors scripts/prep-folders-worker.js.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const flag = String(process.env.SOUND_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
@@ -19,7 +19,7 @@ const intervalMs = Math.max(
   300_000,
   parsePositiveInt(process.env.SOUND_MERGE_INTERVAL_MS, 60 * 60_000), // hourly
 )
-const baseUrl = (process.env.SOUND_MERGE_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.SOUND_MERGE_URL)
 const secret = (
   process.env.SOUND_MERGE_SECRET ||
   process.env.NEXTAUTH_SECRET ||

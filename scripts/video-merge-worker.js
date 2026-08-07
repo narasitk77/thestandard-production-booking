@@ -22,7 +22,7 @@
 // accepted by default (NAS_DSM_INSECURE_TLS=0 to require a valid cert).
 
 const https = require('https')
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const flag = String(process.env.VIDEO_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
@@ -31,7 +31,7 @@ if (flag === '0' || flag === 'false' || flag === 'no') {
   return
 }
 
-const baseUrl = (process.env.VIDEO_MERGE_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.VIDEO_MERGE_URL)
 const secret = (
   process.env.VIDEO_MERGE_SECRET ||
   process.env.NEXTAUTH_SECRET ||

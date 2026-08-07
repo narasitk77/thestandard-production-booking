@@ -11,7 +11,7 @@
 // SIGTERM handling) so anyone who's debugged that one already knows the
 // shape of this one.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const enabled = String(process.env.FOOTAGE_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -26,7 +26,7 @@ const intervalMs = Math.max(
   60_000,
   parsePositiveInt(process.env.FOOTAGE_WORKER_INTERVAL_MS, 10 * 60_000),
 )
-const baseUrl = (process.env.FOOTAGE_SYNC_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.FOOTAGE_SYNC_URL)
 const secret = (
   process.env.FOOTAGE_SYNC_SECRET ||
   process.env.NEXTAUTH_SECRET ||

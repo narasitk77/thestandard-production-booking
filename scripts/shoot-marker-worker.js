@@ -13,7 +13,7 @@
 // small regenerable _SHOOT stubs to Shared-Drive trash (recoverable ~30 days);
 // footage folders are never touched. The endpoint sends the report email.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const enabled = String(process.env.SHOOT_MARKER_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -24,7 +24,7 @@ if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
 
 // Target hour of day in Asia/Bangkok to run the nightly pass (0–23; default 3am).
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.SHOOT_MARKER_WORKER_HOUR, 3)))
-const baseUrl = (process.env.SHOOT_MARKER_RECONCILE_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.SHOOT_MARKER_RECONCILE_URL)
 const secret = (
   process.env.SHOOT_MARKER_RECONCILE_SECRET ||
   process.env.CALENDAR_RECONCILE_SECRET ||

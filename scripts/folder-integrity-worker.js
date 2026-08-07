@@ -13,7 +13,7 @@
 // boot is delayed (FOLDER_INTEGRITY_START_DELAY_MS, default 4 min) so it never
 // races the prep-folders sweep or a deploy's cold start.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const enabled = String(process.env.FOLDER_INTEGRITY_WORKER_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
@@ -24,7 +24,7 @@ if (enabled === '0' || enabled === 'false' || enabled === 'no') {
 
 const intervalMs = parsePositiveInt(process.env.FOLDER_INTEGRITY_INTERVAL_MS, 60 * 60 * 1000)
 const startDelayMs = parsePositiveInt(process.env.FOLDER_INTEGRITY_START_DELAY_MS, 4 * 60 * 1000)
-const baseUrl = (process.env.FOLDER_INTEGRITY_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.FOLDER_INTEGRITY_URL)
 const secret = (
   process.env.PREP_FOLDERS_SECRET ||
   process.env.NEXTAUTH_SECRET ||

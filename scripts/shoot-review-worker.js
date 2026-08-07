@@ -12,7 +12,7 @@
 // Runs with dryRun=0 (sends for real). Every invite is unique per (booking,
 // person), so a restart or a double run cannot invite anybody twice.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const enabled = String(process.env.SHOOT_REVIEW_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -22,7 +22,7 @@ if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
 }
 
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.SHOOT_REVIEW_WORKER_HOUR, 10)))
-const baseUrl = (process.env.SHOOT_REVIEW_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.SHOOT_REVIEW_URL)
 const secret = (
   process.env.RECONCILE_SECRET ||
   process.env.NEXTAUTH_SECRET ||

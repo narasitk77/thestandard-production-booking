@@ -10,7 +10,7 @@
 // (nightly scheduler, secret resolution, SIGTERM handling). Mutating (dryRun=0);
 // idempotent, only trashes EMPTY regenerable folders to recoverable Drive trash.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const enabled = String(process.env.LANDING_WORKER_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
@@ -20,7 +20,7 @@ if (enabled === '0' || enabled === 'false' || enabled === 'no') {
 }
 
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.LANDING_WORKER_HOUR, 19)))
-const baseUrl = (process.env.LANDING_MANAGE_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.LANDING_MANAGE_URL)
 const secret = (
   process.env.PREP_FOLDERS_SECRET ||
   process.env.NEXTAUTH_SECRET ||

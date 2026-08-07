@@ -9,7 +9,7 @@
 // change. Mirrors scripts/reminders-worker.js (interval, secret resolution,
 // SIGTERM handling) so anyone who's debugged that one knows the shape of this.
 
-const { parsePositiveInt } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl } = require('./lib/env')
 
 const enabled = String(process.env.FOOTAGE_READY_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -22,7 +22,7 @@ const intervalMs = Math.max(
   60_000,
   parsePositiveInt(process.env.FOOTAGE_READY_INTERVAL_MS, 30 * 60_000),
 )
-const baseUrl = (process.env.FOOTAGE_READY_URL || 'http://127.0.0.1:3000').trim()
+const baseUrl = appBaseUrl(process.env.FOOTAGE_READY_URL)
 const secret = (
   process.env.FOOTAGE_READY_SECRET ||
   process.env.REMINDERS_SECRET ||
