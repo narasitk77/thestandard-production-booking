@@ -7,6 +7,7 @@ import { Menu, X, Plus, ChevronDown } from 'lucide-react'
 import { signOut } from 'next-auth/react'
 import { hasConsoleAccess } from '@/lib/roles'
 import { tierAllows, type Tier } from '@/lib/tiers'
+import { canReadReviews } from '@/lib/review-access'
 
 interface NavProps {
   session: { email: string; role: string } | null
@@ -35,6 +36,8 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
   const isAdmin = session?.role === 'ADMIN'
   // v1.90 — only tiers that book (admin/coordinator/producer) get the + New CTA.
   const canCreate = !!session && tierAllows(tier, '/new')
+  // v1.168 — see the note on the '/admin/reviews' item below: cosmetic gate.
+  const isReviewOwner = canReadReviews(session?.email)
   const close = () => { setOpen(false); setMoreOpen(false) }
 
   const isActive = (href: string) =>
@@ -87,6 +90,17 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     { href: '/upload', label: 'Upload', show: !!canUpload },
     // v1.35.5 — Admin-only review queue for Mark-as-Done
     { href: '/admin/upload-review', label: 'Upload Review', show: isConsole },
+    // v1.168 — the v1.166 pages had no way in at all: they shipped without a
+    // single link, so the only way to reach them was to type the URL.
+    // Everyone can follow up on what THEY reported; the queue is console-only.
+    { href: '/feedback', label: 'เรื่องที่ฉันแจ้งไว้', show: !!session },
+    { href: '/admin/feedback', label: 'Feedback จากทีม', show: isConsole },
+    // Peer-review results are readable by three named people (review-access.ts
+    // enforces it server-side and returns 403 to everyone else). This check is
+    // a UI hint ONLY — it runs on the client, where REVIEW_OWNER_EMAILS is not
+    // available, so it uses the built-in list. If the env override is ever set,
+    // the page's own 403 is still the truth; the menu is just cosmetic.
+    { href: '/admin/reviews', label: 'ผลประเมินหลังงาน', show: isReviewOwner },
   ].filter(i => i.show && tierAllows(tier, i.href))
 
   // Active state: primary hubs (คิวงาน / Admin) use their own match fn so the

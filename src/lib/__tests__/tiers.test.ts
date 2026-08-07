@@ -120,3 +120,12 @@ test('/review and /feedback are open to every tier — crew are the whole audien
     assert.equal(tierAllows(tier, '/feedback'), true, `${tier} → /feedback`)
   }
 })
+
+test('the v1.166 pages are reachable by the tiers that need them', () => {
+  // They shipped with no nav entry at all — typing the URL was the only way in.
+  // These assert the tier gate would not have bounced them once linked.
+  assert.equal(tierAllows('crew', '/feedback'), true)
+  assert.equal(tierAllows('producer', '/feedback'), true)
+  assert.equal(tierAllows('coordinator', '/admin/feedback'), true)
+  assert.equal(tierAllows('admin', '/admin/reviews'), true)
+})
