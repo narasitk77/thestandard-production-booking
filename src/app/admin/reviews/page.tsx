@@ -31,6 +31,21 @@ export default function AdminReviewsPage() {
   const [data, setData] = useState<Payload | null>(null)
   const [days, setDays] = useState(90)
   const [error, setError] = useState('')
+  // v1.169 — with the feature dormant this page is empty and there is nothing
+  // to click. This mints a real invite for YOU on a real booking and sends no
+  // email, so the form can be seen before anyone decides to turn it on.
+  const [preview, setPreview] = useState<{ url: string; booking: { code: string | null }; targets: string[] } | null>(null)
+  const [previewBusy, setPreviewBusy] = useState(false)
+
+  const makePreview = async () => {
+    setPreviewBusy(true); setError('')
+    try {
+      const r = await fetch('/api/admin/reviews/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'สร้างตัวอย่างไม่สำเร็จ')
+      setPreview(d)
+    } catch (e: any) { setError(e.message) } finally { setPreviewBusy(false) }
+  }
 
   const load = useCallback(async () => {
     setError('')
@@ -74,6 +89,26 @@ export default function AdminReviewsPage() {
       </p>
 
       {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">{error}</div>}
+
+      <div className="gf-card p-3 mb-4 text-xs">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-gray-600">อยากเห็นว่าทีมจะได้รับฟอร์มหน้าตาแบบไหน?</span>
+          <button onClick={makePreview} disabled={previewBusy}
+            className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+            {previewBusy ? 'กำลังสร้าง…' : 'สร้างฟอร์มตัวอย่างให้ฉัน'}
+          </button>
+          <span className="text-gray-400">ออกลิงก์ให้คุณคนเดียว · ไม่ส่งอีเมลถึงใคร</span>
+        </div>
+        {preview && (
+          <div className="mt-2 border-t border-gray-100 pt-2 space-y-1">
+            <div>งานที่ใช้: <span className="font-mono">{preview.booking.code}</span> · จะให้คุณประเมิน: {preview.targets.join(', ')}</div>
+            <a href={preview.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">
+              {preview.url}
+            </a>
+            <div className="text-gray-400">คะแนนที่ส่งจากฟอร์มนี้จะขึ้นในรายการด้านล่างจริง (ลบไม่ได้ตามกติกา)</div>
+          </div>
+        )}
+      </div>
 
       {!data && !error ? (
         <div className="text-sm text-gray-500 flex items-center gap-2 py-6"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด…</div>
