@@ -93,6 +93,7 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     // v1.168 — the v1.166 pages had no way in at all: they shipped without a
     // single link, so the only way to reach them was to type the URL.
     // Everyone can follow up on what THEY reported; the queue is console-only.
+    { href: '/admin/monitor', label: '📊 ศูนย์ติดตาม', show: isConsole },
     { href: '/feedback', label: 'เรื่องที่ฉันแจ้งไว้', show: !!session },
     { href: '/admin/feedback', label: 'Feedback จากทีม', show: isConsole },
     // Peer-review results are readable by three named people (review-access.ts
