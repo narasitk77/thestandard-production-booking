@@ -11,6 +11,17 @@ _(ว่าง)_
 
 ---
 
+## [1.168.2] — 2026-08-07
+
+### Removed — เศษ Render ที่ค้างอยู่ทั้งหมด (บางชิ้นชี้ผู้ใช้ไปแอปที่ตายแล้ว)
+- **คู่มือผู้ใช้ (`USER_MANUAL_TH.md`) บอกให้พนักงานเข้า `production-booking-app.onrender.com`** ซึ่งเป็นแอปเก่าที่เลิกใช้แล้ว — แก้เป็น `probook.xtec9.xyz` (จุดนี้ user-facing ตรงที่สุด)
+- **ลิงก์ในอีเมลมี fallback เป็น onrender.com** (`email.ts` 2 จุด, `audit-auto-email.ts` 1 จุด) — ถ้า `NEXTAUTH_URL`/`NEXT_PUBLIC_APP_URL` หลุดเมื่อไหร่ อีเมลทุกฉบับจะพาคนไปแอปที่ตายแล้ว แก้เป็น URL จริง
+- **ยังเหลือ job `Trigger Render deploy` ใน `ci.yml`** — token ที่ใช้ push ไม่มี `workflow` scope จึงแก้ไฟล์ workflow ไม่ได้ ต้องลบผ่านหน้าเว็บ GitHub เอง (job นี้ไม่ทำอะไรอยู่แล้วเพราะ `RENDER_DEPLOY_HOOK` ไม่ได้ตั้ง — เป็นความรกไม่ใช่ความเสี่ยง)
+- ข้อความ error เรื่องอีเมลเลิกอ้าง "Render env vars / Render blocks SMTP" เป็นคำที่ตรงกับที่ deploy จริง · README + PORTAINER_DEPLOY เลิกเรียก Portainer ว่า "ทางเลือก" — มันคือทางเดียวแล้ว
+- CHANGELOG เก็บคำว่า Render ไว้ตามเดิม (เป็นประวัติ ไม่ใช่ config)
+
+---
+
 ## [1.168.1] — 2026-08-07
 
 ### Fixed — หน้า v1.166 ไม่มีลิงก์ในเมนูเลย เข้าได้ทางเดียวคือพิมพ์ URL

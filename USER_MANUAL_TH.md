@@ -2,7 +2,7 @@
 
 ระบบจองงานถ่ายทำสำหรับทีม Production Platform · เวอร์ชัน 1.7+
 
-🔗 **ลิงก์เข้าใช้งาน:** [https://production-booking-app.onrender.com](https://production-booking-app.onrender.com)
+🔗 **ลิงก์เข้าใช้งาน:** [https://probook.xtec9.xyz](https://probook.xtec9.xyz)
 
 ---
 
@@ -26,7 +26,7 @@
 
 ### ขั้นตอน
 
-1. เปิด [https://production-booking-app.onrender.com](https://production-booking-app.onrender.com)
+1. เปิด [https://probook.xtec9.xyz](https://probook.xtec9.xyz)
 2. ระบบจะพาไปหน้า **Sign in**
 3. กดปุ่ม **"Sign in with Google"**
 4. เลือกบัญชี `@thestandard.co` ของคุณ → กด Continue

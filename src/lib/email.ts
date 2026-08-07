@@ -38,7 +38,7 @@ function getSmtpConfig() {
       pass: process.env.SMTP_PASS,
     },
     tls: { rejectUnauthorized: false },
-    // Fail fast — if the port is blocked on Render these will never succeed
+    // Fail fast — if the SMTP port is blocked by the host these never succeed
     connectionTimeout: 8_000,
     greetingTimeout: 8_000,
     socketTimeout: 10_000,
@@ -308,13 +308,13 @@ export function buildEmailErrorHint(error: any, accessTokenError?: string | null
   const msg: string = error?.message || String(error || '')
   const code: string = error?.code || 'unknown'
   if (msg.includes('provider not configured') || msg.includes('not configured')) {
-    return 'No email provider is set up. Add SMTP_USER + SMTP_PASS (Gmail App Password) to your Render environment variables, or sign out and sign in to enable Gmail OAuth.'
+    return 'No email provider is set up. Add SMTP_USER + SMTP_PASS (Gmail App Password) to the stack environment, or sign out and sign in to enable Gmail OAuth.'
   }
   if (msg.includes('gmail.send') || msg.includes('insufficient authentication') || msg.includes('Gmail send permission') || msg.includes('Gmail API failed')) {
     return 'Your Google session is missing the gmail.send permission. Sign out and sign in again — on the consent screen, allow "Send email on your behalf".'
   }
   if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ESOCKET') {
-    return `SMTP port blocked (${code}) — Render often blocks outbound SMTP. Best fix: sign out and sign in again to use Gmail OAuth instead. Or add RESEND_API_KEY to Render env vars (free at resend.com).`
+    return `SMTP port blocked (${code}) — some hosts block outbound SMTP. Best fix: sign out and sign in again to use Gmail OAuth instead. Or add RESEND_API_KEY to the stack environment (free at resend.com).`
   }
   if (msg.includes('Invalid login') || msg.includes('Username and Password') || msg.includes('535') || msg.includes('534')) {
     return 'Gmail rejected the password. Use a 16-character App Password from myaccount.google.com/apppasswords — not your regular Gmail password. Or: sign out + sign in to use Gmail OAuth.'
@@ -384,7 +384,7 @@ export async function sendEmail(message: EmailMessage, context: EmailContext = {
   }
   const provider = getPreferredProvider(context)
   if (!provider) {
-    throw new Error('Email provider not configured. Set SMTP_USER + SMTP_PASS in Render environment variables, or configure RESEND_API_KEY / SENDGRID_API_KEY.')
+    throw new Error('Email provider not configured. Set SMTP_USER + SMTP_PASS in the stack environment, or configure RESEND_API_KEY / SENDGRID_API_KEY.')
   }
   if (provider === 'resend') return sendViaResend(message)
   if (provider === 'sendgrid') return sendViaSendGrid(message)
@@ -427,7 +427,7 @@ export async function sendAssignmentEmail(opts: {
 }) {
   // NEXTAUTH_URL is a normal runtime env (NEXT_PUBLIC_* gets inlined at build
   // time, so it can't reflect the real deployment URL). Prefer it.
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
   const detailLink = opts.calendarUrl || `${appUrl}/dashboard/${opts.bookingId}`
 
   const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')
@@ -495,7 +495,7 @@ export async function sendBookingConfirmedEmail(opts: {
   senderEmail?: string | null
   calendarUrl?: string | null
 }) {
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://production-booking-app.onrender.com'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
   const detailLink = `${appUrl}/dashboard/${opts.bookingId}`
 
   const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')

@@ -42,7 +42,7 @@ export async function tryAutoEmailPurgeWarning(): Promise<AutoEmailResult> {
     const appUrl =
       process.env.NEXTAUTH_URL ||
       process.env.NEXT_PUBLIC_APP_URL ||
-      'https://production-booking-app.onrender.com'
+      'https://probook.xtec9.xyz'
     const fromParam = warning.oldestAt
       ? `?from=${encodeURIComponent(warning.oldestAt.toISOString())}`
       : ''

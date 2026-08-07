@@ -2,7 +2,9 @@
 
 Step-by-step guide for deploying THE STANDARD Production Booking on a self-hosted Portainer instance (e.g. `thestandard.fortiddns.com:9000`).
 
-This is an alternative to the Render deployment. It uses the same codebase but runs the database and app on your own Docker host.
+This is how the app is deployed. The database and app run on our own Docker host, managed through Portainer.
+
+(An earlier Render deployment was retired; v1.168.1 removed the last of its config. `production-booking-app.onrender.com` is dead — never point anyone at it.)
 
 ---
 
@@ -13,8 +15,8 @@ Before you start, gather these:
 | What | Where to get it |
 |------|-----------------|
 | **Public URL** the app will live at | Decide a port on your Portainer host (e.g. `:3001`) and the FQDN, e.g. `http://thestandard.fortiddns.com:3001` |
-| **Google OAuth Client ID + Secret** | Reuse the existing one from Render env vars, or create a new client at [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials) |
-| **Google Service Account** (for Sheets/Calendar) | Reuse the existing one from Render |
+| **Google OAuth Client ID + Secret** | Reuse the existing one from the stack env, or create a new client at [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials) |
+| **Google Service Account** (for Sheets/Calendar) | Reuse the existing one from the stack env |
 | **Strong PostgreSQL password** | `openssl rand -base64 24` |
 | **NextAuth secret** | `openssl rand -base64 32` |
 
@@ -61,7 +63,7 @@ First deploy takes 3–5 min (npm install + Next.js build). Watch logs in Portai
 
 ## 4. Updating
 
-Push to `main` does **not** auto-redeploy on Portainer (unlike Render). To pull a new version:
+Push to `main` does **not** auto-redeploy. CI builds and pushes the image; pulling it is a deliberate step:
 
 - Portainer → Stacks → `production-booking` → **Pull and redeploy**
 
@@ -75,4 +77,3 @@ Or enable Portainer's automatic stack updates (Stacks → edit → toggle "Autom
 - **`POSTGRES_PASSWORD: not set` build error** → an env var placeholder isn't filled in. Compose enforces required values via the `?error` syntax.
 - **Port `3001` already in use** → pick a different `APP_PORT` in env vars and update `NEXTAUTH_URL` / `NEXT_PUBLIC_APP_URL` accordingly.
 - **No nginx in this stack** → put it behind your existing reverse proxy (Traefik, nginx, Caddy, Cloudflare Tunnel, etc.). The local `docker-compose.yml` includes nginx; this one does not.
-- **Migrating data from Render** → run `pg_dump` against the Render Postgres and `pg_restore` into the new db container. The Render free DB expires `2026-05-27`.

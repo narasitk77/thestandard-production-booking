@@ -123,7 +123,7 @@ See [docs/ops-log.md](docs/ops-log.md) for the deploy journal and [docs/architec
 
 ## Email Delivery
 
-The app sends via the signed-in admin's Google account using the Gmail HTTPS API (avoids the SMTP-port block on Render free). Admins must sign out + sign in once after a fresh deploy to grant Gmail send permission.
+The app can send via the signed-in admin's Google account using the Gmail HTTPS API (useful wherever outbound SMTP is blocked). Admins must sign out + sign in once after a fresh deploy to grant Gmail send permission. Prod uses SMTP; see the stack env.
 
 Optional provider-based delivery still supported (`resend`, `sendgrid`, or SMTP via port `2525` where allowed). See `.env.example`.
 
@@ -139,7 +139,7 @@ Optional provider-based delivery still supported (`resend`, `sendgrid`, or SMTP 
 | Charts | Recharts |
 | Icons | Lucide React |
 | Container | Docker · docker-compose · Nginx |
-| Hosting | Self-hosted Portainer (primary) · Render (legacy) |
+| Hosting | Self-hosted Docker via Portainer (https://probook.xtec9.xyz) |
 
 ## Outlets & Programs
 
