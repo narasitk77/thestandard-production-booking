@@ -8,6 +8,7 @@ import {
   classifyRater, presentRoles, buildInvites, newInviteToken, tokenFingerprint,
   isCriterionKey, reviewDelayDays, REVIEW_CRITERIA,
   reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow,
+  isInvitableEmail, reviewExcludedEmails, reviewAllowedDomains,
 } from '../shoot-review'
 import {
   OVERALL_TARGET, isOverallTarget, isSubmittableTarget, isReviewTargetRole,
@@ -200,6 +201,75 @@ test('the overall satisfaction row is submittable but is NOT a team', () => {
   for (const role of ['producer', 'camera', 'sound']) {
     assert.equal(targetsFor(role, present).includes(OVERALL_TARGET as any), false)
   }
+})
+
+test('shared team mailboxes are not invited — they are teams, not people', () => {
+  // Real prod data: video@ appeared 264 times and sound@ 205 times across 300
+  // bookings, standing in for "the camera team". Mailing them meant 18 invites to
+  // one shared inbox in a single week, and an invite link is a bearer credential.
+  for (const e of ['video@thestandard.co', 'sound@thestandard.co', 'EVENT@thestandard.co']) {
+    assert.equal(isInvitableEmail(e), false, `${e} should not be invited`)
+  }
+  assert.equal(isInvitableEmail('chaiyaphat.t@thestandard.co'), true)
+})
+
+test('addresses outside the org are not invited', () => {
+  assert.equal(isInvitableEmail('boriphat.yao@gmail.com'), false)
+  assert.equal(isInvitableEmail('someone@thestandard.co.evil.com'), false)
+  assert.equal(isInvitableEmail('someone@sub.thestandard.co'), false)
+  // Case and stray whitespace must not be a way past either rule.
+  assert.equal(isInvitableEmail('  Tanapak.I@THESTANDARD.CO '), true)
+})
+
+test('malformed addresses are refused rather than mailed', () => {
+  for (const e of ['', '   ', 'nope', '@thestandard.co', 'someone@', 'a@b@thestandard.co']) {
+    assert.equal(isInvitableEmail(e), false, `${e || '(empty)'} should not be invited`)
+  }
+})
+
+test('both lists are env-overridable, and junk falls back to the safe default', () => {
+  const savedEx = process.env.REVIEW_EXCLUDE_EMAILS
+  const savedDom = process.env.REVIEW_ALLOWED_EMAIL_DOMAINS
+  delete process.env.REVIEW_EXCLUDE_EMAILS
+  delete process.env.REVIEW_ALLOWED_EMAIL_DOMAINS
+  assert.ok(reviewExcludedEmails().includes('video@thestandard.co'))
+  assert.deepEqual(reviewAllowedDomains(), ['thestandard.co'])
+
+  process.env.REVIEW_EXCLUDE_EMAILS = 'bickboon@thestandard.co'
+  assert.deepEqual(reviewExcludedEmails(), ['bickboon@thestandard.co'])
+  assert.equal(isInvitableEmail('video@thestandard.co'), true, 'an explicit list REPLACES the default')
+
+  // Junk that parses to nothing must not silently open the gate…
+  process.env.REVIEW_EXCLUDE_EMAILS = ' , , '
+  assert.ok(reviewExcludedEmails().includes('video@thestandard.co'))
+  // …but an explicit empty string is a real choice: exclude nobody.
+  process.env.REVIEW_EXCLUDE_EMAILS = ''
+  assert.deepEqual(reviewExcludedEmails(), [])
+
+  process.env.REVIEW_ALLOWED_EMAIL_DOMAINS = '@thestandard.co, partner.co.th'
+  assert.deepEqual(reviewAllowedDomains(), ['thestandard.co', 'partner.co.th'])
+
+  if (savedEx === undefined) delete process.env.REVIEW_EXCLUDE_EMAILS
+  else process.env.REVIEW_EXCLUDE_EMAILS = savedEx
+  if (savedDom === undefined) delete process.env.REVIEW_ALLOWED_EMAIL_DOMAINS
+  else process.env.REVIEW_ALLOWED_EMAIL_DOMAINS = savedDom
+})
+
+test('excluding a mailbox drops it from the ASK list without erasing its team', () => {
+  // The camera team worked the shoot even when the only camera entry is video@.
+  // If exclusion also removed the team, the producer would be asked to rate
+  // nobody and the booking would go unsurveyed — the opposite of the intent.
+  const invites = buildInvites({
+    ...base,
+    assignedEmails: ['video@thestandard.co', 'snd@thestandard.co'],
+    mainVideographerEmail: 'video@thestandard.co',
+  }, roster)
+  assert.equal(invites.some(i => i.email === 'video@thestandard.co'), false)
+  const pd = invites.find(i => i.email === 'pd@thestandard.co')!
+  assert.ok(pd, 'the producer is still invited')
+  assert.ok(pd.targets.includes('camera'), 'the camera team is still rateable')
+  const snd = invites.find(i => i.email === 'snd@thestandard.co')!
+  assert.ok(snd.targets.includes('camera'))
 })
 
 test('junk target roles are still refused', () => {

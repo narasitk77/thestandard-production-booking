@@ -27,7 +27,7 @@ import { recordHeartbeat } from '@/lib/heartbeat'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import {
   buildInvites, newInviteToken, reviewsEnabled, reviewDelayDays,
-  reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow,
+  reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow, nonInvitableEmails,
 } from '@/lib/shoot-review'
 import { REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, OVERALL_TH } from '@/lib/review-access'
 import { startOfTodayBangkok } from '@/lib/bangkok-day'
@@ -115,6 +115,7 @@ export async function POST(request: NextRequest) {
   const errors: string[] = []
   const details: Array<{ code: string | null; invites: number; resend?: number; emails?: string[] }> = []
   let sampleEmail: { to: string; subject: string; text: string } | null = null
+  const skippedRecipients = new Map<string, number>()
 
   /**
    * The invite mail, in ONE place. A dry run returns a sample built by this same
@@ -155,6 +156,12 @@ export async function POST(request: NextRequest) {
 
   for (const b of bookings) {
     try {
+    // Shared mailboxes and outside addresses are filtered out of the ask list.
+    // Counted here so a crowd that silently vanished from the batch is visible in
+    // the run's own output — the operator has to be able to see that video@ was
+    // dropped 18 times, or the numbers look like the crew simply was not there.
+    for (const e of nonInvitableEmails(b)) skippedRecipients.set(e, (skippedRecipients.get(e) || 0) + 1)
+
     const invites = buildInvites(b, rosterRoleByEmail)
     if (invites.length === 0) continue
 
@@ -229,6 +236,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const skipped = Array.from(skippedRecipients.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([email, bookings]) => ({ email, bookings }))
+  if (skipped.length > 0) {
+    console.log(`[shoot-review] not mailable, skipped: ${skipped.map(s => `${s.email} ×${s.bookings}`).join(', ')}`)
+  }
+
   // A cap that nobody can see reads as "we covered everything".
   if (deferred > 0) {
     console.log(`[shoot-review] ${deferred} booking(s) over the ${maxPerRun}/run cap — deferred to the next run (nothing written for them).`)
@@ -259,6 +273,7 @@ export async function POST(request: NextRequest) {
     delayDays: delay, lookbackDays: lookback, maxPerRun,
     autoCompleted, bookingsScanned: bookings.length,
     invited, mailed, skippedExisting, deferred,
+    skippedRecipients: skipped,
     errors, emailConfigured: isEmailConfigured(), details,
   })
 }

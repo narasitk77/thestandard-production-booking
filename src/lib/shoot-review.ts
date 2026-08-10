@@ -87,6 +87,63 @@ export function tokenFingerprint(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 12)
 }
 
+/**
+ * v1.173 — who may HOLD an invite. Two rules, both from the operator after
+ * reading a real dry run:
+ *
+ * 1. **Shared team mailboxes are not people.** `video@` and `sound@` sit in
+ *    assignedEmails as a stand-in for "the camera team" / "the sound team" —
+ *    264 and 205 times across the last 300 bookings — so one week's batch was
+ *    about to send video@ eighteen separate invites. Worse, an invite link is a
+ *    bearer credential: anyone with the shared inbox could file ratings on
+ *    behalf of the team, which makes both the numbers and the promise of
+ *    "nobody sees who said what" meaningless.
+ * 2. **Only @thestandard.co.** An outside address must not hold a link that
+ *    rates staff.
+ *
+ * Env-overridable, because which addresses are shared is an org fact and not a
+ * code fact — but the DEFAULTS are the shared boxes actually present in the
+ * data, so correct behaviour does not depend on anyone remembering to set a var.
+ */
+const DEFAULT_EXCLUDED_EMAILS = [
+  'video@thestandard.co',
+  'sound@thestandard.co',
+  'event@thestandard.co',
+]
+
+export function reviewExcludedEmails(): string[] {
+  const raw = process.env.REVIEW_EXCLUDE_EMAILS?.trim()
+  if (raw === undefined) return DEFAULT_EXCLUDED_EMAILS
+  // An explicit empty string means "exclude nobody" — a deliberate choice the
+  // operator can make. Junk that parses to nothing falls back to the defaults.
+  if (raw === '') return []
+  const list = raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  return list.length > 0 ? list : DEFAULT_EXCLUDED_EMAILS
+}
+
+export function reviewAllowedDomains(): string[] {
+  const raw = process.env.REVIEW_ALLOWED_EMAIL_DOMAINS?.trim()
+  if (!raw) return ['thestandard.co']
+  const list = raw.split(',').map(s => s.trim().toLowerCase().replace(/^@/, '')).filter(Boolean)
+  return list.length > 0 ? list : ['thestandard.co']
+}
+
+/** Pure so both rules are pinned by tests rather than by whoever reads the env. */
+export function isInvitableEmail(
+  email: string,
+  excluded: string[] = reviewExcludedEmails(),
+  domains: string[] = reviewAllowedDomains(),
+): boolean {
+  const e = (email || '').trim().toLowerCase()
+  // Exactly one '@'. Splitting on the LAST one let `a@b@thestandard.co` read as
+  // internal — a malformed address must fail the domain rule, not slip through
+  // it, since passing the rule is what hands someone a link to rate staff.
+  const parts = e.split('@')
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false
+  if (excluded.includes(e)) return false
+  return domains.includes(parts[1])
+}
+
 export interface BookingForReview {
   id: string
   bookingCode: string | null
@@ -145,32 +202,59 @@ export function presentRoles(
  * Build the invite list for one booking. Returns [] when the shoot has nobody
  * to ask or only ONE team — a form with no other team to rate is noise.
  */
+/**
+ * Everyone on the booking who could conceivably be asked, before the
+ * invitability rules. Shared so the "who got skipped" report cannot drift from
+ * the list buildInvites actually works from.
+ *
+ * NOTE: `createdByEmail` is deliberately absent. Coordinators and admins file
+ * bookings for other people all the time and never go on set; asking them to
+ * rate a shoot they did not attend produces noise, and asking the whole company
+ * for ratings is how a survey loses its credibility. They are included only when
+ * they are also the producer or on the crew.
+ */
+export function crewEmails(booking: BookingForReview): string[] {
+  const emails = new Set<string>()
+  for (const e of booking.assignedEmails || []) if (e?.trim()) emails.add(e.trim().toLowerCase())
+  if (booking.mainVideographerEmail?.trim()) emails.add(booking.mainVideographerEmail.trim().toLowerCase())
+  if (booking.producerEmail?.trim()) emails.add(booking.producerEmail.trim().toLowerCase())
+  return Array.from(emails)
+}
+
+/** On the booking but not mailable — reported so a filtered-out crowd is visible. */
+export function nonInvitableEmails(booking: BookingForReview): string[] {
+  const excluded = reviewExcludedEmails()
+  const domains = reviewAllowedDomains()
+  return crewEmails(booking).filter(e => !isInvitableEmail(e, excluded, domains))
+}
+
 export function buildInvites(
   booking: BookingForReview,
   rosterRoleByEmail: Record<string, string>,
 ): ReviewInvitee[] {
   if (booking.deletedAt || booking.status === 'CANCELLED') return []
 
-  const emails = new Set<string>()
-  for (const e of booking.assignedEmails || []) if (e?.trim()) emails.add(e.trim().toLowerCase())
-  if (booking.mainVideographerEmail?.trim()) emails.add(booking.mainVideographerEmail.trim().toLowerCase())
-  if (booking.producerEmail?.trim()) emails.add(booking.producerEmail.trim().toLowerCase())
-  // NOTE: `createdByEmail` is deliberately NOT invited on its own. Coordinators
-  // and admins file bookings for other people all the time and never go on set;
-  // asking them to rate a shoot they did not attend produces noise, and asking
-  // the whole company for ratings is how a survey loses its credibility. They
-  // are included only when they are also the producer or on the crew.
+  const emails = new Set<string>(crewEmails(booking))
   if (emails.size === 0) return []
 
   const roleByEmail = new Map<string, string>()
   for (const e of Array.from(emails)) roleByEmail.set(e, classifyRater(e, booking, rosterRoleByEmail))
 
+  // Which teams are RATEABLE is decided from everyone on the booking, including
+  // the addresses nobody can be mailed at: a shared video@ entry still means the
+  // camera team worked this shoot, and "ทีมกล้อง" is a team, not that mailbox. So
+  // the exclusion below drops people from the ASK list only — it must not quietly
+  // erase a team from the questions everyone else answers.
   const present = presentRoles(booking, Array.from(roleByEmail.values()))
   // Fewer than two teams present → everyone would be rating nobody.
   if (present.length < 2) return []
 
+  const excluded = reviewExcludedEmails()
+  const domains = reviewAllowedDomains()
+
   const out: ReviewInvitee[] = []
   for (const [email, role] of Array.from(roleByEmail)) {
+    if (!isInvitableEmail(email, excluded, domains)) continue
     const targets = targetsFor(role, present)
     if (targets.length === 0) continue
     out.push({ email, role, targets })
