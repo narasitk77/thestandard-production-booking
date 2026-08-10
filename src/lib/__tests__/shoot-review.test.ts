@@ -8,7 +8,7 @@ import {
   classifyRater, presentRoles, buildInvites, newInviteToken, tokenFingerprint,
   isCriterionKey, reviewDelayDays, REVIEW_CRITERIA,
   reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow,
-  isInvitableEmail, reviewExcludedEmails, reviewAllowedDomains, buildInviteMail,
+  isInvitableEmail, reviewExcludedEmails, reviewAllowedDomains, buildInviteMail, buildReceiptMail,
 } from '../shoot-review'
 import {
   OVERALL_TARGET, isOverallTarget, isSubmittableTarget, isReviewTargetRole,
@@ -329,6 +329,45 @@ test('both letters carry the job, the date, the link and the confidentiality lin
     // the shoot was today or yesterday.
     assert.ok(!/เมื่อวาน|วันนี้/.test(m.text), `${role}: must not name a relative day`)
   }
+})
+
+// ── v1.173.3 — the receipt: the answer to "เห็นที่ผมเขียนไหม", before it is asked
+
+const receiptArgs = {
+  what: 'POP Q&A - MARQUISE',
+  bookingCode: 'POP-PQA-260805-01',
+  submittedAtTh: '10 ส.ค. 2026 14:32',
+}
+
+test('the receipt echoes the answers back, so the sender holds their own proof', () => {
+  const m = buildReceiptMail({
+    ...receiptArgs, raterRole: 'producer',
+    rows: [
+      { targetRole: 'camera', score: 4, comment: null },
+      { targetRole: OVERALL_TARGET, score: 5, comment: 'ทีมช่วยกันดีมาก ขอเวลาเซ็ตอัพเพิ่ม 15 นาที' },
+    ],
+  })
+  assert.match(m.subject, /ได้รับคำตอบของคุณแล้ว/)
+  assert.ok(m.text.includes('POP-PQA-260805-01'))
+  assert.ok(m.text.includes('10 ส.ค. 2026 14:32'), 'when it arrived is the proof')
+  assert.ok(m.text.includes('ทีมช่างภาพ: ★★★★☆ (4/5)'))
+  assert.ok(m.text.includes('ขอเวลาเซ็ตอัพเพิ่ม 15 นาที'), 'their own words come back')
+  assert.ok(m.text.includes('ไม่ต้องตามถาม'))
+})
+
+test('the receipt uses the same overall wording that person was asked', () => {
+  const rows = [{ targetRole: OVERALL_TARGET, score: 5, comment: null }]
+  assert.ok(buildReceiptMail({ ...receiptArgs, raterRole: 'producer', rows }).text.includes(OVERALL_TH))
+  assert.ok(buildReceiptMail({ ...receiptArgs, raterRole: 'sound', rows }).text.includes(OVERALL_TH_CREW))
+})
+
+test('a receipt with no comment does not print an empty ข้อความ section', () => {
+  const m = buildReceiptMail({
+    ...receiptArgs, raterRole: 'camera',
+    rows: [{ targetRole: 'producer', score: 3, comment: null }],
+  })
+  assert.ok(!m.text.includes('ข้อความที่คุณเขียน'))
+  assert.ok(m.text.includes('ทีมโปรดิวเซอร์: ★★★☆☆ (3/5)'))
 })
 
 test('junk target roles are still refused', () => {

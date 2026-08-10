@@ -43,6 +43,7 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
+  const [receiptSent, setReceiptSent] = useState(false)
   const [form, setForm] = useState<Record<string, { score: number; scores: Record<string, number>; comment: string }>>({})
 
   const load = useCallback(async () => {
@@ -73,6 +74,7 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'ส่งไม่สำเร็จ')
+      setReceiptSent(!!d.receiptSent)
       setDone(true)
     } catch (e: any) { setError(e.message) } finally { setBusy(false) }
   }
@@ -88,6 +90,13 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
       <div className="max-w-md mx-auto px-4 py-20 text-center space-y-2">
         <div className="text-4xl">🙏</div>
         <div className="text-base font-medium text-gray-800">ส่งแล้ว ขอบคุณมากครับ</div>
+        {/* v1.173.3 — say where the proof is. Without this the only way to find
+            out whether an answer arrived is to go and ask the admin. */}
+        <p className="text-sm text-gray-600">
+          {receiptSent
+            ? 'ระบบส่งอีเมลยืนยันไปที่เมลของคุณแล้ว ใช้เป็นหลักฐานได้ ไม่ต้องตามถามครับ'
+            : 'คำตอบถูกบันทึกแล้วเรียบร้อย'}
+        </p>
         <p className="text-xs text-gray-500">{data.notice}</p>
       </div>
     )
@@ -115,7 +124,17 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
       </div>
 
       {nothingLeft ? (
-        <p className="text-sm text-gray-600">คุณส่งแบบประเมินของงานนี้ครบแล้ว ขอบคุณครับ 🙏</p>
+        <div className="gf-card p-4 text-sm text-gray-700 space-y-1">
+          <div>คุณส่งแบบประเมินของงานนี้ครบแล้ว ขอบคุณครับ 🙏</div>
+          {/* The timestamp IS the proof here. Whether the receipt mail went out is
+              only known at submit time — claiming it on a later visit would be a
+              promise this page cannot check. */}
+          {data.submittedAt && (
+            <div className="text-xs text-gray-500">
+              ส่งเมื่อ {new Date(data.submittedAt).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'medium', timeStyle: 'short' })}
+            </div>
+          )}
+        </div>
       ) : pending.map(t => {
         const v = form[t.key] || { score: 0, scores: {}, comment: '' }
         return (

@@ -19,7 +19,7 @@ import { randomBytes, createHash } from 'crypto'
 import type { ReviewTargetRole } from './review-access'
 import {
   REVIEW_TARGET_ROLES, targetsFor, REVIEW_TARGET_MAIL_TH,
-  MAIL_CONFIDENTIAL_TH, isCrewRole, overallLabelFor,
+  MAIL_CONFIDENTIAL_TH, isCrewRole, overallLabelFor, OVERALL_TARGET,
 } from './review-access'
 
 export function reviewsEnabled(): boolean {
@@ -320,6 +320,62 @@ export function buildInviteMail(input: {
       url,
       '',
       MAIL_CONFIDENTIAL_TH,
+      '',
+      'THE STANDARD Production Booking',
+    ].join('\n'),
+  }
+}
+
+/**
+ * v1.173.3 — the receipt, sent to the person who just answered.
+ *
+ * Without it the loop is open: you fill in a form, a thank-you screen flashes,
+ * and nothing you can point to ever confirms it arrived. Anyone who wrote
+ * something that mattered to them then has exactly one way to find out whether it
+ * landed — walk over and ask the operator "เห็นที่ผมเขียนไหม". This mail is the
+ * answer to that question, arriving before it gets asked.
+ *
+ * It echoes the person's OWN answers back, which is safe: it goes to their own
+ * address. Their answers are deliberately NOT readable from the form link —
+ * that token is a bearer credential and a forwarded mail would hand someone
+ * else's ratings to whoever opened it.
+ */
+export function buildReceiptMail(input: {
+  what: string
+  bookingCode: string | null
+  submittedAtTh: string
+  raterRole: string
+  rows: Array<{ targetRole: string; score: number; comment: string | null }>
+}): { subject: string; text: string } {
+  const { what, bookingCode, submittedAtTh, raterRole, rows } = input
+
+  const label = (t: string) =>
+    t === OVERALL_TARGET ? overallLabelFor(raterRole) : (REVIEW_TARGET_MAIL_TH[t] || t)
+  // Stars, because "4" alone reads like a grade out of nothing.
+  const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(Math.max(0, 5 - n))
+
+  const answered = rows.map(r => `  · ${label(r.targetRole)}: ${stars(r.score)} (${r.score}/5)`)
+  const comments = rows
+    .filter(r => r.comment)
+    .map(r => `  · ${label(r.targetRole)} — “${r.comment}”`)
+
+  return {
+    subject: `[ประเมินงาน] ได้รับคำตอบของคุณแล้ว — ${bookingCode || what}`,
+    text: [
+      'ได้รับคำตอบของคุณแล้วครับ ขอบคุณที่สละเวลา 🙏',
+      '',
+      `งาน: ${what}`,
+      `Production ID: ${bookingCode || '—'}`,
+      `ส่งเมื่อ: ${submittedAtTh}`,
+      '',
+      'คะแนนที่คุณส่ง',
+      ...answered,
+      ...(comments.length ? ['', 'ข้อความที่คุณเขียน', ...comments] : []),
+      '',
+      // Deliberately no promise of a reply to every message — a commitment the
+      // team cannot keep would bring back the same follow-up it is meant to end.
+      'คำตอบนี้ถูกบันทึกไว้แล้วและแก้ไขไม่ได้ · ผู้อ่านคือผู้ดูแลระบบ 3 คน (นัท · ปุ๊ก · หวาน) เท่านั้น',
+      'ถ้ามีเรื่องที่ต้องแก้ ทีมจะติดต่อกลับ — เมลฉบับนี้ใช้เป็นหลักฐานว่าส่งถึงแล้ว ไม่ต้องตามถามครับ',
       '',
       'THE STANDARD Production Booking',
     ].join('\n'),

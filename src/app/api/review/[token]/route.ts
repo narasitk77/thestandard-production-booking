@@ -21,7 +21,8 @@ import {
   isValidScore, isReviewTargetRole, REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor,
   OVERALL_TARGET, isOverallTarget, isSubmittableTarget, overallLabelFor,
 } from '@/lib/review-access'
-import { REVIEW_CRITERIA, isCriterionKey, tokenFingerprint } from '@/lib/shoot-review'
+import { REVIEW_CRITERIA, isCriterionKey, tokenFingerprint, buildReceiptMail } from '@/lib/shoot-review'
+import { sendEmail, isEmailConfigured } from '@/lib/email'
 
 export const dynamic = 'force-dynamic'
 
@@ -171,9 +172,40 @@ export async function POST(request: NextRequest, { params }: { params: { token: 
     changes: { invite: tokenFingerprint(params.token), created: res.count },
   })
 
+  // v1.173.3 — the receipt. Best-effort by design: the ratings are already
+  // committed, so a mail outage must never turn into a failed submission that
+  // makes someone answer the same form twice (and the unique index would then
+  // silently discard the second attempt).
+  //
+  // Sent even when the feature flag is off: the flag gates INVITES, and a person
+  // who just answered a form is owed the confirmation either way.
+  let receiptSent = false
+  if (isEmailConfigured()) {
+    try {
+      const what = [invite.booking.program?.name, invite.booking.episodes[0]?.title]
+        .filter(Boolean).join(' · ') || (invite.booking.outlet?.name ?? 'งานถ่าย')
+      await sendEmail({
+        to: invite.email,
+        ...buildReceiptMail({
+          what,
+          bookingCode: invite.booking.bookingCode,
+          submittedAtTh: new Date().toLocaleString('th-TH-u-ca-gregory', {
+            timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short',
+          }),
+          raterRole: invite.role,
+          rows: rows.map(r => ({ targetRole: r.targetRole, score: r.score, comment: r.comment })),
+        }),
+      })
+      receiptSent = true
+    } catch (e: any) {
+      console.error(`[shoot-review] receipt to ${invite.email} failed (answers saved):`, e?.message || e)
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     created: res.count,
     duplicate: res.count < rows.length,
+    receiptSent,
   })
 }
