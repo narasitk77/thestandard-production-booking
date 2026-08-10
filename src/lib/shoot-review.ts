@@ -29,6 +29,51 @@ export function reviewDelayDays(): number {
   return Number.isFinite(n) && n >= 0 ? n : 1
 }
 
+/**
+ * v1.173 — how far back to keep looking for finished jobs nobody was asked
+ * about.
+ *
+ * The first cut matched ONE calendar day exactly (`shootEndDate: target`), so
+ * any morning the sender did not run — a deploy, a container restart, a DB blip
+ * — skipped that day's shoots permanently. There was no second chance and
+ * nothing to show that a day had been missed.
+ */
+export function reviewLookbackDays(): number {
+  const n = Number(process.env.SHOOT_REVIEW_LOOKBACK_DAYS ?? 7)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 7
+}
+
+/**
+ * Most bookings one run will survey. Oldest first, so a backlog drains over a
+ * few days instead of arriving as one mass mailing — which is what the very
+ * first run after switching the feature on would otherwise be.
+ */
+export function reviewMaxBookingsPerRun(): number {
+  const n = Number(process.env.SHOOT_REVIEW_MAX_BOOKINGS ?? 20)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 20
+}
+
+/**
+ * The band of LAST-shoot-days a run acts on: finished at least `delayDays` ago,
+ * and no earlier than `lookbackDays` before that. BOTH BOUNDS INCLUSIVE.
+ *
+ * `todayBkk` must be Bangkok midnight expressed as a UTC Date (see
+ * startOfTodayBangkok) — Prisma stores @db.Date as UTC midnight, and the worker
+ * fires at 10:00 BKK = 03:00 UTC, so UTC arithmetic on a UTC `now` points at
+ * the wrong calendar day.
+ */
+export function dueWindow(
+  todayBkk: Date,
+  delayDays: number,
+  lookbackDays: number,
+): { from: Date; to: Date } {
+  const to = new Date(todayBkk)
+  to.setUTCDate(to.getUTCDate() - delayDays)
+  const from = new Date(to)
+  from.setUTCDate(from.getUTCDate() - lookbackDays)
+  return { from, to }
+}
+
 /** 32 random bytes, url-safe. Long enough that guessing is not a threat model. */
 export function newInviteToken(): string {
   return randomBytes(32).toString('base64url')

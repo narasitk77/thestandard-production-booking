@@ -1,8 +1,15 @@
 // Post-shoot peer review sender — supervised by start.sh on every container
 // boot. Once a MORNING (default 10:00 Asia/Bangkok) it calls the in-process
 // /api/internal/shoot-reviews/send endpoint, which invites everyone who worked
-// a shoot that ended SHOOT_REVIEW_DELAY_DAYS ago (default 1) to rate the other
-// teams.
+// a COMPLETED job to rate the other teams and to score their overall
+// satisfaction with the service.
+//
+// v1.173: the endpoint picks up anything that finished between
+// SHOOT_REVIEW_DELAY_DAYS (default 1) and SHOOT_REVIEW_LOOKBACK_DAYS further
+// back (default 7), capped at SHOOT_REVIEW_MAX_BOOKINGS per run (default 20).
+// So a morning this worker does not run is caught up by the next one instead of
+// skipping those shoots forever — which is exactly what the old single-day
+// match did.
 //
 // Stays dormant unless SHOOT_REVIEW_ENABLED=1 — and note the endpoint checks
 // that flag too, so the worker cannot mail anyone by itself. 10:00 rather than

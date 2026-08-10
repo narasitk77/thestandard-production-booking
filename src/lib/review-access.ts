@@ -62,6 +62,35 @@ export function isReviewTargetRole(v: unknown): v is ReviewTargetRole {
 }
 
 /**
+ * v1.173 — one question asked of EVERYONE, about the job as a whole instead of a
+ * team: how satisfied were you with how this shoot was served? That is the
+ * number the operator actually reports on ("ข้อมูลการให้บริการ"); a per-team
+ * average answers a different question.
+ *
+ * Stored as a normal ShootReview row with targetRole 'overall', so it exports,
+ * ages, and stays append-only with everything else, and the existing unique
+ * index on (bookingId, raterEmail, targetRole) already limits it to one per
+ * person per booking. No migration.
+ *
+ * Deliberately NOT a member of REVIEW_TARGET_ROLES: that list drives the mutual
+ * rule (rate every team but your own). 'overall' is not a team — inside that
+ * list, `targetsFor` would hand it out or withhold it depending on the rater's
+ * own role, so the producer would be asked for overall satisfaction and the
+ * producer's own team would not.
+ */
+export const OVERALL_TARGET = 'overall'
+export const OVERALL_TH = 'ความพึงพอใจโดยรวมต่อการให้บริการงานนี้'
+
+export function isOverallTarget(v: unknown): boolean {
+  return v === OVERALL_TARGET
+}
+
+/** Every targetRole a submitted form may legitimately carry. */
+export function isSubmittableTarget(v: unknown): boolean {
+  return isReviewTargetRole(v) || isOverallTarget(v)
+}
+
+/**
  * Mutual review: you rate every team on the shoot EXCEPT your own. Returns the
  * teams this rater is asked about, given which teams actually worked the job.
  */

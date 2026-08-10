@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   responseRate, undelivered, awaitingReply, rateHealth, deliveryHealth,
-  medianResolveHours, oldestOpenDays, queueHealth, dueShootDay,
+  medianResolveHours, oldestOpenDays, queueHealth,
 } from '../review-ops'
 
 const now = new Date('2026-08-07T10:00:00.000Z')
@@ -96,10 +96,4 @@ test('oldest-open is reported so one ignored person cannot hide in an average', 
   assert.equal(oldestOpenDays([mk('NEW', 5), mk('IN_PROGRESS', 12)], now), 12)
   assert.equal(oldestOpenDays([mk('RESOLVED', 99)], now), null)
   assert.equal(oldestOpenDays([], now), null)
-})
-
-test('the due-day matches the sender exactly, or the panel promises a batch that never runs', () => {
-  assert.equal(dueShootDay(now, 1).toISOString().slice(0, 10), '2026-08-06')
-  assert.equal(dueShootDay(now, 0).toISOString().slice(0, 10), '2026-08-07')
-  assert.equal(dueShootDay(now, 3).toISOString().slice(0, 10), '2026-08-04')
 })

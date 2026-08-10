@@ -17,7 +17,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
-import { isValidScore, isReviewTargetRole, REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor, type ReviewTargetRole } from '@/lib/review-access'
+import {
+  isValidScore, isReviewTargetRole, REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor,
+  OVERALL_TARGET, OVERALL_TH, isOverallTarget, isSubmittableTarget,
+} from '@/lib/review-access'
 import { REVIEW_CRITERIA, isCriterionKey, tokenFingerprint } from '@/lib/shoot-review'
 
 export const dynamic = 'force-dynamic'
@@ -72,6 +75,9 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     },
     yourRole: invite.role,
     targets: targets.map(k => ({ key: k, th: ROLE_TH[k] || k, answered: answered.has(k) })),
+    // v1.173 — asked of everyone, no matter which teams they were paired with,
+    // so it is returned separately from `targets` rather than smuggled into it.
+    overall: { key: OVERALL_TARGET, th: OVERALL_TH, answered: answered.has(OVERALL_TARGET) },
     criteria: REVIEW_CRITERIA,
     notice: ANONYMITY_NOTICE_TH,
     submittedAt: invite.submittedAt,
@@ -89,28 +95,38 @@ export async function POST(request: NextRequest, { params }: { params: { token: 
   if (raw.length === 0) return NextResponse.json({ error: 'ยังไม่ได้ให้คะแนน' }, { status: 400 })
 
   const allowed = (invite.targets || []).filter(isReviewTargetRole)
-  const rows: Array<{ targetRole: ReviewTargetRole; score: number; scores: Record<string, number>; comment: string | null }> = []
+  const rows: Array<{ targetRole: string; score: number; scores: Record<string, number>; comment: string | null }> = []
   for (const r of raw) {
-    if (!isReviewTargetRole(r?.targetRole)) {
+    if (!isSubmittableTarget(r?.targetRole)) {
       return NextResponse.json({ error: `ทีมปลายทางไม่ถูกต้อง: ${r?.targetRole}` }, { status: 400 })
     }
-    if (r.targetRole === invite.role) {
-      return NextResponse.json({ error: 'ประเมินทีมตัวเองไม่ได้' }, { status: 400 })
-    }
-    // Only the teams this invite actually asked about. Without this, a crafted
-    // POST could file a permanent rating against a team that never worked the
-    // shoot — and ratings cannot be deleted.
-    if (allowed.length > 0 && !allowed.includes(r.targetRole)) {
-      return NextResponse.json({ error: `แบบประเมินนี้ไม่ได้ถามถึง "${r.targetRole}"` }, { status: 400 })
+    // The team checks apply to TEAM rows only. 'overall' rates the job, not a
+    // team, and every invitee is asked it — running it through the rules below
+    // would reject it as "a team this form did not ask about".
+    if (isReviewTargetRole(r.targetRole)) {
+      if (r.targetRole === invite.role) {
+        return NextResponse.json({ error: 'ประเมินทีมตัวเองไม่ได้' }, { status: 400 })
+      }
+      // Only the teams this invite actually asked about. Without this, a crafted
+      // POST could file a permanent rating against a team that never worked the
+      // shoot — and ratings cannot be deleted.
+      if (allowed.length > 0 && !allowed.includes(r.targetRole)) {
+        return NextResponse.json({ error: `แบบประเมินนี้ไม่ได้ถามถึง "${r.targetRole}"` }, { status: 400 })
+      }
     }
     if (!isValidScore(r?.score)) {
       return NextResponse.json({ error: 'คะแนนต้องเป็น 1–5' }, { status: 400 })
     }
+    // Per-criterion scores describe how a TEAM worked; the overall row carries
+    // one satisfaction score and free text, so anything sent alongside it is
+    // dropped rather than stored under a criterion it does not mean.
     const scores: Record<string, number> = {}
-    for (const [k, v] of Object.entries(r?.scores || {})) {
-      if (!isCriterionKey(k)) continue
-      if (!isValidScore(v)) return NextResponse.json({ error: `คะแนนหัวข้อ "${k}" ต้องเป็น 1–5` }, { status: 400 })
-      scores[k] = v as number
+    if (!isOverallTarget(r.targetRole)) {
+      for (const [k, v] of Object.entries(r?.scores || {})) {
+        if (!isCriterionKey(k)) continue
+        if (!isValidScore(v)) return NextResponse.json({ error: `คะแนนหัวข้อ "${k}" ต้องเป็น 1–5` }, { status: 400 })
+        scores[k] = v as number
+      }
     }
     const comment = typeof r?.comment === 'string' ? r.comment.trim().slice(0, 2000) : ''
     rows.push({ targetRole: r.targetRole, score: r.score, scores, comment: comment || null })

@@ -24,7 +24,9 @@ type Payload = {
   answered: number
 }
 
-const ROLE_TH: Record<string, string> = { producer: 'ทีมโปรดิวเซอร์', camera: 'ทีมกล้อง', sound: 'ทีมเสียง', other: 'อื่นๆ' }
+// 'overall' is not a team — it is the v1.173 job-level satisfaction score, and it
+// shows up in the same score cards and the same log rows as the team ratings.
+const ROLE_TH: Record<string, string> = { producer: 'ทีมโปรดิวเซอร์', camera: 'ทีมกล้อง', sound: 'ทีมเสียง', other: 'อื่นๆ', overall: 'ความพึงพอใจโดยรวม' }
 const when = (s: string) => new Date(s).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short' })
 
 export default function AdminReviewsPage() {

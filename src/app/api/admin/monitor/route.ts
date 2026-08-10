@@ -3,7 +3,7 @@
  *
  * One request, four answers: what is due today, did it go out, is anyone
  * replying, is anything stuck. Everything is computed server-side so the panel
- * cannot drift from the sender's own rules — `dueShootDay` and the delay come
+ * cannot drift from the sender's own rules — `dueWindow` and the delay come
  * from the same modules the worker uses.
  *
  * Two audiences, two gates, one response:
@@ -18,11 +18,15 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { canReadReviews } from '@/lib/review-access'
-import { reviewsEnabled, reviewDelayDays, buildInvites } from '@/lib/shoot-review'
+import {
+  reviewsEnabled, reviewDelayDays, reviewLookbackDays, dueWindow, buildInvites,
+} from '@/lib/shoot-review'
 import {
   responseRate, undelivered, awaitingReply, rateHealth, deliveryHealth,
-  medianResolveHours, oldestOpenDays, queueHealth, dueShootDay,
+  medianResolveHours, oldestOpenDays, queueHealth,
 } from '@/lib/review-ops'
+import { startOfTodayBangkok } from '@/lib/bangkok-day'
+import { isShootOver } from '@/lib/shoot-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,23 +64,35 @@ export async function GET() {
 
   // ── review pipeline (owners only) ─────────────────────────────────────────
   const delay = reviewDelayDays()
-  const due = dueShootDay(now, delay)
+  const lookback = reviewLookbackDays()
+  const { from, to } = dueWindow(startOfTodayBangkok(), delay, lookback)
 
-  // What the worker WOULD pick up on its next run. Same query shape as the
-  // sender: last shoot day == the due day, live, not cancelled/requested.
-  const dueBookings = await prisma.booking.findMany({
+  // What the worker WOULD pick up on its next run — the same population as the
+  // sender, or the panel promises a batch the worker will not send.
+  //
+  // The sender triggers on COMPLETED and closes anything overdue itself
+  // (autoCompleteBookings). This is a read-only panel, so instead of writing,
+  // it pulls CONFIRMED rows too and keeps the ones whose shoot is genuinely over
+  // — exactly the set the sender will have closed by the time it queries.
+  const windowBookings = await prisma.booking.findMany({
     where: {
       deletedAt: null,
-      status: { notIn: ['CANCELLED', 'REQUESTED'] },
-      OR: [{ shootEndDate: due }, { shootEndDate: null, shootDate: due }],
+      status: { in: ['COMPLETED', 'CONFIRMED'] },
+      OR: [
+        { shootEndDate: { gte: from, lte: to } },
+        { shootEndDate: null, shootDate: { gte: from, lte: to } },
+      ],
     },
+    orderBy: { shootDate: 'asc' },
     select: {
-      id: true, bookingCode: true, shootDate: true, shootEndDate: true, status: true, deletedAt: true,
+      id: true, bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
+      status: true, deletedAt: true,
       producerEmail: true, createdByEmail: true, assignedEmails: true,
       mainVideographerEmail: true, crewRequired: true,
       program: { select: { name: true } }, outlet: { select: { name: true } },
     },
   })
+  const dueBookings = windowBookings.filter(b => b.status === 'COMPLETED' || isShootOver(b, now))
 
   const roster = await prisma.teamMember.findMany({ select: { email: true, role: true } }).catch(() => [])
   const rosterRoleByEmail: Record<string, string> = {}
@@ -90,7 +106,7 @@ export async function GET() {
       })
     : []
 
-  const todayRows = dueBookings.map(b => {
+  const allRows = dueBookings.map(b => {
     const mine = dueInvites.filter(i => i.bookingId === b.id)
     // How many the sender would create if it ran right now — so a row reading
     // "0 / 4" is visibly "nothing sent yet", not "nobody to ask".
@@ -99,6 +115,7 @@ export async function GET() {
       code: b.bookingCode,
       show: b.program?.name || b.outlet?.name || null,
       status: b.status,
+      shootDate: (b.shootEndDate ?? b.shootDate).toISOString().slice(0, 10),
       expected: wouldInvite,
       invited: mine.length,
       mailed: mine.filter(i => i.mailedAt).length,
@@ -106,12 +123,36 @@ export async function GET() {
     }
   })
 
+  // A whole lookback window can be long. Jobs the sender still owes something to
+  // come first, and the count of what was left off is reported rather than the
+  // table quietly ending.
+  const ROW_LIMIT = 20
+  const ranked = [...allRows].sort((a, b) =>
+    Number(b.mailed < b.expected) - Number(a.mailed < a.expected))
+  const todayRows = ranked.slice(0, ROW_LIMIT)
+  const rowsOmitted = ranked.length - todayRows.length
+
   const recentInvites = await prisma.shootReviewInvite.findMany({
     where: { sentAt: { gte: since30 } },
-    select: { bookingId: true, email: true, sentAt: true, mailedAt: true, submittedAt: true },
+    select: { id: true, bookingId: true, email: true, sentAt: true, mailedAt: true, submittedAt: true },
   })
+
+  // The /admin/reviews preview mints a REAL invite and mails nobody on purpose,
+  // so it is not a delivery failure — but it looks exactly like one, and it kept
+  // the delivery light red with nothing an operator could do about it.
+  //
+  // Identified by the audit row written in the same request as the invite, which
+  // needs no schema flag. Audit rows age out at 90 days; a 90-day-old un-mailed
+  // invite resurfacing here is fine — by then it IS something to look at.
+  const previewIds = new Set(
+    (await prisma.auditLog.findMany({
+      where: { action: 'review.preview_minted', entityType: 'ShootReviewInvite' },
+      select: { entityId: true },
+    })).map(r => r.entityId),
+  )
+
   const rate30 = responseRate(recentInvites)
-  const stuck = undelivered(recentInvites)
+  const stuck = undelivered(recentInvites.filter(i => !previewIds.has(i.id)))
   const waiting = awaitingReply(recentInvites, now)
 
   const reviews = await prisma.shootReview.findMany({
@@ -136,10 +177,19 @@ export async function GET() {
     reviews: {
       enabled: reviewsEnabled(),
       delayDays: delay,
-      dueShootDay: due.toISOString().slice(0, 10),
+      lookbackDays: lookback,
+      window: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
       today: todayRows,
+      rowsOmitted,
       rate30: { ...rate30, health: rateHealth(rate30.pct) },
-      undelivered: { count: stuck.length, health: deliveryHealth(stuck.length) },
+      // While the feature is off, NOTHING is sending — an un-mailed invite (the
+      // /admin/reviews preview mints one) is then the expected state, not a
+      // delivery failure, and a permanently red light is a light nobody reads.
+      // The next real run re-sends those with the same token.
+      undelivered: {
+        count: stuck.length,
+        health: reviewsEnabled() ? deliveryHealth(stuck.length) : 'ok' as const,
+      },
       awaiting: {
         count: waiting.length,
         oldestDays: waiting[0]?.waitingDays ?? null,

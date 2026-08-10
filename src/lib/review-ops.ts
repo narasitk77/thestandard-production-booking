@@ -113,15 +113,3 @@ export function queueHealth(tickets: TicketRow[], now: Date): OpsHealth {
   if (worst >= 1) return 'warn'
   return 'ok'
 }
-
-/**
- * The send window the nightly job will act on next: shoots whose LAST day was
- * `delayDays` ago. Mirrors the sender exactly so the panel cannot promise a
- * batch the worker will not pick up.
- */
-export function dueShootDay(now: Date, delayDays: number): Date {
-  const d = new Date(now)
-  d.setUTCHours(0, 0, 0, 0)
-  d.setUTCDate(d.getUTCDate() - delayDays)
-  return d
-}

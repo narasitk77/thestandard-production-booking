@@ -7,7 +7,12 @@ import assert from 'node:assert/strict'
 import {
   classifyRater, presentRoles, buildInvites, newInviteToken, tokenFingerprint,
   isCriterionKey, reviewDelayDays, REVIEW_CRITERIA,
+  reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow,
 } from '../shoot-review'
+import {
+  OVERALL_TARGET, isOverallTarget, isSubmittableTarget, isReviewTargetRole,
+  targetsFor, REVIEW_TARGET_ROLES,
+} from '../review-access'
 
 const base = {
   id: 'b1', bookingCode: 'NWS-260817-01', shootDate: new Date('2026-08-17'),
@@ -141,4 +146,64 @@ test('invite targets are what the email promised — they are stored, not recomp
   }
   const cam = invites.find(i => i.email === 'cam@thestandard.co')!
   assert.deepEqual(cam.targets, ['producer', 'sound'])
+})
+
+// ── v1.173 — COMPLETED trigger, catch-up window, overall satisfaction ────────
+
+test('the due window covers a whole lookback band, both bounds inclusive', () => {
+  // A single-day match was the bug: one morning the sender did not run and those
+  // shoots were never surveyed. The window is what gives a missed run a retry.
+  const today = new Date('2026-08-10T00:00:00.000Z') // Bangkok midnight, UTC Date
+  const { from, to } = dueWindow(today, 1, 7)
+  assert.equal(to.toISOString().slice(0, 10), '2026-08-09')   // finished ≥1 day ago
+  assert.equal(from.toISOString().slice(0, 10), '2026-08-02')  // ...but not older than 7 more days
+})
+
+test('a zero lookback degrades to exactly the old single-day behaviour', () => {
+  const today = new Date('2026-08-10T00:00:00.000Z')
+  const { from, to } = dueWindow(today, 1, 0)
+  assert.equal(from.getTime(), to.getTime())
+  assert.equal(to.toISOString().slice(0, 10), '2026-08-09')
+})
+
+test('lookback and per-run cap read from env, and junk values fall back', () => {
+  const savedLb = process.env.SHOOT_REVIEW_LOOKBACK_DAYS
+  const savedMax = process.env.SHOOT_REVIEW_MAX_BOOKINGS
+  delete process.env.SHOOT_REVIEW_LOOKBACK_DAYS
+  delete process.env.SHOOT_REVIEW_MAX_BOOKINGS
+  assert.equal(reviewLookbackDays(), 7)
+  assert.equal(reviewMaxBookingsPerRun(), 20)
+  process.env.SHOOT_REVIEW_LOOKBACK_DAYS = '2'
+  process.env.SHOOT_REVIEW_MAX_BOOKINGS = '3'
+  assert.equal(reviewLookbackDays(), 2)
+  assert.equal(reviewMaxBookingsPerRun(), 3)
+  // A cap of 0 would mean "survey nobody, quietly" — the floor is 1.
+  process.env.SHOOT_REVIEW_MAX_BOOKINGS = '0'
+  assert.equal(reviewMaxBookingsPerRun(), 20)
+  process.env.SHOOT_REVIEW_LOOKBACK_DAYS = 'soon'
+  assert.equal(reviewLookbackDays(), 7)
+  if (savedLb === undefined) delete process.env.SHOOT_REVIEW_LOOKBACK_DAYS
+  else process.env.SHOOT_REVIEW_LOOKBACK_DAYS = savedLb
+  if (savedMax === undefined) delete process.env.SHOOT_REVIEW_MAX_BOOKINGS
+  else process.env.SHOOT_REVIEW_MAX_BOOKINGS = savedMax
+})
+
+test('the overall satisfaction row is submittable but is NOT a team', () => {
+  assert.equal(isSubmittableTarget(OVERALL_TARGET), true)
+  assert.equal(isOverallTarget(OVERALL_TARGET), true)
+  // The distinction that matters: inside REVIEW_TARGET_ROLES, targetsFor would
+  // hand 'overall' out or withhold it depending on the rater's own role, so a
+  // producer would be asked for overall satisfaction and a producer would not.
+  assert.equal(isReviewTargetRole(OVERALL_TARGET), false)
+  assert.equal(REVIEW_TARGET_ROLES.some(r => r.key === (OVERALL_TARGET as any)), false)
+  const present = REVIEW_TARGET_ROLES.map(r => r.key)
+  for (const role of ['producer', 'camera', 'sound']) {
+    assert.equal(targetsFor(role, present).includes(OVERALL_TARGET as any), false)
+  }
+})
+
+test('junk target roles are still refused', () => {
+  assert.equal(isSubmittableTarget('everyone'), false)
+  assert.equal(isSubmittableTarget(''), false)
+  assert.equal(isSubmittableTarget(null), false)
 })

@@ -20,8 +20,10 @@ type Payload = {
     open: Array<{ id: string; number: number; subject: string; status: string; reporterEmail: string; createdAt: string; lastMessageAt: string }>
   }
   reviews: null | {
-    enabled: boolean; delayDays: number; dueShootDay: string
-    today: Array<{ code: string | null; show: string | null; status: string; expected: number; invited: number; mailed: number; answered: number }>
+    enabled: boolean; delayDays: number; lookbackDays: number
+    window: { from: string; to: string }
+    today: Array<{ code: string | null; show: string | null; status: string; shootDate: string; expected: number; invited: number; mailed: number; answered: number }>
+    rowsOmitted: number
     rate30: { sent: number; answered: number; pct: number | null; health: Health }
     undelivered: { count: number; health: Health }
     awaiting: { count: number; oldestDays: number | null }
@@ -30,7 +32,7 @@ type Payload = {
   }
 }
 
-const ROLE_TH: Record<string, string> = { producer: 'ทีมโปรดิวเซอร์', camera: 'ทีมกล้อง', sound: 'ทีมเสียง' }
+const ROLE_TH: Record<string, string> = { producer: 'ทีมโปรดิวเซอร์', camera: 'ทีมกล้อง', sound: 'ทีมเสียง', overall: 'ความพึงพอใจโดยรวม' }
 const STATUS_TH: Record<string, string> = { NEW: 'ใหม่', IN_PROGRESS: 'กำลังแก้', RESOLVED: 'แก้เสร็จ' }
 const ref = (n: number) => `FB-${String(n).padStart(3, '0')}`
 const when = (s: string) => new Date(s).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short' })
@@ -136,7 +138,9 @@ export default function MonitorPage() {
                   value={d.reviews.rate30.pct !== null ? `${d.reviews.rate30.pct}%` : '—'}
                   sub={`ตอบ ${d.reviews.rate30.answered} จากที่ส่ง ${d.reviews.rate30.sent}`} />
                 <Card label="ส่งไม่ออก (ต้องแก้)" value={d.reviews.undelivered.count} health={d.reviews.undelivered.health}
-                  sub={d.reviews.undelivered.count ? 'ระบบจะส่งซ้ำรอบหน้า' : 'ไม่มี'} />
+                  sub={!d.reviews.undelivered.count ? 'ไม่มี'
+                    : d.reviews.enabled ? 'ระบบจะส่งซ้ำรอบหน้า'
+                    : 'ยังไม่ส่งเพราะระบบปิดอยู่ (เปิดแล้วส่งให้เอง)'} />
                 <Card label="รอตอบอยู่" value={d.reviews.awaiting.count}
                   sub={d.reviews.awaiting.oldestDays !== null ? `นานสุด ${d.reviews.awaiting.oldestDays} วัน` : '—'} />
                 <Card label="รอบล่าสุดที่ส่ง"
@@ -146,7 +150,11 @@ export default function MonitorPage() {
 
               <div className="text-xs text-gray-500 mb-1.5 flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
-                รอบถัดไปจะถามถึงงานที่ถ่ายจบวันที่ <span className="font-mono">{d.reviews.dueShootDay}</span> (หลังจบงาน {d.reviews.delayDays} วัน)
+                <span>
+                  รอบถัดไปจะถามถึงงานที่ปิด (COMPLETED) และถ่ายจบระหว่างวันที่{' '}
+                  <span className="font-mono">{d.reviews.window.from}</span> – <span className="font-mono">{d.reviews.window.to}</span>{' '}
+                  (หลังจบงาน {d.reviews.delayDays} วัน · ตามเก็บย้อนหลัง {d.reviews.lookbackDays} วัน)
+                </span>
               </div>
 
               {d.reviews.today.length === 0 ? (
@@ -161,12 +169,18 @@ export default function MonitorPage() {
                         <Light h={done ? 'ok' : sent ? 'warn' : 'bad'} />
                         <span className="font-mono text-[11px] text-gray-500">{r.code}</span>
                         <span className="flex-1 truncate text-gray-700">{r.show || '—'}</span>
+                        <span className="font-mono text-[11px] text-gray-400">{r.shootDate}</span>
                         <span className="text-[11px] text-gray-400">
                           {sent ? `ส่งแล้ว ${r.mailed}` : `ยังไม่ส่ง (จะส่ง ${r.expected})`} · ตอบ {r.answered}/{r.invited || r.expected}
                         </span>
                       </div>
                     )
                   })}
+                  {d.reviews.rowsOmitted > 0 && (
+                    <div className="px-3 py-2 text-[11px] text-gray-400">
+                      + อีก {d.reviews.rowsOmitted} งานในช่วงนี้ (ไม่ได้แสดง — เรียงงานที่ยังต้องส่งขึ้นก่อน)
+                    </div>
+                  )}
                 </div>
               )}
 
