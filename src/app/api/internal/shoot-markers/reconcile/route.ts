@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session'
 import { reconcileShootMarkers, reconcileGenericMarkers, mergeReconcileResults, formatReconcileReport, totalChanges } from '@/lib/shoot-marker-reconcile'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
+import { recordHeartbeat } from '@/lib/heartbeat'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -118,6 +119,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // isWorker, not just !dryRun: this route defaults dryRun to TRUE and the
+    // nightly-check routine deliberately calls it with dryRun=1 to observe
+    // drift. Neither that nor an admin click may stand in for the 03:00 worker.
+    if (allowed.isWorker && !dryRun) await recordHeartbeat('shoot-marker')
     return NextResponse.json(result)
   } catch (e: any) {
     console.error('GET /api/internal/shoot-markers/reconcile error:', e)

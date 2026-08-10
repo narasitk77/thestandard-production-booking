@@ -23,6 +23,7 @@
 
 const https = require('https')
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const flag = String(process.env.VIDEO_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
@@ -132,8 +133,8 @@ async function runMerge(why) {
   try {
     console.log(`[video-merge] running merge (${why})`)
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/video-merge/run?notify=1`
-    const res = await fetch(url, { headers: secret ? { 'x-video-merge-secret': secret } : {} })
-    const text = await res.text()
+    const res = await httpRequest(url, { headers: secret ? { 'x-video-merge-secret': secret } : {} })
+    const text = res.text
     if (!res.ok) {
       console.error(`[video-merge] ${res.status}: ${text.slice(0, 500)}`)
       return

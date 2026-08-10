@@ -10,6 +10,7 @@
 // SIGTERM handling) so anyone who's debugged that one knows the shape of this.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.FOOTAGE_READY_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -44,10 +45,10 @@ async function runOnce() {
   running = true
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/footage-ready/run`
-    const res = await fetch(url, {
+    const res = await httpRequest(url, {
       headers: secret ? { 'x-footage-ready-secret': secret } : {},
     })
-    const text = await res.text()
+    const text = res.text
     if (!res.ok) {
       console.error(`[footage-ready] ${res.status}: ${text.slice(0, 500)}`)
       return

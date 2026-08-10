@@ -8,6 +8,7 @@
 // scripts/reminders-worker.js for interval / secret / SIGTERM handling.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const flag = String(process.env.PREP_FOLDERS_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
@@ -38,8 +39,8 @@ async function runOnce() {
   running = true
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/prep-folders/run`
-    const res = await fetch(url, { headers: secret ? { 'x-prep-folders-secret': secret } : {} })
-    const text = await res.text()
+    const res = await httpRequest(url, { headers: secret ? { 'x-prep-folders-secret': secret } : {} })
+    const text = res.text
     if (!res.ok) {
       console.error(`[prep-folders] ${res.status}: ${text.slice(0, 500)}`)
       return

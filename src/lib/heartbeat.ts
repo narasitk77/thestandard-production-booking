@@ -15,10 +15,26 @@ function posInt(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 const enabled = (v: string | undefined) => ['1', 'true', 'yes'].includes(String(v || '').toLowerCase())
+/**
+ * The other half of the convention: some workers are ON unless explicitly
+ * switched off. Mirrors the guard at the top of each script — keep the two in
+ * step, because a spec that disagrees with its script is worse than no spec
+ * (it reports a worker as healthy-because-disabled while it is actually dead).
+ */
+const enabledUnlessOff = (v: string | undefined) => !['0', 'false', 'no'].includes(String(v || '').toLowerCase())
 
 export interface WorkerSpec { key: string; label: string; enabled: boolean; intervalMs: number }
 
-/** Expected workers + their cadence, derived from the same envs start.sh uses. */
+/**
+ * Expected workers + their cadence, derived from the same envs start.sh uses.
+ *
+ * CAUTION when the `workers` compose profile is ever enabled (v1.168): this
+ * function runs in the WEB process and reads the WEB container's env. A worker
+ * flag set only on the `worker` service would make the web side compute
+ * `enabled: false` and quietly switch that worker's dead-man off — the failure
+ * this whole file exists to prevent. Set the enable flags on BOTH services, or
+ * on the shared stack env.
+ */
 export function workerSpecs(): WorkerSpec[] {
   return [
     { key: 'calendar-reconcile', label: 'Calendar reconcile', enabled: true,
@@ -41,6 +57,26 @@ export function workerSpecs(): WorkerSpec[] {
     // v1.147 — auto "footage ready" notification sweep.
     { key: 'footage-ready', label: 'Footage ready notify', enabled: enabled(process.env.FOOTAGE_READY_WORKER_ENABLED),
       intervalMs: posInt(process.env.FOOTAGE_READY_INTERVAL_MS, 30 * MINUTE) },
+
+    // v1.172 — the five workers that ran for months with NO dead-man cover. All
+    // five do real Drive work; until now the only way to notice one had died was
+    // for a human to miss the folders it should have made.
+    //
+    // The daily ones declare a 24h interval, so the +2h grace in evaluateWorkers
+    // alerts at ~26h: one missed run is caught, and a run that lands a couple of
+    // hours late (the hour gate drifts with restarts) is not a false alarm.
+    { key: 'prep-folders', label: 'Prep folders', enabled: enabledUnlessOff(process.env.PREP_FOLDERS_WORKER_ENABLED),
+      // The script floors this at 5 min (Math.max(300_000, …)); mirror that or a
+      // bad env value would give us a stale window shorter than the real cadence.
+      intervalMs: Math.max(5 * MINUTE, posInt(process.env.PREP_FOLDERS_INTERVAL_MS, HOUR)) },
+    { key: 'folder-integrity', label: 'Folder integrity', enabled: enabledUnlessOff(process.env.FOLDER_INTEGRITY_WORKER_ENABLED),
+      intervalMs: posInt(process.env.FOLDER_INTEGRITY_INTERVAL_MS, HOUR) },
+    { key: 'shoot-marker', label: '_SHOOT marker reconcile', enabled: enabled(process.env.SHOOT_MARKER_WORKER_ENABLED),
+      intervalMs: 24 * HOUR },
+    { key: 'landing', label: 'Landing drop folders', enabled: enabledUnlessOff(process.env.LANDING_WORKER_ENABLED),
+      intervalMs: 24 * HOUR },
+    { key: 'shoot-review', label: 'Post-shoot review invites', enabled: enabled(process.env.SHOOT_REVIEW_ENABLED),
+      intervalMs: 24 * HOUR },
   ]
 }
 

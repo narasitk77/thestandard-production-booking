@@ -13,6 +13,7 @@
 // person), so a restart or a double run cannot invite anybody twice.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.SHOOT_REVIEW_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -54,8 +55,8 @@ async function runOnce() {
   running = true
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/shoot-reviews/send?dryRun=0`
-    const res = await fetch(url, { method: 'POST', headers: secret ? { 'x-reconcile-secret': secret } : {} })
-    const body = await res.text()
+    const res = await httpRequest(url, { method: 'POST', headers: secret ? { 'x-reconcile-secret': secret } : {} })
+    const body = res.text
     if (!res.ok) {
       console.error(`[shoot-review] ${res.status}: ${body.slice(0, 500)}`)
       return

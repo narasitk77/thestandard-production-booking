@@ -7,6 +7,7 @@
 // to disable. Mirrors scripts/prep-folders-worker.js.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const flag = String(process.env.SOUND_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
@@ -37,8 +38,8 @@ async function runOnce() {
   running = true
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/sound-merge/run`
-    const res = await fetch(url, { headers: secret ? { 'x-sound-merge-secret': secret } : {} })
-    const text = await res.text()
+    const res = await httpRequest(url, { headers: secret ? { 'x-sound-merge-secret': secret } : {} })
+    const text = res.text
     if (!res.ok) {
       console.error(`[sound-merge] ${res.status}: ${text.slice(0, 500)}`)
       return

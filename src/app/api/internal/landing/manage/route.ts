@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session'
 import { manageLandingFolders, pruneLandingToToday, ensureLandingForBooking } from '@/lib/landing-lifecycle'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
+import { recordHeartbeat } from '@/lib/heartbeat'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -118,6 +119,11 @@ export async function GET(request: NextRequest) {
         changes: { targetDay: r.targetDay, created: r.created, removedPastEmpty: r.removedPastEmpty, keptRecent: r.keptRecent, createErrors: r.createErrors, removeErrors: r.removeErrors },
       })
     }
+    // Liveness tick for the nightly 19:00 landing worker — and only for it.
+    // isWorker matters: the daily 12:00 landing-cleanup routine calls the
+    // ?prune=today branch above, which returns earlier and must never forge a
+    // tick for the evening sweep. An admin dry run must not either.
+    if (allowed.isWorker && !dryRun) await recordHeartbeat('landing', r.targetDay)
     const worth = changed > 0 || r.createErrors > 0 || r.removeErrors > 0
     if ((allowed.isWorker && worth) || forceReport) {
       const text = [

@@ -14,6 +14,7 @@
 // races the prep-folders sweep or a deploy's cold start.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.FOLDER_INTEGRITY_WORKER_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
@@ -47,10 +48,10 @@ async function runOnce() {
   if (running) return
   running = true
   try {
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/internal/folder-integrity/run?dryRun=${applyMode ? '0' : '1'}`, {
+    const res = await httpRequest(`${baseUrl.replace(/\/$/, '')}/api/internal/folder-integrity/run?dryRun=${applyMode ? '0' : '1'}`, {
       headers: secret ? { 'x-reconcile-secret': secret } : {},
     })
-    const body = await res.text()
+    const body = res.text
     if (!res.ok) { console.error(`[folder-integrity] ${res.status}: ${body.slice(0, 400)}`); return }
     const j = JSON.parse(body)
     if (j.skipped) { console.log(`[folder-integrity] skipped: ${j.reason}`); return }

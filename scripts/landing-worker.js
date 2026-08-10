@@ -11,6 +11,7 @@
 // idempotent, only trashes EMPTY regenerable folders to recoverable Drive trash.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.LANDING_WORKER_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
@@ -48,8 +49,8 @@ async function runOnce() {
   if (running) return
   running = true
   try {
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/internal/landing/manage?dryRun=0`, { headers: secret ? { 'x-reconcile-secret': secret } : {} })
-    const body = await res.text()
+    const res = await httpRequest(`${baseUrl.replace(/\/$/, '')}/api/internal/landing/manage?dryRun=0`, { headers: secret ? { 'x-reconcile-secret': secret } : {} })
+    const body = res.text
     if (!res.ok) { console.error(`[landing] ${res.status}: ${body.slice(0, 500)}`); return }
     const j = JSON.parse(body)
     if (j.skipped) { console.log(`[landing] skipped: ${j.reason}`); return }

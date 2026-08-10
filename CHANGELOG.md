@@ -11,6 +11,32 @@ _(ว่าง)_
 
 ---
 
+## [1.172.0] — 2026-08-10
+
+### Fixed — `run failed: fetch failed` ทุกชั่วโมง ทั้งที่งานเสร็จเรียบร้อย
+
+`[sound-merge] run failed: fetch failed` ขึ้น **48 จาก 48 รอบใน 2 วัน** และ `[shoot-marker]` ก็เหมือนกันทุกคืน — ไม่ใช่ worker พัง ไม่ใช่ URL ผิด ไม่ใช่ secret ผิด
+
+- **หลักฐานว่าเป็น timeout ไม่ใช่ error**: worker ขึ้น banner ตอน `10:20:12` รันครั้งแรก +120 วิ แล้วล้มตอน `10:27:13` = **+301 วินาทีพอดี** และทุกรอบถัดมาล้มตอน `:25:1x` หลัง timer ตี `:20:1x` = +300 วินาทีเป๊ะทุกครั้ง นี่คือ `headersTimeout` ของ undici (ค่า default 300 วิ) ที่ฝังอยู่ใน `fetch()` ของ Node
+- **หลักฐานว่างานไม่ได้พัง**: `/api/health-summary` แสดง heartbeat ของ sound-merge อายุ 2006 วินาที = รอบที่ "ล้ม" ตอน 04:25:14 ไปบันทึก heartbeat ตอน ~04:26 → `runSoundMerge` ทำงานจบใน **~5 นาที 46 วินาที** ช้ากว่าเส้นตายแค่ 46 วินาที
+- ราคาที่จ่ายไม่ใช่ log รก แต่คือ **ความบอด** — เมื่อทุกรอบรายงานว่าล้มเหมือนกันหมด รอบที่ล้มจริงจะรายงานไม่ได้อีกต่อไป
+- `scripts/lib/http.js` ใหม่ ใช้ `node:http`/`node:https` แทน `fetch` ทั้ง 12 worker (ไม่เพิ่ม dependency — `undici` ไม่ได้อยู่ใน package.json และ `AbortSignal` ทำให้ยอมรอ**นาน**กว่า 300 วิไม่ได้ ทำได้แค่สั้นลง)
+- timeout ใหม่เป็น **inactivity timeout** ไม่ใช่เพดานเวลารวม (default 30 นาที, `WORKER_HTTP_TIMEOUT_MS`) — endpoint ที่ยังทำงานอยู่ไม่โดนตัด ส่วน connection ที่เงียบไปเฉยๆ โดน
+- +6 เทสต์: header ช้าแล้วยังผ่าน · server เงียบแล้ว reject · non-2xx ต้อง resolve ไม่ใช่ throw (ไม่งั้น 401 จะดูเหมือน transport พัง = ความสับสนเดิมอีกรอบ)
+
+### Fixed — 5 ใน 12 worker ไม่มี dead-man switch เลย
+
+`prep-folders` · `folder-integrity` · `shoot-marker` · `landing` · `shoot-review` ทำงานกับ Drive จริงทุกตัว แต่ไม่มี heartbeat — ถ้าตายเงียบ อาการเดียวที่เห็นคือโฟลเดอร์ไม่ถูกสร้าง แล้วรอให้คนสังเกตเอง
+
+- เพิ่ม `recordHeartbeat` ใน 5 route + spec ใน `workerSpecs()` ครบ 12 ตัว
+- **กับดักที่เกือบพลาด**: `folder-integrity` ต้อง tick ที่ `allowed.isWorker` ไม่ใช่ `!dryRun` — เพราะ `FOLDER_INTEGRITY_APPLY` default เป็น `'0'` stack ที่ยังไม่เปิดโหมดซ่อมจึงยิง `?dryRun=1` ตลอดกาล ถ้าเช็ค `!dryRun` จะไม่มี tick เลยสักครั้ง แล้ว health-summary จะขึ้น 503 ให้ worker ที่แข็งแรงดี (prod ตั้ง APPLY=1 อยู่จึงมองไม่เห็นบั๊กนี้ แต่ staging จะเจอ)
+- `isWorker` ยังกันไม่ให้ admin ที่เปิด URL เอง (สาม route นี้ default `dryRun=true`) หรือ routine เคลียร์ landing ตอนเที่ยง **ปลอม tick** แทน worker ตัวจริง
+- `'digest:folder-integrity'` ที่มีอยู่เดิมคือ**ประตูกันโพสต์ Discord ซ้ำวันละครั้ง ไม่ใช่ heartbeat** — สดอยู่ 24 ชม. หลังรันครั้งเดียว ถ้าเอามาใช้แทน liveness จะกลบ worker ที่ตายแล้วสนิท
+- worker รายวันประกาศ interval 24 ชม. → บวก grace 2 ชม. = เตือนที่ ~26 ชม. (รันช้าไปสองสามชั่วโมงไม่เตือน แต่ขาดไปทั้งวันเตือน)
+- +7 เทสต์ รวม **435 ผ่าน** — รวมตัวกันซ้ำรอย: **worker script ใหม่ที่ไม่มี spec จะทำให้เทสต์แดง** และ spec ที่ชี้ไปยัง key ที่ไม่มีใครเขียนก็แดงเหมือนกัน
+
+---
+
 ## [1.171.0] — 2026-08-07
 
 ### Added — reconciler ชิ้นที่ 3: DriveView (แคช listing ต่อรอบ) — ยังไม่มีอะไรเรียกใช้

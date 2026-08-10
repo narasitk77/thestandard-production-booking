@@ -9,6 +9,7 @@
 // Mirrors scripts/reminders-worker.js (interval, secret resolution, SIGTERM).
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.BACKUP_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -39,8 +40,8 @@ async function runOnce() {
   running = true
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/backup/run`
-    const res = await fetch(url, { headers: secret ? { 'x-backup-secret': secret } : {} })
-    const text = await res.text()
+    const res = await httpRequest(url, { headers: secret ? { 'x-backup-secret': secret } : {} })
+    const text = res.text
     if (!res.ok) {
       console.error(`[backup] ${res.status}: ${text.slice(0, 500)}`)
       return

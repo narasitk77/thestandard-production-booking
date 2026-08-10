@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { prepTodayShootFolders } from '@/lib/prep-folders'
+import { recordHeartbeat } from '@/lib/heartbeat'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,6 +46,7 @@ export async function GET(request: NextRequest) {
   }
   try {
     const result = await prepTodayShootFolders({ dryRun })
+    if (!dryRun) await recordHeartbeat('prep-folders')
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
     console.error('GET /api/internal/prep-folders/run error:', e)

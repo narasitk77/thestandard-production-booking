@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
+import { recordHeartbeat } from '@/lib/heartbeat'
 import { buildInvites, newInviteToken, reviewsEnabled, reviewDelayDays } from '@/lib/shoot-review'
 import { REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH } from '@/lib/review-access'
 import { startOfTodayBangkok } from '@/lib/bangkok-day'
@@ -168,6 +169,7 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  if (!dryRun) await recordHeartbeat('shoot-review')
   return NextResponse.json({
     ok: true, dryRun, shootDate: target.toISOString().slice(0, 10),
     bookingsScanned: bookings.length, invited, mailed, skippedExisting,

@@ -12,6 +12,7 @@
 // shape of this one.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.FOOTAGE_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -47,10 +48,10 @@ async function runOnce() {
   running = true
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/footage/sync`
-    const res = await fetch(url, {
+    const res = await httpRequest(url, {
       headers: secret ? { 'x-footage-sync-secret': secret } : {},
     })
-    const body = await res.text()
+    const body = res.text
     if (!res.ok) {
       console.error(`[footage-sync] ${res.status}: ${body.slice(0, 500)}`)
       return

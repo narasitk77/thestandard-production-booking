@@ -1,4 +1,5 @@
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const intervalMs = Math.max(
   60_000,
@@ -28,10 +29,10 @@ async function runOnce() {
   running = true
   try {
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/calendar/reconcile?limit=50`
-    const res = await fetch(url, {
+    const res = await httpRequest(url, {
       headers: secret ? { 'x-reconcile-secret': secret } : {},
     })
-    const body = await res.text()
+    const body = res.text
     if (!res.ok) {
       console.error(`[calendar-reconcile] ${res.status}: ${body.slice(0, 500)}`)
       return

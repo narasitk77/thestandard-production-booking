@@ -14,6 +14,7 @@
 // footage folders are never touched. The endpoint sends the report email.
 
 const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.SHOOT_MARKER_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
@@ -59,8 +60,8 @@ async function runOnce() {
   try {
     // dryRun=0 → apply. The endpoint audits + emails any run that changed Drive.
     const url = `${baseUrl.replace(/\/$/, '')}/api/internal/shoot-markers/reconcile?dryRun=0`
-    const res = await fetch(url, { headers: secret ? { 'x-reconcile-secret': secret } : {} })
-    const body = await res.text()
+    const res = await httpRequest(url, { headers: secret ? { 'x-reconcile-secret': secret } : {} })
+    const body = res.text
     if (!res.ok) {
       console.error(`[shoot-marker] ${res.status}: ${body.slice(0, 500)}`)
       return

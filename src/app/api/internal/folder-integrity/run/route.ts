@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { runFolderIntegrity, maybeSendDailyDigest } from '@/lib/folder-integrity'
+import { recordHeartbeat } from '@/lib/heartbeat'
 import { sendEmail } from '@/lib/email'
 
 export const dynamic = 'force-dynamic'
@@ -130,6 +131,18 @@ export async function GET(request: NextRequest) {
         console.error('[folder-integrity] report email failed (non-fatal):', e?.message || e)
       }
     }
+    // Liveness tick. Three things are load-bearing here:
+    //  · it keys off isWorker, not !dryRun — FOLDER_INTEGRITY_APPLY defaults to
+    //    '0', so a stack that hasn't opted into repairs has its worker calling
+    //    ?dryRun=1 forever. Gating on !dryRun would mean no tick ever, and the
+    //    spec (on by default) would report a perfectly healthy worker as dead.
+    //    A report-only pass still walks every folder: liveness is proven.
+    //  · isWorker also stops an admin opening this URL from forging a tick —
+    //    this route defaults dryRun to TRUE, so a curious click is a dry run.
+    //  · it is NOT the 'digest:folder-integrity' key used below. That one is a
+    //    once-a-day gate for the Discord post; it stays fresh for 24h after a
+    //    single run, so it can never stand in for liveness.
+    if (allowed.isWorker) await recordHeartbeat('folder-integrity')
     // v1.153 — once a day, post "what did the folder worker do" to Discord.
     // Worker runs only, and best-effort: a digest failure must not fail the run
     // that just repaired real folders.
