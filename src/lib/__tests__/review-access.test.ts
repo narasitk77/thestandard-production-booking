@@ -4,22 +4,45 @@
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  canReadReviews, reviewOwnerEmails, targetsFor, isValidScore,
+  canReadReviewContent, canSeeReviewActivity, reviewContentReaderEmails,
+  reviewActivityReaderEmails, targetsFor, isValidScore,
   isReviewTargetRole, ANONYMITY_NOTICE_TH,
 } from '../review-access'
 
-let saved: string | undefined
-beforeEach(() => { saved = process.env.REVIEW_OWNER_EMAILS; delete process.env.REVIEW_OWNER_EMAILS })
-afterEach(() => { if (saved === undefined) delete process.env.REVIEW_OWNER_EMAILS; else process.env.REVIEW_OWNER_EMAILS = saved })
-
-test('exactly the three named people can read reviews', () => {
-  for (const e of ['narasit.k@thestandard.co', 'panu.w@thestandard.co', 'chonlathorn.j@thestandard.co']) {
-    assert.equal(canReadReviews(e), true, e)
+const ENVS = ['REVIEW_CONTENT_READER_EMAILS', 'REVIEW_ACTIVITY_READER_EMAILS'] as const
+let saved: Record<string, string | undefined> = {}
+beforeEach(() => {
+  saved = {}
+  for (const k of ENVS) { saved[k] = process.env[k]; delete process.env[k] }
+})
+afterEach(() => {
+  for (const k of ENVS) {
+    if (saved[k] === undefined) delete process.env[k]
+    else process.env[k] = saved[k]!
   }
-  assert.equal(reviewOwnerEmails().length, 3)
 })
 
-test('everyone else is refused — including other admins and the crew being rated', () => {
+const MANAGERS = ['panu.w@thestandard.co', 'chonlathorn.j@thestandard.co']
+const OPERATOR = 'narasit.k@thestandard.co'
+
+test('only the managers read the messages', () => {
+  for (const e of MANAGERS) assert.equal(canReadReviewContent(e), true, e)
+  assert.deepEqual(reviewContentReaderEmails().sort(), [...MANAGERS].sort())
+})
+
+test('THE POINT OF v1.173.4: the operator sees that feedback exists, never what it says', () => {
+  // He runs the system, sits on the crew list and is often the producer being
+  // rated. A system owner who can read every complaint about himself is a system
+  // nobody complains in.
+  assert.equal(canReadReviewContent(OPERATOR), false, 'operator must NOT read content')
+  assert.equal(canSeeReviewActivity(OPERATOR), true, 'operator must still see the pipeline')
+})
+
+test('managers see strictly more than the operator, never less', () => {
+  for (const e of MANAGERS) assert.equal(canSeeReviewActivity(e), true, e)
+})
+
+test('everyone else is refused at BOTH tiers — other admins and the crew being rated', () => {
   for (const e of [
     'aomtian.t@thestandard.co',      // an outlet producer
     'video@thestandard.co',          // the camera team inbox
@@ -28,28 +51,45 @@ test('everyone else is refused — including other admins and the crew being rat
     'someone@evil.com',
     '', null, undefined,
   ] as const) {
-    assert.equal(canReadReviews(e as any), false, String(e))
+    assert.equal(canReadReviewContent(e as any), false, `content: ${String(e)}`)
+    assert.equal(canSeeReviewActivity(e as any), false, `activity: ${String(e)}`)
   }
 })
 
 test('matching is case- and whitespace-insensitive (session emails vary)', () => {
-  assert.equal(canReadReviews('  NARASIT.K@thestandard.co '), true)
-  assert.equal(canReadReviews('Panu.W@THESTANDARD.CO'), true)
+  assert.equal(canReadReviewContent('Panu.W@THESTANDARD.CO'), true)
+  assert.equal(canSeeReviewActivity('  NARASIT.K@thestandard.co '), true)
+  // ...and case games do not get anyone past the content gate either
+  assert.equal(canReadReviewContent('  NARASIT.K@thestandard.co '), false)
 })
 
-test('REVIEW_OWNER_EMAILS REPLACES the list — it never extends it silently', () => {
-  process.env.REVIEW_OWNER_EMAILS = 'boss@thestandard.co'
-  assert.equal(canReadReviews('boss@thestandard.co'), true)
+test('each env REPLACES its list — it never extends it silently', () => {
+  process.env.REVIEW_CONTENT_READER_EMAILS = 'boss@thestandard.co'
+  assert.equal(canReadReviewContent('boss@thestandard.co'), true)
   // the defaults are gone: the set is exactly what the env says
-  assert.equal(canReadReviews('narasit.k@thestandard.co'), false)
+  for (const e of MANAGERS) assert.equal(canReadReviewContent(e), false, e)
+  // a new content reader also gets activity, without being listed there
+  assert.equal(canSeeReviewActivity('boss@thestandard.co'), true)
 })
 
-test('a junk env value falls back to the named three, never to an empty gate', () => {
+test('handing the operator content access takes an explicit env change', () => {
+  // Not a thing that can happen by accident — which is the guarantee the notice
+  // on the form makes to the staff.
+  process.env.REVIEW_CONTENT_READER_EMAILS = `${MANAGERS[0]},${OPERATOR}`
+  assert.equal(canReadReviewContent(OPERATOR), true)
+})
+
+test('junk env falls back to the defaults — never to an open gate, never to nobody', () => {
   for (const junk of ['', '   ', ',,,', ' , , ']) {
-    process.env.REVIEW_OWNER_EMAILS = junk
-    assert.equal(reviewOwnerEmails().length, 3, `junk=${JSON.stringify(junk)}`)
-    assert.equal(canReadReviews('narasit.k@thestandard.co'), true)
-    assert.equal(canReadReviews('anyone@thestandard.co'), false)
+    process.env.REVIEW_CONTENT_READER_EMAILS = junk
+    process.env.REVIEW_ACTIVITY_READER_EMAILS = junk
+    assert.equal(reviewContentReaderEmails().length, 2, `junk=${JSON.stringify(junk)}`)
+    assert.equal(reviewActivityReaderEmails().length, 1, `junk=${JSON.stringify(junk)}`)
+    for (const e of MANAGERS) assert.equal(canReadReviewContent(e), true, e)
+    assert.equal(canReadReviewContent(OPERATOR), false)
+    assert.equal(canSeeReviewActivity(OPERATOR), true)
+    assert.equal(canReadReviewContent('anyone@thestandard.co'), false)
+    assert.equal(canSeeReviewActivity('anyone@thestandard.co'), false)
   }
 })
 
@@ -76,11 +116,15 @@ test('only the three known target roles are accepted', () => {
   assert.equal(isReviewTargetRole(''), false)
 })
 
-test('the notice shown to raters states the real audience, not "fully anonymous"', () => {
-  // The gate lets 3 people see raw rows, so the copy must say so. A promise of
-  // total anonymity here would be a lie the code cannot keep.
-  assert.match(ANONYMITY_NOTICE_TH, /ผู้ดูแลระบบ 3 คน/)
+test('the notice shown to raters names the REAL readers, and only them', () => {
+  // The sentence and the gate have to agree or the app is lying to its own staff.
+  // v1.173.4 broke the old copy: it named the operator as a reader, and it called
+  // the managers "ผู้ดูแลระบบ".
   assert.match(ANONYMITY_NOTICE_TH, /ไม่ถูกเปิดเผยต่อผู้ถูกประเมิน/)
+  assert.match(ANONYMITY_NOTICE_TH, /หัวหน้าทีม 2 คน/)
+  assert.match(ANONYMITY_NOTICE_TH, /ผู้ดูแลระบบเห็นเพียงว่ามีการส่ง ไม่เห็นข้อความ/)
+  assert.doesNotMatch(ANONYMITY_NOTICE_TH, /ผู้ดูแลระบบ 3 คน/, 'the operator no longer reads')
+  assert.doesNotMatch(ANONYMITY_NOTICE_TH, /นัท/, 'the operator must not be listed as a reader')
 })
 
 // ── v1.166.1 — the anonymity promise, pinned against the way it actually broke ──

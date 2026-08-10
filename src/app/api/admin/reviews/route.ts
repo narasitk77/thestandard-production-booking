@@ -1,7 +1,7 @@
 /**
  * GET /api/admin/reviews — v1.166. The ONLY door review content leaves by.
  *
- * Gated on `canReadReviews` (three named people), not on the ADMIN role: the
+ * Gated on `canReadReviewContent` (the managers), not on the ADMIN role: the
  * console has several admins and the operator named exactly three. Every other
  * signed-in user — including admins and including the people being rated —
  * gets 403 with no hint that anything exists.
@@ -12,15 +12,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { canReadReviews } from '@/lib/review-access'
+import { canReadReviewContent } from '@/lib/review-access'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canReadReviews(session.email)) {
-    return NextResponse.json({ error: 'ไม่มีสิทธิ์ดูผลประเมิน' }, { status: 403 })
+  if (!canReadReviewContent(session.email)) {
+    return NextResponse.json({ error: 'ข้อความประเมินเปิดอ่านได้เฉพาะหัวหน้าทีม (ปุ๊ก · หวาน) — ผู้ดูแลระบบดูความเคลื่อนไหวได้ที่ /admin/monitor' }, { status: 403 })
   }
 
   const sp = new URL(request.url).searchParams

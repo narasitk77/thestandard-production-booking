@@ -19,7 +19,7 @@ import { randomBytes, createHash } from 'crypto'
 import type { ReviewTargetRole } from './review-access'
 import {
   REVIEW_TARGET_ROLES, targetsFor, REVIEW_TARGET_MAIL_TH,
-  MAIL_CONFIDENTIAL_TH, isCrewRole, overallLabelFor, OVERALL_TARGET,
+  MAIL_CONFIDENTIAL_TH, isCrewRole, overallLabelFor, OVERALL_TARGET, CONTENT_READERS_TH,
 } from './review-access'
 
 export function reviewsEnabled(): boolean {
@@ -374,7 +374,7 @@ export function buildReceiptMail(input: {
       '',
       // Deliberately no promise of a reply to every message — a commitment the
       // team cannot keep would bring back the same follow-up it is meant to end.
-      'คำตอบนี้ถูกบันทึกไว้แล้วและแก้ไขไม่ได้ · ผู้อ่านคือผู้ดูแลระบบ 3 คน (นัท · ปุ๊ก · หวาน) เท่านั้น',
+      `คำตอบนี้ถูกบันทึกไว้แล้วและแก้ไขไม่ได้ · ผู้อ่านคือ${CONTENT_READERS_TH} เท่านั้น`,
       'ถ้ามีเรื่องที่ต้องแก้ ทีมจะติดต่อกลับ — เมลฉบับนี้ใช้เป็นหลักฐานว่าส่งถึงแล้ว ไม่ต้องตามถามครับ',
       '',
       'THE STANDARD Production Booking',

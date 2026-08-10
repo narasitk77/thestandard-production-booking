@@ -9,13 +9,15 @@
  * email to anybody. It is the same row the nightly sender would create, so the
  * form that opens is the real thing, not a mockup.
  *
- * Restricted to the three review owners (same gate as the results): an invite
- * is a bearer credential, and handing them out is not a general admin power.
+ * v1.173.4 — gated on ACTIVITY, not content: this mints a form for the CALLER
+ * and reveals nobody else's answers, so the operator can still see what the team
+ * receives. An invite is a bearer credential, so it is still not a general admin
+ * power.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { canReadReviews, REVIEW_TARGET_ROLES, targetsFor } from '@/lib/review-access'
+import { canSeeReviewActivity, REVIEW_TARGET_ROLES, targetsFor } from '@/lib/review-access'
 import { newInviteToken, classifyRater, presentRoles } from '@/lib/shoot-review'
 import { logAudit } from '@/lib/audit'
 
@@ -24,7 +26,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canReadReviews(session.email)) {
+  if (!canSeeReviewActivity(session.email)) {
     return NextResponse.json({ error: 'ไม่มีสิทธิ์' }, { status: 403 })
   }
 

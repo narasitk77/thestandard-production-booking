@@ -27,7 +27,8 @@ type Payload = {
     rate30: { sent: number; answered: number; pct: number | null; health: Health }
     undelivered: { count: number; health: Health }
     awaiting: { count: number; oldestDays: number | null }
-    scores: Array<{ role: string; count: number; average: number }>
+    canReadContent: boolean
+    scores: Array<{ role: string; count: number; average: number }> | null
     lastRun: { at: string; changes: any } | null
   }
 }
@@ -120,7 +121,7 @@ export default function MonitorPage() {
           <h2 className="text-sm font-medium text-gray-700 mb-2">แบบประเมินหลังงาน</h2>
 
           {!d.reviews ? (
-            <p className="text-sm text-gray-500">บัญชีนี้ดูตัวเลขประเมินไม่ได้ (เห็นได้เฉพาะ นัท · ปุ๊ก · หวาน)</p>
+            <p className="text-sm text-gray-500">บัญชีนี้ดูตัวเลขประเมินไม่ได้ (หัวหน้าทีม ปุ๊ก · หวาน เห็นข้อความ · ผู้ดูแลระบบเห็นความเคลื่อนไหว)</p>
           ) : (
             <>
               {!d.reviews.enabled && (
@@ -184,7 +185,17 @@ export default function MonitorPage() {
                 </div>
               )}
 
-              {d.reviews.scores.length > 0 && (
+              {/* v1.173.4 — the operator runs this pipeline but does not read it, so
+                  say so on the page rather than leaving a silently missing panel
+                  that looks like a bug. */}
+              {!d.reviews.canReadContent && (
+                <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded p-2.5 mt-3">
+                  🔒 หน้านี้แสดงเฉพาะ<strong>ความเคลื่อนไหว</strong> — งานไหนถูกถามแล้ว ใครตอบแล้วกี่คน
+                  ตัวข้อความและคะแนนเปิดอ่านได้เฉพาะหัวหน้าทีม (ปุ๊ก · หวาน) ตามที่ระบุไว้ในฟอร์มที่ทีมงานเห็น
+                </div>
+              )}
+
+              {d.reviews.scores && d.reviews.scores.length > 0 && (
                 <div className="grid grid-cols-3 gap-2">
                   {d.reviews.scores.map(s => (
                     <Card key={s.role} label={ROLE_TH[s.role] || s.role}

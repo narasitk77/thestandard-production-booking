@@ -8,45 +8,101 @@
  * is not access control.
  *
  * Deliberately NOT tied to `role === 'ADMIN'`: the console has several admins
- * and the operator named exactly three people. An admin who is not on the list
+ * and the operator named exactly who reads what. An admin who is not on the list
  * gets the same 403 as anyone else.
  *
- * `REVIEW_OWNER_EMAILS` (comma-separated) overrides the default without a code
- * change — but it REPLACES the list rather than extending it, so the set is
- * always exactly what one place says it is.
+ * `REVIEW_CONTENT_READER_EMAILS` / `REVIEW_ACTIVITY_READER_EMAILS`
+ * (comma-separated) override the defaults without a code change — but each
+ * REPLACES its list rather than extending it, so the set is always exactly what
+ * one place says it is. Adding the operator back to content therefore takes a
+ * deliberate env change, which is the guarantee the form's notice relies on.
  */
 
-const DEFAULT_OWNERS = [
-  'narasit.k@thestandard.co',
-  'panu.w@thestandard.co',
-  'chonlathorn.j@thestandard.co',
+/**
+ * v1.173.4 — TWO tiers, because this stopped being a quality survey and became
+ * the channel for the things people will not say to someone's face.
+ *
+ * The operator's instruction: the managers read the messages; the operator —
+ * who runs the system, sits on the crew list, and is often the producer being
+ * rated — sees only THAT a job produced feedback. A system owner who can read
+ * every complaint about himself is a system nobody complains in.
+ *
+ *   content  → the messages, the scores, the names. Managers only.
+ *   activity → did it go out, did anyone answer, is anything stuck. No content.
+ *
+ * Both lists fail CLOSED: an env var set to junk falls back to these defaults
+ * rather than to "everybody", and an unknown email gets nothing.
+ */
+const DEFAULT_CONTENT_READERS = [
+  'panu.w@thestandard.co',      // ปุ๊ก
+  'chonlathorn.j@thestandard.co', // หวาน
 ]
 
-export function reviewOwnerEmails(): string[] {
-  const raw = process.env.REVIEW_OWNER_EMAILS?.trim()
-  const list = raw
-    ? raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
-    : DEFAULT_OWNERS
-  // An env var set to junk (e.g. just commas) must not silently open the door
-  // to nobody-checks-anything; fall back to the named three.
-  return list.length > 0 ? list : DEFAULT_OWNERS
+/** Sees the pipeline, never the words. */
+const DEFAULT_ACTIVITY_READERS = [
+  'narasit.k@thestandard.co',   // นัท — operator
+]
+
+function parseList(raw: string | undefined, fallback: string[]): string[] {
+  const v = raw?.trim()
+  if (!v) return fallback
+  const list = v.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  return list.length > 0 ? list : fallback
 }
 
-/** The ONLY predicate that may gate review content. */
-export function canReadReviews(email: string | null | undefined): boolean {
-  const e = (email || '').trim().toLowerCase()
-  if (!e) return false
-  return reviewOwnerEmails().includes(e)
+/** Who may read the messages, the scores and the raters' names. */
+export function reviewContentReaderEmails(): string[] {
+  return parseList(process.env.REVIEW_CONTENT_READER_EMAILS, DEFAULT_CONTENT_READERS)
+}
+
+/** Who may see only that feedback exists, on top of the content readers. */
+export function reviewActivityReaderEmails(): string[] {
+  return parseList(process.env.REVIEW_ACTIVITY_READER_EMAILS, DEFAULT_ACTIVITY_READERS)
 }
 
 /**
+ * The ONLY predicate that may gate review CONTENT — messages, scores, names.
+ * Called on the server in every route that can return any of it; hiding a menu
+ * item is not access control.
+ */
+export function canReadReviewContent(email: string | null | undefined): boolean {
+  const e = (email || '').trim().toLowerCase()
+  if (!e) return false
+  return reviewContentReaderEmails().includes(e)
+}
+
+/**
+ * May see the pipeline: which jobs produced feedback, how many answered, what is
+ * stuck. Content readers necessarily qualify — they see strictly more.
+ */
+export function canSeeReviewActivity(email: string | null | undefined): boolean {
+  const e = (email || '').trim().toLowerCase()
+  if (!e) return false
+  return canReadReviewContent(e) || reviewActivityReaderEmails().includes(e)
+}
+
+/**
+ * How the readers are named in every user-facing sentence. One constant, because
+ * six different places used to spell out "3 คน (นัท · ปุ๊ก · หวาน)" and a change of
+ * audience has to move all of them or the app lies in whichever one was missed.
+ */
+export const CONTENT_READERS_TH = 'หัวหน้าทีม 2 คน (ปุ๊ก · หวาน)'
+
+/**
  * What a rater is told on the form. Kept next to the gate on purpose: if the
- * audience for reviews ever widens, the sentence people read has to move with
+ * audience for reviews ever changes, the sentence people read has to move with
  * it, or the app starts lying to its own staff.
+ *
+ * v1.173.4 — it used to promise "ผู้ดูแลระบบ 3 คน (นัท · ปุ๊ก · หวาน)". The moment
+ * the operator stopped reading the messages, that sentence became false in BOTH
+ * directions: it named a reader who no longer reads, and it described managers as
+ * system admins. The second clause is the operator's own commitment written down
+ * where the staff can hold him to it.
  */
 export const ANONYMITY_NOTICE_TH =
   'คำตอบของคุณจะไม่ถูกเปิดเผยต่อผู้ถูกประเมินหรือเพื่อนร่วมงาน — ' +
-  'มีเพียงผู้ดูแลระบบ 3 คน (นัท · ปุ๊ก · หวาน) ที่เห็นได้ เพื่อใช้ปรับปรุงการทำงาน'
+  `ผู้อ่านข้อความคือ${CONTENT_READERS_TH} เท่านั้น ` +
+  'ผู้ดูแลระบบเห็นเพียงว่ามีการส่ง ไม่เห็นข้อความ เพื่อใช้ปรับปรุงการทำงาน'
 
 /** Roles that can be rated, and the Thai label used in the form + reports. */
 export const REVIEW_TARGET_ROLES = [
@@ -69,7 +125,7 @@ export const REVIEW_TARGET_MAIL_TH: Record<string, string> = {
 
 /**
  * The confidentiality line in the MAIL. The form keeps the longer
- * ANONYMITY_NOTICE_TH (which names the three people who can read the answers):
+ * ANONYMITY_NOTICE_TH (which names who can actually read the answers):
  * the promise has to be spelled out where someone is about to answer, not
  * shortened there.
  */

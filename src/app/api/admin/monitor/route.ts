@@ -6,18 +6,19 @@
  * cannot drift from the sender's own rules — `dueWindow` and the delay come
  * from the same modules the worker uses.
  *
- * Two audiences, two gates, one response:
- *   - review numbers → the three review owners only (they contain who was
- *     asked and who answered, which is rater metadata)
+ * Three audiences, three gates, one response (v1.173.4):
+ *   - review CONTENT (score averages) → the managers only
+ *   - review ACTIVITY (did it go out, did anyone answer, what is stuck) → the
+ *     managers plus the operator, who runs the pipeline but does not read it
  *   - ticket numbers → console staff (a feedback queue is not secret)
- * A console user who is not a review owner gets `reviews: null` rather than a
- * 403 for the whole page.
+ * A console user with neither gets `reviews: null` rather than a 403 for the
+ * whole page.
  */
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
-import { canReadReviews } from '@/lib/review-access'
+import { canReadReviewContent, canSeeReviewActivity } from '@/lib/review-access'
 import {
   reviewsEnabled, reviewDelayDays, reviewLookbackDays, dueWindow, buildInvites,
 } from '@/lib/shoot-review'
@@ -58,11 +59,15 @@ export async function GET() {
     open: openList,
   }
 
-  if (!canReadReviews(session.email)) {
+  if (!canSeeReviewActivity(session.email)) {
     return NextResponse.json({ tickets: ticketStats, reviews: null, now: now.toISOString() })
   }
+  // v1.173.4 — the operator gets the PIPELINE (did it go out, did anyone answer);
+  // the score averages are review content and belong to the managers. On a
+  // two-person shoot a per-team average IS one person's rating of another.
+  const showContent = canReadReviewContent(session.email)
 
-  // ── review pipeline (owners only) ─────────────────────────────────────────
+  // ── review pipeline ───────────────────────────────────────────────────────
   const delay = reviewDelayDays()
   const lookback = reviewLookbackDays()
   const { from, to } = dueWindow(startOfTodayBangkok(), delay, lookback)
@@ -155,14 +160,18 @@ export async function GET() {
   const stuck = undelivered(recentInvites.filter(i => !previewIds.has(i.id)))
   const waiting = awaitingReply(recentInvites, now)
 
-  const reviews = await prisma.shootReview.findMany({
-    where: { createdAt: { gte: since30 } },
-    select: { targetRole: true, score: true },
-  })
+  // Not fetched at all unless the caller may read content — the cheapest way to
+  // be sure a score cannot leak through this response is to never load it.
   const byTarget: Record<string, { n: number; sum: number }> = {}
-  for (const r of reviews) {
-    const t = (byTarget[r.targetRole] ||= { n: 0, sum: 0 })
-    t.n++; t.sum += r.score
+  if (showContent) {
+    const reviews = await prisma.shootReview.findMany({
+      where: { createdAt: { gte: since30 } },
+      select: { targetRole: true, score: true },
+    })
+    for (const r of reviews) {
+      const t = (byTarget[r.targetRole] ||= { n: 0, sum: 0 })
+      t.n++; t.sum += r.score
+    }
   }
 
   const lastRun = await prisma.auditLog.findFirst({
@@ -194,9 +203,12 @@ export async function GET() {
         count: waiting.length,
         oldestDays: waiting[0]?.waitingDays ?? null,
       },
-      scores: Object.entries(byTarget).map(([role, v]) => ({
-        role, count: v.n, average: Math.round((v.sum / v.n) * 100) / 100,
-      })),
+      canReadContent: showContent,
+      scores: showContent
+        ? Object.entries(byTarget).map(([role, v]) => ({
+            role, count: v.n, average: Math.round((v.sum / v.n) * 100) / 100,
+          }))
+        : null,
       lastRun: lastRun ? { at: lastRun.at, changes: lastRun.changes } : null,
     },
   })

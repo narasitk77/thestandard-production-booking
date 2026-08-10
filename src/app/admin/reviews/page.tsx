@@ -6,7 +6,8 @@ import { Loader2, Download, Lock } from 'lucide-react'
 
 /* =============================================================================
    /admin/reviews — v1.166. Post-shoot peer review results.
-   Visible to three people only; the API enforces that, this page just renders
+   Visible to the managers only (v1.173.4 — the operator sees activity, not
+   content); the API enforces that, this page just renders
    whatever it is allowed to see (a 403 here is the gate working, not a bug).
    ============================================================================= */
 
@@ -54,7 +55,7 @@ export default function AdminReviewsPage() {
     try {
       const r = await fetch(`/api/admin/reviews?days=${days}`)
       const d = await r.json()
-      if (r.status === 403) throw new Error('บัญชีนี้ไม่มีสิทธิ์ดูผลประเมิน (เห็นได้เฉพาะ นัท · ปุ๊ก · หวาน)')
+      if (r.status === 403) throw new Error('ข้อความประเมินเปิดอ่านได้เฉพาะหัวหน้าทีม (ปุ๊ก · หวาน) — ผู้ดูแลระบบดูความเคลื่อนไหวได้ที่ /admin/monitor')
       if (!r.ok) throw new Error(d.error || 'โหลดไม่สำเร็จ')
       setData(d)
     } catch (e: any) { setError(e.message); setData(null) }
@@ -87,7 +88,7 @@ export default function AdminReviewsPage() {
         </div>
       </div>
       <p className="text-[11px] text-gray-400 mb-4">
-        คนให้คะแนนไม่ถูกเปิดเผยต่อผู้ถูกประเมินหรือเพื่อนร่วมงาน · หน้านี้เห็นได้ 3 คน · บันทึกลบไม่ได้
+        คนให้คะแนนไม่ถูกเปิดเผยต่อผู้ถูกประเมินหรือเพื่อนร่วมงาน · หน้านี้เห็นได้เฉพาะหัวหน้าทีม (ปุ๊ก · หวาน) · บันทึกลบไม่ได้
       </p>
 
       {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">{error}</div>}

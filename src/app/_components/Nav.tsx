@@ -7,7 +7,7 @@ import { Menu, X, Plus, ChevronDown } from 'lucide-react'
 import { signOut } from 'next-auth/react'
 import { hasConsoleAccess } from '@/lib/roles'
 import { tierAllows, type Tier } from '@/lib/tiers'
-import { canReadReviews } from '@/lib/review-access'
+import { canReadReviewContent } from '@/lib/review-access'
 
 interface NavProps {
   session: { email: string; role: string } | null
@@ -37,7 +37,7 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
   // v1.90 — only tiers that book (admin/coordinator/producer) get the + New CTA.
   const canCreate = !!session && tierAllows(tier, '/new')
   // v1.168 — see the note on the '/admin/reviews' item below: cosmetic gate.
-  const isReviewOwner = canReadReviews(session?.email)
+  const isReviewOwner = canReadReviewContent(session?.email)
   const close = () => { setOpen(false); setMoreOpen(false) }
 
   const isActive = (href: string) =>
@@ -96,11 +96,12 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     { href: '/admin/monitor', label: '📊 ศูนย์ติดตาม', show: isConsole },
     { href: '/feedback', label: 'เรื่องที่ฉันแจ้งไว้', show: !!session },
     { href: '/admin/feedback', label: 'Feedback จากทีม', show: isConsole },
-    // Peer-review results are readable by three named people (review-access.ts
+    // Peer-review CONTENT is readable by the managers only (review-access.ts
     // enforces it server-side and returns 403 to everyone else). This check is
-    // a UI hint ONLY — it runs on the client, where REVIEW_OWNER_EMAILS is not
-    // available, so it uses the built-in list. If the env override is ever set,
-    // the page's own 403 is still the truth; the menu is just cosmetic.
+    // a UI hint ONLY — it runs on the client, where REVIEW_CONTENT_READER_EMAILS
+    // is not available, so it uses the built-in list. If the env override is ever
+    // set, the page's own 403 is still the truth; the menu is just cosmetic.
+    // The operator reaches the ACTIVITY view through 📊 ศูนย์ติดตาม above.
     { href: '/admin/reviews', label: 'ผลประเมินหลังงาน', show: isReviewOwner },
   ].filter(i => i.show && tierAllows(tier, i.href))
 

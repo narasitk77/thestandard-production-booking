@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { canReadReviews } from '@/lib/review-access'
+import { canReadReviewContent } from '@/lib/review-access'
 import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -24,8 +24,8 @@ function csvCell(v: unknown): string {
 export async function GET(request: NextRequest) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canReadReviews(session.email)) {
-    return NextResponse.json({ error: 'ไม่มีสิทธิ์ดูผลประเมิน' }, { status: 403 })
+  if (!canReadReviewContent(session.email)) {
+    return NextResponse.json({ error: 'export ข้อความประเมินได้เฉพาะหัวหน้าทีม (ปุ๊ก · หวาน)' }, { status: 403 })
   }
 
   const days = Math.min(365, Math.max(1, Number(new URL(request.url).searchParams.get('days') ?? 1)))

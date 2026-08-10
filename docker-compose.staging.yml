@@ -170,15 +170,31 @@ services:
       AGN_MARKER_WINDOW_DAYS: ${AGN_MARKER_WINDOW_DAYS:-90}
 
 
-      # --- Post-shoot peer review (v1.166) ---
-      # Ratings between teams, one day after the shoot. DORMANT by default: this
+      # --- Post-shoot peer review (v1.166, reworked v1.173) ---
+      # Ratings between teams once a job is COMPLETED. DORMANT by default: this
       # feature emails real crew, so it turns on only when the operator says so.
-      # Results are readable by REVIEW_OWNER_EMAILS only (default: the three
-      # named people, enforced server-side in src/lib/review-access.ts).
+      #
+      # v1.173: a run surveys jobs that finished between DELAY_DAYS and
+      # LOOKBACK_DAYS further back (so a missed morning is caught up, not skipped
+      # forever), oldest first, at most MAX_BOOKINGS per run.
       SHOOT_REVIEW_ENABLED: ${SHOOT_REVIEW_ENABLED:-0}
       SHOOT_REVIEW_DELAY_DAYS: ${SHOOT_REVIEW_DELAY_DAYS:-1}
+      SHOOT_REVIEW_LOOKBACK_DAYS: ${SHOOT_REVIEW_LOOKBACK_DAYS:-7}
+      SHOOT_REVIEW_MAX_BOOKINGS: ${SHOOT_REVIEW_MAX_BOOKINGS:-20}
       SHOOT_REVIEW_WORKER_HOUR: ${SHOOT_REVIEW_WORKER_HOUR:-10}
-      REVIEW_OWNER_EMAILS: ${REVIEW_OWNER_EMAILS:-}
+      # Who may be ASKED: shared team mailboxes (video@, sound@, event@) and any
+      # address outside the org are never invited — an invite link is a bearer
+      # credential and a shared inbox means anyone could rate on behalf of a team.
+      REVIEW_EXCLUDE_EMAILS: ${REVIEW_EXCLUDE_EMAILS:-}
+      REVIEW_ALLOWED_EMAIL_DOMAINS: ${REVIEW_ALLOWED_EMAIL_DOMAINS:-}
+      # v1.173.4 — TWO tiers, enforced server-side in src/lib/review-access.ts.
+      # CONTENT (messages, scores, names) = the managers. ACTIVITY (did it go out,
+      # did anyone answer) = the managers plus the operator, who runs the pipeline
+      # and does not read it. Blank = the defaults in that module; each var
+      # REPLACES its list rather than extending it. The form tells staff exactly
+      # this, so changing either var changes a promise made to them.
+      REVIEW_CONTENT_READER_EMAILS: ${REVIEW_CONTENT_READER_EMAILS:-}
+      REVIEW_ACTIVITY_READER_EMAILS: ${REVIEW_ACTIVITY_READER_EMAILS:-}
       # --- Backup: OFF on staging (nothing worth backing up) ---
       BACKUP_WORKER_ENABLED: ${BACKUP_WORKER_ENABLED:-0}
 
