@@ -17,7 +17,10 @@
  */
 import { randomBytes, createHash } from 'crypto'
 import type { ReviewTargetRole } from './review-access'
-import { REVIEW_TARGET_ROLES, targetsFor } from './review-access'
+import {
+  REVIEW_TARGET_ROLES, targetsFor, REVIEW_TARGET_MAIL_TH,
+  MAIL_CONFIDENTIAL_TH, isCrewRole, overallLabelFor,
+} from './review-access'
 
 export function reviewsEnabled(): boolean {
   return process.env.SHOOT_REVIEW_ENABLED?.trim() === '1'
@@ -260,6 +263,67 @@ export function buildInvites(
     out.push({ email, role, targets })
   }
   return out
+}
+
+/**
+ * v1.173.2 — the invite mail, in TWO voices (operator's copy).
+ *
+ * The producer's side used Probook to get a crew and is being asked to rate the
+ * service; the crew did the work and is being asked whether the day went
+ * smoothly. Addressing both with one paragraph made half the recipients read a
+ * letter written for somebody else.
+ *
+ * Pure, and the ONLY place either body exists — the dry-run sample the operator
+ * reads before switching the feature on is built by this same function, so what
+ * they approve is what the team receives.
+ */
+export function buildInviteMail(input: {
+  what: string
+  shootDateTh: string
+  bookingCode: string | null
+  /** The RECIPIENT's own role: producer | camera | sound | other. */
+  raterRole: string
+  /** Teams this person is asked about, decided by buildInvites. */
+  targets: string[]
+  url: string
+}): { subject: string; text: string } {
+  const { what, shootDateTh, bookingCode, raterRole, targets, url } = input
+  const crew = isCrewRole(raterRole)
+  // " และ" with no trailing space — Thai does not space after และ, and the
+  // operator's copy reads "ทีมช่างภาพ และทีมเสียงครับ".
+  const teamList = targets.map(t => REVIEW_TARGET_MAIL_TH[t] || t).join(' และ')
+
+  const head = crew
+    ? `ขอบคุณสำหรับการทำงานหนัก — ${what} (${shootDateTh}) ครับ 🙏`
+    : `ขอบคุณสำหรับการใช้งาน Probook — ${what} (${shootDateTh}) ครับ 🙏`
+
+  // "วันนี้" is deliberately not used: with the catch-up window this mail can
+  // arrive a few days after the shoot, and copy that names the wrong day is the
+  // first thing that makes a survey feel like it was sent by a machine that was
+  // not paying attention. Same reason the old greeting stopped saying "เมื่อวาน".
+  const ask = crew
+    ? 'การทำงานกับทีมและโปรดิวเซอร์ในงานนี้ราบรื่นไหมครับ?'
+    : `ขอรบกวนให้คะแนน${teamList}ครับ`
+
+  return {
+    subject: `[ประเมินงาน] ${bookingCode || ''} ${what}`.trim(),
+    text: [
+      head,
+      '',
+      `งาน: ${what}`,
+      `Production ID: ${bookingCode || '—'}`,
+      `วันถ่าย: ${shootDateTh}`,
+      '',
+      ask,
+      `พร้อม${overallLabelFor(raterRole)} สัก 1 นาที`,
+      '',
+      url,
+      '',
+      MAIL_CONFIDENTIAL_TH,
+      '',
+      'THE STANDARD Production Booking',
+    ].join('\n'),
+  }
 }
 
 /** The criteria shown on the form. Kept small on purpose — a long form on a

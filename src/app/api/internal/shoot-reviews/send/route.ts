@@ -28,14 +28,12 @@ import { autoCompleteBookings } from '@/lib/booking-complete'
 import {
   buildInvites, newInviteToken, reviewsEnabled, reviewDelayDays,
   reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow, nonInvitableEmails,
+  buildInviteMail,
 } from '@/lib/shoot-review'
-import { REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, OVERALL_TH } from '@/lib/review-access'
 import { startOfTodayBangkok } from '@/lib/bangkok-day'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
-
-const ROLE_TH = Object.fromEntries(REVIEW_TARGET_ROLES.map(r => [r.key, r.th]))
 
 function authorised(request: NextRequest): boolean {
   const want = (process.env.RECONCILE_SECRET || process.env.NEXTAUTH_SECRET || '').trim()
@@ -114,45 +112,23 @@ export async function POST(request: NextRequest) {
   let invited = 0, mailed = 0, skippedExisting = 0, worked = 0, deferred = 0
   const errors: string[] = []
   const details: Array<{ code: string | null; invites: number; resend?: number; emails?: string[] }> = []
-  let sampleEmail: { to: string; subject: string; text: string } | null = null
+  let sampleEmail: { to: string; role: string; subject: string; text: string } | null = null
   const skippedRecipients = new Map<string, number>()
 
-  /**
-   * The invite mail, in ONE place. A dry run returns a sample built by this same
-   * function, so what the operator reads before flipping the switch cannot drift
-   * from what the crew actually receives.
-   */
+  /** Thin adapter over the (pure, tested) copy builder — one call site per body. */
   const composeInvite = (
     b: (typeof bookings)[number],
+    raterRole: string,
     targets: string[],
     token: string,
-  ): { subject: string; text: string } => {
-    const what = [b.program?.name, b.episodes[0]?.title].filter(Boolean).join(' · ') || (b.outlet?.name ?? 'งานถ่าย')
-    const shootDateTh = new Date(b.shootDate).toLocaleDateString('th-TH-u-ca-gregory', { dateStyle: 'medium' })
-    return {
-      subject: `[ประเมินงาน] ${b.bookingCode || ''} ${what}`.trim(),
-      text: [
-        // Not "เมื่อวาน" any more: with a lookback window this mail can go out a
-        // few days after the shoot, and a greeting that names the wrong day is
-        // the first thing that makes a survey feel automated and ignorable.
-        `ขอบคุณที่ร่วมงาน ${what} (${shootDateTh}) ครับ 🙏`,
-        '',
-        `งาน: ${what}`,
-        `Production ID: ${b.bookingCode || '—'}`,
-        `วันถ่าย: ${shootDateTh}`,
-        '',
-        `ขอรบกวนให้คะแนน ${targets.map(t => ROLE_TH[t] || t).join(' และ ')}`,
-        `พร้อม${OVERALL_TH} สัก 1 นาที`,
-        'จะได้เอาไปปรับการทำงานร่วมกันและปรับการให้บริการให้ดีขึ้น',
-        '',
-        `${appUrl}/review/${token}`,
-        '',
-        ANONYMITY_NOTICE_TH,
-        '',
-        'THE STANDARD Production Booking',
-      ].join('\n'),
-    }
-  }
+  ) => buildInviteMail({
+    what: [b.program?.name, b.episodes[0]?.title].filter(Boolean).join(' · ') || (b.outlet?.name ?? 'งานถ่าย'),
+    shootDateTh: new Date(b.shootDate).toLocaleDateString('th-TH-u-ca-gregory', { dateStyle: 'medium' }),
+    bookingCode: b.bookingCode,
+    raterRole,
+    targets,
+    url: `${appUrl}/review/${token}`,
+  })
 
   for (const b of bookings) {
     try {
@@ -194,8 +170,8 @@ export async function POST(request: NextRequest) {
       // is answerable without mailing anyone. The token is the one thing that
       // cannot be shown — it does not exist until a real run mints it.
       if (!sampleEmail && fresh[0]) {
-        const c = composeInvite(b, fresh[0].targets, '<ลิงก์เฉพาะบุคคล-สร้างตอนส่งจริง>')
-        sampleEmail = { to: fresh[0].email, ...c }
+        const c = composeInvite(b, fresh[0].role, fresh[0].targets, '<ลิงก์เฉพาะบุคคล-สร้างตอนส่งจริง>')
+        sampleEmail = { to: fresh[0].email, role: fresh[0].role, ...c }
       }
       continue
     }
@@ -218,7 +194,7 @@ export async function POST(request: NextRequest) {
     for (const inv of work) {
       if (!isEmailConfigured()) continue
       try {
-        await sendEmail({ to: inv.email, ...composeInvite(b, inv.targets, inv.token) })
+        await sendEmail({ to: inv.email, ...composeInvite(b, inv.role, inv.targets, inv.token) })
         mailed++
         if (inv.inviteId) {
           await prisma.shootReviewInvite.update({ where: { id: inv.inviteId }, data: { mailedAt: new Date() } })

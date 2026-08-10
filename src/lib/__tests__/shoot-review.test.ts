@@ -8,11 +8,12 @@ import {
   classifyRater, presentRoles, buildInvites, newInviteToken, tokenFingerprint,
   isCriterionKey, reviewDelayDays, REVIEW_CRITERIA,
   reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow,
-  isInvitableEmail, reviewExcludedEmails, reviewAllowedDomains,
+  isInvitableEmail, reviewExcludedEmails, reviewAllowedDomains, buildInviteMail,
 } from '../shoot-review'
 import {
   OVERALL_TARGET, isOverallTarget, isSubmittableTarget, isReviewTargetRole,
-  targetsFor, REVIEW_TARGET_ROLES,
+  targetsFor, REVIEW_TARGET_ROLES, isCrewRole, overallLabelFor,
+  OVERALL_TH, OVERALL_TH_CREW, MAIL_CONFIDENTIAL_TH,
 } from '../review-access'
 
 const base = {
@@ -270,6 +271,64 @@ test('excluding a mailbox drops it from the ASK list without erasing its team', 
   assert.ok(pd.targets.includes('camera'), 'the camera team is still rateable')
   const snd = invites.find(i => i.email === 'snd@thestandard.co')!
   assert.ok(snd.targets.includes('camera'))
+})
+
+// ── v1.173.2 — two voices: the side that USED the service vs the side that gave it
+
+const mailArgs = {
+  what: 'Long Form · EP1',
+  shootDateTh: '5 ส.ค. 2026',
+  bookingCode: 'AGN-260805-01',
+  url: 'https://probook.xtec9.xyz/review/tok',
+}
+
+test('the producer side is thanked for USING Probook and asked to rate the crew teams', () => {
+  const m = buildInviteMail({ ...mailArgs, raterRole: 'producer', targets: ['camera', 'sound'] })
+  assert.match(m.text, /ขอบคุณสำหรับการใช้งาน Probook/)
+  assert.match(m.text, /ขอรบกวนให้คะแนนทีมช่างภาพ และทีมเสียงครับ/)
+  assert.ok(m.text.includes(OVERALL_TH), 'the producer side rates a SERVICE')
+  assert.ok(!m.text.includes('การทำงานหนัก'))
+})
+
+test('the crew is thanked for the WORK and asked whether the day went smoothly', () => {
+  const m = buildInviteMail({ ...mailArgs, raterRole: 'camera', targets: ['producer', 'sound'] })
+  assert.match(m.text, /ขอบคุณสำหรับการทำงานหนัก/)
+  assert.match(m.text, /การทำงานกับทีมและโปรดิวเซอร์ในงานนี้ราบรื่นไหมครับ\?/)
+  assert.ok(m.text.includes(OVERALL_TH_CREW), 'the crew rates the JOB, not a service they bought')
+  assert.ok(!m.text.includes('การใช้งาน Probook'))
+})
+
+test('"คนอื่นๆ" reads the producer-side letter, not the crew one', () => {
+  // classifyRater buckets anyone it cannot place as 'other' — a coordinator or a
+  // guest on set. They are on the receiving end of the service, so they get the
+  // same letter as the producer.
+  const m = buildInviteMail({ ...mailArgs, raterRole: 'other', targets: ['camera'] })
+  assert.match(m.text, /ขอบคุณสำหรับการใช้งาน Probook/)
+  assert.equal(isCrewRole('other'), false)
+  assert.equal(overallLabelFor('other'), OVERALL_TH)
+  assert.equal(overallLabelFor('sound'), OVERALL_TH_CREW)
+})
+
+test('the producer-side ask names only the teams that actually worked the shoot', () => {
+  // A shoot with no sound team must not ask its producer to rate ทีมเสียง.
+  const m = buildInviteMail({ ...mailArgs, raterRole: 'producer', targets: ['camera'] })
+  assert.match(m.text, /ขอรบกวนให้คะแนนทีมช่างภาพครับ/)
+  assert.ok(!m.text.includes('ทีมเสียง'))
+})
+
+test('both letters carry the job, the date, the link and the confidentiality line', () => {
+  for (const role of ['producer', 'camera', 'sound', 'other']) {
+    const m = buildInviteMail({ ...mailArgs, raterRole: role, targets: ['camera'] })
+    assert.ok(m.text.includes('Long Form · EP1'), `${role}: job name`)
+    assert.ok(m.text.includes('5 ส.ค. 2026'), `${role}: shoot date`)
+    assert.ok(m.text.includes('AGN-260805-01'), `${role}: production id`)
+    assert.ok(m.text.includes(mailArgs.url), `${role}: form link`)
+    assert.ok(m.text.includes(MAIL_CONFIDENTIAL_TH), `${role}: confidentiality line`)
+    assert.equal(m.subject, '[ประเมินงาน] AGN-260805-01 Long Form · EP1')
+    // The catch-up window means this can land days later — no copy may claim
+    // the shoot was today or yesterday.
+    assert.ok(!/เมื่อวาน|วันนี้/.test(m.text), `${role}: must not name a relative day`)
+  }
 })
 
 test('junk target roles are still refused', () => {

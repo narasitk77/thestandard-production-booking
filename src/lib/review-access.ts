@@ -55,6 +55,26 @@ export const REVIEW_TARGET_ROLES = [
   { key: 'sound', th: 'ทีมเสียง' },
 ] as const
 
+/**
+ * How the teams are named in the invite MAIL — the operator's wording, which is
+ * shorter than the form's headings ("ทีมช่างภาพ" rather than "ทีมกล้อง") because
+ * it has to read as a sentence: "ขอรบกวนให้คะแนนทีมช่างภาพ และทีมเสียงครับ".
+ * Kept beside the canonical list so the two cannot drift out of sync silently.
+ */
+export const REVIEW_TARGET_MAIL_TH: Record<string, string> = {
+  producer: 'ทีมโปรดิวเซอร์',
+  camera: 'ทีมช่างภาพ',
+  sound: 'ทีมเสียง',
+}
+
+/**
+ * The confidentiality line in the MAIL. The form keeps the longer
+ * ANONYMITY_NOTICE_TH (which names the three people who can read the answers):
+ * the promise has to be spelled out where someone is about to answer, not
+ * shortened there.
+ */
+export const MAIL_CONFIDENTIAL_TH = '(ข้อความจะถูกเก็บเป็นความลับ ไม่เผยแพร่ให้ผู้ร่วมงานรับรู้)'
+
 export type ReviewTargetRole = (typeof REVIEW_TARGET_ROLES)[number]['key']
 
 export function isReviewTargetRole(v: unknown): v is ReviewTargetRole {
@@ -80,6 +100,27 @@ export function isReviewTargetRole(v: unknown): v is ReviewTargetRole {
  */
 export const OVERALL_TARGET = 'overall'
 export const OVERALL_TH = 'ความพึงพอใจโดยรวมต่อการให้บริการงานนี้'
+
+/**
+ * v1.173.2 — the same question, asked in the recipient's own terms.
+ *
+ * The producer's side is asking about a SERVICE they received; the crew is
+ * asking about a JOB they worked. One sentence cannot be both without sounding
+ * like it was written for someone else, which is how a survey gets ignored.
+ * Same stored row either way (`targetRole: 'overall'`) — only the wording moves,
+ * so the number stays comparable across the whole team.
+ */
+export const OVERALL_TH_CREW = 'ความพึงพอใจโดยรวมต่อการทำงานนี้'
+
+/** camera/sound = the people delivering the service. producer/other = receiving it. */
+export function isCrewRole(raterRole: string | null | undefined): boolean {
+  const r = (raterRole || '').trim().toLowerCase()
+  return r === 'camera' || r === 'sound'
+}
+
+export function overallLabelFor(raterRole: string | null | undefined): string {
+  return isCrewRole(raterRole) ? OVERALL_TH_CREW : OVERALL_TH
+}
 
 export function isOverallTarget(v: unknown): boolean {
   return v === OVERALL_TARGET

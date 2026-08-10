@@ -19,7 +19,7 @@ import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
 import {
   isValidScore, isReviewTargetRole, REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor,
-  OVERALL_TARGET, OVERALL_TH, isOverallTarget, isSubmittableTarget,
+  OVERALL_TARGET, isOverallTarget, isSubmittableTarget, overallLabelFor,
 } from '@/lib/review-access'
 import { REVIEW_CRITERIA, isCriterionKey, tokenFingerprint } from '@/lib/shoot-review'
 
@@ -77,7 +77,10 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     targets: targets.map(k => ({ key: k, th: ROLE_TH[k] || k, answered: answered.has(k) })),
     // v1.173 — asked of everyone, no matter which teams they were paired with,
     // so it is returned separately from `targets` rather than smuggled into it.
-    overall: { key: OVERALL_TARGET, th: OVERALL_TH, answered: answered.has(OVERALL_TARGET) },
+    // v1.173.2 — worded for whoever is holding the phone: the producer's side
+    // rates a service, the crew rates a job. Same stored row; the form has to
+    // match the sentence their invite mail used.
+    overall: { key: OVERALL_TARGET, th: overallLabelFor(invite.role), answered: answered.has(OVERALL_TARGET) },
     criteria: REVIEW_CRITERIA,
     notice: ANONYMITY_NOTICE_TH,
     submittedAt: invite.submittedAt,
