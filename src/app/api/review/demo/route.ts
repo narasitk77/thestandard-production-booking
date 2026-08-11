@@ -25,23 +25,37 @@ export const dynamic = 'force-dynamic'
 
 const ROLE_TH: Record<string, string> = Object.fromEntries(REVIEW_TARGET_ROLES.map(r => [r.key, r.th]))
 
+/**
+ * Every seat at the shoot, because the review is MUTUAL and each seat sees a
+ * different form. Collapsing the crew into one "ฝั่งทีมงาน" hid the sound
+ * engineer's view entirely — they rate the producer side and the camera team,
+ * which is not what either other form shows.
+ */
+const SEATS: Record<string, { role: string; th: string }> = {
+  producer: { role: 'producer', th: 'มุมมองโปรดิวเซอร์ / เจ้าของงาน' },
+  camera: { role: 'camera', th: 'มุมมองทีมกล้อง' },
+  sound: { role: 'sound', th: 'มุมมองทีมเสียง' },
+  // v1.173.6 shipped with these two names; keep them working.
+  client: { role: 'producer', th: 'มุมมองโปรดิวเซอร์ / เจ้าของงาน' },
+  crew: { role: 'camera', th: 'มุมมองทีมกล้อง' },
+}
+
 export async function GET(request: NextRequest) {
-  const voice = new URL(request.url).searchParams.get('voice') === 'crew' ? 'crew' : 'client'
-  // The two sides of the mutual review, exactly as buildInvites would assign
-  // them: the producer's side rates the crew teams, the crew rates the producer
-  // side (and the other crew team).
-  const role = voice === 'crew' ? 'camera' : 'producer'
+  const sp = new URL(request.url).searchParams
+  const asked = (sp.get('role') || sp.get('voice') || 'producer').toLowerCase()
+  const seat = SEATS[asked] ?? SEATS.producer
+  const role = seat.role
   const targets = targetsFor(role, REVIEW_TARGET_ROLES.map(r => r.key))
 
   return NextResponse.json({
     demo: true,
-    voice,
+    seat: role,
     booking: {
       code: 'DEMO-000000-01',
       shootDate: new Date().toISOString(),
       show: 'ฟอร์มจำลอง (ไม่ใช่งานจริง)',
       outlet: null,
-      job: voice === 'crew' ? 'มุมมองทีมงาน' : 'มุมมองโปรดิวเซอร์',
+      job: seat.th,
     },
     yourRole: role,
     targets: targets.map(k => ({ key: k, th: ROLE_TH[k] || k, answered: false })),

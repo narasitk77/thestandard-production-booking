@@ -45,7 +45,8 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
   // booking that does not exist. They are the ONLY safe way to look at it: an
   // invite minted on a real job writes a permanent rating the moment it is sent.
   const isDemo = params.token === 'demo' || params.token.startsWith('demo-')
-  const demoVoice = params.token === 'demo-crew' ? 'crew' : 'client'
+  // /review/demo-<seat>: producer | camera | sound (client/crew still work).
+  const demoSeat = params.token.replace(/^demo-?/, '') || 'producer'
 
   const [data, setData] = useState<Payload | null>(null)
   const [error, setError] = useState('')
@@ -56,7 +57,7 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(isDemo ? `/api/review/demo?voice=${demoVoice}` : `/api/review/${params.token}`)
+      const r = await fetch(isDemo ? `/api/review/demo?role=${encodeURIComponent(demoSeat)}` : `/api/review/${params.token}`)
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'เปิดแบบประเมินไม่ได้')
       setData(d)
@@ -67,7 +68,7 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
       if (d.overall && !d.overall.answered) init[d.overall.key] = { score: 0, scores: {}, comment: '' }
       setForm(init)
     } catch (e: any) { setError(e.message) }
-  }, [params.token, isDemo, demoVoice])
+  }, [params.token, isDemo, demoSeat])
   useEffect(() => { load() }, [load])
 
   const submit = async () => {

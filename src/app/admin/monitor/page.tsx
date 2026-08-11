@@ -145,13 +145,20 @@ export default function MonitorPage() {
             <div className="gf-card p-3 mb-3 text-xs">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-gray-600">ดูฟอร์มแบบจำลอง (ไม่ผูกกับงานจริง ไม่บันทึกอะไร):</span>
-                <a href="/review/demo-client" target="_blank" rel="noreferrer"
+                {/* One link per SEAT — the review is mutual, so each seat is asked
+                    about a different pair of teams. "ฝั่งทีมงาน" alone hid the sound
+                    engineer's form, which is the one that rates the camera team. */}
+                <a href="/review/demo-producer" target="_blank" rel="noreferrer"
                   className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">
-                  ฝั่งโปรดิวเซอร์
+                  มุมโปรดิวเซอร์
                 </a>
-                <a href="/review/demo-crew" target="_blank" rel="noreferrer"
+                <a href="/review/demo-camera" target="_blank" rel="noreferrer"
                   className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">
-                  ฝั่งทีมงาน
+                  มุมทีมกล้อง
+                </a>
+                <a href="/review/demo-sound" target="_blank" rel="noreferrer"
+                  className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">
+                  มุมทีมเสียง
                 </a>
               </div>
               <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-gray-100">
