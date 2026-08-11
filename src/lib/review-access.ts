@@ -200,22 +200,19 @@ export function isSubmittableTarget(v: unknown): boolean {
 }
 
 /**
- * Who this rater is asked to score.
+ * Mutual review: you score every team on the shoot EXCEPT your own.
  *
- * v1.173.8 — the crew no longer scores the crew. Camera and sound work side by
- * side all day; putting a star rating on each other turned a service survey into
- * a scoreboard between colleagues who have to share a van tomorrow, and neither
- * team receives anything from the other to judge. They score the producer side,
- * which is the service they actually receive, plus the job overall — and anything
- * they need to say about another team goes in the free-text box, where it reads
- * as a sentence a manager can act on rather than a number nobody can explain.
+ * v1.173.8 briefly cut the crew down to scoring the producer side only, on the
+ * reasoning that camera and sound deliver nothing to each other. The operator
+ * reverted it: every team's experience of every other team is the data he wants,
+ * and the crew work together closely enough to have a view worth recording.
  *
- * The producer side still scores every crew team: they DO receive that work.
- * 'other' (a coordinator, a guest on set) is on the receiving side too.
+ * What did NOT come back with it: the per-team "ภาพรวม" star (v1.173.6, the score
+ * is derived from the criteria) and "คุณภาพงานที่ส่งมอบ" for crew raters (v1.173.7,
+ * they receive no deliverable) — separate calls, both still standing.
  */
 export function targetsFor(raterRole: string, presentRoles: ReviewTargetRole[]): ReviewTargetRole[] {
   const mine = (raterRole || '').trim().toLowerCase()
-  if (isCrewRole(mine)) return presentRoles.filter(r => r === 'producer')
   return presentRoles.filter(r => r !== mine)
 }
 

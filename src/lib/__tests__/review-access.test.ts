@@ -93,23 +93,16 @@ test('junk env falls back to the defaults — never to an open gate, never to no
   }
 })
 
-test('v1.173.8 — the crew rates the PRODUCER side only, never each other', () => {
+test('mutual review: you score every team on the shoot except your own', () => {
   const all: any[] = ['producer', 'camera', 'sound']
-  // The receiving side still scores every crew team that worked the job…
   assert.deepEqual(targetsFor('producer', all), ['camera', 'sound'])
-  assert.deepEqual(targetsFor('other', ['producer', 'camera']), ['producer', 'camera'])
-  // …but camera and sound share a van tomorrow. A star rating between them turned
-  // the survey into a scoreboard between colleagues, and neither receives work
-  // from the other to judge. Anything they need to raise goes in the free text.
-  assert.deepEqual(targetsFor('camera', all), ['producer'])
-  assert.deepEqual(targetsFor('sound', all), ['producer'])
-  // Nobody ever rates their own team.
+  assert.deepEqual(targetsFor('camera', all), ['producer', 'sound'])
+  assert.deepEqual(targetsFor('sound', all), ['producer', 'camera'])
   for (const role of all) assert.ok(!targetsFor(role, all).includes(role), role)
-  // A shoot with no sound team: nobody is asked about sound.
+  // a shoot with no sound team: nobody is asked about sound
   assert.deepEqual(targetsFor('producer', ['producer', 'camera']), ['camera'])
-  // A crew-only shoot with no producer side leaves the crew nothing to score,
-  // which is what stops buildInvites from mailing a pointless form.
-  assert.deepEqual(targetsFor('camera', ['camera', 'sound']), [])
+  // a role not on the shoot still never rates itself
+  assert.deepEqual(targetsFor('other', ['producer', 'camera']), ['producer', 'camera'])
 })
 
 test('scores are integers 1..5 — no clamping, no strings, no half stars', () => {
