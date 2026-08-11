@@ -178,6 +178,18 @@ export function overallLabelFor(raterRole: string | null | undefined): string {
   return isCrewRole(raterRole) ? OVERALL_TH_CREW : OVERALL_TH
 }
 
+/**
+ * What the free-text box under the overall question invites. For the crew this is
+ * now the ONLY place a problem with another team can land, so the box has to say
+ * so — otherwise the star rows read as "nobody asked about that" and the thing
+ * they actually wanted to raise goes unsaid.
+ */
+export function overallHintFor(raterRole: string | null | undefined): string {
+  return isCrewRole(raterRole)
+    ? 'อะไรที่ควรทำต่อ / อะไรที่ควรแก้ · มีเรื่องของทีมอื่นในกองก็เขียนมาได้เลยครับ (ไม่บังคับ)'
+    : 'อะไรที่ควรทำต่อ / อะไรที่ควรแก้ บอกได้เลยครับ (ไม่บังคับ)'
+}
+
 export function isOverallTarget(v: unknown): boolean {
   return v === OVERALL_TARGET
 }
@@ -188,11 +200,22 @@ export function isSubmittableTarget(v: unknown): boolean {
 }
 
 /**
- * Mutual review: you rate every team on the shoot EXCEPT your own. Returns the
- * teams this rater is asked about, given which teams actually worked the job.
+ * Who this rater is asked to score.
+ *
+ * v1.173.8 — the crew no longer scores the crew. Camera and sound work side by
+ * side all day; putting a star rating on each other turned a service survey into
+ * a scoreboard between colleagues who have to share a van tomorrow, and neither
+ * team receives anything from the other to judge. They score the producer side,
+ * which is the service they actually receive, plus the job overall — and anything
+ * they need to say about another team goes in the free-text box, where it reads
+ * as a sentence a manager can act on rather than a number nobody can explain.
+ *
+ * The producer side still scores every crew team: they DO receive that work.
+ * 'other' (a coordinator, a guest on set) is on the receiving side too.
  */
 export function targetsFor(raterRole: string, presentRoles: ReviewTargetRole[]): ReviewTargetRole[] {
   const mine = (raterRole || '').trim().toLowerCase()
+  if (isCrewRole(mine)) return presentRoles.filter(r => r === 'producer')
   return presentRoles.filter(r => r !== mine)
 }
 

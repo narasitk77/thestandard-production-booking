@@ -27,12 +27,13 @@ const base = {
 }
 const roster = { 'cam@thestandard.co': 'video', 'snd@thestandard.co': 'sound', 'pd@thestandard.co': 'producer' }
 
-test('everyone is asked about the OTHER teams and never about their own', () => {
+test('the producer side is asked about the crew; the crew is asked about the producer', () => {
   const invites = buildInvites(base, roster)
   const byEmail = Object.fromEntries(invites.map(i => [i.email, i]))
   assert.deepEqual(byEmail['pd@thestandard.co'].targets, ['camera', 'sound'])
-  assert.deepEqual(byEmail['cam@thestandard.co'].targets, ['producer', 'sound'])
-  assert.deepEqual(byEmail['snd@thestandard.co'].targets, ['producer', 'camera'])
+  // v1.173.8 — no crew-to-crew star ratings; that goes in the free text instead.
+  assert.deepEqual(byEmail['cam@thestandard.co'].targets, ['producer'])
+  assert.deepEqual(byEmail['snd@thestandard.co'].targets, ['producer'])
   for (const i of invites) assert.ok(!i.targets.includes(i.role as any), `${i.email} rates own team`)
 })
 
@@ -148,7 +149,7 @@ test('invite targets are what the email promised — they are stored, not recomp
     assert.ok(!i.targets.includes(i.role as any))
   }
   const cam = invites.find(i => i.email === 'cam@thestandard.co')!
-  assert.deepEqual(cam.targets, ['producer', 'sound'])
+  assert.deepEqual(cam.targets, ['producer'])
 })
 
 // ── v1.173 — COMPLETED trigger, catch-up window, overall satisfaction ────────
@@ -270,8 +271,10 @@ test('excluding a mailbox drops it from the ASK list without erasing its team', 
   const pd = invites.find(i => i.email === 'pd@thestandard.co')!
   assert.ok(pd, 'the producer is still invited')
   assert.ok(pd.targets.includes('camera'), 'the camera team is still rateable')
+  // The sound engineer is still invited — they score the producer side, which is
+  // unaffected by a camera mailbox being excluded.
   const snd = invites.find(i => i.email === 'snd@thestandard.co')!
-  assert.ok(snd.targets.includes('camera'))
+  assert.deepEqual(snd.targets, ['producer'])
 })
 
 // ── v1.173.2 — two voices: the side that USED the service vs the side that gave it

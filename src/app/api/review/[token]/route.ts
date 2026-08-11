@@ -19,7 +19,7 @@ import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
 import {
   isValidScore, isReviewTargetRole, REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor,
-  OVERALL_TARGET, isOverallTarget, isSubmittableTarget, overallLabelFor,
+  OVERALL_TARGET, isOverallTarget, isSubmittableTarget, overallLabelFor, overallHintFor,
 } from '@/lib/review-access'
 import { criteriaFor, isCriterionAllowedFor, tokenFingerprint, buildReceiptMail } from '@/lib/shoot-review'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
@@ -81,7 +81,10 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     // v1.173.2 — worded for whoever is holding the phone: the producer's side
     // rates a service, the crew rates a job. Same stored row; the form has to
     // match the sentence their invite mail used.
-    overall: { key: OVERALL_TARGET, th: overallLabelFor(invite.role), answered: answered.has(OVERALL_TARGET) },
+    overall: {
+      key: OVERALL_TARGET, th: overallLabelFor(invite.role), hint: overallHintFor(invite.role),
+      answered: answered.has(OVERALL_TARGET),
+    },
     criteria: criteriaFor(invite.role),
     notice: ANONYMITY_NOTICE_TH,
     submittedAt: invite.submittedAt,

@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor,
-  OVERALL_TARGET, overallLabelFor,
+  OVERALL_TARGET, overallLabelFor, overallHintFor,
 } from '@/lib/review-access'
 import { criteriaFor } from '@/lib/shoot-review'
 
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     },
     yourRole: role,
     targets: targets.map(k => ({ key: k, th: ROLE_TH[k] || k, answered: false })),
-    overall: { key: OVERALL_TARGET, th: overallLabelFor(role), answered: false },
+    overall: { key: OVERALL_TARGET, th: overallLabelFor(role), hint: overallHintFor(role), answered: false },
     criteria: criteriaFor(role),
     notice: ANONYMITY_NOTICE_TH,
     submittedAt: null,

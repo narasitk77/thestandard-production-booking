@@ -7,6 +7,11 @@
  * camera and sound, and camera and sound rate the producer side back — a
  * one-way form would read as management grading crew, which is not the point.
  *
+ * v1.173.8 — mutual between SIDES, not between crew members. Camera and sound do
+ * not score each other: see targetsFor. Whatever they need to say about another
+ * team goes in the free-text box, which a manager can act on; a star from one
+ * colleague to another is a scoreboard nobody can explain.
+ *
  * The invite is a TOKEN link, not a login: crew read email on a phone and half
  * of them are freelancers without a session. The token is single-purpose (it
  * identifies one person on one booking and nothing else), long, and its

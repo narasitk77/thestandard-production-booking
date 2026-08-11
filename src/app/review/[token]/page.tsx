@@ -10,7 +10,7 @@ import { Loader2, Send, Star } from 'lucide-react'
    read nothing back — not even what the person just sent.
    ============================================================================= */
 
-type Target = { key: string; th: string; answered: boolean }
+type Target = { key: string; th: string; answered: boolean; hint?: string }
 type Criterion = { key: string; th: string }
 type Payload = {
   /** v1.173.6 — set by /api/review/demo: nothing here is real and nothing is stored. */
@@ -202,7 +202,7 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
             </div>
             <textarea value={v.comment} rows={3}
               onChange={e => setForm({ ...form, [overall.key]: { ...v, comment: e.target.value } })}
-              placeholder="อะไรที่ควรทำต่อ / อะไรที่ควรแก้ บอกได้เลยครับ (ไม่บังคับ)"
+              placeholder={overall.hint || 'อะไรที่ควรทำต่อ / อะไรที่ควรแก้ บอกได้เลยครับ (ไม่บังคับ)'}
               className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm" />
           </div>
         )
