@@ -34,6 +34,52 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({} as any))
   const code = String(body?.bookingCode || '').trim()
 
+  /**
+   * v1.173.6 — `demo: true` mails the letter for a job that does not exist, with
+   * a link to the simulator. NOTHING is read or written: no invite row, no real
+   * booking name, and the form it opens cannot submit.
+   *
+   * This is what the buttons use. The real-invite path below still exists for
+   * exercising the true pipeline, but it is deliberately not wired to a button —
+   * an invite on a real job is a permanent rating waiting to happen.
+   */
+  if (body?.demo === true) {
+    const voice = body?.voice === 'crew' ? 'crew' : 'client'
+    const raterRole = voice === 'crew' ? 'camera' : 'producer'
+    const appUrlDemo = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+    if (!isEmailConfigured()) {
+      return NextResponse.json({ ok: true, demo: true, mailed: false, mailError: 'ระบบอีเมลยังไม่ได้ตั้งค่า' })
+    }
+    try {
+      await sendEmail({
+        to: session.email,
+        ...buildInviteMail({
+          what: 'ฟอร์มจำลอง (ไม่ใช่งานจริง)',
+          shootDateTh: new Date().toLocaleDateString('th-TH-u-ca-gregory', { dateStyle: 'medium' }),
+          bookingCode: 'DEMO-000000-01',
+          raterRole,
+          targets: targetsFor(raterRole, REVIEW_TARGET_ROLES.map(r => r.key)),
+          url: `${appUrlDemo}/review/demo-${voice}`,
+        }),
+      })
+    } catch (e: any) {
+      console.error('[review-preview] demo self-send failed:', e?.message || e)
+      return NextResponse.json({ ok: true, demo: true, mailed: false, mailError: e?.message || 'ส่งอีเมลไม่สำเร็จ' })
+    }
+    logAudit({
+      actorEmail: session.email,
+      action: 'review.demo_mailed',
+      entityType: 'ShootReviewInvite',
+      entityId: 'demo',
+      changes: { voice },
+    })
+    return NextResponse.json({
+      ok: true, demo: true, voice, mailed: true, mailError: null,
+      url: `${appUrlDemo}/review/demo-${voice}`,
+      note: 'ส่งเมลตัวอย่างไปที่เมลของคุณคนเดียว — ลิงก์ในเมลเป็นฟอร์มจำลอง ไม่แตะงานจริง',
+    })
+  }
+
   // Default to the most recent finished shoot — the same population the nightly
   // sender works on, so the preview reflects reality.
   // The relations are part of the SELECT because the mail names the job; a plain
@@ -61,25 +107,57 @@ export async function POST(request: NextRequest) {
   // a booking where the caller has no role at all.
   const myRole = classifyRater(session.email, booking, rosterRoleByEmail)
   const present = presentRoles(booking, ['producer', 'camera', 'sound'])
-  const targets = targetsFor(myRole, present)
-  const finalTargets = targets.length ? targets : REVIEW_TARGET_ROLES.map(r => r.key).filter(k => k !== myRole)
+
+  /**
+   * v1.173.6 — `voice` decides which SIDE of the review is being previewed, and
+   * it has to drive the form as well as the letter.
+   *
+   * v1.173.5 applied it to the mail wording only, so asking for the crew version
+   * sent the crew letter with a link that opened the producer's form — the two
+   * halves of the same preview disagreeing with each other. The operator's own
+   * role on a job is whatever it is; previewing the other side is the entire
+   * point of the button.
+   */
+  const voice: 'client' | 'crew' | null =
+    body?.voice === 'crew' ? 'crew' : body?.voice === 'client' ? 'client' : null
+  const previewRole = voice === 'crew' ? 'camera' : voice === 'client' ? 'producer' : myRole
+  const targets = targetsFor(previewRole, present)
+  const finalTargets = targets.length ? targets : REVIEW_TARGET_ROLES.map(r => r.key).filter(k => k !== previewRole)
 
   // Reuse the caller's existing invite for this booking if there is one — the
   // unique index would reject a second, and a preview must be re-runnable.
   const existing = await prisma.shootReviewInvite.findFirst({
     where: { bookingId: booking.id, email: session.email },
   })
-  const invite = existing ?? await prisma.shootReviewInvite.create({
-    data: {
-      bookingId: booking.id,
-      email: session.email,
-      role: myRole,
-      targets: finalTargets,
-      token: newInviteToken(),
-      // No email is sent, so mailedAt stays null on purpose — if the feature is
-      // ever switched on, the nightly run will mail this person properly.
-    },
-  })
+
+  // Switching voice re-points the caller's OWN un-answered preview row. Never a
+  // submitted one: those ratings are already filed against the teams the form
+  // named at the time, and rewriting the question after the answer would make
+  // the stored row mean something it was not asked.
+  const rePoint = !!existing && !existing.submittedAt && (
+    existing.role !== previewRole ||
+    existing.targets.join(',') !== finalTargets.join(',')
+  )
+  const lockedByAnswer = !!existing && !!existing.submittedAt && existing.role !== previewRole
+
+  const invite = existing
+    ? (rePoint
+        ? await prisma.shootReviewInvite.update({
+            where: { id: existing.id },
+            data: { role: previewRole, targets: finalTargets },
+          })
+        : existing)
+    : await prisma.shootReviewInvite.create({
+        data: {
+          bookingId: booking.id,
+          email: session.email,
+          role: previewRole,
+          targets: finalTargets,
+          token: newInviteToken(),
+          // mailedAt stays null unless this call actually mails it below, so an
+          // un-mailed preview is still visibly unfinished to the nightly run.
+        },
+      })
 
   const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
   const url = `${appUrl}/review/${invite.token}`
@@ -106,12 +184,9 @@ export async function POST(request: NextRequest) {
             what,
             shootDateTh: new Date(booking.shootDate).toLocaleDateString('th-TH-u-ca-gregory', { dateStyle: 'medium' }),
             bookingCode: booking.bookingCode,
-            // `voice` overrides the WORDING only, so the operator can read the
-            // crew letter even though his own role on this job is not crew. The
-            // invite row keeps his real role, which is what the form obeys.
-            raterRole: body?.voice === 'crew' ? 'camera'
-              : body?.voice === 'client' ? 'producer'
-              : myRole,
+            // Same role the invite row now carries, so the letter and the form
+            // it links to are two halves of one preview.
+            raterRole: previewRole,
             targets: finalTargets,
             url,
           }),
@@ -134,7 +209,10 @@ export async function POST(request: NextRequest) {
     action: 'review.preview_minted',
     entityType: 'ShootReviewInvite',
     entityId: invite.id,
-    changes: { reused: !!existing, role: myRole, targets: finalTargets, mailedToSelf: mailed },
+    changes: {
+      reused: !!existing, actualRole: myRole, previewRole, targets: finalTargets,
+      rePointed: rePoint, mailedToSelf: mailed,
+    },
   })
 
   return NextResponse.json({
@@ -143,11 +221,18 @@ export async function POST(request: NextRequest) {
     url,
     booking: { code: booking.bookingCode, shootDate: booking.shootDate },
     yourRole: myRole,
+    previewRole,
+    voice: voice ?? 'actual',
     targets: finalTargets,
     mailed,
     mailError,
-    note: mailed
-      ? 'ส่งอีเมลฉบับจริงไปที่เมลของคุณคนเดียว — ไม่มีใครอื่นได้รับ'
-      : 'ไม่มีการส่งอีเมลถึงใคร — ลิงก์นี้ออกให้คุณคนเดียว',
+    // A form that was already answered cannot be re-pointed, so say so instead
+    // of handing back a link that shows the other side's questions.
+    lockedByAnswer,
+    note: lockedByAnswer
+      ? 'ฟอร์มของงานนี้ถูกตอบไปแล้ว เปลี่ยนฝั่งไม่ได้ — ลองระบุ bookingCode งานอื่น'
+      : mailed
+        ? 'ส่งอีเมลฉบับจริงไปที่เมลของคุณคนเดียว — ไม่มีใครอื่นได้รับ'
+        : 'ไม่มีการส่งอีเมลถึงใคร — ลิงก์นี้ออกให้คุณคนเดียว',
   })
 }

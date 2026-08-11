@@ -118,9 +118,6 @@ export async function POST(request: NextRequest, { params }: { params: { token: 
         return NextResponse.json({ error: `แบบประเมินนี้ไม่ได้ถามถึง "${r.targetRole}"` }, { status: 400 })
       }
     }
-    if (!isValidScore(r?.score)) {
-      return NextResponse.json({ error: 'คะแนนต้องเป็น 1–5' }, { status: 400 })
-    }
     // Per-criterion scores describe how a TEAM worked; the overall row carries
     // one satisfaction score and free text, so anything sent alongside it is
     // dropped rather than stored under a criterion it does not mean.
@@ -132,8 +129,27 @@ export async function POST(request: NextRequest, { params }: { params: { token: 
         scores[k] = v as number
       }
     }
+
+    // v1.173.6 — a team's overall `score` is DERIVED from its criteria, not asked.
+    // The form used to show a fourth star row labelled "ภาพรวม" above the same
+    // three questions, which asked people to summarise the summary; the operator
+    // took it off the form. The column stays (every report keys off it) and is
+    // computed here rather than in the browser, so one definition serves every
+    // client that ever posts to this route.
+    let score = r?.score
+    if (!isOverallTarget(r.targetRole) && !isValidScore(score)) {
+      const vals = Object.values(scores)
+      if (vals.length === 0) {
+        return NextResponse.json({ error: 'ให้ดาวอย่างน้อย 1 หัวข้อของทีมนี้ก่อนส่ง' }, { status: 400 })
+      }
+      score = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+    }
+    if (!isValidScore(score)) {
+      return NextResponse.json({ error: 'คะแนนต้องเป็น 1–5' }, { status: 400 })
+    }
+
     const comment = typeof r?.comment === 'string' ? r.comment.trim().slice(0, 2000) : ''
-    rows.push({ targetRole: r.targetRole, score: r.score, scores, comment: comment || null })
+    rows.push({ targetRole: r.targetRole, score, scores, comment: comment || null })
   }
 
   // createMany + skipDuplicates: a re-submit adds nothing and overwrites nothing.

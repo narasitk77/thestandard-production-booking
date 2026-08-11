@@ -13,6 +13,8 @@ import { Loader2, Send, Star } from 'lucide-react'
 type Target = { key: string; th: string; answered: boolean }
 type Criterion = { key: string; th: string }
 type Payload = {
+  /** v1.173.6 — set by /api/review/demo: nothing here is real and nothing is stored. */
+  demo?: boolean
   booking: { code: string | null; shootDate: string; show: string | null; outlet: string | null; job: string | null }
   yourRole: string
   targets: Target[]
@@ -39,6 +41,12 @@ function Stars({ value, onChange }: { value: number; onChange: (n: number) => vo
 }
 
 export default function ReviewFormPage({ params }: { params: { token: string } }) {
+  // /review/demo-client and /review/demo-crew render the real form against a
+  // booking that does not exist. They are the ONLY safe way to look at it: an
+  // invite minted on a real job writes a permanent rating the moment it is sent.
+  const isDemo = params.token === 'demo' || params.token.startsWith('demo-')
+  const demoVoice = params.token === 'demo-crew' ? 'crew' : 'client'
+
   const [data, setData] = useState<Payload | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -48,7 +56,7 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/review/${params.token}`)
+      const r = await fetch(isDemo ? `/api/review/demo?voice=${demoVoice}` : `/api/review/${params.token}`)
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'เปิดแบบประเมินไม่ได้')
       setData(d)
@@ -59,14 +67,24 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
       if (d.overall && !d.overall.answered) init[d.overall.key] = { score: 0, scores: {}, comment: '' }
       setForm(init)
     } catch (e: any) { setError(e.message) }
-  }, [params.token])
+  }, [params.token, isDemo, demoVoice])
   useEffect(() => { load() }, [load])
 
   const submit = async () => {
+    const overallKey = data?.overall?.key
     const ratings = Object.entries(form)
-      .filter(([, v]) => v.score > 0)
-      .map(([targetRole, v]) => ({ targetRole, score: v.score, scores: v.scores, comment: v.comment }))
+      .map(([targetRole, v]) => {
+        // The job-level question is one star row; a team is its criteria.
+        if (targetRole === overallKey) {
+          return v.score > 0 ? { targetRole, score: v.score, comment: v.comment } : null
+        }
+        const given = Object.values(v.scores).filter(n => n > 0)
+        return given.length > 0 ? { targetRole, scores: v.scores, comment: v.comment } : null
+      })
+      .filter(Boolean) as Array<Record<string, unknown>>
     if (ratings.length === 0) { setError('ให้ดาวอย่างน้อย 1 ข้อก่อนส่งนะครับ'); return }
+    // The whole point of demo mode: the request is never made.
+    if (isDemo) { setReceiptSent(false); setDone(true); return }
     setBusy(true); setError('')
     try {
       const r = await fetch(`/api/review/${params.token}`, {
@@ -89,13 +107,17 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center space-y-2">
         <div className="text-4xl">🙏</div>
-        <div className="text-base font-medium text-gray-800">ส่งแล้ว ขอบคุณมากครับ</div>
+        <div className="text-base font-medium text-gray-800">
+          {data.demo ? 'นี่คือหน้าจอที่ทีมจะเห็นหลังกดส่ง' : 'ส่งแล้ว ขอบคุณมากครับ'}
+        </div>
         {/* v1.173.3 — say where the proof is. Without this the only way to find
             out whether an answer arrived is to go and ask the admin. */}
         <p className="text-sm text-gray-600">
-          {receiptSent
-            ? 'ระบบส่งอีเมลยืนยันไปที่เมลของคุณแล้ว ใช้เป็นหลักฐานได้ ไม่ต้องตามถามครับ'
-            : 'คำตอบถูกบันทึกแล้วเรียบร้อย'}
+          {data.demo
+            ? '🧪 โหมดจำลอง — ไม่มีอะไรถูกบันทึก และไม่มีอีเมลออกไป'
+            : receiptSent
+              ? 'ระบบส่งอีเมลยืนยันไปที่เมลของคุณแล้ว ใช้เป็นหลักฐานได้ ไม่ต้องตามถามครับ'
+              : 'คำตอบถูกบันทึกแล้วเรียบร้อย'}
         </p>
         <p className="text-xs text-gray-500">{data.notice}</p>
       </div>
@@ -119,6 +141,12 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
         </p>
       </div>
 
+      {data.demo && (
+        <div className="text-xs text-gray-800 bg-blue-50 border border-blue-200 rounded p-2.5">
+          🧪 <strong>โหมดจำลอง</strong> — งานนี้ไม่มีอยู่จริง กดส่งได้เต็มที่ ไม่มีอะไรถูกบันทึก และไม่มีใครได้รับอีเมล
+        </div>
+      )}
+
       <div className="text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded p-2.5">
         🔒 {data.notice}
       </div>
@@ -141,14 +169,12 @@ export default function ReviewFormPage({ params }: { params: { token: string } }
           <div key={t.key} className="gf-card p-4 space-y-3">
             <div className="font-medium text-gray-800">{t.th}</div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">ภาพรวม</span>
-              <Stars value={v.score} onChange={n => setForm({ ...form, [t.key]: { ...v, score: n } })} />
-            </div>
-
+            {/* No "ภาพรวม" row: it sat above the same three questions and asked
+                people to summarise their own summary. The stored per-team score
+                is derived from these three, server-side. */}
             {data.criteria.map(c => (
               <div key={c.key} className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">{c.th}</span>
+                <span className="text-sm text-gray-600">{c.th}</span>
                 <Stars value={v.scores[c.key] || 0}
                   onChange={n => setForm({ ...form, [t.key]: { ...v, scores: { ...v.scores, [c.key]: n } } })} />
               </div>

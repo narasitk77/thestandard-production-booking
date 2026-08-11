@@ -58,23 +58,25 @@ function Card({ label, value, sub, health }: { label: string; value: React.React
 export default function MonitorPage() {
   const [d, setD] = useState<Payload | null>(null)
   const [error, setError] = useState('')
-  // v1.173.5 — the operator's own "show me what the team gets". It lives HERE and
-  // not only on /admin/reviews, because after v1.173.4 that page is the managers'
-  // and he has no menu entry to it — a tool you cannot reach is not shipped.
-  const [sent, setSent] = useState<string>('')
+  // v1.173.6 — "show me what the team gets" now opens the SIMULATOR, not an
+  // invite on a real job. The previous version minted a real one, the operator
+  // submitted it while inspecting the copy, and there is no undo by design.
+  const [sent, setSent] = useState<{ msg: string } | null>(null)
   const [sendBusy, setSendBusy] = useState(false)
 
-  const sendSelf = async (voice: 'client' | 'crew') => {
-    setSendBusy(true); setError(''); setSent('')
+  // Mails the demo letter to YOUR OWN address; the link inside points at the
+  // simulator, so nothing it leads to can write anything.
+  const mailSelf = async (voice: 'client' | 'crew') => {
+    setSendBusy(true); setError(''); setSent(null)
     try {
       const r = await fetch('/api/admin/reviews/preview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sendMail: true, voice }),
+        body: JSON.stringify({ sendMail: true, demo: true, voice }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'ส่งไม่สำเร็จ')
       if (j.mailError) throw new Error(j.mailError)
-      setSent(`ส่งเมลฉบับ${voice === 'crew' ? 'ทีมงาน' : 'โปรดิวเซอร์'}ไปที่เมลของคุณแล้ว (งาน ${j.booking?.code || '—'})`)
+      setSent({ msg: `ส่งเมลตัวอย่างฉบับ${voice === 'crew' ? 'ทีมงาน' : 'โปรดิวเซอร์'}ไปที่เมลของคุณแล้ว` })
     } catch (e: any) { setError(e.message) } finally { setSendBusy(false) }
   }
 
@@ -142,18 +144,29 @@ export default function MonitorPage() {
           {d.reviews && (
             <div className="gf-card p-3 mb-3 text-xs">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-gray-600">อยากเห็นของจริงในกล่องเมล?</span>
-                <button onClick={() => sendSelf('client')} disabled={sendBusy}
+                <span className="text-gray-600">ดูฟอร์มแบบจำลอง (ไม่ผูกกับงานจริง ไม่บันทึกอะไร):</span>
+                <a href="/review/demo-client" target="_blank" rel="noreferrer"
+                  className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">
+                  ฝั่งโปรดิวเซอร์
+                </a>
+                <a href="/review/demo-crew" target="_blank" rel="noreferrer"
+                  className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">
+                  ฝั่งทีมงาน
+                </a>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-gray-100">
+                <span className="text-gray-600">อยากเห็นเมลในกล่องจริง:</span>
+                <button onClick={() => mailSelf('client')} disabled={sendBusy}
                   className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
                   {sendBusy ? 'กำลังส่ง…' : 'ส่งฉบับโปรดิวเซอร์มาที่ฉัน'}
                 </button>
-                <button onClick={() => sendSelf('crew')} disabled={sendBusy}
+                <button onClick={() => mailSelf('crew')} disabled={sendBusy}
                   className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
                   ส่งฉบับทีมงานมาที่ฉัน
                 </button>
-                <span className="text-gray-400">ส่งถึงเมลของคุณคนเดียว · ไม่มีใครอื่นได้รับ</span>
+                <span className="text-gray-400">ส่งถึงเมลของคุณคนเดียว · ลิงก์ในเมลชี้ไปที่ฟอร์มจำลอง</span>
               </div>
-              {sent && <div className="text-green-700 mt-1.5">✉️ {sent}</div>}
+              {sent && <div className="text-green-700 mt-1.5">✉️ {sent.msg}</div>}
             </div>
           )}
 
