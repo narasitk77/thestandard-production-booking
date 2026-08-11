@@ -37,15 +37,20 @@ export default function AdminReviewsPage() {
   // v1.169 — with the feature dormant this page is empty and there is nothing
   // to click. This mints a real invite for YOU on a real booking and sends no
   // email, so the form can be seen before anyone decides to turn it on.
-  const [preview, setPreview] = useState<{ url: string; booking: { code: string | null }; targets: string[] } | null>(null)
+  const [preview, setPreview] = useState<{ url: string; booking: { code: string | null }; targets: string[]; mailed?: boolean; mailError?: string | null; note?: string } | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
 
-  const makePreview = async () => {
+  // opts.sendMail posts the real invite to YOUR OWN inbox (never anyone else's);
+  // opts.voice picks which of the two letters to read.
+  const makePreview = async (opts: { sendMail?: boolean; voice?: 'client' | 'crew' } = {}) => {
     setPreviewBusy(true); setError('')
     try {
-      const r = await fetch('/api/admin/reviews/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const r = await fetch('/api/admin/reviews/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts),
+      })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'สร้างตัวอย่างไม่สำเร็จ')
+      if (d.mailError) setError(`ออกลิงก์ให้แล้ว แต่ส่งอีเมลไม่สำเร็จ: ${d.mailError}`)
       setPreview(d)
     } catch (e: any) { setError(e.message) } finally { setPreviewBusy(false) }
   }
@@ -96,11 +101,19 @@ export default function AdminReviewsPage() {
       <div className="gf-card p-3 mb-4 text-xs">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-gray-600">อยากเห็นว่าทีมจะได้รับฟอร์มหน้าตาแบบไหน?</span>
-          <button onClick={makePreview} disabled={previewBusy}
+          <button onClick={() => makePreview()} disabled={previewBusy}
             className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
-            {previewBusy ? 'กำลังสร้าง…' : 'สร้างฟอร์มตัวอย่างให้ฉัน'}
+            {previewBusy ? 'กำลังสร้าง…' : 'ออกลิงก์ฟอร์มให้ฉัน'}
           </button>
-          <span className="text-gray-400">ออกลิงก์ให้คุณคนเดียว · ไม่ส่งอีเมลถึงใคร</span>
+          <button onClick={() => makePreview({ sendMail: true, voice: 'client' })} disabled={previewBusy}
+            className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+            ส่งเมลฉบับ<strong>โปรดิวเซอร์</strong>มาที่ฉัน
+          </button>
+          <button onClick={() => makePreview({ sendMail: true, voice: 'crew' })} disabled={previewBusy}
+            className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+            ส่งเมลฉบับ<strong>ทีมงาน</strong>มาที่ฉัน
+          </button>
+          <span className="text-gray-400">ส่งถึงเมลของคุณคนเดียว · ไม่มีใครอื่นได้รับ</span>
         </div>
         {preview && (
           <div className="mt-2 border-t border-gray-100 pt-2 space-y-1">
@@ -108,6 +121,7 @@ export default function AdminReviewsPage() {
             <a href={preview.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">
               {preview.url}
             </a>
+            {preview.mailed && <div className="text-green-700">✉️ ส่งอีเมลไปที่เมลของคุณแล้ว</div>}
             <div className="text-gray-400">คะแนนที่ส่งจากฟอร์มนี้จะขึ้นในรายการด้านล่างจริง (ลบไม่ได้ตามกติกา)</div>
           </div>
         )}

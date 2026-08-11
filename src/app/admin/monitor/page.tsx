@@ -58,6 +58,25 @@ function Card({ label, value, sub, health }: { label: string; value: React.React
 export default function MonitorPage() {
   const [d, setD] = useState<Payload | null>(null)
   const [error, setError] = useState('')
+  // v1.173.5 — the operator's own "show me what the team gets". It lives HERE and
+  // not only on /admin/reviews, because after v1.173.4 that page is the managers'
+  // and he has no menu entry to it — a tool you cannot reach is not shipped.
+  const [sent, setSent] = useState<string>('')
+  const [sendBusy, setSendBusy] = useState(false)
+
+  const sendSelf = async (voice: 'client' | 'crew') => {
+    setSendBusy(true); setError(''); setSent('')
+    try {
+      const r = await fetch('/api/admin/reviews/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sendMail: true, voice }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'ส่งไม่สำเร็จ')
+      if (j.mailError) throw new Error(j.mailError)
+      setSent(`ส่งเมลฉบับ${voice === 'crew' ? 'ทีมงาน' : 'โปรดิวเซอร์'}ไปที่เมลของคุณแล้ว (งาน ${j.booking?.code || '—'})`)
+    } catch (e: any) { setError(e.message) } finally { setSendBusy(false) }
+  }
 
   const load = useCallback(async () => {
     setError('')
@@ -119,6 +138,24 @@ export default function MonitorPage() {
 
           {/* ── แบบประเมินหลังงาน ──────────────────────────────────── */}
           <h2 className="text-sm font-medium text-gray-700 mb-2">แบบประเมินหลังงาน</h2>
+
+          {d.reviews && (
+            <div className="gf-card p-3 mb-3 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-gray-600">อยากเห็นของจริงในกล่องเมล?</span>
+                <button onClick={() => sendSelf('client')} disabled={sendBusy}
+                  className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+                  {sendBusy ? 'กำลังส่ง…' : 'ส่งฉบับโปรดิวเซอร์มาที่ฉัน'}
+                </button>
+                <button onClick={() => sendSelf('crew')} disabled={sendBusy}
+                  className="px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+                  ส่งฉบับทีมงานมาที่ฉัน
+                </button>
+                <span className="text-gray-400">ส่งถึงเมลของคุณคนเดียว · ไม่มีใครอื่นได้รับ</span>
+              </div>
+              {sent && <div className="text-green-700 mt-1.5">✉️ {sent}</div>}
+            </div>
+          )}
 
           {!d.reviews ? (
             <p className="text-sm text-gray-500">บัญชีนี้ดูตัวเลขประเมินไม่ได้ (หัวหน้าทีม ปุ๊ก · หวาน เห็นข้อความ · ผู้ดูแลระบบเห็นความเคลื่อนไหว)</p>
