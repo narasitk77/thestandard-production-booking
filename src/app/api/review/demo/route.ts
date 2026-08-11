@@ -19,7 +19,7 @@ import {
   REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor,
   OVERALL_TARGET, overallLabelFor,
 } from '@/lib/review-access'
-import { REVIEW_CRITERIA } from '@/lib/shoot-review'
+import { criteriaFor } from '@/lib/shoot-review'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     yourRole: role,
     targets: targets.map(k => ({ key: k, th: ROLE_TH[k] || k, answered: false })),
     overall: { key: OVERALL_TARGET, th: overallLabelFor(role), answered: false },
-    criteria: REVIEW_CRITERIA,
+    criteria: criteriaFor(role),
     notice: ANONYMITY_NOTICE_TH,
     submittedAt: null,
   })

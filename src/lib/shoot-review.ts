@@ -395,3 +395,25 @@ export type ReviewCriterionKey = (typeof REVIEW_CRITERIA)[number]['key']
 export function isCriterionKey(v: unknown): v is ReviewCriterionKey {
   return typeof v === 'string' && REVIEW_CRITERIA.some(c => c.key === v)
 }
+
+/**
+ * v1.173.7 — which criteria a given RATER is asked, which is not the same for
+ * everyone on the shoot.
+ *
+ * "คุณภาพงานที่ส่งมอบ" only means something to the side that RECEIVES delivered
+ * work. Camera and sound hand nothing to each other and receive no deliverable
+ * from the producer, so asking them to score it produced a number about nothing —
+ * and it was dragging their derived per-team score with it. Operator's call, and
+ * it keys off the rater rather than the target: the same camera team is asked
+ * about delivery by a producer and not asked by the sound engineer.
+ */
+export function criteriaFor(raterRole: string | null | undefined) {
+  return isCrewRole(raterRole)
+    ? REVIEW_CRITERIA.filter(c => c.key !== 'quality')
+    : REVIEW_CRITERIA.slice()
+}
+
+/** Server-side guard: a rater may only submit the criteria they were asked. */
+export function isCriterionAllowedFor(raterRole: string | null | undefined, key: unknown): boolean {
+  return isCriterionKey(key) && criteriaFor(raterRole).some(c => c.key === key)
+}

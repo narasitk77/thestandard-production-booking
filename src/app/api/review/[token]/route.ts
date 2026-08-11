@@ -21,7 +21,7 @@ import {
   isValidScore, isReviewTargetRole, REVIEW_TARGET_ROLES, ANONYMITY_NOTICE_TH, targetsFor,
   OVERALL_TARGET, isOverallTarget, isSubmittableTarget, overallLabelFor,
 } from '@/lib/review-access'
-import { REVIEW_CRITERIA, isCriterionKey, tokenFingerprint, buildReceiptMail } from '@/lib/shoot-review'
+import { criteriaFor, isCriterionAllowedFor, tokenFingerprint, buildReceiptMail } from '@/lib/shoot-review'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 
 export const dynamic = 'force-dynamic'
@@ -82,7 +82,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     // rates a service, the crew rates a job. Same stored row; the form has to
     // match the sentence their invite mail used.
     overall: { key: OVERALL_TARGET, th: overallLabelFor(invite.role), answered: answered.has(OVERALL_TARGET) },
-    criteria: REVIEW_CRITERIA,
+    criteria: criteriaFor(invite.role),
     notice: ANONYMITY_NOTICE_TH,
     submittedAt: invite.submittedAt,
   })
@@ -124,7 +124,9 @@ export async function POST(request: NextRequest, { params }: { params: { token: 
     const scores: Record<string, number> = {}
     if (!isOverallTarget(r.targetRole)) {
       for (const [k, v] of Object.entries(r?.scores || {})) {
-        if (!isCriterionKey(k)) continue
+        // Silently dropping an unasked criterion is right: an older cached page
+        // may still post one, and that is not worth failing a submission over.
+        if (!isCriterionAllowedFor(invite.role, k)) continue
         if (!isValidScore(v)) return NextResponse.json({ error: `คะแนนหัวข้อ "${k}" ต้องเป็น 1–5` }, { status: 400 })
         scores[k] = v as number
       }

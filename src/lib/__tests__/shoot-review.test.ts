@@ -9,6 +9,7 @@ import {
   isCriterionKey, reviewDelayDays, REVIEW_CRITERIA,
   reviewLookbackDays, reviewMaxBookingsPerRun, dueWindow,
   isInvitableEmail, reviewExcludedEmails, reviewAllowedDomains, buildInviteMail, buildReceiptMail,
+  criteriaFor, isCriterionAllowedFor,
 } from '../shoot-review'
 import {
   OVERALL_TARGET, isOverallTarget, isSubmittableTarget, isReviewTargetRole,
@@ -368,6 +369,52 @@ test('a receipt with no comment does not print an empty ข้อความ se
   })
   assert.ok(!m.text.includes('ข้อความที่คุณเขียน'))
   assert.ok(m.text.includes('ทีมโปรดิวเซอร์: ★★★☆☆ (3/5)'))
+})
+
+// ── v1.173.7 — the criteria follow the RATER, not the team being rated ───────
+
+test('the crew is not asked about delivered work — they receive none', () => {
+  // Camera and sound hand nothing to each other and get no deliverable from the
+  // producer, so a "คุณภาพงานที่ส่งมอบ" score from them was a number about nothing
+  // — and it dragged their derived per-team score with it.
+  for (const role of ['camera', 'sound']) {
+    const keys = criteriaFor(role).map(c => c.key)
+    assert.deepEqual(keys, ['communication', 'onTime'], role)
+  }
+})
+
+test('the side that RECEIVES the work is still asked about it', () => {
+  for (const role of ['producer', 'other', '', null, undefined]) {
+    const keys = criteriaFor(role as any).map(c => c.key)
+    assert.ok(keys.includes('quality'), `${String(role)} should keep quality`)
+    assert.equal(keys.length, 3, String(role))
+  }
+})
+
+test('the same team is judged on delivery by a producer and not by the crew', () => {
+  // The rule keys off who is ASKING. A camera team rated by the producer gets a
+  // delivery score; the same team rated by the sound engineer does not.
+  assert.ok(criteriaFor('producer').some(c => c.key === 'quality'))
+  assert.ok(!criteriaFor('sound').some(c => c.key === 'quality'))
+})
+
+test('a crew member cannot post the criterion they were never asked', () => {
+  // The form is the polite gate; this is the real one. A stale cached page or a
+  // crafted POST must not file a delivery score against a permanent record.
+  assert.equal(isCriterionAllowedFor('camera', 'quality'), false)
+  assert.equal(isCriterionAllowedFor('camera', 'onTime'), true)
+  assert.equal(isCriterionAllowedFor('producer', 'quality'), true)
+  assert.equal(isCriterionAllowedFor('producer', 'vibes'), false)
+  assert.equal(isCriterionAllowedFor('sound', ''), false)
+})
+
+test('every criterion a rater is offered has Thai copy and validates', () => {
+  for (const role of ['producer', 'camera', 'sound', 'other']) {
+    for (const c of criteriaFor(role)) {
+      assert.equal(isCriterionKey(c.key), true, `${role}/${c.key}`)
+      assert.ok(c.th, `${role}/${c.key} has no Thai label`)
+    }
+  }
 })
 
 test('junk target roles are still refused', () => {
