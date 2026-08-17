@@ -159,7 +159,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [producerOpts, setProducerOpts] = useState<{ email: string; name: string; nickname: string }[]>([])
   const [producerCustom, setProducerCustom] = useState(false)
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot
-  const [cameraOverload, setCameraOverload] = useState('')
+  const [cameraOverload, setCameraOverload] = useState<string[]>([]) // v1.177 — one chip per over-capacity pool
   // v1.107 — which required crew roles still have nobody assigned (warn the assigner)
   const [crewGaps, setCrewGaps] = useState<{ missing: string[]; missingTh: string[]; freelancerCount: number } | null>(null)
   const [editForm, setEditForm] = useState({
@@ -227,9 +227,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot.
   // Excludes this booking's own row (excludeBookingId) and re-adds its own
   // cameraCount via the endpoint, so the total isn't double-counted.
+  // v1.177 — crew shortages count too, and the wording now comes from the server
+  // so this page and the booking wizard cannot describe the same slot differently.
   useEffect(() => {
-    if (!booking || !booking.cameraCount || booking.cameraCount <= 0) { setCameraOverload(''); return }
-    if (booking.status === 'CANCELLED' || booking.status === 'COMPLETED') { setCameraOverload(''); return }
+    if (!booking) { setCameraOverload([]); return }
+    const cams = booking.cameraCount || 0
+    const vids = booking.videographerCount || 0
+    const swis = booking.switcherCount || 0
+    if (cams <= 0 && vids <= 0 && swis <= 0) { setCameraOverload([]); return }
+    if (booking.status === 'CANCELLED' || booking.status === 'COMPLETED') { setCameraOverload([]); return }
     let cancelled = false
     fetch('/api/camera-load', {
       method: 'POST',
@@ -239,12 +245,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         shootEndDate: booking.shootEndDate || null,
         callTime: booking.callTime,
         estimatedWrap: booking.estimatedWrap || null,
-        cameraCount: booking.cameraCount,
+        shootType: booking.shootType,
+        cameraCount: cams,
+        videographerCount: vids,
+        switcherCount: swis,
         excludeBookingId: booking.id,
       }),
     })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (!cancelled && d) setCameraOverload(d.exceedsLimit ? `กล้องเต็ม: ช่วงเวลานี้จองรวม ${d.totalCameras}/${d.limit} ตัว — ต้องเช่ากล้องเพิ่ม` : '') })
+      .then(d => { if (!cancelled && d) setCameraOverload(Array.isArray(d.shortages) ? d.shortages : []) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [booking])
@@ -763,11 +772,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
              booking.status === 'CANCELLED' ? 'CANCELLED' :
              '[REQUESTED]'}
           </span>
-          {cameraOverload && (
-            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-300 font-medium">
-              <AlertTriangle className="w-3 h-3" /> {cameraOverload}
+          {cameraOverload.map((w, i) => (
+            <span key={i} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-medium">
+              <AlertTriangle className="w-3 h-3 shrink-0" /> {w}
             </span>
-          )}
+          ))}
         </div>
         <h1 className="text-2xl font-normal text-gray-800">
           {booking.outlet.name} · {bookingDisplayName(booking)}

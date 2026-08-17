@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { OUTLETS, CREW_OPTIONS, SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
-import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation } from '@/lib/locations'
+import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation, roomDefaultCameras } from '@/lib/locations'
 import NumberStepper from '@/app/_components/NumberStepper'
 
 /* =============================================================================
@@ -288,13 +288,32 @@ export default function BookingWizard() {
     return () => { cancelled = true }
   }, [projectId])
 
-  // v1.63.0 — live, NON-BLOCKING camera-overload check. Sums cameraCount across
-  // time-overlapping active bookings (+ this one) and warns when total > 9.
-  // Debounced; only sets a red banner — never blocks Next/Submit.
+  // v1.177 — picking a room that has a permanent rig pre-fills the camera count
+  // (Studio 1 = Sony FX30 × 3). Only fills a BLANK field, and only when the room
+  // changes — so a number the producer typed, or one restored from a draft, is
+  // never overwritten, and clearing the field to retype does not refill it.
   useEffect(() => {
-    const own = parseInt(cameraCount, 10)
-    if (!shootDate || !callTime || cameraCount.trim() === '' || isNaN(own) || own <= 0) {
-      setCameraLoadWarning('')
+    const kit = roomDefaultCameras(locationId)
+    if (kit && cameraCount.trim() === '') setCameraCount(String(kit.count))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationId])
+
+  // v1.63.0 — live, NON-BLOCKING overload check → v1.177 covers crew too.
+  //
+  // Runs as soon as the slot is known, even with the camera field still blank: a
+  // shortage of ช่างวิดีโอ matters just as much as one of cameras, and a producer
+  // who fills the crew step first should not have to backtrack to hear about it.
+  // The warning text comes from the server so this banner and the admin page can
+  // never word the same shortage differently. Debounced; never blocks Next/Submit.
+  useEffect(() => {
+    const cam = parseInt(cameraCount, 10)
+    const cams = Number.isFinite(cam) && cam > 0 ? cam : 0
+    // Mirror what submit actually sends: a headcount only counts when the role
+    // was ticked, otherwise every booking would claim a videographer.
+    const vids = crew.includes('Videographer') ? Math.max(1, parseInt(videographerCount, 10) || 1) : 0
+    const swis = crew.includes('Switcher') ? Math.max(1, parseInt(switcherCount, 10) || 1) : 0
+    if (!shootDate || !callTime || (cams === 0 && vids === 0 && swis === 0)) {
+      setLoadWarnings([])
       return
     }
     let cancelled = false
@@ -302,19 +321,22 @@ export default function BookingWizard() {
       fetch('/api/camera-load', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shootDate, shootEndDate: shootEndDate || null, callTime, estimatedWrap: estimatedWrap || null, cameraCount: own }),
+        body: JSON.stringify({
+          shootDate, shootEndDate: shootEndDate || null, callTime,
+          estimatedWrap: estimatedWrap || null,
+          shootType: SHOOT_TYPE_VALUES[shootType],
+          cameraCount: cams, videographerCount: vids, switcherCount: swis,
+        }),
       })
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           if (cancelled || !d) return
-          setCameraLoadWarning(d.exceedsLimit
-            ? `⚠️ กล้องเต็ม / Cameras full — ช่วงเวลานี้จองรวม ${d.totalCameras}/${d.limit} ตัว (ของคุณ ${own} + งานอื่น ${d.otherCameras}) · ต้องเช่ากล้องเพิ่ม / rent extra cameras`
-            : '')
+          setLoadWarnings(Array.isArray(d.warnings) ? d.warnings : [])
         })
         .catch(() => {})
     }, 400)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [shootDate, shootEndDate, callTime, estimatedWrap, cameraCount])
+  }, [shootDate, shootEndDate, callTime, estimatedWrap, shootType, cameraCount, videographerCount, switcherCount, crew])
 
   /* ---- derived ---- */
   const selectedOutlet = OUTLETS.find(o => o.code === outletCode)
@@ -515,7 +537,8 @@ export default function BookingWizard() {
     setSpecialEquipment(prev => prev.includes(item) ? prev.filter(x => x !== item) : [...prev, item])
 
   // v1.63.0 — live, NON-BLOCKING camera-overload warning (set by the effect below)
-  const [cameraLoadWarning, setCameraLoadWarning] = useState('')
+  // v1.177 — one line per over-capacity pool, plus the "admin จัดหาให้" footer.
+  const [loadWarnings, setLoadWarnings] = useState<string[]>([])
 
   const toggleEpisode = (epId: string) =>
     setSelectedEpisodeIds(prev =>
@@ -847,9 +870,13 @@ export default function BookingWizard() {
           {error}
         </div>
       )}
-      {cameraLoadWarning && (
-        <div className="ops-card px-3 py-2 mb-3 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">
-          {cameraLoadWarning}
+      {/* v1.177 — amber, not red: this is a heads-up, not a rejection. The last
+          line is always the "admin จะจัดหาให้" note, so it is styled quieter. */}
+      {loadWarnings.length > 0 && (
+        <div className="ops-card px-3 py-2 mb-3 text-sm text-amber-800 bg-amber-50 border-amber-200 border-l-4 border-l-amber-500 space-y-1">
+          {loadWarnings.map((w, i) => (
+            <div key={i} className={i === loadWarnings.length - 1 ? 'text-xs text-amber-700 pt-0.5' : ''}>{w}</div>
+          ))}
         </div>
       )}
 
@@ -1599,6 +1626,11 @@ export default function BookingWizard() {
                         onChange={v => { setCameraCount(v); if (fieldErrors.cameraCount) setFieldErrors(p => { const n = { ...p }; delete n.cameraCount; return n }) }}
                       />
                       <FieldError message={fieldErrors.cameraCount} />
+                      {roomDefaultCameras(locationId) && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          {findLocation(locationId)?.name}: ค่าเริ่มต้น {roomDefaultCameras(locationId)!.model} × {roomDefaultCameras(locationId)!.count} — แก้ได้
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label htmlFor="micCount" required={!isBlockShot}>🎙 จำนวนไมค์</Label>

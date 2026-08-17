@@ -1,20 +1,35 @@
-// v1.61.0 — camera-capacity check. The studio owns 9 cameras; when bookings
-// whose shoot date-range AND call-time window overlap request more than 9
-// cameras in total, extra cameras must be rented. This lib sums cameraCount
-// across OTHER active bookings (REQUESTED + CONFIRMED, not soft-deleted) that
-// overlap a candidate. The caller adds the candidate's own cameraCount to
-// compare against CAMERA_LIMIT. Advisory only — nothing here blocks a booking.
+// v1.61.0 — camera-capacity check, generalised in v1.177 to cameras + crew.
+//
+// Loads the OTHER active bookings whose shoot date-range overlaps a candidate,
+// then hands them to the pure `resource-load` module for the window math and the
+// Thai advisory text. Advisory only — nothing here blocks a booking.
+//
+// Two things this layer fixed in v1.177:
+//  1. ASSIGNED bookings were missing from the status filter. A job that had been
+//     assigned crew (the state between REQUESTED and CONFIRMED) contributed zero
+//     cameras to the total, so the busiest jobs were the ones being undercounted.
+//  2. Crew pools are read from the live TeamMember roster rather than a constant,
+//     so hiring or deactivating someone changes the warning without a deploy.
 import { prisma } from '@/lib/db'
 // v1.118 — single source of truth for the HH:MM window math (client-safe, pure).
-import { timeWindowsOverlap, effectiveWrap } from '@/lib/shoot-window'
+import { timeWindowsOverlap } from '@/lib/shoot-window'
+import {
+  CAMERA_POOL, loadWarningsTh, summariseLoad,
+  type LoadDemand, type LoadSummary, type Pools,
+} from '@/lib/resource-load'
 
-export const CAMERA_LIMIT = 9
+/** Kept as the old name — the pool of cameras the team owns. */
+export const CAMERA_LIMIT = CAMERA_POOL
 
 export interface OverlapCandidate {
   shootDate: Date | string
   shootEndDate?: Date | string | null
   callTime: string                 // HH:MM
   estimatedWrap?: string | null     // HH:MM; null → estimated wrap (call + 8h)
+  shootType?: string | null         // STUDIO | ON_LOCATION | REMOTE_ONLINE | EVENT
+  cameraCount?: number | null
+  videographerCount?: number | null
+  switcherCount?: number | null
   excludeBookingId?: string         // exclude self when viewing an existing booking
 }
 
@@ -24,44 +39,87 @@ function asDate(d: Date | string): Date {
   return typeof d === 'string' ? new Date(d) : d
 }
 
+/** Same-day? Used to decide whether a row occupies the whole day (see LoadSlot). */
+function spansMultipleDays(start: Date, end: Date | null | undefined): boolean {
+  if (!end) return false
+  return end.getTime() > start.getTime()
+}
+
 /**
- * Sum cameraCount of OTHER active bookings (REQUESTED + CONFIRMED, deletedAt
- * null) whose date-range AND time-window overlap the candidate. Does NOT
- * include the candidate's own cameraCount — the caller adds that to compare
- * against CAMERA_LIMIT.
+ * The staffed pools. `role` values come from the TeamMember roster comment:
+ * producer | video | director | sound | photo | switcher | virtualProduction.
+ * Only the two roles a booking asks for a HEADCOUNT of are pooled here —
+ * videographerCount and switcherCount are the fields the wizard collects.
  */
-export async function computeOverlapCameraCount(candidate: OverlapCandidate): Promise<number> {
+export async function crewPools(): Promise<Pick<Pools, 'videographers' | 'switchers'>> {
+  const [videographers, switchers] = await Promise.all([
+    prisma.teamMember.count({ where: { role: 'video', active: true } }),
+    prisma.teamMember.count({ where: { role: 'switcher', active: true } }),
+  ])
+  return { videographers, switchers }
+}
+
+export interface SlotLoad {
+  summary: LoadSummary
+  /** Ready-to-render Thai lines; empty when everything fits. */
+  warnings: string[]
+  pools: Pools
+}
+
+/**
+ * Compute the full resource load for a candidate slot.
+ *
+ * Date-range overlap is done in SQL; the time-of-day comparison is done in JS
+ * because an HH:MM string comparison cannot be expressed in a Prisma WHERE.
+ */
+export async function computeSlotLoad(candidate: OverlapCandidate): Promise<SlotLoad> {
   const candStart = asDate(candidate.shootDate)
-  const candEnd = candidate.shootEndDate ? asDate(candidate.shootEndDate) : candStart
+  const candEndDate = candidate.shootEndDate ? asDate(candidate.shootEndDate) : null
+  const candEnd = candEndDate ?? candStart
 
-  // Date-range overlap in Prisma: existing.shootDate <= candEnd AND
-  // existing.end >= candStart, where existing.end = shootEndDate ?? shootDate.
-  // Time-window overlap is filtered in JS below (HH:MM string compare can't be
-  // expressed in a Prisma WHERE).
-  const active = await prisma.booking.findMany({
-    where: {
-      status: { in: ['REQUESTED', 'CONFIRMED'] },
-      deletedAt: null,
-      ...(candidate.excludeBookingId ? { id: { not: candidate.excludeBookingId } } : {}),
-      shootDate: { lte: candEnd },
-      OR: [
-        { shootEndDate: null, shootDate: { gte: candStart } },
-        { shootEndDate: { gte: candStart } },
-      ],
-    },
-    select: { callTime: true, estimatedWrap: true, cameraCount: true },
-  })
+  const [rows, pools] = await Promise.all([
+    prisma.booking.findMany({
+      where: {
+        // REQUESTED + ASSIGNED + CONFIRMED = every booking still expected to shoot.
+        // CANCELLED and COMPLETED release their gear.
+        status: { in: ['REQUESTED', 'ASSIGNED', 'CONFIRMED'] },
+        deletedAt: null,
+        ...(candidate.excludeBookingId ? { id: { not: candidate.excludeBookingId } } : {}),
+        shootDate: { lte: candEnd },
+        OR: [
+          { shootEndDate: null, shootDate: { gte: candStart } },
+          { shootEndDate: { gte: candStart } },
+        ],
+      },
+      select: {
+        shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
+        shootType: true, cameraCount: true, videographerCount: true, switcherCount: true,
+      },
+    }),
+    crewPools(),
+  ])
 
-  // v1.118 — compare EFFECTIVE windows (a missing wrap = call + 8h, not 23:59),
-  // so a shoot with no wrap time no longer "holds" the whole day and clashes
-  // with everything.
-  const candEndT = effectiveWrap(candidate.callTime, candidate.estimatedWrap).end
-  let total = 0
-  for (const b of active) {
-    const bEndT = effectiveWrap(b.callTime, b.estimatedWrap).end
-    if (timeWindowsOverlap(candidate.callTime, candEndT, b.callTime, bEndT)) {
-      total += b.cameraCount ?? 0
-    }
+  const others: LoadDemand[] = rows.map(b => ({
+    callTime: b.callTime,
+    estimatedWrap: b.estimatedWrap,
+    shootType: b.shootType,
+    multiDay: spansMultipleDays(b.shootDate, b.shootEndDate),
+    cameraCount: b.cameraCount,
+    videographerCount: b.videographerCount,
+    switcherCount: b.switcherCount,
+  }))
+
+  const self: LoadDemand = {
+    callTime: candidate.callTime,
+    estimatedWrap: candidate.estimatedWrap,
+    shootType: candidate.shootType,
+    multiDay: spansMultipleDays(candStart, candEndDate),
+    cameraCount: candidate.cameraCount,
+    videographerCount: candidate.videographerCount,
+    switcherCount: candidate.switcherCount,
   }
-  return total
+
+  const allPools: Pools = { cameras: CAMERA_POOL, ...pools }
+  const summary = summariseLoad(self, others, allPools)
+  return { summary, warnings: loadWarningsTh(summary), pools: allPools }
 }

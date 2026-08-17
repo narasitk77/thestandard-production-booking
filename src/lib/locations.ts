@@ -45,6 +45,22 @@ export const LOCATION_GROUPS: { key: 'STUDIO' | 'A' | 'B' | 'EXTERNAL'; label: s
   { key: 'EXTERNAL', label: 'External / Other' },
 ]
 
+/**
+ * v1.177 — the rig that permanently lives in a room, so booking that room starts
+ * from the real setup instead of an empty field. Studio 1 is a 3-camera Sony FX30
+ * setup; anyone who needs something different just types over it.
+ *
+ * Advisory default only — nothing reserves these specific bodies, and the load
+ * check still counts them against the shared pool like any other request.
+ */
+export const ROOM_DEFAULT_CAMERAS: Record<string, { count: number; model: string }> = {
+  'tsd-studio-1': { count: 3, model: 'Sony FX30' },
+}
+
+export function roomDefaultCameras(locationId: string | null | undefined) {
+  return ROOM_DEFAULT_CAMERAS[(locationId || '').trim()]
+}
+
 export function findLocation(idOrName: string | null | undefined): Location | undefined {
   if (!idOrName) return undefined
   return LOCATIONS.find(l => l.id === idOrName || l.name === idOrName || l.fullName === idOrName)
