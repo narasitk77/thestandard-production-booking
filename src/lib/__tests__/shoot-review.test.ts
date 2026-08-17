@@ -244,8 +244,14 @@ test('both lists are env-overridable, and junk falls back to the safe default', 
   // Junk that parses to nothing must not silently open the gate…
   process.env.REVIEW_EXCLUDE_EMAILS = ' , , '
   assert.ok(reviewExcludedEmails().includes('video@thestandard.co'))
-  // …but an explicit empty string is a real choice: exclude nobody.
+  // …and neither must an empty string. docker-compose passes `${VAR:-}` for a
+  // var the stack never defines, so "" is what an UNCONFIGURED prod looks like —
+  // it reached the app and re-opened the gate to video@/sound@ (v1.176 fix).
   process.env.REVIEW_EXCLUDE_EMAILS = ''
+  assert.ok(reviewExcludedEmails().includes('video@thestandard.co'))
+  assert.equal(isInvitableEmail('video@thestandard.co'), false, 'an unset var must still protect shared inboxes')
+  // Excluding nobody is still possible, but it now takes saying so out loud.
+  process.env.REVIEW_EXCLUDE_EMAILS = 'none'
   assert.deepEqual(reviewExcludedEmails(), [])
 
   process.env.REVIEW_ALLOWED_EMAIL_DOMAINS = '@thestandard.co, partner.co.th'

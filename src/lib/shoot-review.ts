@@ -116,10 +116,15 @@ const DEFAULT_EXCLUDED_EMAILS = [
 
 export function reviewExcludedEmails(): string[] {
   const raw = process.env.REVIEW_EXCLUDE_EMAILS?.trim()
-  if (raw === undefined) return DEFAULT_EXCLUDED_EMAILS
-  // An explicit empty string means "exclude nobody" — a deliberate choice the
-  // operator can make. Junk that parses to nothing falls back to the defaults.
-  if (raw === '') return []
+  // v1.176 — empty means DEFAULTS, not "exclude nobody". The compose files pass
+  // `REVIEW_EXCLUDE_EMAILS: ${REVIEW_EXCLUDE_EMAILS:-}`, so a var the stack never
+  // defines arrives as an EMPTY STRING rather than undefined. Reading that as a
+  // deliberate "exclude nobody" is what put video@ and sound@ back into the
+  // recipient list on prod — caught in a dry run before the system was switched
+  // on, but it would have mailed review links to shared team inboxes on day one.
+  // To genuinely exclude nobody, set the sentinel REVIEW_EXCLUDE_EMAILS=none.
+  if (!raw) return DEFAULT_EXCLUDED_EMAILS
+  if (raw.toLowerCase() === 'none') return []
   const list = raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
   return list.length > 0 ? list : DEFAULT_EXCLUDED_EMAILS
 }
