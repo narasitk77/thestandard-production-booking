@@ -95,7 +95,7 @@ export const OUTLETS: Outlet[] = [
     borderColor: 'border-purple-200',
     sort: 5,
     programs: [
-      { code: '8MH', name: '8 Minutes History', category: 'Recurring' },
+      { code: '8MH', name: '8 Minute History', category: 'Recurring' },
       { code: 'HMS', name: 'Human-ศาสตร์', category: 'Recurring' },
       { code: 'OPR', name: 'Open Relationship', category: 'Recurring' },
       { code: 'TTT', name: 'Top to Toe', category: 'Recurring' },

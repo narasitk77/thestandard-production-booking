@@ -1171,7 +1171,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Shoot Type</label>
                 <select className="gf-input" value={editForm.shootType}
-                  onChange={e => setEditForm({ ...editForm, shootType: e.target.value })}>
+                  onChange={e => {
+                    const next = e.target.value
+                    // Crossing the office/off-site line invalidates the old value: a
+                    // room name is not a place, and a place is not a room. Keep it
+                    // only when it still belongs to the side we are switching to.
+                    const isRoom = LOCATIONS.some(l => l.fullName === editForm.locationName)
+                    const crossed = (next === 'ON_LOCATION') === isRoom
+                    setEditForm({ ...editForm, shootType: next, locationName: crossed ? '' : editForm.locationName })
+                  }}>
                   <option value="STUDIO">Studio</option>
                   <option value="ON_LOCATION">On Location</option>
                   <option value="REMOTE_ONLINE">Remote / Online</option>
@@ -1179,22 +1187,42 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">Location / Room</label>
-                <select className="gf-input" value={editForm.locationName}
-                  onChange={e => setEditForm({ ...editForm, locationName: e.target.value })}>
-                  <option value="">— Choose —</option>
-                  {LOCATION_GROUPS.map(g => (
-                    <optgroup key={g.key} label={g.label}>
-                      {LOCATIONS.filter(l => l.group === g.key).map(l => (
-                        <option key={l.id} value={l.fullName}>{l.name}</option>
-                      ))}
-                    </optgroup>
-                  ))}
-                  {/* If existing booking has a non-standard location, preserve it as an option */}
-                  {editForm.locationName && !LOCATIONS.some(l => l.fullName === editForm.locationName) && (
-                    <option value={editForm.locationName}>{editForm.locationName}</option>
-                  )}
-                </select>
+                <label className="text-xs text-gray-500 mb-1 block">
+                  {editForm.shootType === 'ON_LOCATION' ? 'สถานที่ (ระบุเอง)' : 'Location / Room'}
+                </label>
+                {/* An off-site shoot has no room to pick. The edit form used to show
+                    the office-room dropdown for EVERY shoot type and merely preserved
+                    the existing free-text as one extra <option> — so an On Location
+                    booking could be READ but never re-typed: changing it meant picking
+                    an office room. The create wizard has always split these (v1.58);
+                    this brings editing in line. */}
+                {editForm.shootType === 'ON_LOCATION' ? (
+                  <>
+                    <input className="gf-input" value={editForm.locationName}
+                      onChange={e => setEditForm({ ...editForm, locationName: e.target.value })}
+                      placeholder="ชื่อสถานที่ + ลิงก์ Google Maps" />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      งานนอกออฟฟิศ — พิมพ์สถานที่ได้เลย ไม่ต้องเลือกห้อง
+                    </p>
+                  </>
+                ) : (
+                  <select className="gf-input" value={editForm.locationName}
+                    onChange={e => setEditForm({ ...editForm, locationName: e.target.value })}>
+                    <option value="">— Choose —</option>
+                    {LOCATION_GROUPS.map(g => (
+                      <optgroup key={g.key} label={g.label}>
+                        {LOCATIONS.filter(l => l.group === g.key).map(l => (
+                          <option key={l.id} value={l.fullName}>{l.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    {/* A booking that already carries a non-standard location keeps it
+                        selectable, so switching Shoot Type does not silently blank it. */}
+                    {editForm.locationName && !LOCATIONS.some(l => l.fullName === editForm.locationName) && (
+                      <option value={editForm.locationName}>{editForm.locationName}</option>
+                    )}
+                  </select>
+                )}
               </div>
             </div>
 
