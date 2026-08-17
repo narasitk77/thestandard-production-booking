@@ -136,7 +136,7 @@ export const OUTLETS: Outlet[] = [
       { code: 'LGV', name: 'Longevity', category: 'Recurring' },
       { code: 'ECO', name: 'Eco-curious', category: 'Recurring' },
       { code: '4HR', name: '4Hours', category: 'Recurring' },
-      { code: 'HDL', name: 'How do you live?', category: 'Recurring', notes: 'Photo-centric' },
+      { code: 'HDL', name: 'How Do You Live ?', category: 'Recurring', notes: 'Photo-centric' },
       { code: 'PSC', name: 'Passion Calling (Short Clip)', category: 'Short-form' },
       { code: 'ART', name: 'Article', category: 'Recurring' },
     ],
