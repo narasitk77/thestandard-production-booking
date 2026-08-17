@@ -115,6 +115,28 @@ test('the travel note only appears alongside a real shortage', () => {
   assert.deepEqual(loadWarningsTh(light), [])
 })
 
+test('a stored headcount only counts when the role was actually requested', () => {
+  // Both counts default to 1 in the schema, and the wizard posts 1 even for a
+  // role nobody ticked — so raw sums made every booking claim a videographer.
+  // The first prod call reported 9 ช่างวิดีโอ on a morning with far fewer.
+  const notAsked = { ...studio({ videographerCount: 1 }), crewRequired: ['Sound'] }
+  const asked = { ...studio({ videographerCount: 1 }), crewRequired: ['Videographer'] }
+  const mine = { ...studio({ videographerCount: 2, cameraCount: 1 }), crewRequired: ['Videographer'] }
+
+  const withDefaults = summariseLoad(mine, [notAsked, notAsked, notAsked, notAsked], POOLS)
+  assert.equal(withDefaults.lines.find(l => l.key === 'videographers')!.others, 0, 'four Sound-only shoots need no videographer')
+  assert.equal(withDefaults.lines.find(l => l.key === 'videographers')!.over, false)
+
+  const real = summariseLoad(mine, [asked, asked, asked, asked], POOLS)
+  assert.equal(real.lines.find(l => l.key === 'videographers')!.others, 4)
+  assert.equal(real.lines.find(l => l.key === 'videographers')!.over, true, '6 > pool of 5')
+
+  // An omitted crewRequired means "already resolved" — the live wizard zeroes
+  // the counts itself as the boxes are ticked, so its numbers pass through.
+  const fromWizard = summariseLoad(studio({ videographerCount: 3, cameraCount: 1 }), [studio({ videographerCount: 3, cameraCount: 1 })], POOLS)
+  assert.equal(fromWizard.lines.find(l => l.key === 'videographers')!.total, 6)
+})
+
 test('a resource this booking never asked for is not its warning', () => {
   // Caught on the first live call: a shoot requesting 0 switchers was told
   // "สวิตเชอร์ 2/1 คน (ของคุณ 0)". True, and none of that producer's business.

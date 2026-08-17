@@ -55,6 +55,19 @@ export interface LoadDemand extends LoadSlot {
   cameraCount?: number | null
   videographerCount?: number | null
   switcherCount?: number | null
+  /**
+   * The roles this booking actually asked for (Booking.crewRequired).
+   *
+   * REQUIRED for stored rows, because the headcounts alone lie: both
+   * videographerCount and switcherCount default to 1 in the schema AND the
+   * wizard posts 1 even when the role was never ticked. Summing them raw made
+   * every booking in the system look like it wanted a videographer — the first
+   * prod call read 9 ช่างวิดีโอ booked on a morning that had nowhere near that.
+   *
+   * Leave undefined only when the caller has already zeroed the counts itself
+   * (the live wizard does exactly that as the producer ticks the boxes).
+   */
+  crewRequired?: string[] | null
 }
 
 export interface Pools {
@@ -129,9 +142,20 @@ export interface ResourceLine {
 
 const RESOURCES: { key: ResourceKey; labelTh: string; unitTh: string; of: (d: LoadDemand) => number }[] = [
   { key: 'cameras', labelTh: 'กล้อง', unitTh: 'ตัว', of: d => num(d.cameraCount) },
-  { key: 'videographers', labelTh: 'ช่างวิดีโอ', unitTh: 'คน', of: d => num(d.videographerCount) },
-  { key: 'switchers', labelTh: 'สวิตเชอร์', unitTh: 'คน', of: d => num(d.switcherCount) },
+  { key: 'videographers', labelTh: 'ช่างวิดีโอ', unitTh: 'คน', of: d => wants(d, 'Videographer') ? num(d.videographerCount) : 0 },
+  { key: 'switchers', labelTh: 'สวิตเชอร์', unitTh: 'คน', of: d => wants(d, 'Switcher') ? num(d.switcherCount) : 0 },
 ]
+
+/**
+ * Did this booking ask for the role at all? An absent crewRequired means the
+ * caller already resolved it (see LoadDemand.crewRequired); a present list is
+ * authoritative, so a default-1 headcount on a booking that never wanted a
+ * videographer contributes nothing.
+ */
+function wants(d: LoadDemand, role: string): boolean {
+  if (d.crewRequired == null) return true
+  return d.crewRequired.some(r => (r || '').trim().toLowerCase() === role.toLowerCase())
+}
 
 function num(v: number | null | undefined): number {
   const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10)

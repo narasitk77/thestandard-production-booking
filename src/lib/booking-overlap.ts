@@ -94,6 +94,9 @@ export async function computeSlotLoad(candidate: OverlapCandidate): Promise<Slot
       select: {
         shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
         shootType: true, cameraCount: true, videographerCount: true, switcherCount: true,
+        // Without this the headcounts lie — both default to 1 whether or not the
+        // role was ever ticked. See LoadDemand.crewRequired.
+        crewRequired: true,
       },
     }),
     crewPools(),
@@ -107,6 +110,7 @@ export async function computeSlotLoad(candidate: OverlapCandidate): Promise<Slot
     cameraCount: b.cameraCount,
     videographerCount: b.videographerCount,
     switcherCount: b.switcherCount,
+    crewRequired: b.crewRequired,
   }))
 
   const self: LoadDemand = {
