@@ -16,6 +16,7 @@ import { startOfWeek, addDays, addWeeks, format, parseISO, isSameDay } from 'dat
 import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
 import { effectiveWrap } from '@/lib/shoot-window'
+import { buildWeekPlanText } from '@/lib/week-plan-export'
 
 type Episode = { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 type Booking = {
@@ -48,6 +49,10 @@ export default function WeekPlanClient() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [savingId, setSavingId] = useState<string | null>(null)
+  // v1.175 — ops asked to be able to say what was arranged without screenshotting.
+  const [exportText, setExportText] = useState<string | null>(null)
+  const [filledOnly, setFilledOnly] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [savedId, setSavedId] = useState<string | null>(null)
   // ✏️ พิมพ์ (textareas) vs 👁 ดูสรุป (clean read-only rows) — "พอใส่เยอะๆ มันดูยาก".
   const [viewOnly, setViewOnly] = useState(false)
@@ -146,6 +151,26 @@ export default function WeekPlanClient() {
 
   const weekLabel = `${format(weekStart, 'd MMM')} – ${format(addDays(weekStart, 6), 'd MMM yyyy')}`
 
+  // Built from the very helpers the rows are rendered with (windowOf,
+  // bookingDisplayName) so the exported text and the screen can never disagree.
+  const buildText = (onlyFilled: boolean) => buildWeekPlanText({
+    weekLabel,
+    filledOnly: onlyFilled,
+    days: days.map(d => ({
+      label: `${TH_DAY[d.getDay()]} ${format(d, 'd MMM')}`,
+      rows: bookingsOn(d).map(b => {
+        const w = windowOf(b)
+        return {
+          time: `${w.start} → ${w.end}${w.estimated ? ' ~' : ''}`,
+          title: `${b.isBlockShot ? '🧱 ' : ''}${b.outlet.code} · ${bookingDisplayName(b)}`,
+          cameraCount: b.cameraCount,
+          equipment: b.equipmentNote,
+          rental: b.rentalGearNote,
+        }
+      }),
+    })),
+  })
+
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-4">
       <BackButton fallback="/admin" label="คิวงาน" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800" />
@@ -156,6 +181,10 @@ export default function WeekPlanClient() {
           <p className="text-sm text-gray-500">พิมพ์รายการ<b>อุปกรณ์</b>และ<b>ของเช่า</b>ของแต่ละงาน — บันทึกอัตโนมัติ และแสดงต่อในหน้า Booking + Google Calendar</p>
         </div>
         <div className="flex items-center gap-1">
+          <button onClick={() => { setCopied(false); setExportText('') }}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 mr-1">
+            📄 Export ข้อความ
+          </button>
           <button onClick={toggleView}
                   className={`px-3 py-1.5 text-sm border rounded mr-1 ${viewOnly ? 'border-[#673ab7] text-[#673ab7] bg-purple-50' : 'border-gray-300 hover:bg-gray-50'}`}>
             {viewOnly ? '✏️ กลับไปพิมพ์' : '👁 ดูสรุป'}
@@ -166,6 +195,40 @@ export default function WeekPlanClient() {
           <span className="ml-2 text-sm font-medium text-gray-700 tabular-nums">{weekLabel}</span>
         </div>
       </div>
+
+      {exportText !== null && (() => {
+        const text = buildText(filledOnly)
+        return (
+          <div className="border border-gray-200 rounded-lg bg-white p-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium text-gray-700">📄 ข้อความสรุปสัปดาห์นี้</span>
+              <label className="text-xs text-gray-600 inline-flex items-center gap-1">
+                <input type="checkbox" checked={filledOnly} onChange={e => { setFilledOnly(e.target.checked); setCopied(false) }} />
+                เฉพาะงานที่กรอกแล้ว
+              </label>
+              <button
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(text); setCopied(true) }
+                  catch { setCopied(false) }   // คลิปบอร์ดถูกบล็อก — ยังเลือกจากกล่องด้านล่างได้
+                }}
+                className="px-2.5 py-1 text-xs border border-[#673ab7] text-[#673ab7] rounded hover:bg-purple-50">
+                {copied ? '✓ คัดลอกแล้ว' : '📋 คัดลอก'}
+              </button>
+              <a
+                href={`data:text/plain;charset=utf-8,${encodeURIComponent(text)}`}
+                download={`week-plan-${format(weekStart, 'yyyy-MM-dd')}.txt`}
+                className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+                ⬇︎ .txt
+              </a>
+              <button onClick={() => { setExportText(null); setCopied(false) }}
+                      className="ml-auto text-xs text-gray-500 hover:text-gray-800">ปิด</button>
+            </div>
+            <textarea readOnly value={text} onFocus={e => e.currentTarget.select()}
+              className="w-full h-56 text-xs font-mono border border-gray-200 rounded p-2 bg-gray-50" />
+            <p className="text-[11px] text-gray-400">แตะในกล่องเพื่อเลือกทั้งหมด — วางลงแชตได้เลย</p>
+          </div>
+        )
+      })()}
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</div>}
 
