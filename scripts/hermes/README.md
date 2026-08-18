@@ -1,0 +1,65 @@
+# Hermes cron scripts (probook watchdogs)
+
+สคริปต์ 3 ตัวนี้เคยเป็น **Claude Code scheduled routine** แล้วย้ายมาอยู่บน **Hermes cron**
+เมื่อ 2026-08-18. ตัวที่รันจริงคือสำเนาใน `~/.hermes/scripts/` — โฟลเดอร์นี้คือต้นฉบับที่ git คุม
+(`~/.hermes` ไม่มีระบบสำรอง และ `updates.pre_update_backup: false` ใน `~/.hermes/config.yaml`
+หมายความว่าการอัปเดต Hermes ไม่ได้สำรองอะไรให้)
+
+| script | cron (เวลาไทย) | ทำอะไร |
+|---|---|---|
+| `probook-worker-check.py` | `0 9,21 * * *` | probe `/api/health-summary` + `/api/version`; แจ้งเมื่อ worker ที่ `enabled` กลาย `stale`, app ตอบไม่ได้, หรือ `neverTicked` 2 รอบติด |
+| `probook-idfirst-monitor.py` | `30 9 * * *` | อ่าน `/api/internal/id-first-stats` เก็บ snapshot 14 วัน; แจ้งเมื่อ fallback พุ่ง / hit ตกเกือบ 0 / endpoint ล่ม 2 วันติด |
+| `probook-landing-cleanup.py` | `0 12 * * *` | `landing/manage?prune=today` แบบ dry-run → apply → verify; ลบเฉพาะ drop folder ที่ว่าง (ฟุตเทจส่งเข้ากล่องแล้ว) |
+
+## หลักการที่ต้องรักษาไว้
+
+1. **ไม่มี LLM** — ทั้งสามตัวเป็น Python stdlib ล้วน เพราะงานคือ "อ่านเลข → ใช้กฎ → รายงาน"
+   เอา LLM ออกแล้วได้ทั้งความนิ่งและความประหยัด (Hermes ต่อ provider `nous` โมเดล default
+   `upstage/solar-pro4:free` ซึ่งวัดแล้วว่าไม่ควรให้ตัดสินใจเรื่องแก้โค้ด)
+2. **เงียบเมื่อปกติ** — ไม่ print อะไร = Hermes ไม่ส่งข้อความ (`--no-agent` + empty stdout)
+   scheduler จะบันทึกรอบนั้นว่า `[SILENT] — skipping delivery` ใน `~/.hermes/logs/gateway.log`
+   และเขียนไฟล์ `**Status:** silent (empty output)` ไว้ที่ `~/.hermes/cron/output/<job-id>/`
+   → "เงียบเพราะปกติ" กับ "สคริปต์ crash" แยกออกจากกันได้จากร่องรอยนี้
+3. **landing: ห้ามลบโฟลเดอร์ของคิวถ่ายวันหลัง** — `prune=today` เก็บแค่ของ "วันนี้" ส่วน
+   landing worker ในคอนเทนเนอร์สร้างของ "วันพรุ่งนี้" ตอน 19:00 BKK ดังนั้นถ้ารอบเที่ยงถูกเลื่อน
+   ไปรันหลัง 19:00 มันจะลบของพรุ่งนี้ทิ้ง (เกิดขึ้นจริงตอนพอร์ตงานนี้) — `future_targets()`
+   จึงบล็อกการ apply ไว้ ถ้าจะลบจริงต้องสั่งมือด้วย `--force`
+4. **ยิง apply ครั้งเดียว** — endpoint ที่เดิน Drive นาน ๆ ถูก proxy ตัดที่ ~60s ทั้งที่งานเดินต่อ
+   ฝั่ง server การยิงซ้ำ = race/ของซ้ำ สคริปต์จึงรอแล้ว verify ไม่ยิงใหม่
+
+## Secret
+
+`/api/internal/*` รับ shared secret ทาง header `x-reconcile-secret` (ค่า = prod
+`PREP_FOLDERS_SECRET || NEXTAUTH_SECRET || AUTH_SECRET`) สคริปต์ landing อ่านจาก
+`~/.hermes/scripts/probook.env` (chmod 600, **ห้าม commit เข้า repo นี้**):
+
+```
+PROBOOK_LANDING_SECRET=<prod NEXTAUTH_SECRET>
+```
+
+ถ้า prod หมุน secret สคริปต์จะรายงาน 401 พร้อมบอกไฟล์ที่ต้องแก้ ไม่เงียบหาย
+
+## ลงทะเบียนใหม่ (กรณี Hermes ถูกติดตั้งใหม่ / job หาย)
+
+```bash
+cp scripts/hermes/probook-*.py ~/.hermes/scripts/
+cd ~/.hermes/hermes-agent
+H="./venv/bin/python -m hermes_cli.main"
+$H cron create "0 9,21 * * *" --name probook-worker-check      --script probook-worker-check.py      --no-agent --deliver discord:1536651002667601980
+$H cron create "30 9 * * *"   --name idfirst-fallback-monitor  --script probook-idfirst-monitor.py   --no-agent --deliver discord:1536651002667601980
+$H cron create "0 12 * * *"   --name probook-landing-cleanup   --script probook-landing-cleanup.py   --no-agent --deliver discord:1536651002667601980
+$H cron list && $H cron status
+```
+
+ปลายทาง `discord:1536651002667601980` คือห้อง `hermes-agent` — ทดสอบแล้วส่งได้จริง
+ห้อง `probook-noti` (`1516833315561144341`) ตอบ `403 Missing Access` เพราะบอทยังไม่มีสิทธิ์
+ถ้าให้สิทธิ์บอทแล้วก็เปลี่ยนได้ด้วย `cron edit <job-id> --deliver discord:1516833315561144341`
+
+**อย่าใช้ `--deliver local`**: ในโค้ด Hermes มันหมายถึง "no delivery, save only" — เขียนไฟล์แล้วไม่แจ้งใคร
+
+## สำเนาที่ยังอยู่บน Claude Code
+
+`probook-nightly-check` ยังรันบน Claude Code (ต้องใช้ LLM จริงเพื่อวินิจฉัย test/tsc แล้วแก้โค้ด)
+และมันเป็นตัวเฝ้าว่า 3 job นี้ยังยิงอยู่ (ถ้า Hermes gateway ตาย จะไม่มีใครรู้จากฝั่ง Hermes เอง)
+routine เดิมอีก 3 ตัวถูก **disable ไว้ ไม่ได้ลบ** ที่ `~/.claude/scheduled-tasks/<id>/SKILL.md`
+เผื่อย้อนกลับ
