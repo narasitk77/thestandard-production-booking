@@ -14,6 +14,7 @@ State (history continues from the Claude Code file, same schema):
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -27,6 +28,19 @@ SPIKE_FACTOR = 2.0      # และต้องมากกว่าวันก
 HIT_FLOOR = 50          # totalHit ต่ำกว่านี้...
 HIT_BASELINE = 500      # ...ขณะที่ค่ากลาง 3 วันก่อนสูงกว่านี้ = worker/auth น่าจะพัง
 FAIL_STREAK_ALERT = 2   # endpoint ล่มติดกันกี่วันจึงเตือน
+RETRY_DELAYS = (20, 60, 120)
+
+
+def net_down():
+    """เน็ต/DNS ของเครื่องนี้พังเอง ≠ prod ล่ม — ต้องแยกให้ออก (DNS ล่มจริง 11:03–12:00 วันที่ 19 ส.ค.)"""
+    import socket
+    for host in ("cloudflare.com", "google.com", "github.com"):
+        try:
+            socket.getaddrinfo(host, 443)
+            return False
+        except Exception:
+            continue
+    return True
 
 
 def load_state():
@@ -59,16 +73,30 @@ def main():
     state = load_state()
     out = []
 
-    try:
-        req = urllib.request.Request(URL, headers={"User-Agent": "hermes-probook-idfirst"})
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            data = json.loads(r.read().decode("utf-8", "replace"))
-    except Exception as e:
+    data = None
+    err = None
+    for attempt, delay in enumerate((0,) + RETRY_DELAYS):
+        if delay:
+            time.sleep(delay)
+        try:
+            req = urllib.request.Request(URL, headers={"User-Agent": "hermes-probook-idfirst"})
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+                err = None
+                break
+        except Exception as e:
+            err = e
+    if data is None:
+        if net_down():
+            # เน็ตเราเองล่ม → ไม่ใช่หลักฐานว่า prod พัง ห้ามนับ failStreak (ไม่งั้น wifi งอแง 2 วัน = เตือนผิด)
+            save_state(state)
+            print("⚠️ อ่าน id-first-stats ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod) ไม่นับเป็นวันที่ล้ม")
+            return
         state["failStreak"] = int(state.get("failStreak", 0)) + 1
         save_state(state)
         if state["failStreak"] >= FAIL_STREAK_ALERT:
-            print(f"⚠️ id-first-stats เรียกไม่ได้ {state['failStreak']} วันติด — prod น่ามีปัญหา")
-            print(f"   ({str(e)[:120]})")
+            print(f"⚠️ id-first-stats เรียกไม่ได้ {state['failStreak']} วันติด — prod น่ามีปัญหา (เน็ตเครื่องนี้ปกติ)")
+            print(f"   ({str(err)[:120]})")
             print("   ดูต่อ: /api/health-summary, log ของ container production-booking-app (stack 125)")
         return
     state["failStreak"] = 0

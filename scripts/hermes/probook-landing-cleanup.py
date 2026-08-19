@@ -43,6 +43,7 @@ ENV_FILE = os.path.expanduser("~/.hermes/scripts/probook.env")
 DRY_TIMEOUT = 180
 APPLY_TIMEOUT = 280
 SETTLE_SEC = 60  # รอหลัง apply ที่ 504/timeout ก่อนไป verify
+DRY_RETRY_DELAYS = (20, 60, 120)  # dry-run อ่านอย่างเดียว retry ได้ปลอดภัย
 
 
 def secret():
@@ -74,6 +75,18 @@ def call(dry, token, timeout):
         return e.code, None, body
     except Exception as e:
         return 0, None, str(e)
+
+
+def net_down():
+    """เน็ต/DNS ของเครื่องนี้พังเอง ≠ prod ล่ม — ต้องแยกให้ออก (DNS ล่มจริง 11:03–12:00 วันที่ 19 ส.ค.)"""
+    import socket
+    for host in ("cloudflare.com", "google.com", "github.com"):
+        try:
+            socket.getaddrinfo(host, 443)
+            return False
+        except Exception:
+            continue
+    return True
 
 
 def bangkok_today():
@@ -114,11 +127,17 @@ def main():
         print(f"   ใส่ค่าไว้ที่ {ENV_FILE} (บรรทัด PROBOOK_LANDING_SECRET=…)")
         return
 
-    # 1) DRY-RUN (read-only → retry ได้ 1 ครั้งถ้าโดน proxy ตัด)
+    # 1) DRY-RUN (read-only → retry ได้ปลอดภัย; เน็ตเครื่องนี้เคยล่มยาวเป็นชั่วโมงคาบรอบเที่ยง)
     status, data, err = call(True, token, DRY_TIMEOUT)
-    if status in (0, 502, 503, 504):
-        time.sleep(10)
+    for delay in DRY_RETRY_DELAYS:
+        if status not in (0, 502, 503, 504):
+            break
+        time.sleep(delay)
         status, data, err = call(True, token, DRY_TIMEOUT)
+    if status == 0 and net_down():
+        print("⚠️ landing cleanup: ข้ามรอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod)")
+        print("   ไม่มีการลบอะไร · worker 19:00 ในคอนเทนเนอร์ยังเคลียร์ให้ตามปกติ")
+        return
 
     if status == 401:
         print("⚠️ landing-cleanup: prod ตอบ 401 — shared secret ไม่ตรงแล้ว (prod หมุน NEXTAUTH_SECRET?)")
