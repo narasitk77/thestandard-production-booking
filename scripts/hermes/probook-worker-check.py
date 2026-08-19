@@ -73,7 +73,6 @@ LOG_TAIL = 8000
 SKIP_RE = re.compile(r"supervisor: worker exited|is off — exiting|WORKER_ENABLED=0")
 WORKER_RE = re.compile(r"\[([a-z][a-z-]+)\]")
 BAD_RE = re.compile(r"run failed|no activity for|\] [45]\d\d:")
-OK_RE = re.compile(r"bookings=|checked=|scanned=|today=|merged=|created=|repaired=")
 
 
 def env_val(key):
@@ -127,25 +126,36 @@ def fetch_container_logs():
 
 
 def scan_logs(text):
-    """-> (bad, ok, samples) นับต่อ worker จาก log 24 ชม."""
-    bad, ok, samples = {}, {}, []
+    """-> (bad, seen, samples) นับต่อ tag จาก log 24 ชม.
+
+    `seen` = "มีร่องรอยว่ายังมีชีวิต" = บรรทัดใดก็ได้ของ tag นั้นที่ไม่ใช่ SKIP
+    เดิมผมนับเฉพาะบรรทัดที่แมตช์รูปแบบสรุป (`bookings=`, `checked=` …) แล้วมันกล่าวหา
+    backup / calendar-reconcile / shoot-marker ว่าตาย ทั้งที่ log มีบรรทัดของมันอยู่จริง —
+    worker รายวันพิมพ์บรรทัดเดียวและใช้คำคนละแบบ (`ok file=…`, `scanned 19p/41b`)
+    """
+    bad, seen, samples = {}, {}, []
     for raw in (text or "").split("\n"):
-        line = re.sub(r"[\x00-\x08]", "", raw)
+        # ลอก byte framing ของ docker log (\x00-\x1f + U+FFFD ที่เกิดจาก decode ไม่ได้)
+        line = re.sub(r"^[\x00-\x1f\ufffd]+", "", re.sub(r"[\x00-\x08\ufffd]", "", raw))
         m = WORKER_RE.search(line)
         if not m or SKIP_RE.search(line):
             continue
         name = m.group(1)
+        seen[name] = seen.get(name, 0) + 1
         if BAD_RE.search(line):
             bad[name] = bad.get(name, 0) + 1
             if len(samples) < 5:
                 samples.append(line.strip()[:150])
-        elif OK_RE.search(line):
-            ok[name] = ok.get(name, 0) + 1
-    return bad, ok, samples
+    return bad, seen, samples
 
 
-def log_scan_report(enabled_keys):
-    """-> list บรรทัดรายงาน (ว่าง = log สะอาด หรือไม่ได้ตั้ง token)"""
+def log_scan_report(enabled_keys, dead_keys=()):
+    """-> list บรรทัดรายงาน (ว่าง = log สะอาด หรือไม่ได้ตั้ง token)
+
+    dead_keys = worker ที่ health-summary บอกว่าเปิดอยู่แต่ไม่ tick มาเกิน 24 ชม.
+    (หรือไม่เคย tick) — เฉพาะพวกนี้ที่ "ไม่มีร่องรอยใน log" ถึงจะเป็นสัญญาณจริง
+    ตัวที่ tick ปกติแต่เงียบใน log = worker รายวันที่ยังไม่ถึงคิว ไม่ใช่ปัญหา
+    """
     text, err = fetch_container_logs()
     if err == "no-config":
         return []  # ข้าม log scan เงียบ ๆ (เหมือน routine เดิมเมื่อไม่มี session)
@@ -157,7 +167,7 @@ def log_scan_report(enabled_keys):
         }.get(err, f"เรียก Portainer ไม่ได้ ({err})")
         return [f"⚠️ ข้าม log scan — {hint}", f"   แก้ค่าใน {ENV_FILE}"]
 
-    bad, ok, samples = scan_logs(text)
+    bad, seen, samples = scan_logs(text)
     lines = []
     if bad:
         worst = sorted(bad.items(), key=lambda kv: -kv[1])
@@ -174,10 +184,12 @@ def log_scan_report(enabled_keys):
         if re.search(r"\] 409:", joined):
             lines.append("   = 409 นานๆ ครั้งปกติ แต่ทุกรอบ = pass เดินนานเกิน interval")
 
-    # worker ที่ health-summary บอกว่าเปิดอยู่ แต่ 24 ชม. ไม่มีร่องรอยใน log เลย
-    quiet = sorted(k for k in enabled_keys if k not in bad and k not in ok)
-    if quiet and (bad or ok):  # มี log อ่านได้จริงเท่านั้นถึงจะสรุปได้
-        lines.append(f"⚠️ ไม่มีร่องรอยใน log 24 ชม.: {', '.join(quiet)} (supervisor อาจไม่ได้รันสคริปต์)")
+    # ไม่มีร่องรอยใน log = สัญญาณจริงเฉพาะกับ worker ที่ health-summary ก็บอกว่าไม่ tick แล้ว
+    # (ถ้ามันยัง tick ปกติ การเงียบใน log แค่หมายความว่ายังไม่ถึงคิวพิมพ์สรุป)
+    if seen:  # มี log อ่านได้จริงเท่านั้นถึงจะสรุปอะไรได้
+        quiet = sorted(k for k in dead_keys if k not in seen)
+        if quiet:
+            lines.append(f"⚠️ ไม่ tick + ไม่มีร่องรอยใน log 24 ชม.: {', '.join(quiet)} (supervisor อาจไม่ได้รันสคริปต์)")
     return lines
 
 
@@ -256,8 +268,10 @@ def main():
     #   worker ที่ยิง HTTP ล้มทุกรอบแต่งานข้างล่างยังเสร็จ health-summary จับไม่ได้
     #   (เคสจริง: [sound-merge] run failed: fetch failed 48/48 รอบ ก่อน v1.172)
     enabled_keys = {w.get("key") for w in workers if w.get("enabled")}
+    dead_keys = {w.get("key") for w in workers if w.get("enabled")
+                 and (w.get("neverTicked") or float(w.get("lastTickAgoSec") or 0) > LOG_HOURS * 3600)}
     try:
-        lines.extend(log_scan_report(enabled_keys))
+        lines.extend(log_scan_report(enabled_keys, dead_keys))
     except Exception as e:
         lines.append(f"⚠️ log scan พังเอง: {str(e)[:100]}")
 
