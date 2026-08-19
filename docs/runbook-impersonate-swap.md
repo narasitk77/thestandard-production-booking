@@ -122,4 +122,12 @@ GOOGLE_IMPERSONATE_SUBJECTS=alice@thestandard.co,bob@thestandard.co
 
 The code would try each in order until calendar API succeeds. Not yet
 shipped because the current single-user setup has been stable since
-v1.29.4. Track via Phase B follow-up in `docs/architecture.md`.
+v1.29.4 — still open as "Multi-tenant DWD config" under *What's NOT done yet*
+in `docs/architecture.md`.
+
+One data point since: Google auth has flapped intermittently
+(`unauthorized_client`, seen a couple of times in a 24h window) without the
+impersonate user changing at all. That is a **transient Google-side failure**,
+not a swap trigger — the tri-state guards absorb it and the next run recovers.
+Only swap when the person has actually left Workspace or their account is
+disabled.

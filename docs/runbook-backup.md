@@ -1,9 +1,50 @@
 # Runbook — database backup + restore
 
-> **⚠ Status:** This document is the **plan**, not the implemented
-> reality. As of v1.31 there is no automated backup running. Treat
-> everything below as the agreed strategy; section "Action items" at
-> the bottom lists what needs to be set up to actually have backups.
+> **Status (v1.177):** the automated backup **exists in the app** — it was
+> written in v1.77 and this document said otherwise for a year. Whether it is
+> *running* is an env question, answered below, not by this file.
+
+## The automated backup
+
+`src/lib/backup.ts`, poked daily by `scripts/backup-worker.js` via
+`POST /api/internal/backup/run`. It runs inside the **app** container because
+that is where `DATABASE_URL`, the Drive service-account credentials and
+`pg_dump` (from the image's `postgresql-client`) all live together.
+
+What one run does:
+
+1. `pg_dump --no-owner --no-privileges` streamed straight into gzip in-process
+   (never lands on disk)
+2. upload to Drive as `backup-YYYY-MM-DDTHHMM.sql.gz` (UTC, colon-free)
+3. best-effort prune of anything in that folder older than the retention window
+
+| Env | Default | Meaning |
+|---|---|---|
+| `BACKUP_WORKER_ENABLED` | `0` — **dormant** | must be `1` for any backup to happen |
+| `BACKUP_DRIVE_FOLDER_ID` | *(unset)* | Drive folder to upload into — the service account needs edit access. Unset = the run throws |
+| `BACKUP_INTERVAL_MS` | `86400000` (24 h) | how often the worker pokes |
+| `BACKUP_RETENTION_DAYS` | `30` | older files in that folder are trashed |
+| `BACKUP_SECRET` | falls back to `NEXTAUTH_SECRET` | worker → app auth |
+
+### Is it actually on right now?
+
+**Read the stack env, not the compose default.** `${BACKUP_WORKER_ENABLED:-0}`
+tells you nothing about the running value — that mistake has cost a day twice.
+Two reliable checks:
+
+- `GET /api/health-summary` → the `backup` entry. `enabled: false` means off;
+  `enabled: true` with a stale/never `lastTickAgoSec` means on but not working.
+- The Drive folder itself: a file dated today is the only proof that matters.
+
+The dead-man check alerts if the worker is enabled and stops ticking (24 h
+interval + 2 h grace).
+
+### The backup worker must stay with the app
+
+Unlike the other 11 workers, this one is **not** a thin HTTP scheduler on the
+app's behalf — the endpoint it calls needs the database and `pg_dump`. When
+workers are split into their own container (`APP_ROLE=worker`), leave
+`BACKUP_WORKER_ENABLED=0` there and keep it on the web role.
 
 ## What we need to back up
 
@@ -31,7 +72,7 @@ Options ranked:
 2. **rclone → Google Drive** — already in the Workspace ecosystem.
 3. **External USB drive rotated weekly** — air-gapped, cheap, slow recovery.
 
-## Backup procedure (manual — until automated)
+## Backup procedure (manual — the fallback, and what to run if the worker is off)
 
 Run from the Docker host:
 
@@ -105,15 +146,24 @@ If you don't drill, you don't have a backup — you have a hope.
 Off-host storage costs are negligible at this scale (<100 MB per dump
 even with audit_logs).
 
-## Action items (to actually have backups in place)
+## Action items
 
-- [ ] Choose backup target (S3 / GDrive / external disk)
-- [ ] Set up credentials on the Portainer host
-- [ ] Cron the dump command + retention policy
-- [ ] Test the restore procedure end-to-end once
-- [ ] Document the credentials location in this file (or in 1Password)
-- [ ] Set up a monitoring alert if a backup is missed (e.g. dead-man's
-      switch via cron-job.org or healthchecks.io)
+Done in v1.77 (see "The automated backup" above): the dump job, the off-host
+target (Google Drive), the retention policy, and the missed-backup alert
+(the worker dead-man check).
+
+Still open:
+
+- [ ] Turn it on where it is meant to be on — set `BACKUP_WORKER_ENABLED=1`
+      and `BACKUP_DRIVE_FOLDER_ID` on the stack, then confirm a file lands
+- [ ] Test the restore procedure end-to-end once against a real dump
+- [ ] Run the quarterly verification drill above at least once, and write the
+      date here when you do
+
+> Retention in the section above (14 days / 3 months / 2 years) is the agreed
+> *strategy*. What the code implements today is one flat window,
+> `BACKUP_RETENTION_DAYS` (default 30). Tiering it would mean teaching `prune()`
+> to keep Sundays and 1st-of-months — not done.
 
 ## In an actual emergency
 

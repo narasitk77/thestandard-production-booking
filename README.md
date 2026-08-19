@@ -85,7 +85,7 @@ Producer กรอก Booking ครั้งเดียว → Coordinator app
 | Feature | Detail |
 |---------|--------|
 | Feedback queue (v1.166) | `/feedback` (ของฉัน) · `/admin/feedback` (คิวรวม, FB-###) |
-| Post-shoot peer review | แบบประเมินไม่ระบุชื่อผ่าน token link (`/review/[token]`) · เนื้อหาอ่านได้เฉพาะผู้จัดการ 3 คน (บังคับฝั่งเซิร์ฟเวอร์) · มีปุ่มสร้างฟอร์มตัวอย่างส่งเข้าอินบ็อกซ์ตัวเอง |
+| Post-shoot peer review | แบบประเมินไม่ระบุชื่อผ่าน token link (`/review/[token]`) · v1.173.4 แยกสิทธิ์เป็น **เนื้อหา** (ข้อความ/คะแนน/ชื่อผู้เขียน — ผู้จัดการ 2 คน) กับ **กิจกรรม** (ส่งไปหรือยัง ใครตอบแล้ว — ผู้จัดการ + operator) ทั้งคู่ fail-closed ฝั่งเซิร์ฟเวอร์ · simulator `/review/demo-*` ให้ดูฟอร์มได้โดยไม่เขียนอะไรลง DB |
 | ศูนย์ติดตาม (v1.170) | `/admin/monitor` — KPI: งานไหนถึงคิวส่ง · ส่งออกไปหรือยัง · ใครตอบแล้ว · อะไรค้าง |
 | Health | `/admin/health` — runtime config + live checks (DB, Calendar DWD, Sheets read/write) |
 | Dead-man switches (v1.172) | worker ทั้ง 12 ตัวเขียน heartbeat · `/api/health-summary` เตือนเมื่อ tick หายเกิน interval + 2 ชม. |
@@ -158,7 +158,7 @@ OUT     PROG    YYMMDD   Sequence
 | `/admin/room-schedule` | ห้อง/สตูดิโอ |
 | `/admin/monitor` | 📊 ศูนย์ติดตาม |
 | `/admin/feedback` | Feedback จากทีม |
-| `/admin/reviews` | ผลประเมินหลังงาน (จำกัด 3 คน) |
+| `/admin/reviews` | ผลประเมินหลังงาน (เนื้อหา — ผู้จัดการ 2 คน) |
 | `/ot/admin` · `/ot/admin/review/[email]` | OT approval |
 
 ### Admin hub
@@ -315,7 +315,7 @@ master list อยู่ใน `src/lib/data.ts` แล้ว seed ลง Postgr
 - ✅ **Drive test harness** — `FakeDrive` (`src/lib/__tests__/helpers/fake-drive.ts`) ทำให้ Drive logic เทสต์ได้จริง
 - ✅ **id-first Drive links** — booking เก็บ folder id (v1.114 → ปิดงาน v1.157) เปลี่ยนชื่อ/ย้ายโฟลเดอร์แล้วไม่พัง
 - ✅ **Staging environment** — stack คู่ขนาน fail-closed (v1.159)
-- 🚧 **Reconciler** — ยุบ ~10 Drive sweep เหลือ pass เดียวต่อ booking · design ผ่าน adversarial review แล้ว ([docs/reconciler-design.md](docs/reconciler-design.md)) · ฐานลงแล้ว: lease + 19 invariant guards (v1.167), DriveView listing cache (v1.171) · **ยังไม่มีอะไรเรียกใช้ — เหลือแค่ implementation**
+- 🚧 **Reconciler** — ยุบ ~10 Drive sweep เหลือ pass เดียวต่อ booking · design ผ่าน adversarial review แล้ว ([docs/reconciler-design.md](docs/reconciler-design.md)) · ฐานลงแล้ว: lease + guards 16 ตัว (v1.167), DriveView listing cache (v1.171) · **ยังไม่มีอะไรเรียกใช้ — เหลือแค่ implementation**
 
 ### เปิดอยู่
 
