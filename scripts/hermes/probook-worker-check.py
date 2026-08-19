@@ -72,7 +72,7 @@ LOG_TAIL = 8000
 # บรรทัดที่ไม่ใช่ความผิดปกติ — supervisor ปิด worker ที่ตั้งใจปิด
 SKIP_RE = re.compile(r"supervisor: worker exited|is off — exiting|WORKER_ENABLED=0")
 WORKER_RE = re.compile(r"\[([a-z][a-z-]+)\]")
-BAD_RE = re.compile(r"run failed|no activity for|\] [45]\d\d:")
+BAD_RE = re.compile(r"run failed|no activity for|route error|\] [45]\d\d:")
 
 
 def env_val(key):
@@ -133,7 +133,7 @@ def scan_logs(text):
     backup / calendar-reconcile / shoot-marker ว่าตาย ทั้งที่ log มีบรรทัดของมันอยู่จริง —
     worker รายวันพิมพ์บรรทัดเดียวและใช้คำคนละแบบ (`ok file=…`, `scanned 19p/41b`)
     """
-    bad, seen, samples = {}, {}, []
+    bad, seen, samples, last = {}, {}, [], {}
     for raw in (text or "").split("\n"):
         # ลอก byte framing ของ docker log (\x00-\x1f + U+FFFD ที่เกิดจาก decode ไม่ได้)
         line = re.sub(r"^[\x00-\x1f\ufffd]+", "", re.sub(r"[\x00-\x08\ufffd]", "", raw))
@@ -142,11 +142,22 @@ def scan_logs(text):
             continue
         name = m.group(1)
         seen[name] = seen.get(name, 0) + 1
+        # framing byte ของ docker บางตัว decode เป็นตัวอักษรที่มองเห็นได้ (W, C, ?)
+        # จึงต้อง search ไม่ใช่ match ไม่งั้น timestamp หลุดแล้วรายงานเวลาผิด
+        tsm = re.search(r"(\d{4}-\d{2}-\d{2}T[\d:.]+)", line[:60])
+        ts = tsm.group(1) if tsm else ""
+        slot = last.setdefault(name, {"bad": "", "good": "", "goodAfter": 0})
         if BAD_RE.search(line):
             bad[name] = bad.get(name, 0) + 1
+            slot["bad"] = ts or slot["bad"]
+            slot["goodAfter"] = 0
             if len(samples) < 5:
                 samples.append(line.strip()[:150])
-    return bad, seen, samples
+        else:
+            slot["good"] = ts or slot["good"]
+            if slot["bad"]:
+                slot["goodAfter"] += 1
+    return bad, seen, samples, last
 
 
 def log_scan_report(enabled_keys, dead_keys=()):
@@ -167,11 +178,20 @@ def log_scan_report(enabled_keys, dead_keys=()):
         }.get(err, f"เรียก Portainer ไม่ได้ ({err})")
         return [f"⚠️ ข้าม log scan — {hint}", f"   แก้ค่าใน {ENV_FILE}"]
 
-    bad, seen, samples = scan_logs(text)
+    bad, seen, samples, last = scan_logs(text)
     lines = []
     if bad:
         worst = sorted(bad.items(), key=lambda kv: -kv[1])
         lines.append("⚠️ log 24 ชม. มี error: " + ", ".join(f"{k}×{v}" for k, v in worst[:6]))
+        # เตือนเรื่องที่จบไปแล้วคือการรบกวนคน — บอกให้ชัดว่ายังเกิดอยู่หรือหายแล้ว
+        for k, _ in worst[:3]:
+            sl = last.get(k, {})
+            hhmm = lambda t: (t or "")[11:16] or "?"
+            if sl.get("goodAfter"):
+                lines.append(f"   ✅ {k}: หายแล้ว — ครั้งสุดท้าย {hhmm(sl.get('bad'))} UTC "
+                             f"แล้วเดินปกติต่ออีก {sl['goodAfter']} รอบ (ล่าสุด {hhmm(sl.get('good'))})")
+            else:
+                lines.append(f"   🔴 {k}: ยังเกิดอยู่ — ล่าสุด {hhmm(sl.get('bad'))} UTC ยังไม่มีรอบที่สำเร็จตามหลัง")
         for s in samples[:3]:
             lines.append(f"   • {s}")
         joined = "\n".join(samples)
@@ -191,6 +211,154 @@ def log_scan_report(enabled_keys, dead_keys=()):
         if quiet:
             lines.append(f"⚠️ ไม่ tick + ไม่มีร่องรอยใน log 24 ชม.: {', '.join(quiet)} (supervisor อาจไม่ได้รันสคริปต์)")
     return lines
+
+
+# ─────────── NAS manifest agent (launchd บนแมคเครื่องนี้ ทุก 600s) ───────────
+# มันออกแบบให้ "เงียบ" เมื่อ /Volumes/production team ไม่ได้ mount (โน้ตบุ๊กไม่อยู่ออฟฟิศ)
+# ปัญหาคือไม่มีใครรู้ว่ามันเงียบมานานแค่ไหน และ log อยู่ใน /tmp ซึ่งหายทุกครั้งที่รีบูต
+# ตัวนี้จึงทำสองอย่าง: ก็อป log ไปเก็บที่ถาวร + แจ้งเมื่อ agent หยุดเด้ง หรือ manifest ค้างนาน
+NAS_LOG = "/tmp/probook-nas-agent.log"
+NAS_ARCHIVE = os.path.expanduser("~/.hermes/state/probook/nas-agent.log")
+NAS_STATE = os.path.expanduser("~/.hermes/state/probook/nas-agent.json")
+NAS_AGENT_INTERVAL_MIN = 10
+AGENT_SILENT_MIN = 45          # log ไม่ขยับเกินนี้ = agent อาจไม่ได้เด้ง (interval 10 นาที)
+NAS_UNMOUNTED_ALERT_HOURS = 48  # ไม่ mount ต่อเนื่องนานกว่านี้ = manifest ฝั่ง server ค้าง
+
+
+def _read_json(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def nas_agent_report():
+    """-> list บรรทัดรายงาน · ว่าง = agent ปกติ (หรือไม่ได้ติดตั้ง)"""
+    lines = []
+    st = _read_json(NAS_STATE, {})
+    now = time.time()
+
+    if not os.path.exists(NAS_LOG):
+        # /tmp ถูกล้าง (รีบูต) หรือไม่ได้ติดตั้ง agent — ใช้ archive ตัดสิน
+        if not os.path.exists(NAS_ARCHIVE):
+            return []
+        last_seen = st.get("lastLogSeenAt", 0)
+        if last_seen and now - last_seen > AGENT_SILENT_MIN * 60:
+            mins = int((now - last_seen) / 60)
+            lines.append(f"⚠️ NAS agent: ไม่มี log ใหม่ {mins} นาที และไฟล์ /tmp หายไป (รีบูตแล้ว launchd ไม่ได้เด้ง?)")
+            lines.append("   เช็ก: launchctl list | grep probook-nas-agent")
+        return lines
+
+    try:
+        raw = open(NAS_LOG, errors="replace").read().split("\n")
+    except Exception as e:
+        return [f"⚠️ NAS agent: อ่าน log ไม่ได้ ({str(e)[:60]})"]
+    log_lines = [l.strip() for l in raw if l.strip()]
+    mtime = os.stat(NAS_LOG).st_mtime
+
+    # เก็บถาวร: ต่อท้ายเฉพาะบรรทัดที่ยังไม่เคยเก็บ (นับจากจำนวนที่เก็บไปแล้ว)
+    kept = int(st.get("archivedCount", 0))
+    if len(log_lines) < kept:      # ไฟล์ถูกล้าง/หมุนใหม่ → เริ่มนับใหม่
+        kept = 0
+    new = log_lines[kept:]
+    if new:
+        os.makedirs(os.path.dirname(NAS_ARCHIVE), exist_ok=True)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        with open(NAS_ARCHIVE, "a") as f:
+            for l in new:
+                f.write(f"{stamp} {l}\n")
+    st["archivedCount"] = len(log_lines)
+    st["lastLogSeenAt"] = mtime
+
+    # agent หยุดเด้งหรือยัง
+    if now - mtime > AGENT_SILENT_MIN * 60:
+        mins = int((now - mtime) / 60)
+        lines.append(f"⚠️ NAS agent ไม่ได้เด้งมา {mins} นาที (ควรทุก {NAS_AGENT_INTERVAL_MIN} นาที)")
+        lines.append("   เช็ก: launchctl list | grep probook-nas-agent")
+
+    # ไม่ mount ต่อเนื่องนานแค่ไหน (นับจากครั้งแรกที่เรา *เห็น* ว่ามันเริ่มไม่ mount)
+    tail_unmounted = 0
+    for l in reversed(log_lines):
+        if "not mounted" in l:
+            tail_unmounted += 1
+        else:
+            break
+    if tail_unmounted and tail_unmounted == len(log_lines):
+        # ถ้าทุกบรรทัดในไฟล์เป็น not mounted แปลว่ามันไม่เคย mount เลยตั้งแต่ไฟล์เริ่ม →
+        # ใช้เวลาสร้างไฟล์เป็นจุดเริ่ม (ตรงกว่าเดา 10 นาที/บรรทัด เพราะเครื่องหลับบ้าง)
+        try:
+            birth = os.stat(NAS_LOG).st_birthtime
+        except Exception:
+            birth = mtime - tail_unmounted * NAS_AGENT_INTERVAL_MIN * 60
+        first_seen = st.get("unmountedSinceAt") or min(birth, mtime - tail_unmounted * NAS_AGENT_INTERVAL_MIN * 60)
+        st["unmountedSinceAt"] = first_seen
+        hours = (now - first_seen) / 3600
+        if hours >= NAS_UNMOUNTED_ALERT_HOURS and not lines:
+            lines.append(f"⚠️ NAS ไม่ได้ mount ต่อเนื่อง ~{hours:.0f} ชม. ({tail_unmounted} รอบติด)")
+            lines.append("   = manifest ฝั่ง server ค้างอยู่ที่ค่าเดิม · อีเมล 'โฟลเดอร์ sync เสร็จ' จะไม่มาเลย")
+            lines.append("   ถ้าไม่ได้ใช้ฟีเจอร์นี้แล้วให้ถอน agent ทิ้ง (launchctl unload) จะได้ไม่มีเสียงรบกวน")
+    elif tail_unmounted == 0:
+        st.pop("unmountedSinceAt", None)
+
+    _write_json(NAS_STATE, st)
+    return lines
+
+
+# ─────────── งวดของไดรฟ์ฟุตเทจ (ระเบิดเวลาปี 2027) ───────────
+# DRIVE_FOOTAGE_ROOT ชี้ไดรฟ์ "VIDEO 2026 [JUL–DEC]" ซึ่งหมุนด้วยมือทุกครึ่งปี
+# ถ้าไม่มีใครเปลี่ยน env ตอนขึ้นงวดใหม่ ระบบจะสร้างกล่องลงไดรฟ์งวดเก่าต่อไปแบบเงียบ ๆ
+FOOTAGE_ROOT_STATE = os.path.expanduser("~/.hermes/state/probook/footage-root.json")
+SEED_PERIOD = "2026-H2"
+PREWARN_DAYS = (14, 7, 3, 1)
+
+
+def period_of(ts):
+    tm = time.gmtime(ts + 7 * 3600)
+    return f"{tm.tm_year}-H{1 if tm.tm_mon <= 6 else 2}"
+
+
+def days_left_in_period(ts):
+    tm = time.gmtime(ts + 7 * 3600)
+    end_mon = 6 if tm.tm_mon <= 6 else 12
+    end = time.mktime((tm.tm_year, end_mon, [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][end_mon - 1],
+                       23, 59, 59, 0, 0, 0))
+    start = time.mktime((tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, 0, 0, 0, 0))
+    return int((end - start) / 86400)
+
+
+def footage_root_report():
+    """-> list บรรทัดรายงาน · เตือนเมื่อถึงงวดใหม่แล้วยังไม่หมุนไดรฟ์"""
+    st = _read_json(FOOTAGE_ROOT_STATE, {"period": SEED_PERIOD})
+    cur, acked = period_of(time.time()), st.get("period", SEED_PERIOD)
+    if cur != acked:
+        _write_json(FOOTAGE_ROOT_STATE, st)
+        return [
+            f"⚠️ ขึ้นงวด {cur} แล้ว แต่ DRIVE_FOOTAGE_ROOT ยังเป็นของงวด {acked}",
+            "   ถ้าไม่หมุน env บน stack 125 ระบบจะสร้างกล่องลงไดรฟ์งวดเก่าต่อไปโดยไม่มี error",
+            f"   หมุนแล้วสั่ง: python3 ~/.hermes/scripts/probook-worker-check.py --ack-footage-root {cur}",
+        ]
+    # เตือนล่วงหน้าแบบ "ช่วงละครั้ง" ไม่ใช่เทียบวันตรง ๆ (กัน off-by-one และกันเตือนซ้ำทุกวัน)
+    left = days_left_in_period(time.time())
+    bucket = min((t for t in PREWARN_DAYS if left <= t), default=None)
+    if bucket is None:
+        if st.pop("prewarnBucket", None) is not None:
+            _write_json(FOOTAGE_ROOT_STATE, st)
+        return []
+    if st.get("prewarnBucket") == bucket:
+        return []                       # ช่วงนี้เตือนไปแล้ว
+    st["prewarnBucket"] = bucket
+    _write_json(FOOTAGE_ROOT_STATE, st)
+    return [f"ℹ️ อีก ~{left} วันจะขึ้นงวด {period_of(time.time() + (left + 1) * 86400)} — "
+            f"เตรียมสร้างไดรฟ์ VIDEO งวดถัดไป แล้วหมุน DRIVE_FOOTAGE_ROOT บน stack 125"]
 
 
 def load_state():
@@ -217,6 +385,14 @@ def hours(sec):
 
 
 def main():
+    # โหมดยืนยันว่าหมุนไดรฟ์ให้งวดใหม่แล้ว: --ack-footage-root 2027-H1
+    if "--ack-footage-root" in sys.argv:
+        i = sys.argv.index("--ack-footage-root")
+        period = sys.argv[i + 1] if len(sys.argv) > i + 1 else period_of(time.time())
+        _write_json(FOOTAGE_ROOT_STATE, {"period": period, "ackedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+        print(f"บันทึกแล้ว: DRIVE_FOOTAGE_ROOT = งวด {period}")
+        return
+
     state = load_state()
     lines = []
 
@@ -274,6 +450,18 @@ def main():
         lines.extend(log_scan_report(enabled_keys, dead_keys))
     except Exception as e:
         lines.append(f"⚠️ log scan พังเอง: {str(e)[:100]}")
+
+    # STEP 3 — เฝ้า launchd NAS agent (กลุ่มงานตั้งเวลาที่ไม่เคยมีใครตรวจ)
+    try:
+        lines.extend(nas_agent_report())
+    except Exception as e:
+        lines.append(f"⚠️ เช็ก NAS agent พังเอง: {str(e)[:80]}")
+
+    # STEP 4 — งวดของไดรฟ์ฟุตเทจ (กันระเบิดเงียบตอนขึ้นปี/ครึ่งปีใหม่)
+    try:
+        lines.extend(footage_root_report())
+    except Exception as e:
+        lines.append(f"⚠️ เช็กงวดไดรฟ์พังเอง: {str(e)[:80]}")
 
     vstatus, vbody = get_retry("/api/version", timeout=15)
     if vstatus != 200:

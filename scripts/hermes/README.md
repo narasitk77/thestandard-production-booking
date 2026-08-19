@@ -7,7 +7,7 @@
 
 | script | cron (เวลาไทย) | ทำอะไร |
 |---|---|---|
-| `probook-worker-check.py` | `0 9,21 * * *` | **step 1** probe `/api/health-summary` + `/api/version` (worker `stale`, app ตอบไม่ได้, `neverTicked` 2 รอบติด) · **step 2** สแกน log container 24 ชม. ผ่าน Portainer API |
+| `probook-worker-check.py` | `0 9,21 * * *` | **1** probe `/api/health-summary` + `/api/version` · **2** สแกน log container 24 ชม. ผ่าน Portainer API · **3** เฝ้า launchd NAS agent · **4** เตือนหมุนงวดไดรฟ์ฟุตเทจ |
 | `probook-idfirst-monitor.py` | `30 9 * * *` | อ่าน `/api/internal/id-first-stats` เก็บ snapshot 14 วัน; แจ้งเมื่อ fallback พุ่ง / hit ตกเกือบ 0 / endpoint ล่ม 2 วันติด |
 | `probook-landing-cleanup.py` | `0 12 * * *` | `landing/manage?prune=today` แบบ dry-run → apply → verify; ลบเฉพาะ drop folder ที่ว่าง (ฟุตเทจส่งเข้ากล่องแล้ว) |
 
@@ -54,6 +54,29 @@ PORTAINER_CONTAINER=production-booking-app
 ปล่อย `PORTAINER_API_KEY` ว่าง = ข้าม step 2 เงียบ ๆ (ไม่กวน ไม่พัง) · token เสีย/หมดอายุ → สคริปต์
 รายงาน `⚠️ ข้าม log scan — Portainer API token ใช้ไม่ได้แล้ว` ไม่เงียบหาย · สคริปต์ยิงแค่ `GET .../logs`
 ไม่มีการเขียน ไม่ redeploy (token มีสิทธิ์เท่าเจ้าของบัญชี — ไฟล์จึง chmod 600)
+
+## Step 3 — เฝ้า launchd NAS agent
+
+`co.thestandard.probook-nas-agent` (launchd ทุก 600s) รัน `~/.probook/nas-manifest-agent.sh`
+สแกน SMB share แล้ว POST manifest เข้า `/api/internal/nas-manifest` **มันออกแบบให้เงียบเมื่อ
+`/Volumes/production team` ไม่ได้ mount** (โน้ตบุ๊กไม่อยู่ออฟฟิศ) — "not mounted" จึงไม่ใช่ความผิดพลาด
+แต่ถ้าเงียบยาว manifest ฝั่ง server ค้าง และอีเมล "โฟลเดอร์ sync เสร็จ" จะไม่มาเลยโดยไม่มีใครรู้
+
+- แจ้งเมื่อ log ไม่ขยับเกิน 45 นาที (agent ไม่ได้เด้ง — ควรทุก 10 นาที)
+- แจ้งเมื่อไม่ mount ต่อเนื่องเกิน 48 ชม. พร้อมบอกว่าถอน agent ได้ถ้าไม่ใช้ฟีเจอร์นี้แล้ว
+- ก็อป log ไปเก็บถาวรที่ `~/.hermes/state/probook/nas-agent.log` เพราะตัวจริงอยู่ใน `/tmp` ซึ่งหายทุกครั้งที่รีบูต
+
+## Step 4 — งวดของไดรฟ์ฟุตเทจ (กันระเบิดเงียบตอนขึ้นปี/ครึ่งปีใหม่)
+
+`DRIVE_FOOTAGE_ROOT` ชี้ Shared Drive ชื่อ **"VIDEO 2026 [JUL–DEC]"** ซึ่งหมุน **ด้วยมือ** ทุกครึ่งปี
+ไม่มีโค้ดตรงไหนเทียบชื่อไดรฟ์กับปฏิทิน ⇒ ถ้าขึ้นงวดใหม่แล้วไม่มีใครหมุน env ระบบจะสร้างกล่อง/EP/CAM
+ลงไดรฟ์งวดเก่าต่อไป **เงียบ ไม่มี error** = คลาส "เขียนของผิดลงระบบ" ที่แก้ย้อนหลังแพงที่สุด
+
+- สคริปต์เก็บงวดที่ยืนยันแล้วไว้ที่ `~/.hermes/state/probook/footage-root.json` (seed `2026-H2`)
+- ขึ้นงวดใหม่แล้วยังไม่ยืนยัน → เตือนทุกรอบจนกว่าจะหมุน
+- ใกล้ปลายงวด → เตือนล่วงหน้าเป็น "ช่วง" (≤14, ≤7, ≤3, ≤1 วัน) ช่วงละครั้ง ไม่ก่อกวนทุกวัน
+- หมุน env บน stack แล้วยืนยันด้วย:
+  `python3 ~/.hermes/scripts/probook-worker-check.py --ack-footage-root 2027-H1`
 
 ## Secret
 
