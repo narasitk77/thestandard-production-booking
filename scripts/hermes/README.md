@@ -7,7 +7,7 @@
 
 | script | cron (เวลาไทย) | ทำอะไร |
 |---|---|---|
-| `probook-worker-check.py` | `0 9,21 * * *` | probe `/api/health-summary` + `/api/version`; แจ้งเมื่อ worker ที่ `enabled` กลาย `stale`, app ตอบไม่ได้, หรือ `neverTicked` 2 รอบติด |
+| `probook-worker-check.py` | `0 9,21 * * *` | **step 1** probe `/api/health-summary` + `/api/version` (worker `stale`, app ตอบไม่ได้, `neverTicked` 2 รอบติด) · **step 2** สแกน log container 24 ชม. ผ่าน Portainer API |
 | `probook-idfirst-monitor.py` | `30 9 * * *` | อ่าน `/api/internal/id-first-stats` เก็บ snapshot 14 วัน; แจ้งเมื่อ fallback พุ่ง / hit ตกเกือบ 0 / endpoint ล่ม 2 วันติด |
 | `probook-landing-cleanup.py` | `0 12 * * *` | `landing/manage?prune=today` แบบ dry-run → apply → verify; ลบเฉพาะ drop folder ที่ว่าง (ฟุตเทจส่งเข้ากล่องแล้ว) |
 
@@ -26,6 +26,34 @@
    จึงบล็อกการ apply ไว้ ถ้าจะลบจริงต้องสั่งมือด้วย `--force`
 4. **ยิง apply ครั้งเดียว** — endpoint ที่เดิน Drive นาน ๆ ถูก proxy ตัดที่ ~60s ทั้งที่งานเดินต่อ
    ฝั่ง server การยิงซ้ำ = race/ของซ้ำ สคริปต์จึงรอแล้ว verify ไม่ยิงใหม่
+
+## Step 2 — Portainer log scan
+
+health-summary จับได้แค่ "heartbeat ค้าง" แต่จับ **ไม่ได้** เคสที่ worker ยิง HTTP ล้มทุกรอบ
+ทั้งที่งานข้างล่างยังเสร็จ (เคสจริง `[sound-merge] run failed: fetch failed` 48/48 รอบ ก่อน v1.172)
+step 2 จึงอ่าน log ของ container ย้อน 24 ชม. แล้วนับต่อ worker:
+
+- `run failed` / `no activity for NNNs` / `] 4xx:` / `] 5xx:` → นับเป็น error พร้อมยกตัวอย่างบรรทัด
+- บรรทัด `supervisor: worker exited` / `is off — exiting` / `WORKER_ENABLED=0` → ข้าม (ปิดเองถูกต้องแล้ว)
+- worker ที่ health-summary บอกว่า `enabled` แต่ 24 ชม. ไม่มีร่องรอยใน log เลย → เตือน (supervisor อาจไม่ได้รันสคริปต์)
+- ตีความให้ด้วย: `no activity for` = endpoint ค้างจริง · `fetch failed` = deploy เก่ากว่า v1.172 · `401` = shared secret ไม่ตรง · `409` ทุกรอบ = pass เดินนานเกิน interval
+
+**ต้องใช้ Portainer access token ไม่ใช่ session ของ Chrome** — Hermes ขับบราวเซอร์ของตัวเอง
+ยืม session ที่คนใช้ล็อกอินไว้ไม่ได้ วิธีออก token:
+
+> Portainer → ไอคอนผู้ใช้มุมขวาบน → **My account** → **Access tokens** → **Add access token**
+> → ตั้งชื่อ `hermes-worker-check` → copy ค่า (โชว์ครั้งเดียว) → วางใน `~/.hermes/scripts/probook.env`
+
+```
+PORTAINER_URL=http://thestandard.fortiddns.com:9000
+PORTAINER_API_KEY=<paste>
+PORTAINER_ENDPOINT_ID=2
+PORTAINER_CONTAINER=production-booking-app
+```
+
+ปล่อย `PORTAINER_API_KEY` ว่าง = ข้าม step 2 เงียบ ๆ (ไม่กวน ไม่พัง) · token เสีย/หมดอายุ → สคริปต์
+รายงาน `⚠️ ข้าม log scan — Portainer API token ใช้ไม่ได้แล้ว` ไม่เงียบหาย · สคริปต์ยิงแค่ `GET .../logs`
+ไม่มีการเขียน ไม่ redeploy (token มีสิทธิ์เท่าเจ้าของบัญชี — ไฟล์จึง chmod 600)
 
 ## Secret
 
