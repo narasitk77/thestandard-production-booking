@@ -329,6 +329,13 @@ model Booking {
   // window's last observed { fileCount, totalBytes, at } between sweeps.
   readyNotifiedAt  DateTime?
   readySnapshot    Json?
+  // v1.179 — when the footage-ready sweep last WALKED this booking on Drive
+  // (stamped even when it found nothing). The walk budget is capped per sweep,
+  // and without this the same first N rows won won every run: bookings that can
+  // never have footage (daily news, events, lighting-only) held the queue for
+  // the whole lookback window and the real shoots behind them were never walked
+  // at all. Ordering by this = least-recently-checked first, so the queue rotates.
+  readyCheckedAt   DateTime?
   // v1.156 — set the moment an "urgent booking" alert (rush job: shoot within a
   // couple of days of the booking) is dispatched, so the alert fires exactly
   // once per booking even though create-booking is shared/retried.

@@ -37,6 +37,7 @@ import { getCachedFootagePayload, type CachedFootagePayload, type BookingForFoot
 import { isPhotoAlbumBooking } from './outlet-folders'
 import { isShootOver } from './shoot-window'
 import { latestNasState } from './nas-sync'
+import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
 
@@ -47,11 +48,37 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
-export type FootageReadyAudience = 'producer' | 'everyone' | 'admin'
+export type FootageReadyAudience = 'producer' | 'team' | 'everyone' | 'admin'
 
 export function footageReadyAudience(): FootageReadyAudience {
   const v = (process.env.FOOTAGE_READY_AUDIENCE || '').trim().toLowerCase()
-  return v === 'everyone' || v === 'admin' ? v : 'producer'
+  return v === 'everyone' || v === 'admin' || v === 'team' ? v : 'producer'
+}
+
+/** Domains that count as "our staff" for the `team` audience. */
+export function footageReadyInternalDomains(): string[] {
+  const raw = process.env.FOOTAGE_READY_INTERNAL_DOMAINS?.trim()
+  if (!raw) return ['thestandard.co']
+  const list = raw.split(',').map(d => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean)
+  return list.length > 0 ? list : ['thestandard.co']
+}
+
+/**
+ * v1.179 — `team` = staff only. Same list as `everyone` minus anyone outside our
+ * domains, because assignedEmails carries freelancers' PERSONAL addresses and the
+ * operator did not want a one-day freelancer mailed a Drive link for every shoot
+ * they ever touched. Shared boxes (video@, sound@) stay IN — unlike the review
+ * invites, where a shared inbox was a credential problem, here it is simply how
+ * "the camera team" is reached.
+ *
+ * Exactly one '@' required. Splitting on the LAST one would read
+ * `a@b@thestandard.co` as internal — same trap already paid for in
+ * isInvitableEmail (v1.173.1).
+ */
+export function isInternalEmail(email: string, domains: string[] = footageReadyInternalDomains()): boolean {
+  const parts = (email || '').trim().toLowerCase().split('@')
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false
+  return domains.includes(parts[1])
 }
 
 /**
@@ -78,10 +105,11 @@ export function footageReadyRecipients(
   if (audience === 'admin') return { people: [], digest: true }
 
   const raw =
-    audience === 'everyone'
+    audience === 'everyone' || audience === 'team'
       ? [b.producerEmail, b.createdByEmail, ...(b.assignedEmails || [])]
       : [b.producerEmail]
-  const people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@'))))
+  let people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@'))))
+  if (audience === 'team') people = people.filter(e => isInternalEmail(e))
   return { people, digest: !!admin && !people.includes(admin) }
 }
 
@@ -117,6 +145,29 @@ export function evaluateSettle(
   return { settled: false, write: { fileCount: current.fileCount, totalBytes: current.totalBytes, at: now.toISOString() } }
 }
 
+/**
+ * v1.179 — the order the capped Drive walks are handed out in.
+ *
+ * The bug this closes: `findMany` had no `orderBy` at all, so Postgres returned
+ * the same rows in the same order every sweep and `slice(0, MAX_PER_RUN)` handed
+ * the budget to the same five bookings forever. Proven against prod — three
+ * consecutive dry runs walked an identical five and deferred an identical four.
+ * Worse, the five squatters were bookings that can never have footage (THE
+ * STANDARD NOW ×2, an event, a lighting-only job): they are never notified, so
+ * they are never stamped, so they held the queue for the whole lookback window
+ * and the shoots behind them were never walked ONCE — not "notified late",
+ * never notified at all, because they aged out of the window still unwalked.
+ *
+ * least-recently-walked first, never-walked at the very front (a booking that
+ * just became eligible jumps the queue, which is what people are waiting for),
+ * newest shoot as the tie-break.
+ */
+export function orderForWalk<T extends { readyCheckedAt?: Date | null; shootDate: Date | string }>(rows: T[]): T[] {
+  const checked = (r: T) => (r.readyCheckedAt ? new Date(r.readyCheckedAt).getTime() : -1)
+  const shot = (r: T) => new Date(r.shootDate).getTime()
+  return [...rows].sort((a, b) => checked(a) - checked(b) || shot(b) - shot(a))
+}
+
 // ── Scan ────────────────────────────────────────────────────────────────────
 
 export type FootageReadyScanResult = {
@@ -126,13 +177,18 @@ export type FootageReadyScanResult = {
   eligible: number           // survivors of the JS gates (shoot over, no in-flight, NAS drained)
   walked: number             // Drive walks actually performed this sweep
   deferred: number           // eligible but beyond MAX_PER_RUN — picked up next sweep
+  deferredCodes: string[]    // v1.179 — WHICH ones. A bare count sent us back to
+                             // the calendar to guess who was starved; never again.
   notified: string[]         // booking codes notified this sweep
   settling: string[]         // codes waiting out the settle window
   skipped: Array<{ code: string; reason: string }>
   errors: Array<{ code: string; error: string }>
 }
 
-type CandidateRow = BookingForFootagePayload & {
+// `program` is widened here (the base type has name only) so the photo-album
+// gate can read the BOOKING's program code, not just each episode's.
+type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
+  program: { name: string; code?: string | null }
   id: string
   bookingCode: string | null
   status: string
@@ -159,7 +215,7 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
   const since = new Date(now.getTime() - lookbackDays * DAY)
 
   const result: FootageReadyScanResult = {
-    dryRun, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0,
+    dryRun, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
     notified: [], settling: [], skipped: [], errors: [],
   }
 
@@ -178,9 +234,9 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
       projectId: true, projectName: true, category: true, crewRequired: true,
       producer: true, producerEmail: true, createdByEmail: true, assignedEmails: true,
       callTime: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
-      readySnapshot: true,
+      readySnapshot: true, readyCheckedAt: true,
       outlet: { select: { code: true, name: true } },
-      program: { select: { name: true } },
+      program: { select: { name: true, code: true } },
       episodes: {
         orderBy: { sequence: 'asc' },
         select: { episodeId: true, sequence: true, title: true, program: { select: { name: true, code: true } } },
@@ -212,7 +268,11 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
     if (!isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap }, now)) {
       result.skipped.push({ code, reason: 'shoot-not-over' }); continue
     }
-    if (isPhotoAlbumBooking(b.episodes)) {
+    // v1.179 — also honour the BOOKING's own program. isPhotoAlbumBooking reads
+    // the EPISODES' program code, and WLT-OTH-260819-01 (a Photo Album booking,
+    // lighting only) slipped through it every sweep because its episode code is
+    // 'OTH' — burning a walk slot on a job that by definition has no video.
+    if (isPhotoAlbumBooking(b.episodes) || (b.program?.code || '').toUpperCase() === PHOTO_ALBUM_EPISODE_CODE) {
       result.skipped.push({ code, reason: 'photo-album' }); continue
     }
     if (uploading.has(b.id)) {
@@ -226,9 +286,12 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
   }
   result.eligible = eligible.length
 
-  // Cap the expensive Drive walks per sweep; the rest are picked up next run.
-  const toWalk = eligible.slice(0, maxPerRun)
-  result.deferred = eligible.length - toWalk.length
+  // Cap the expensive Drive walks per sweep; the rest are picked up next run —
+  // which only holds because orderForWalk rotates the queue (see its comment).
+  const ordered = orderForWalk(eligible)
+  const toWalk = ordered.slice(0, maxPerRun)
+  result.deferred = ordered.length - toWalk.length
+  result.deferredCodes = ordered.slice(maxPerRun).map(r => r.bookingCode as string)
 
   for (const b of toWalk) {
     const code = b.bookingCode as string
@@ -239,6 +302,12 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
       let payload = await getCachedFootagePayload(b, { refresh: !dryRun })
       if (dryRun && payload.folders.length === 0) payload = await getCachedFootagePayload(b, { refresh: false })
       result.walked++
+      // Stamp BEFORE the outcome branches: a walk that found nothing still has to
+      // move this booking to the back of the queue, or it squats forever (that is
+      // exactly the bug — see orderForWalk).
+      if (!dryRun) {
+        await prisma.booking.update({ where: { id: b.id }, data: { readyCheckedAt: now } }).catch(() => {})
+      }
       if (payload.folders.length === 0 || payload.fileCount === 0) {
         result.skipped.push({ code, reason: 'no-footage' })
         continue

@@ -195,13 +195,18 @@ services:
       # Sweeps recent bookings and auto-emails the folder links once footage is
       # complete + settled (src/lib/footage-ready.ts). Dormant until
       # FOOTAGE_READY_WORKER_ENABLED=1.
-      # Audience: producer (default) | everyone | admin
-      #   admin    = the digest address ONLY (this is what prod ran until v1.178,
+      # Audience: producer (default) | team | everyone | admin
+      #   admin    = the digest address ONLY (this is what prod ran until v1.179,
       #              and why the team never heard about their own footage)
       #   producer = the booking's producer  + the admin digest
-      #   everyone = producer + creator + assigned crew + the admin digest
+      #   team     = producer + creator + assigned crew, STAFF ONLY + the digest
+      #   everyone = the same, freelancers' personal addresses included
       # From v1.178 the digest is ADDED, never replaced: moving off 'admin' used to
       # remove the operator's copy silently.
+      # 'team' drops non-@thestandard.co addresses (FOOTAGE_READY_INTERNAL_DOMAINS
+      # overrides the domain list). Shared boxes video@/sound@ stay IN — that is how
+      # the camera team is reached, and unlike a review invite the link is not a
+      # credential: Drive permissions still decide who can open it.
       FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
       FOOTAGE_READY_INTERVAL_MS: ${FOOTAGE_READY_INTERVAL_MS:-1800000}
       FOOTAGE_READY_AUDIENCE: ${FOOTAGE_READY_AUDIENCE:-producer}

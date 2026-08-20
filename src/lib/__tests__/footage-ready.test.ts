@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluateSettle, footageReadyRecipients, parseReadySnapshot } from '../footage-ready'
+import { evaluateSettle, footageReadyRecipients, isInternalEmail, orderForWalk, parseReadySnapshot } from '../footage-ready'
 
 const T0 = new Date('2026-07-14T10:00:00Z')
 const mins = (n: number) => new Date(T0.getTime() + n * 60_000)
@@ -126,4 +126,98 @@ test('a booking with nobody on it yields nobody — the caller warns the admin i
   const r = footageReadyRecipients('everyone', { producerEmail: null, createdByEmail: null, assignedEmails: [] }, ADMIN)
   assert.deepEqual(r.people, [])
   assert.equal(r.digest, true)
+})
+
+// ── audience=team (v1.179) ──────────────────────────────────────────────────
+// Operator's call: notify the team but NOT the freelancers' personal addresses.
+
+test('audience=team: staff only — the freelancer gmail is dropped', () => {
+  const r = footageReadyRecipients('team', BK, ADMIN)
+  assert.deepEqual(r.people, [
+    'prae@thestandard.co',
+    'coordinator@thestandard.co',
+    'video@thestandard.co',
+    'sound@thestandard.co',
+  ], 'shared boxes stay — that IS how the camera team is reached')
+  assert.equal(r.digest, true)
+})
+
+test('isInternalEmail: a malformed address fails the domain rule, never slips through it', () => {
+  assert.equal(isInternalEmail('a@thestandard.co'), true)
+  assert.equal(isInternalEmail('  A@THESTANDARD.CO '), true)
+  assert.equal(isInternalEmail('a@b@thestandard.co'), false, 'splitting on the LAST @ would read this as internal')
+  assert.equal(isInternalEmail('a@gmail.com'), false)
+  assert.equal(isInternalEmail('@thestandard.co'), false)
+  assert.equal(isInternalEmail('nobody'), false)
+  assert.equal(isInternalEmail(''), false)
+})
+
+test('team with a custom domain list', () => {
+  assert.equal(isInternalEmail('x@partner.co', ['partner.co']), true)
+  assert.equal(isInternalEmail('x@thestandard.co', ['partner.co']), false)
+})
+
+// ── orderForWalk (v1.179) ───────────────────────────────────────────────────
+// The starvation bug: no orderBy + slice(0, MAX_PER_RUN) handed the walk budget
+// to the same five rows every sweep. Proven on prod — three consecutive dry runs
+// walked an identical five and deferred an identical four, and the five squatters
+// were bookings that can never have footage, so they were never stamped and never
+// moved. Everything behind them aged out of the window unwalked.
+
+const row = (bookingCode: string, shootDate: string, readyCheckedAt: string | null) =>
+  ({ bookingCode, shootDate: new Date(shootDate), readyCheckedAt: readyCheckedAt ? new Date(readyCheckedAt) : null })
+
+test('never-walked bookings go to the very front', () => {
+  const out = orderForWalk([
+    row('WALKED-RECENTLY', '2026-08-19', '2026-08-20T09:00:00Z'),
+    row('NEVER-WALKED', '2026-08-17', null),
+  ])
+  assert.deepEqual(out.map(r => r.bookingCode), ['NEVER-WALKED', 'WALKED-RECENTLY'])
+})
+
+test('among walked ones, least recently walked comes first', () => {
+  const out = orderForWalk([
+    row('B', '2026-08-19', '2026-08-20T09:00:00Z'),
+    row('A', '2026-08-19', '2026-08-20T07:00:00Z'),
+    row('C', '2026-08-19', '2026-08-20T08:00:00Z'),
+  ])
+  assert.deepEqual(out.map(r => r.bookingCode), ['A', 'C', 'B'])
+})
+
+test('tie on last-walked breaks to the NEWEST shoot — people wait for fresh footage', () => {
+  const out = orderForWalk([
+    row('OLD', '2026-08-14', null),
+    row('NEW', '2026-08-19', null),
+    row('MID', '2026-08-17', null),
+  ])
+  assert.deepEqual(out.map(r => r.bookingCode), ['NEW', 'MID', 'OLD'])
+})
+
+test('THE REGRESSION: a squatter that keeps finding no footage stops holding the queue', () => {
+  // Sweep 1 — nothing has been walked yet, cap of 2. The two newest win.
+  let rows = [
+    row('TSN-DAILY-NEWS', '2026-08-19', null),   // never has footage
+    row('EVENT', '2026-08-19', null),            // never has footage
+    row('REAL-SHOOT-A', '2026-08-18', null),
+    row('REAL-SHOOT-B', '2026-08-18', null),
+  ]
+  const CAP = 2
+  const sweep1 = orderForWalk(rows).slice(0, CAP).map(r => r.bookingCode)
+  assert.deepEqual(sweep1, ['TSN-DAILY-NEWS', 'EVENT'])
+
+  // Those two are stamped even though the walk found nothing (that is the fix).
+  rows = rows.map(r => sweep1.includes(r.bookingCode as string)
+    ? { ...r, readyCheckedAt: new Date('2026-08-20T09:00:00Z') } : r)
+
+  // Sweep 2 — the real shoots now get the budget instead of being starved again.
+  const sweep2 = orderForWalk(rows).slice(0, CAP).map(r => r.bookingCode)
+  assert.deepEqual(sweep2, ['REAL-SHOOT-A', 'REAL-SHOOT-B'])
+  assert.ok(!sweep2.some(c => sweep1.includes(c as string)), 'no booking is walked twice before every other has had a turn')
+})
+
+test('orderForWalk does not mutate its input', () => {
+  const rows = [row('B', '2026-08-14', null), row('A', '2026-08-19', null)]
+  const before = rows.map(r => r.bookingCode)
+  orderForWalk(rows)
+  assert.deepEqual(rows.map(r => r.bookingCode), before)
 })
