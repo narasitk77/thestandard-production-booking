@@ -55,14 +55,62 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   }
 }
 
-/** DELETE /api/admin/rentals/[id] — hard delete (documents cascade). ADMIN. */
+/**
+ * DELETE /api/admin/rentals/[id] — hard delete. ADMIN.
+ *
+ * DocumentRef rows cascade (schema `onDelete: Cascade`), but the FILES in Drive
+ * are untouched: the money paperwork outlives the tracker row on purpose, and
+ * `driveFolderId` is returned below so the folder can still be found afterwards.
+ *
+ * v1.180 — the audit row used to carry the id and nothing else, which after a
+ * hard delete resolves to nothing: you could see that someone deleted *a* rental
+ * and never learn which. Snapshot the identifying fields into `changes` first.
+ */
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
   const session = await requireAdmin()
   if (!session) return NextResponse.json({ error: 'Admin only (finance)' }, { status: 403 })
   try {
+    const before = await prisma.rentalJob.findUnique({
+      where: { id: params.id },
+      select: {
+        jobName: true, quoteNo: true, items: true, invoiceNo: true, amount: true,
+        paymentStatus: true, status: true, rentalDate: true, returnDueDate: true,
+        driveFolderId: true,
+        vendor: { select: { name: true } },
+        booking: { select: { bookingCode: true } },
+        _count: { select: { documents: true } },
+      },
+    })
+    if (!before) return NextResponse.json({ error: 'ไม่พบงานเช่านี้ (อาจถูกลบไปแล้ว)' }, { status: 404 })
+
     await prisma.rentalJob.delete({ where: { id: params.id } })
-    logAudit({ actorEmail: session.email, action: 'rental.delete', entityType: 'RentalJob', entityId: params.id })
-    return NextResponse.json({ success: true })
+    logAudit({
+      actorEmail: session.email,
+      action: 'rental.delete',
+      entityType: 'RentalJob',
+      entityId: params.id,
+      fromStatus: before.status,
+      changes: {
+        jobName: before.jobName,
+        quoteNo: before.quoteNo,
+        items: before.items,
+        invoiceNo: before.invoiceNo,
+        amount: before.amount ? String(before.amount) : null,
+        paymentStatus: before.paymentStatus,
+        rentalDate: before.rentalDate,
+        returnDueDate: before.returnDueDate,
+        vendor: before.vendor?.name ?? null,
+        bookingCode: before.booking?.bookingCode ?? null,
+        // How much paperwork lost its DB reference, and where the files still live.
+        documentsDetached: before._count.documents,
+        driveFolderId: before.driveFolderId,
+      },
+    })
+    return NextResponse.json({
+      success: true,
+      documentsDetached: before._count.documents,
+      driveFolderId: before.driveFolderId,
+    })
   } catch (e: any) {
     console.error('DELETE /api/admin/rentals/[id] error:', e)
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })

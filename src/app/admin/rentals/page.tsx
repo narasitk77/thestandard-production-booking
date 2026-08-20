@@ -473,12 +473,13 @@ function RentalForm({ initial, vendors, onClose, onSaved }: {
 }
 
 // ── one rental card ──────────────────────────────────────────────────────────
-function RentalCard({ rental, onAdd, onRemove, onPatch, onEdit }: {
+function RentalCard({ rental, onAdd, onRemove, onPatch, onEdit, onDelete }: {
   rental: Rental
   onAdd: (doc: DocRef) => void
   onRemove: (docId: string) => void
   onPatch: (patch: Partial<Rental>) => void
   onEdit: () => void
+  onDelete: () => void
 }) {
   const miss = missingSlots(rental)
   const money = amountNum(rental.amount)
@@ -505,6 +506,7 @@ function RentalCard({ rental, onAdd, onRemove, onPatch, onEdit }: {
         <div className="flex items-center gap-2 shrink-0">
           {money > 0 && <span className="text-sm font-semibold text-gray-800 tabular-nums">{baht(rental.amount)}</span>}
           <button onClick={onEdit} title="แก้ไข" className="text-gray-400 hover:text-[#673ab7] p-1"><Pencil className="w-4 h-4" /></button>
+          <button onClick={onDelete} title="ลบงานเช่านี้" className="text-gray-300 hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
         </div>
       </div>
 
@@ -586,6 +588,35 @@ export default function RentalsPage() {
     setRentals((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)))
     fetch(`/api/admin/rentals/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
       .then((r) => { if (!r.ok) load() }).catch(() => load())
+  }, [load])
+
+  // Hard delete. The softer move already exists — status → "เก็บแล้ว" hides the
+  // job behind the default filter and is reversible — so the confirm offers it
+  // rather than letting someone reach for the irreversible one by default.
+  const deleteRental = useCallback(async (r: Rental) => {
+    const name = r.jobName || r.quoteNo || '(ไม่มีชื่อ)'
+    const docs = (r.documents || []).length
+    const lines = [
+      `⚠️ ลบงานเช่านี้ถาวร?`,
+      ``,
+      `"${name}"${r.vendor?.name ? ` · ${r.vendor.name}` : ''}`,
+      docs > 0
+        ? `เอกสาร ${docs} ใบจะหลุดออกจากระบบ (ไฟล์ยังอยู่ใน Drive ไม่ได้ถูกลบ)`
+        : `ยังไม่มีเอกสารแนบ`,
+      ``,
+      `กู้คืนไม่ได้ — ถ้าแค่อยากให้หายจากหน้านี้ ให้เปลี่ยนสถานะเป็น "เก็บแล้ว" แทน`,
+    ]
+    if (!confirm(lines.join('\n'))) return
+    // Optimistic: the row goes now, and comes back if the server disagrees.
+    setRentals((rs) => rs.filter((x) => x.id !== r.id))
+    try {
+      const res = await fetch(`/api/admin/rentals/${r.id}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+    } catch (e) {
+      setError(`ลบไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`)
+      load()
+    }
   }, [load])
 
   const addDoc = useCallback((id: string, doc: DocRef) => {
@@ -700,7 +731,8 @@ export default function RentalsPage() {
                                 onAdd={(doc) => addDoc(r.id, doc)}
                                 onRemove={(docId) => removeDoc(r.id, docId)}
                                 onPatch={(patch) => patchRental(r.id, patch)}
-                                onEdit={() => setEditing(r)} />
+                                onEdit={() => setEditing(r)}
+                                onDelete={() => deleteRental(r)} />
                   ))}
                 </div>
               </div>
