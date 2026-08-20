@@ -7,7 +7,7 @@ Why it exists: probook runs 12 supervised workers inside the app container.
 The in-app dead-man switch emails when a heartbeat goes stale — but it runs
 INSIDE the app, so a dead container fires nothing. This is the outside observer.
 
-Two steps, same as the original routine:
+Steps (1–2 came from the original routine, 3–5 were added as blind spots surfaced):
   1. /api/health-summary + /api/version — catches "worker heartbeat went stale"
   2. Portainer container-log scan (24h) — catches the class health-summary CANNOT see:
      a worker whose HTTP call fails every run while the job underneath still completes
@@ -15,6 +15,9 @@ Two steps, same as the original routine:
 Step 2 uses a **Portainer access token** (X-API-Key) from ~/.hermes/scripts/probook.env,
 not a browser session — Hermes drives its own browser and cannot borrow the user's
 logged-in Chrome. No token configured = step 2 is skipped silently.
+  3. launchd NAS agent   4. footage-drive period roll
+  5. footage-ready OUTCOME — did the mail reach a human on the job? Liveness said
+     green for five weeks while 103 notifications went only to the operator.
 """
 import json
 import os
@@ -313,6 +316,53 @@ def nas_agent_report():
     return lines
 
 
+# ─────────── footage-ready: มีคนในงานได้รับเมลไหม (ไม่ใช่ "worker เต้นไหม") ───────────
+# 14 ก.ค.–20 ส.ค. worker นี้ 🟢 ทุกวัน tick ครบ errors: [] ส่งไป 103 ใบ — และ
+# **ไม่มีทีมงานคนไหนได้รับแม้ฉบับเดียว** เพราะ FOOTAGE_READY_AUDIENCE=admin ส่งเข้า
+# digest ของ operator ที่เดียว ไม่มีอะไรพัง และไม่มีอะไรเฝ้าสิ่งเดียวที่มีความหมาย
+# /api/internal/footage-ready/stats (v1.181) คิด alert ฝั่ง server จากกฎเดียวกับตัวส่ง
+FOOTAGE_READY_DAYS = 7
+
+
+def footage_ready_report():
+    """-> list บรรทัดรายงาน · ไม่มี secret = ข้ามเงียบ (เหมือน log scan)"""
+    secret = env_val("PROBOOK_LANDING_SECRET") or env_val("FOOTAGE_READY_SECRET")
+    if not secret:
+        return []
+    url = f"{BASE}/api/internal/footage-ready/stats?days={FOOTAGE_READY_DAYS}"
+    req = urllib.request.Request(url, headers={
+        "x-footage-ready-secret": secret, "User-Agent": "hermes-probook-watchdog"})
+    body = None
+    for delay in (0,) + RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                body = r.read().decode("utf-8", "replace")
+                break
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                return ["⚠️ footage-ready stats: 401 — secret ใน probook.env ไม่ตรงกับ prod แล้ว"]
+            if e.code == 404:
+                return []  # prod ยังไม่ได้ deploy endpoint นี้ — ไม่ใช่ความผิดปกติ
+            last = f"HTTP {e.code}"
+        except Exception as e:
+            last = str(e)[:80]
+    if body is None:
+        return [f"⚠️ footage-ready stats: เรียกไม่ได้ ({last})"]
+    try:
+        d = json.loads(body)
+    except Exception:
+        return [f"⚠️ footage-ready stats: อ่าน JSON ไม่ได้ ({body[:80]})"]
+    alerts = [a for a in (d.get("alerts") or []) if isinstance(a, str)]
+    if not alerts:
+        return []
+    s = d.get("sends") or {}
+    head = (f"   ({FOOTAGE_READY_DAYS} วัน: แจ้ง {s.get('total', 0)} ใบ · ถึงทีม {s.get('toTeam', 0)} ใบ · "
+            f"คนที่ได้รับ {s.get('peopleReached', 0)} คน · ถ่ายจบ {d.get('shootsOver', 0)} ใบ)")
+    return alerts[:3] + [head]
+
+
 # ─────────── งวดของไดรฟ์ฟุตเทจ (ระเบิดเวลาปี 2027) ───────────
 # DRIVE_FOOTAGE_ROOT ชี้ไดรฟ์ "VIDEO 2026 [JUL–DEC]" ซึ่งหมุนด้วยมือทุกครึ่งปี
 # ถ้าไม่มีใครเปลี่ยน env ตอนขึ้นงวดใหม่ ระบบจะสร้างกล่องลงไดรฟ์งวดเก่าต่อไปแบบเงียบ ๆ
@@ -541,6 +591,12 @@ def main():
         lines.extend(footage_root_report())
     except Exception as e:
         lines.append(f"⚠️ เช็กงวดไดรฟ์พังเอง: {str(e)[:80]}")
+
+    # STEP 5 — footage-ready: วัดผลลัพธ์ (มีคนได้รับเมลไหม) ไม่ใช่แค่ liveness
+    try:
+        lines.extend(footage_ready_report())
+    except Exception as e:
+        lines.append(f"⚠️ เช็ก footage-ready พังเอง: {str(e)[:80]}")
 
     vstatus, vbody = get_retry("/api/version", timeout=15)
     if vstatus != 200:
