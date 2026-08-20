@@ -16,7 +16,7 @@
  * truth for authorization.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { quRuleEnabled, isValidQuRef, normalizeQuRef } from '@/lib/agency-ref'
+import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
@@ -79,12 +79,12 @@ export async function PATCH(
     } = src
 
     // v1.161 — กฏ QU (เหมือน create/PATCH): งาน Agency (Advertorial) แก้ Agency ref
-    // ได้เฉพาะรูปแบบ QU
+    // ได้เฉพาะรูปแบบ QU. v1.183 — ตัวยึด "1234" (ยังไม่มีเลข QU) ผ่านได้ด้วย
     let agencyRefValidated: string | null = agencyRef || null
     if (agencyRef !== undefined && agencyRef && quRuleEnabled()
         && existing.outlet.code === 'AGN' && existing.category === 'ADVERTORIAL') {
-      if (!isValidQuRef(agencyRef)) {
-        return NextResponse.json({ error: `Agency ref ต้องเป็นเลขใบเสนอราคารูปแบบ QU (เช่น QU-4289) — ค่าที่ส่งมา: "${agencyRef}"` }, { status: 400 })
+      if (!isAcceptableQuRef(agencyRef)) {
+        return NextResponse.json({ error: quRefRejectMessage(agencyRef) }, { status: 400 })
       }
       agencyRefValidated = normalizeQuRef(agencyRef)
     }

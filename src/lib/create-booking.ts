@@ -14,7 +14,8 @@ import { logAudit } from '@/lib/audit'
 import { maybeAlertUrgentBooking } from '@/lib/urgent-booking'
 import { vpAssigneeEmail } from '@/lib/vp-assign'
 import { deriveBookingCategory } from '@/lib/booking-category'
-import { quRuleEnabled, isValidQuRef, normalizeQuRef, pullQuRefFromProject } from '@/lib/agency-ref'
+import { quRuleEnabled, isAcceptableQuRef, isQuPending, normalizeQuRef, quRefRejectMessage, pullQuRefFromProject } from '@/lib/agency-ref'
+import { applyDefaultCoProducer } from '@/lib/outlet-coproducer'
 import { isValidHHMM } from '@/lib/shoot-window'
 
 export type CreateBookingResult =
@@ -244,18 +245,35 @@ export async function createBookingFromPayload(
   // v1.161 — กฏ Agency ref (คำสั่ง operator): งาน Agency (Advertorial) ต้องมี
   // เลขใบเสนอราคารูปแบบ QU เท่านั้น; เว้นว่าง → ดึงจากคิวก่อนหน้าของโปรเจกต์
   // เดียวกันใน DB ให้อัตโนมัติ. ปิดกฏชั่วคราว: AGENCY_REF_QU_RULE=0
+  //
+  // v1.183 — งานที่ "ยังไม่มีเลข QU" ใส่ตัวยึด "1234" มาแทนได้ (คำสั่ง operator
+  // 2026-08-20) แต่ยังพยายามหาเลขจริงให้ก่อน: ถ้าโปรเจกต์เดียวกันเคยมีเลข QU จริง
+  // อยู่แล้ว ใช้เลขนั้น — เจตนาของคนพิมพ์ "1234" คือ "ฉันไม่มีเลข" ไม่ใช่
+  // "อย่าใช้เลขของโปรเจกต์นี้" จึงเป็นพฤติกรรมเดียวกับเว้นว่าง
   let agencyRefFinal: string | null = agencyRef || null
   if (quRuleEnabled() && isAgency && String(bookingCategory).toUpperCase() === 'ADVERTORIAL') {
     let ref = String(agencyRef || '').trim()
-    if (ref && !isValidQuRef(ref)) {
-      return fail(400, `Agency ref/Product Code ต้องเป็นเลขใบเสนอราคารูปแบบ QU (เช่น QU-4289) — ค่าที่ส่งมา: "${ref}"`)
+    if (ref && !isAcceptableQuRef(ref)) {
+      return fail(400, quRefRejectMessage(ref))
     }
-    if (!ref && projectId) ref = (await pullQuRefFromProject(String(projectId))) || ''
+    if ((!ref || isQuPending(ref)) && projectId) {
+      ref = (await pullQuRefFromProject(String(projectId))) || ref
+    }
     if (!ref) {
-      return fail(400, 'งาน Agency ต้องมีเลขใบเสนอราคา (Product Code รูปแบบ QU-xxxx) — โปรเจกต์นี้ยังไม่เคยมีเลข QU ในระบบ กรุณาใส่มากับการจอง')
+      return fail(400, 'งาน Agency ต้องมีเลขใบเสนอราคา (Product Code รูปแบบ QU-xxxx) — โปรเจกต์นี้ยังไม่เคยมีเลข QU ในระบบ ถ้ายังไม่มีเลขจริง ใส่ "1234" ไว้ก่อนได้ แล้วกลับมาแก้ทีหลัง')
     }
     agencyRefFinal = normalizeQuRef(ref)
   }
+
+  // v1.183 — Co-Producer ประจำ outlet (คำสั่ง operator 2026-08-20: งาน TSS ทุกใบ
+  // ต้องมีแก้วเป็น Co-Producer ในคิว). เติมให้เฉพาะตอนช่องว่างจริง — ถ้าคนจอง
+  // เลือกไว้แล้ว ระบบไม่แตะ. ปิดสวิตช์: AUTO_COPRODUCER=0
+  const coPro = applyDefaultCoProducer({
+    outletCode,
+    coProducer,
+    coProducerEmail,
+    producerEmail,
+  })
 
   const dateStr = formatShootDateForId(parsedDate)
   // v1.146 review fix — sequence allocation used to be a plain read-then-create
@@ -364,7 +382,11 @@ export async function createBookingFromPayload(
       producerPhone: producerPhone || null,
       director: director || null,
       directorEmail: directorEmail || null,
-      coProducer: coProducer || null,
+      coProducer: coPro.coProducer,
+      // v1.183 — coProducerEmail มีในสคีมาตั้งแต่ v1.59 แต่ไม่เคยถูกเขียนเลย
+      // (ฟอร์มคำนวณค่าไว้แล้วไม่ส่งมา) → คิวเก็บได้แค่ชื่อเล่น ตามตัวคนไม่ได้
+      // ตอนนี้เก็บอีเมลด้วย ทั้งเคสที่คนเลือกเองและเคสที่ระบบเติมให้
+      coProducerEmail: coPro.coProducerEmail,
       creative: creative || [],
       crewRequired: crewRequired || [],
       videographerCount: Math.max(1, Math.min(10, parseInt(videographerCount, 10) || 1)),
@@ -418,6 +440,11 @@ export async function createBookingFromPayload(
       shootDate: parsedDate.toISOString(),
       ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
       ...(opts.createdByEmail && opts.createdByEmail !== actorEmail ? { createdByEmail: opts.createdByEmail } : {}),
+      // v1.183 — ทิ้งร่องรอยไว้ว่าใบนี้ระบบเติม Co-Producer ให้ (ไม่ใช่คนเลือก)
+      // และใบไหนยังค้างเลข QU อยู่ — เวลามีคนถามว่า "ทำไมมีชื่อแก้วโผล่มา" หรือ
+      // "งานไหนบ้างที่ยังไม่ได้เลขจริง" จะตอบได้จาก audit ไม่ต้องเดา
+      ...(coPro.autoFilled ? { coProducerAuto: coPro.coProducerEmail } : {}),
+      ...(isQuPending(agencyRefFinal) ? { agencyRefPending: agencyRefFinal } : {}),
     },
   })
 

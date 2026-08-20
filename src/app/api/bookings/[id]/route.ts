@@ -6,7 +6,7 @@ import { canViewBooking } from '@/lib/booking-access'
 import { resolveBookingCrew } from '@/lib/crew-names'
 import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
 import { updateBookingRow, joinEpisodeTitles } from '@/lib/google-sheets'
-import { quRuleEnabled, isValidQuRef, normalizeQuRef } from '@/lib/agency-ref'
+import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
 import { isShootOver } from '@/lib/booking-complete'
@@ -152,11 +152,13 @@ export async function PATCH(
 
     // v1.161 — กฏ QU: แก้ไข Agency ref ของงาน Agency (Advertorial) ต้องเป็น
     // รูปแบบ QU เท่านั้น (สอดคล้อง create); ค่าว่าง = ลบได้ตามเดิม
+    // v1.183 — ตัวยึด "1234" (ยังไม่มีเลข QU) ผ่านได้เหมือนฝั่ง create ไม่งั้น
+    // แอดมินจะแก้ใบที่ค้างตัวยึดอยู่ไม่ได้เลย
     let agencyRefValidated: string | null = agencyRef || null
     if (agencyRef !== undefined && agencyRef && quRuleEnabled()
         && (existing as any).outlet?.code === 'AGN' && existing.category === 'ADVERTORIAL') {
-      if (!isValidQuRef(agencyRef)) {
-        return NextResponse.json({ error: `Agency ref ต้องเป็นเลขใบเสนอราคารูปแบบ QU (เช่น QU-4289) — ค่าที่ส่งมา: "${agencyRef}"` }, { status: 400 })
+      if (!isAcceptableQuRef(agencyRef)) {
+        return NextResponse.json({ error: quRefRejectMessage(agencyRef) }, { status: 400 })
       }
       agencyRefValidated = normalizeQuRef(agencyRef)
     }

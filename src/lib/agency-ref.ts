@@ -1,37 +1,29 @@
 /**
- * v1.161 — กฏ Agency ref (คำสั่ง operator 2026-08-03): งาน Agency (Advertorial)
- * ต้องมีเลขใบเสนอราคารูปแบบ QU เท่านั้น — และถ้าเว้นว่างมา ให้ดึงจาก DB เอง
- * (คิวก่อนหน้าของโปรเจกต์เดียวกันพกเลขนี้อยู่แล้ว — เคสจริง: AGN-260713-01
- * ใส่ EP id มาแทน ทั้งที่ QU-4480 อยู่ในคิวก่อนหน้าของโปรเจกต์เดียวกัน)
+ * v1.161 — กฏ Agency ref: งาน Agency (Advertorial) ต้องมีเลขใบเสนอราคารูปแบบ QU
  *
- * รูปแบบที่ถือว่าถูก อิงจากข้อมูลจริงในระบบ: QU-4289, QU-4426-V1, QU-2811/2,
- * QU4406 — ขึ้นต้น QU ตามด้วยตัวเลข อนุญาตตัวอักษร/ตัวเลข กับ "-" และ "/"
- * เป็นตัวคั่นส่วนต่อท้าย
- *
- * Kill switch: AGENCY_REF_QU_RULE=0 ปิดกฏได้ทันทีจาก stack env (ไม่ต้อง deploy)
- * เผื่อกฏไปขวางงานจองหน้างานแบบไม่คาดคิด
+ * v1.183 — ตัว predicate ย้ายไป ./qu-ref (ไม่ import prisma) เพื่อให้ฝั่งฟอร์มจอง
+ * ใช้กฏชุดเดียวกันได้; ไฟล์นี้เหลือส่วนที่แตะ DB + re-export ของเดิมไว้ครบ
+ * (import จาก '@/lib/agency-ref' เหมือนเดิมได้ทุกที่)
  */
 import { prisma } from './db'
+import { isValidQuRef, normalizeQuRef } from './qu-ref'
 
-export function quRuleEnabled(): boolean {
-  return process.env.AGENCY_REF_QU_RULE?.trim() !== '0'
-}
-
-/** ตัดช่องว่าง + uppercase — "qu 4289" → "QU4289", " QU-4289 " → "QU-4289" */
-export function normalizeQuRef(raw: string | null | undefined): string {
-  return (raw || '').trim().toUpperCase().replace(/\s+/g, '')
-}
-
-const QU_RE = /^QU-?\d+[A-Z0-9/-]*$/
-
-export function isValidQuRef(raw: string | null | undefined): boolean {
-  const n = normalizeQuRef(raw)
-  return n !== '' && QU_RE.test(n)
-}
+export {
+  quRuleEnabled,
+  normalizeQuRef,
+  isValidQuRef,
+  isQuPending,
+  isAcceptableQuRef,
+  quRefRejectMessage,
+  QU_PENDING,
+} from './qu-ref'
 
 /**
  * ดึงเลข QU จากคิวก่อนหน้าของโปรเจกต์เดียวกัน (ล่าสุดก่อน) — คืน null เมื่อ
  * ไม่มีคิวไหนของโปรเจกต์เคยมีเลขที่รูปแบบถูกต้อง
+ *
+ * ใช้ isValidQuRef (ไม่ใช่ isAcceptableQuRef) โดยตั้งใจ: ตัวยึด "1234" ของคิว
+ * ก่อนหน้าต้องไม่ถูกดึงมาใส่คิวใหม่ ไม่งั้น placeholder จะแพร่ไปทั้งโปรเจกต์
  */
 export async function pullQuRefFromProject(projectId: string): Promise<string | null> {
   const rows = await prisma.booking.findMany({

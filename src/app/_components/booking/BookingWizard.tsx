@@ -10,6 +10,8 @@ import {
 import { OUTLETS, CREW_OPTIONS, SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation, roomDefaultCameras } from '@/lib/locations'
 import NumberStepper from '@/app/_components/NumberStepper'
+import { isAcceptableQuRef, isQuPending, QU_PENDING } from '@/lib/qu-ref'
+import { defaultCoProducerFor } from '@/lib/outlet-coproducer'
 
 /* =============================================================================
    Booking Wizard — v1.28 redesign
@@ -370,6 +372,11 @@ export default function BookingWizard() {
   const useProducerDropdown = !isContentAgency && hasDropdownPeople && (shootType !== 'Event' || outletCode === 'PM')
   const selProd = outletProducers.find(p => p.email === producerSel)
   const selCoProd = outletCoProducers.find(p => p.email === coProducerSel)
+  // v1.183 — Co-Producer ที่ระบบจะเติมให้เองถ้าไม่เลือก (ตอนนี้: TSS → แก้ว).
+  // ใช้แค่บอกผู้ใช้ในฟอร์ม/หน้าสรุป — ตัวที่เขียนลง DB จริงคือฝั่ง server
+  // (create-booking) เพราะถ้า preselect ใน dropdown จะไปทำให้ validation
+  // "เลือก Producer หรือ Co-Producer อย่างน้อย 1 คน" ผ่านเองโดยไม่มี Producer
+  const autoCoProducer = useProducerDropdown ? defaultCoProducerFor(outletCode) : null
 
   const selectedProject = projectOptions.find(p => p.projectId === projectId)
   const selectedProducerNickname = (
@@ -726,6 +733,10 @@ export default function BookingWizard() {
           directorEmail: isContentAgency ? directorEmail : null,
           // v1.59 — Co-Producer (non-AGN dropdown only)
           coProducer: useProducerDropdown ? effCoProducer : null,
+          // v1.183 — เคยคำนวณค่านี้ไว้แล้วลืมส่ง: คิวจึงเก็บได้แค่ชื่อเล่นของ
+          // Co-Producer ไม่มีอีเมล = ตามตัวคนไม่ได้ (คอลัมน์ coProducerEmail
+          // มีในสคีมามาตั้งแต่ v1.59 แต่ว่างทั้งตาราง)
+          coProducerEmail: useProducerDropdown ? effCoProducerEmail : null,
           creative: creative ? creative.split(',').map(s => s.trim()).filter(Boolean) : [],
           crewRequired: crew,
           videographerCount: crew.includes('Videographer') ? Math.max(1, parseInt(videographerCount, 10) || 1) : 1,
@@ -793,7 +804,10 @@ export default function BookingWizard() {
         : (producerName
             ? `${producerName}${producerPhone ? ` · ${producerPhone}` : ''}${producerEmailText ? ` · ${producerEmailText}` : ''}`
             : ''),
-    coProducer: useProducerDropdown && selCoProd && !(outletCode === 'PM' && !producerSel && coProducerSel) ? selCoProd.nickname : '',
+    coProducer: useProducerDropdown && selCoProd && !(outletCode === 'PM' && !producerSel && coProducerSel)
+      ? selCoProd.nickname
+      // ไม่ได้เลือก แต่ outlet นี้มี Co-Producer ประจำ → หน้าสรุปต้องบอกตามที่จะบันทึกจริง
+      : (autoCoProducer && !coProducerSel ? `${autoCoProducer.nickname} (ระบบใส่ให้อัตโนมัติ)` : ''),
     director: isContentAgency
       ? (caDirector?.nickname ? `${caDirector.nickname} (${directorEmail})` : directorEmail)
       : '',
@@ -1247,7 +1261,12 @@ export default function BookingWizard() {
                             <option key={p.email} value={p.email}>{p.nickname}</option>
                           ))}
                         </select>
-                        <FieldHelp>รายชื่อตาม Outlet — จัดการได้ที่ /admin/permissions</FieldHelp>
+                        <FieldHelp>
+                          รายชื่อตาม Outlet — จัดการได้ที่ /admin/permissions
+                          {autoCoProducer && !coProducerSel
+                            ? ` · ไม่เลือก = ระบบใส่ ${autoCoProducer.nickname} ให้อัตโนมัติ`
+                            : ''}
+                        </FieldHelp>
                       </div>
                     </div>
                   ) : (
@@ -1515,19 +1534,29 @@ export default function BookingWizard() {
                   {isAdvertorialBooking && (
                     <div>
                       <Label htmlFor="agencyRef">Product Code {isContentAgency
-                        ? <span className="ml-1 text-[11px] font-normal text-amber-600">ต้องเป็นเลข QU — เว้นว่างได้ถ้าโปรเจกต์เคยมีคิว (ระบบดึงให้)</span>
+                        ? <span className="ml-1 text-[11px] font-normal text-amber-600">ต้องเป็นเลข QU — เว้นว่างได้ถ้าโปรเจกต์เคยมีคิว (ระบบดึงให้) · ยังไม่มีเลขจริง ใส่ {QU_PENDING} ไว้ก่อนได้</span>
                         : <span className="ml-1 text-[11px] font-normal text-gray-500">(optional)</span>}</Label>
                       <input
                         id="agencyRef"
                         type="text"
                         className="ops-input"
-                        placeholder="e.g. QU-3108"
+                        placeholder={`e.g. QU-3108 (ยังไม่มีเลข → ${QU_PENDING})`}
                         value={agencyRef}
                         onChange={e => setAgencyRef(e.target.value)}
                       />
-                      {/* v1.161 — กฏ QU: เตือนตั้งแต่พิมพ์ (ตัวตัดสินจริงอยู่ฝั่ง server) */}
-                      {isContentAgency && agencyRef.trim() !== '' && !/^QU-?\d+[A-Za-z0-9/-]*$/i.test(agencyRef.trim().replace(/\s+/g, '')) && (
-                        <p className="text-[11px] text-red-600 mt-1">รูปแบบต้องเป็น QU ตามด้วยตัวเลข เช่น QU-4289 (ไม่ใช่เลข EP/แคมเปญ)</p>
+                      {/* v1.161 — กฏ QU: เตือนตั้งแต่พิมพ์ (ตัวตัดสินจริงอยู่ฝั่ง server)
+                          v1.183 — ใช้ predicate ตัวเดียวกับ server (qu-ref.ts) จะได้ไม่
+                          มีวันที่ฟอร์มบอกผ่านแต่ server ตีกลับ */}
+                      {isContentAgency && agencyRef.trim() !== '' && !isAcceptableQuRef(agencyRef) && (
+                        <p className="text-[11px] text-red-600 mt-1">
+                          รูปแบบต้องเป็น QU ตามด้วยตัวเลข เช่น QU-4289 (ไม่ใช่เลข EP/แคมเปญ) — ถ้ายังไม่มีเลขจริง ใส่ {QU_PENDING} ไว้ก่อนได้
+                        </p>
+                      )}
+                      {isContentAgency && isQuPending(agencyRef) && (
+                        <p className="text-[11px] text-amber-600 mt-1">
+                          ⏳ บันทึกเป็น &ldquo;ยังไม่มีเลข QU&rdquo; — ได้เลขจริงแล้วกลับมาแก้ที่ใบจองนี้ด้วย
+                          {' '}(ถ้าโปรเจกต์นี้เคยมีเลข QU อยู่แล้ว ระบบจะใส่เลขจริงให้แทน)
+                        </p>
                       )}
                       <FieldHelp>เขียนลงคอลัมน์ &ldquo;Product Code&rdquo; (F) ของ PD tab</FieldHelp>
                     </div>

@@ -12,13 +12,14 @@ import { normalizeFreelancers, splitLegacyFreelancers, freelancerRoleLabel } fro
 import { CameraMicTag } from '../_components/CameraMicTag'
 import NumberStepper from '@/app/_components/NumberStepper'
 import BookingRentals from '@/app/_components/BookingRentals'
+import { isQuPending } from '@/lib/qu-ref'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface BookingDetail {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null; callTime: string; estimatedWrap?: string
   status: string; shootType: string; locationName?: string
-  producer: string; producerEmail?: string | null; director?: string | null; directorEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number; switcherCount?: number
+  producer: string; producerEmail?: string | null; coProducer?: string | null; coProducerEmail?: string | null; director?: string | null; directorEmail?: string | null; creative: string[]; crewRequired: string[]; videographerCount?: number; switcherCount?: number
   cameraCount?: number | null; micCount?: number | null; isBlockShot?: boolean; vanCount?: number; specialEquipment?: string[]
   equipmentNote?: string | null; rentalGearNote?: string | null; itinerary?: string | null; assignedEquipmentIds?: string[]
   assignedEmails: string[]; mainVideographerEmail?: string | null; agencyRef?: string; projectId?: string; projectName?: string; notes?: string; adminNotes?: string
@@ -1120,6 +1121,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div><div className="text-xs text-gray-400 mb-0.5">Shoot Type</div><div className="text-gray-800">{shootTypeLabel(booking.shootType)}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Location</div><div className="text-gray-800">{booking.locationName || '—'}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Producer</div><div className="text-gray-800">{booking.producer}</div></div>
+            {/* v1.183 — Co-Producer เคยเก็บลง DB แต่ไม่เคยแสดงที่ไหนเลย; งาน TSS
+                ที่ระบบเติมแก้วให้อัตโนมัติจะมองไม่เห็นถ้าไม่โชว์ตรงนี้ */}
+            {(booking.coProducer || booking.coProducerEmail) && (
+              <div><div className="text-xs text-gray-400 mb-0.5">Co-Producer</div><div className="text-gray-800">{booking.coProducer || booking.coProducerEmail}</div></div>
+            )}
             {(booking.director || booking.directorEmail) && (
               <div><div className="text-xs text-gray-400 mb-0.5">🎬 Director</div><div className="text-gray-800">{booking.director || booking.directorEmail}</div></div>
             )}
@@ -1139,7 +1145,15 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             {/* v1.131 — Agency Ref (QU-xxxx) only matters for Advertorial work;
                 still shown if a legacy value exists on a non-AD booking. */}
             {(booking.category === 'ADVERTORIAL' || booking.agencyRef) && (
-              <div><div className="text-xs text-gray-400 mb-0.5">Agency Ref</div><div className="text-gray-800">{booking.agencyRef || '—'}</div></div>
+              <div>
+                <div className="text-xs text-gray-400 mb-0.5">Agency Ref</div>
+                {/* v1.183 — ตัวยึด "ยังไม่มีเลข QU" ต้องอ่านออกทันทีว่ายังไม่ใช่เลขจริง */}
+                {isQuPending(booking.agencyRef) ? (
+                  <div className="text-amber-700">⏳ ยังไม่มีเลข QU ({booking.agencyRef}) — ต้องกลับมาเติมเลขจริง</div>
+                ) : (
+                  <div className="text-gray-800">{booking.agencyRef || '—'}</div>
+                )}
+              </div>
             )}
             {booking.specialEquipment && booking.specialEquipment.length > 0 && (
               <div className="sm:col-span-2"><div className="text-xs text-gray-400 mb-0.5">Special Equipment</div><div className="text-gray-800">{booking.specialEquipment.join(', ')}</div></div>

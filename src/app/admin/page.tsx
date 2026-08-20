@@ -16,7 +16,7 @@ import { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string; shootDate: string; callTime: string; status: string
-  producer: string; producerNick?: string; assignedEmails: string[]
+  producer: string; producerNick?: string; coProducer?: string | null; assignedEmails: string[]
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   footageFiles?: number | null
   footageSent?: boolean
@@ -488,6 +488,8 @@ export default function AdminPage() {
                   </div>
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producerNick || b.producer}
+                    {/* v1.183 — Co-Producer โผล่ในคิว (งาน TSS ระบบเติม "แก้ว" ให้เอง) */}
+                    {b.coProducer ? <> · Co-Pro: {b.coProducer}</> : null}
                     <CrewLine crew={b.assignedCrew} className="mt-0.5 text-[12px] text-blue-700" />
                     <div className="mt-1"><FootageBadge files={b.footageFiles} sent={b.footageSent} /></div>
                   </div>

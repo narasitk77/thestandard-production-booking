@@ -15,6 +15,7 @@ import { bookingDisplayName } from '@/lib/display'
 import { shootTypeLabel } from '@/lib/utils'
 import NumberStepper from '@/app/_components/NumberStepper'
 import { SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
+import { isQuPending, QU_PENDING } from '@/lib/qu-ref'
 
 const SHOOT_TYPES = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT']
 
@@ -246,7 +247,12 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
           </div>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">Agency Ref</label>
-            <input className="ops-input" value={form.agencyRef} onChange={e => setForm({ ...form, agencyRef: e.target.value })} />
+            <input className="ops-input" placeholder={`QU-4289 (ยังไม่มีเลข → ${QU_PENDING})`}
+              value={form.agencyRef} onChange={e => setForm({ ...form, agencyRef: e.target.value })} />
+            {/* v1.183 — งาน Agency ที่ค้างตัวยึดอยู่ ต้องเห็นตรงนี้ว่ายังต้องกลับมาเติมเลขจริง */}
+            {isQuPending(form.agencyRef) && (
+              <p className="text-[11px] text-amber-600 mt-1">⏳ ยังไม่มีเลข QU — ได้เลขจริงแล้วกลับมาแก้ช่องนี้</p>
+            )}
           </div>
         </div>
 
