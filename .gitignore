@@ -43,3 +43,9 @@ next-env.d.ts
 
 # local-only test override (AUTH_DISABLED) — never commit
 docker-compose.override.yml
+
+# claude code local settings (personal, not team-shared)
+/.claude/settings.local.json
+
+# กฎเฉพาะเครื่อง (มีปลายทางบอทภายใน) — รีโปนี้ public
+CLAUDE.local.md
