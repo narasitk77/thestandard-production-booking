@@ -82,9 +82,11 @@ export async function GET(request: NextRequest) {
     .filter(b => isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap }, now))
     .map(b => {
       const c = b.footageCacheAt ? (b.footageCache as { fileCount?: unknown } | null) : null
+      // Window on the LAST day of the shoot — same OR the worker's query uses.
+      const end = b.shootEndDate && b.shootEndDate > b.shootDate ? b.shootEndDate : b.shootDate
       return {
         bookingCode: b.bookingCode,
-        shootDate: b.shootDate,
+        windowDate: end,
         fileCount: typeof c?.fileCount === 'number' ? c.fileCount : 0,
         walkedAt: b.readyCheckedAt ?? null,
       }

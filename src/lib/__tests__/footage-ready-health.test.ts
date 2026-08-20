@@ -71,8 +71,8 @@ test('no sends at all: zeros, not NaN', () => {
 
 // ── bucketPending ───────────────────────────────────────────────────────────
 
-const p = (code: string, shootDaysAgo: number, fileCount: number, walked: Date | null): PendingBooking =>
-  ({ bookingCode: code, shootDate: daysAgo(shootDaysAgo), fileCount, walkedAt: walked })
+const p = (code: string, endDaysAgo: number, fileCount: number, walked: Date | null): PendingBooking =>
+  ({ bookingCode: code, windowDate: daysAgo(endDaysAgo), fileCount, walkedAt: walked })
 
 test('footage on Drive inside the window is waiting; outside it is aged out', () => {
   const b = bucketPending([p('IN-1', 2, 120, daysAgo(1)), p('OUT-1', 9, 300, daysAgo(8))], T0, 4)
@@ -103,8 +103,16 @@ test('never-walked but already past the window is not reported as cold', () => {
 })
 
 test('a missing booking code degrades to a label instead of crashing', () => {
-  const b = bucketPending([{ bookingCode: null, shootDate: daysAgo(1), fileCount: 5, walkedAt: null }], T0, 4)
+  const b = bucketPending([{ bookingCode: null, windowDate: daysAgo(1), fileCount: 5, walkedAt: null }], T0, 4)
   assert.deepEqual(b.waiting, ['(no code)'])
+})
+
+test('multi-day shoot: the LAST day decides, so a long job is not declared lost', () => {
+  // Day 1 was 6 days ago, wrap was yesterday, lookback 4 → the worker still has
+  // it (its query ORs on shootEndDate), so this must read as waiting.
+  const b = bucketPending([p('MULTI', 1, 900, daysAgo(1))], T0, 4)
+  assert.deepEqual(b.waiting, ['MULTI'])
+  assert.deepEqual(b.agedOut, [])
 })
 
 // ── footageReadyAlerts ──────────────────────────────────────────────────────

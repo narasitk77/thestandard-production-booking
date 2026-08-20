@@ -64,7 +64,11 @@ export function summarizeSends(rows: SendRow[]): SendStats {
 
 export type PendingBooking = {
   bookingCode: string | null
-  shootDate: Date
+  /** The date the WORKER windows on: the later of shootDate / shootEndDate. A
+   *  three-day shoot whose first day is older than the lookback is still inside
+   *  the worker's `OR` clause, so comparing shootDate alone would report a live
+   *  booking as permanently lost and send someone chasing a 📣 nobody needs. */
+  windowDate: Date
   fileCount: number       // what the last Drive walk saw (0 = walked, nothing there)
   walkedAt: Date | null   // readyCheckedAt — null = the worker has never looked
 }
@@ -90,7 +94,7 @@ export function bucketPending(rows: PendingBooking[], now: Date, lookbackDays: n
   const out: PendingBuckets = { waiting: [], agedOut: [], neverWalked: [] }
   for (const r of rows) {
     const code = r.bookingCode || '(no code)'
-    const inWindow = new Date(r.shootDate).getTime() >= cutoff
+    const inWindow = new Date(r.windowDate).getTime() >= cutoff
     if (r.fileCount > 0) {
       ;(inWindow ? out.waiting : out.agedOut).push(code)
     } else if (!r.walkedAt && inWindow) {
