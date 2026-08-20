@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluateSettle, footageReadyRecipients, isInternalEmail, orderForWalk, parseReadySnapshot } from '../footage-ready'
+import { evaluateSettle, footageReadyRecipients, isInternalEmail, orderForWalk, parseReadySnapshot, parseForcedCodes, FORCED_MAX } from '../footage-ready'
 
 const T0 = new Date('2026-07-14T10:00:00Z')
 const mins = (n: number) => new Date(T0.getTime() + n * 60_000)
@@ -220,4 +220,34 @@ test('orderForWalk does not mutate its input', () => {
   const before = rows.map(r => r.bookingCode)
   orderForWalk(rows)
   assert.deepEqual(rows.map(r => r.bookingCode), before)
+})
+
+// ── parseForcedCodes (v1.182) ───────────────────────────────────────────────
+// `?codes=` is the only way to reach a booking that aged out of the lookback
+// window, so the parser sits between an operator and a mail blast. Every case
+// below is a way the param can arrive malformed; all of them must NARROW.
+
+test('normal case: trims, upper-cases, keeps order, drops duplicates', () => {
+  assert.deepEqual(
+    parseForcedCodes(' pod-8mh-260814-01 , AGN-260814-01,pod-8mh-260814-01'),
+    ['POD-8MH-260814-01', 'AGN-260814-01'],
+  )
+})
+
+test('empty / missing / garbage yields NO codes — never "all bookings"', () => {
+  for (const raw of [null, undefined, '', '   ', ',,,', '%%%', 'a']) {
+    assert.deepEqual(parseForcedCodes(raw), [], `raw=${JSON.stringify(raw)}`)
+  }
+})
+
+test('entries that are not code-shaped are dropped, the good ones survive', () => {
+  assert.deepEqual(
+    parseForcedCodes("AGN-260814-01, DROP TABLE bookings, ../../etc, TSS-TSS-260813-01"),
+    ['AGN-260814-01', 'TSS-TSS-260813-01'],
+  )
+})
+
+test('a fat finger cannot exceed FORCED_MAX', () => {
+  const many = Array.from({ length: FORCED_MAX + 20 }, (_, i) => `AGN-2608${String(i).padStart(2, '0')}-01`)
+  assert.equal(parseForcedCodes(many.join(',')).length, FORCED_MAX)
 })

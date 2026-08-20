@@ -168,10 +168,39 @@ export function orderForWalk<T extends { readyCheckedAt?: Date | null; shootDate
   return [...rows].sort((a, b) => checked(a) - checked(b) || shot(b) - shot(a))
 }
 
+/** Most codes one forced call may carry — a fat finger must not become a blast. */
+export const FORCED_MAX = 25
+
+/**
+ * v1.182 — `?codes=` turns the sweep into the headless equivalent of a human
+ * pressing 📣 on one booking.
+ *
+ * Why it has to exist: the sweep only ever looks at shoots inside
+ * FOOTAGE_READY_LOOKBACK_DAYS, so a booking whose footage landed late falls out
+ * of the window and the auto path is done with it FOREVER (see the aged-out
+ * bucket in footage-ready-health). The advice "press 📣 by hand" assumed a
+ * logged-in browser; the operator asking for it from a chat has none.
+ *
+ * Malformed input must narrow the set, never widen it: an empty/garbage param
+ * yields [] and the caller falls back to a normal windowed sweep — it must never
+ * be read as "every booking".
+ */
+export function parseForcedCodes(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  const seen = new Set<string>()
+  for (const part of raw.split(',')) {
+    const code = part.trim().toUpperCase()
+    if (/^[A-Z0-9-]{4,40}$/.test(code)) seen.add(code)
+    if (seen.size >= FORCED_MAX) break
+  }
+  return Array.from(seen)
+}
+
 // ── Scan ────────────────────────────────────────────────────────────────────
 
 export type FootageReadyScanResult = {
   dryRun: boolean
+  forced: string[]           // codes named by the caller; [] = normal windowed sweep
   audience: FootageReadyAudience
   scanned: number            // candidates from the DB window
   eligible: number           // survivors of the JS gates (shoot over, no in-flight, NAS drained)
@@ -205,8 +234,11 @@ type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
   episodes: Array<{ episodeId: string | null; sequence: number; title: string | null; program: { name: string; code: string } | null }>
 }
 
-export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Promise<FootageReadyScanResult> {
+export async function runFootageReadyScan(
+  opts: { dryRun?: boolean; codes?: string[] } = {},
+): Promise<FootageReadyScanResult> {
   const dryRun = !!opts.dryRun
+  const forced = (opts.codes || []).slice(0, FORCED_MAX)
   const now = new Date()
   const audience = footageReadyAudience()
   const lookbackDays = envInt('FOOTAGE_READY_LOOKBACK_DAYS', 3)
@@ -215,7 +247,7 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
   const since = new Date(now.getTime() - lookbackDays * DAY)
 
   const result: FootageReadyScanResult = {
-    dryRun, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
+    dryRun, forced, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
     notified: [], settling: [], skipped: [], errors: [],
   }
 
@@ -224,10 +256,18 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
       status: { in: ['CONFIRMED', 'COMPLETED'] },
       deletedAt: null,
       cancelRequestedAt: null,
-      bookingCode: { not: null },
       readyNotifiedAt: null,
       deliveredAt: null, // crew already ส่งงาน → producer already has the report
-      OR: [{ shootDate: { gte: since } }, { shootEndDate: { gte: since } }],
+      // Named codes swap out the DATE window only. Send-once, deleted, cancelled
+      // and ส่งงาน still apply: "force" means "look past the window", not "ignore
+      // every rule" — re-sending a booking already notified stays a deliberate
+      // readyNotifiedAt clear, not a flag. (`in` also covers `not: null`.)
+      ...(forced.length > 0
+        ? { bookingCode: { in: forced } }
+        : {
+            bookingCode: { not: null },
+            OR: [{ shootDate: { gte: since } }, { shootEndDate: { gte: since } }],
+          }),
     },
     select: {
       id: true, bookingCode: true, status: true, driveFolders: true,
@@ -272,7 +312,10 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
     // the EPISODES' program code, and WLT-OTH-260819-01 (a Photo Album booking,
     // lighting only) slipped through it every sweep because its episode code is
     // 'OTH' — burning a walk slot on a job that by definition has no video.
-    if (isPhotoAlbumBooking(b.episodes) || (b.program?.code || '').toUpperCase() === PHOTO_ALBUM_EPISODE_CODE) {
+    // A caller who names the code has already decided this job has footage worth
+    // sending; only the unattended sweep needs the category guess.
+    if (forced.length === 0 &&
+        (isPhotoAlbumBooking(b.episodes) || (b.program?.code || '').toUpperCase() === PHOTO_ALBUM_EPISODE_CODE)) {
       result.skipped.push({ code, reason: 'photo-album' }); continue
     }
     if (uploading.has(b.id)) {
@@ -289,7 +332,9 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
   // Cap the expensive Drive walks per sweep; the rest are picked up next run —
   // which only holds because orderForWalk rotates the queue (see its comment).
   const ordered = orderForWalk(eligible)
-  const toWalk = ordered.slice(0, maxPerRun)
+  // An explicit request is not subject to the sweep's politeness budget — the
+  // caller named at most FORCED_MAX codes and is waiting for all of them.
+  const toWalk = forced.length > 0 ? ordered : ordered.slice(0, maxPerRun)
   result.deferred = ordered.length - toWalk.length
   result.deferredCodes = ordered.slice(maxPerRun).map(r => r.bookingCode as string)
 
@@ -312,7 +357,10 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
         result.skipped.push({ code, reason: 'no-footage' })
         continue
       }
-      const decision = evaluateSettle(
+      // Forced = a human decided it is ready now, so the 4h stability window is
+      // not theirs to wait out. The "footage actually exists" check above is NOT
+      // bypassed — an email of empty folders is worse than no email.
+      const decision = forced.length > 0 ? { settled: true, write: null } : evaluateSettle(
         { fileCount: payload.fileCount, totalBytes: payload.folders.reduce((n, f) => n + f.totalBytes, 0) },
         parseReadySnapshot(b.readySnapshot),
         now,
@@ -347,7 +395,7 @@ export async function runFootageReadyScan(opts: { dryRun?: boolean } = {}): Prom
         entityType: 'Booking',
         entityId: b.id,
         bookingCode: code,
-        changes: { audience, recipients: sent.recipients, folderCount: payload.folders.length, fileCount: payload.fileCount, emailError: sent.error },
+        changes: { audience, recipients: sent.recipients, folderCount: payload.folders.length, fileCount: payload.fileCount, emailError: sent.error, forced: forced.length > 0 || undefined },
       })
       result.notified.push(code)
     } catch (e: any) {

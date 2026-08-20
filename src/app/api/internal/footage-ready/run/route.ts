@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { runFootageReadyScan } from '@/lib/footage-ready'
+import { runFootageReadyScan, parseForcedCodes } from '@/lib/footage-ready'
 import { recordHeartbeat } from '@/lib/heartbeat'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 
@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
   }
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
+  // ?codes=A,B — notify these bookings even though they fell out of the lookback
+  // window (the headless equivalent of pressing 📣). See parseForcedCodes.
+  const codes = parseForcedCodes(searchParams.get('codes'))
 
   if (!dryRun) {
     if (footageReadyRunning) {
@@ -41,8 +44,10 @@ export async function GET(request: NextRequest) {
     footageReadyRunning = true
   }
   try {
-    const result = await runFootageReadyScan({ dryRun })
-    if (!dryRun) await recordHeartbeat('footage-ready').catch(() => {})
+    const result = await runFootageReadyScan({ dryRun, codes })
+    // A forced one-off must not stand in for the scheduled sweep's heartbeat —
+    // that would make the dead-man switch report a worker that never ran.
+    if (!dryRun && codes.length === 0) await recordHeartbeat('footage-ready').catch(() => {})
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
     console.error('GET /api/internal/footage-ready/run error:', e)
