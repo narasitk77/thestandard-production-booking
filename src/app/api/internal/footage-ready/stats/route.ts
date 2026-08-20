@@ -14,6 +14,7 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { footageReadyAudience } from '@/lib/footage-ready'
+import { isPhotoAlbumBooking, PHOTO_ALBUM_EPISODE_CODE } from '@/lib/outlet-folders'
 import { isShootOver } from '@/lib/shoot-window'
 import {
   summarizeSends, bucketPending, footageReadyAlerts,
@@ -76,6 +77,8 @@ export async function GET(request: NextRequest) {
     select: {
       bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
       readyCheckedAt: true, footageCache: true, footageCacheAt: true,
+      program: { select: { code: true } },
+      episodes: { select: { program: { select: { code: true } } } },
     },
   })
   const pendingRows: PendingBooking[] = candidates
@@ -89,6 +92,11 @@ export async function GET(request: NextRequest) {
         windowDate: end,
         fileCount: typeof c?.fileCount === 'number' ? c.fileCount : 0,
         walkedAt: b.readyCheckedAt ?? null,
+        // The same two-sided photo-album gate the sweep applies (booking program
+        // AND episode programs) — otherwise a lighting-only job nags forever.
+        skippedByDesign:
+          isPhotoAlbumBooking(b.episodes) ||
+          (b.program?.code || '').toUpperCase() === PHOTO_ALBUM_EPISODE_CODE,
       }
     })
   const pending = bucketPending(pendingRows, now, lookbackDays)

@@ -64,6 +64,11 @@ export function summarizeSends(rows: SendRow[]): SendStats {
 
 export type PendingBooking = {
   bookingCode: string | null
+  /** The worker skips photo-album bookings permanently, so their readyCheckedAt
+   *  stays null forever. Counting those as "never walked" is a nag that can
+   *  never be resolved — WLT-OTH-260819-01 (lighting for ID photos) was the
+   *  first alert this endpoint ever produced, and it was wrong. */
+  skippedByDesign?: boolean
   /** The date the WORKER windows on: the later of shootDate / shootEndDate. A
    *  three-day shoot whose first day is older than the lookback is still inside
    *  the worker's `OR` clause, so comparing shootDate alone would report a live
@@ -83,21 +88,36 @@ export type PendingBuckets = {
   neverWalked: string[]
 }
 
+/** How old an un-walked shoot must be before silence counts as starvation. */
+export const COLD_AFTER_MS = 18 * 60 * 60_000
+
 /**
  * Split the un-notified shoots into the three states an operator can act on.
  * `lookbackDays` must be the value the WORKER is running with: this is the whole
  * point of the aged-out bucket, and a hardcoded guess would report the wrong
  * bookings as lost the moment the env changes.
+ *
+ * `coldAfterMs` keeps today's shoots out of `neverWalked`: right after wrap the
+ * crew may still be uploading (the sweep skips those on purpose), and a booking
+ * that is merely young is not being starved.
  */
-export function bucketPending(rows: PendingBooking[], now: Date, lookbackDays: number): PendingBuckets {
+export function bucketPending(
+  rows: PendingBooking[],
+  now: Date,
+  lookbackDays: number,
+  coldAfterMs: number = COLD_AFTER_MS,
+): PendingBuckets {
   const cutoff = now.getTime() - lookbackDays * 86_400_000
   const out: PendingBuckets = { waiting: [], agedOut: [], neverWalked: [] }
   for (const r of rows) {
     const code = r.bookingCode || '(no code)'
-    const inWindow = new Date(r.windowDate).getTime() >= cutoff
+    const at = new Date(r.windowDate).getTime()
+    const inWindow = at >= cutoff
     if (r.fileCount > 0) {
+      // Footage exists — worth mailing even for a job the sweep skips, so the
+      // by-design skip must NOT suppress these two buckets.
       ;(inWindow ? out.waiting : out.agedOut).push(code)
-    } else if (!r.walkedAt && inWindow) {
+    } else if (!r.walkedAt && inWindow && !r.skippedByDesign && now.getTime() - at >= coldAfterMs) {
       out.neverWalked.push(code)
     }
   }

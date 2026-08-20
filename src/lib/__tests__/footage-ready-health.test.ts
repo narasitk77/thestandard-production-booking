@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  summarizeSends, bucketPending, footageReadyAlerts, ADMIN_DIGEST,
+  summarizeSends, bucketPending, footageReadyAlerts, ADMIN_DIGEST, COLD_AFTER_MS,
   type SendRow, type PendingBooking,
 } from '../footage-ready-health'
 
@@ -95,6 +95,33 @@ test('never-walked shoots are their own bucket (the starvation symptom)', () => 
 test('walked and genuinely empty is NOT an alert — footage simply is not there yet', () => {
   const b = bucketPending([p('EMPTY', 1, 0, daysAgo(0))], T0, 4)
   assert.deepEqual(b, { waiting: [], agedOut: [], neverWalked: [] })
+})
+
+test('a job the sweep skips by design is never "starved" — it is skipped forever', () => {
+  // WLT-OTH-260819-01: Photo Album, lighting for ID photos. readyCheckedAt stays
+  // null for the life of the booking, so the naive rule nags every single run.
+  const b = bucketPending(
+    [{ bookingCode: 'WLT-OTH-260819-01', windowDate: daysAgo(1), fileCount: 0, walkedAt: null, skippedByDesign: true }],
+    T0, 4,
+  )
+  assert.deepEqual(b.neverWalked, [])
+})
+
+test('but a skipped job that DOES have footage still gets mailed about', () => {
+  const b = bucketPending(
+    [{ bookingCode: 'SKIP-BUT-FILES', windowDate: daysAgo(1), fileCount: 40, walkedAt: daysAgo(1), skippedByDesign: true }],
+    T0, 4,
+  )
+  assert.deepEqual(b.waiting, ['SKIP-BUT-FILES'])
+})
+
+test('a shoot that wrapped hours ago is young, not starved (crew may still be uploading)', () => {
+  const justWrapped = new Date(T0.getTime() - 3 * 60 * 60_000)
+  const b = bucketPending([{ bookingCode: 'FRESH', windowDate: justWrapped, fileCount: 0, walkedAt: null }], T0, 4)
+  assert.deepEqual(b.neverWalked, [], 'inside COLD_AFTER_MS')
+  const later = new Date(T0.getTime() + COLD_AFTER_MS)
+  const b2 = bucketPending([{ bookingCode: 'FRESH', windowDate: justWrapped, fileCount: 0, walkedAt: null }], later, 4)
+  assert.deepEqual(b2.neverWalked, ['FRESH'], 'still un-walked a day later = starvation')
 })
 
 test('never-walked but already past the window is not reported as cold', () => {
