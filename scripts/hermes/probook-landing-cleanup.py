@@ -120,6 +120,85 @@ def names_from(actions, limit=8):
     return short
 
 
+# ── OUTBOX: ส่งซ้ำรายงานที่ Hermes ส่งไม่ออก ────────────────────────────────
+# บล็อกนี้ถูกคัดลอกไว้เหมือนกันทั้ง 3 สคริปต์ *โดยเจตนา* — deploy คือการก๊อปไฟล์
+# ด้วยมือไป ~/.hermes/scripts/ ดังนั้น module ร่วมที่ลืมก๊อป = ImportError = job
+# ตายทั้งตัว ซึ่งแย่กว่าโค้ดซ้ำ 40 บรรทัด. แก้ที่ไหนให้แก้ให้ครบสามที่.
+#
+# ปัญหาที่มันแก้ (เหตุจริง 2026-08-19 21:26): RETRY_DELAYS ในสคริปต์กันได้แค่
+# **ขาไปหา probook** แต่การส่ง Discord เป็นขั้นของ **Hermes ที่เกิดหลังสคริปต์จบ**
+# และ Hermes ไม่ retry — DNS ล่มตอนนั้นรายงานจึงหายไปเลย ไม่มีใครรู้
+#
+# วิธี: เก็บรายงานของรอบนี้ลง outbox แล้ว *รอบถัดไป* อ่าน last_delivery_error ของ
+# job ตัวเองจาก ~/.hermes/cron/jobs.json — ค้างอยู่ = รอบก่อนไม่ถึงคนอ่าน จึงพิมพ์
+# ซ้ำนำหน้า · ไม่ค้าง = ถึงแล้ว ล้าง outbox. ทนเน็ตล่มนานเท่าไรก็ได้ ต่างจาก retry
+# ที่ยอมรอได้แค่ ~200 วินาที
+HERMES_JOBS = os.path.expanduser("~/.hermes/cron/jobs.json")
+
+
+def _ob_read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _ob_write(path, data):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _delivery_error(job_name):
+    """last_delivery_error ของ job นี้ (None = รอบก่อนส่งถึงแล้ว หรืออ่านไฟล์ไม่ได้)"""
+    raw = _ob_read(HERMES_JOBS)
+    if raw is None:
+        return None
+    jobs = raw if isinstance(raw, list) else raw.get("jobs", raw)
+    if isinstance(jobs, dict):
+        jobs = list(jobs.values())
+    if not isinstance(jobs, list):
+        return None
+    for j in jobs:
+        if isinstance(j, dict) and j.get("name") == job_name:
+            return j.get("last_delivery_error")
+    return None
+
+
+def undelivered_lines(job_name, outbox):
+    """บรรทัดที่ต้องพิมพ์ซ้ำเพราะรอบก่อนส่งไม่ออก (ลิสต์ว่าง = ไม่มีอะไรค้าง)"""
+    if not _delivery_error(job_name):
+        if os.path.exists(outbox):
+            try:
+                os.remove(outbox)   # ถึงมือแล้ว
+            except Exception:
+                pass
+        return []
+    saved = _ob_read(outbox)
+    if not isinstance(saved, dict) or not saved.get("text"):
+        return []
+    return [
+        f"📮 ส่งซ้ำ — รายงานรอบ {saved.get('runAt', 'ก่อนหน้า')} ส่งไม่ออก",
+        *str(saved["text"]).splitlines(),
+        "— จบรายงานที่ส่งซ้ำ —",
+        "",
+    ]
+
+
+def remember_report(outbox, text):
+    """เก็บรายงานรอบนี้เผื่อส่งไม่ออก · heartbeat ไม่ต้องเก็บ (ดู hb ที่ผู้เรียก):
+    heartbeat ที่หายไปแก้ตัวเองรอบหน้า แต่ *คำเตือน* ที่หายคือความเสียหายจริง"""
+    if text:
+        _ob_write(outbox, {"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text})
+
+OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-landing.json")
+JOB_NAME = "probook-landing-cleanup"
+
+
 def main():
     token = secret()
     if not token:
@@ -216,4 +295,29 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # ห่อ main() เพื่อให้บล็อก OUTBOX ด้านบนครอบ *ทุกทางออก* ของ main() ได้
+    # (สคริปต์นี้ return ออกกลางทางหลายจุด) โดยไม่ต้องไปแก้ print ทีละที่
+    import contextlib
+    import io as _io
+
+    _buf = _io.StringIO()
+    _crash = None
+    try:
+        with contextlib.redirect_stdout(_buf):
+            main()
+    except SystemExit:
+        pass
+    except Exception as _e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr
+        _crash = f"\u26a0\ufe0f {JOB_NAME} \u0e1e\u0e31\u0e07\u0e01\u0e25\u0e32\u0e07\u0e04\u0e31\u0e19: {type(_e).__name__}: {str(_e)[:120]}"
+
+    _report = _buf.getvalue().rstrip("\n")
+    if _crash:
+        _report = (_report + "\n" + _crash).strip()
+
+    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของรอบก่อนให้เสร็จ แล้วจึงเขียนของรอบนี้ทับ
+    _resend = undelivered_lines(JOB_NAME, OUTBOX)
+    _payload = "\n".join(_resend + ([_report] if _report else []))
+    remember_report(OUTBOX, "\n".join(_payload.splitlines()[:60]))
+
+    if _payload:
+        print(_payload)

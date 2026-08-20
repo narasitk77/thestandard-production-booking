@@ -361,6 +361,85 @@ def footage_root_report():
             f"เตรียมสร้างไดรฟ์ VIDEO งวดถัดไป แล้วหมุน DRIVE_FOOTAGE_ROOT บน stack 125"]
 
 
+# ── OUTBOX: ส่งซ้ำรายงานที่ Hermes ส่งไม่ออก ────────────────────────────────
+# บล็อกนี้ถูกคัดลอกไว้เหมือนกันทั้ง 3 สคริปต์ *โดยเจตนา* — deploy คือการก๊อปไฟล์
+# ด้วยมือไป ~/.hermes/scripts/ ดังนั้น module ร่วมที่ลืมก๊อป = ImportError = job
+# ตายทั้งตัว ซึ่งแย่กว่าโค้ดซ้ำ 40 บรรทัด. แก้ที่ไหนให้แก้ให้ครบสามที่.
+#
+# ปัญหาที่มันแก้ (เหตุจริง 2026-08-19 21:26): RETRY_DELAYS ในสคริปต์กันได้แค่
+# **ขาไปหา probook** แต่การส่ง Discord เป็นขั้นของ **Hermes ที่เกิดหลังสคริปต์จบ**
+# และ Hermes ไม่ retry — DNS ล่มตอนนั้นรายงานจึงหายไปเลย ไม่มีใครรู้
+#
+# วิธี: เก็บรายงานของรอบนี้ลง outbox แล้ว *รอบถัดไป* อ่าน last_delivery_error ของ
+# job ตัวเองจาก ~/.hermes/cron/jobs.json — ค้างอยู่ = รอบก่อนไม่ถึงคนอ่าน จึงพิมพ์
+# ซ้ำนำหน้า · ไม่ค้าง = ถึงแล้ว ล้าง outbox. ทนเน็ตล่มนานเท่าไรก็ได้ ต่างจาก retry
+# ที่ยอมรอได้แค่ ~200 วินาที
+HERMES_JOBS = os.path.expanduser("~/.hermes/cron/jobs.json")
+
+
+def _ob_read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _ob_write(path, data):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _delivery_error(job_name):
+    """last_delivery_error ของ job นี้ (None = รอบก่อนส่งถึงแล้ว หรืออ่านไฟล์ไม่ได้)"""
+    raw = _ob_read(HERMES_JOBS)
+    if raw is None:
+        return None
+    jobs = raw if isinstance(raw, list) else raw.get("jobs", raw)
+    if isinstance(jobs, dict):
+        jobs = list(jobs.values())
+    if not isinstance(jobs, list):
+        return None
+    for j in jobs:
+        if isinstance(j, dict) and j.get("name") == job_name:
+            return j.get("last_delivery_error")
+    return None
+
+
+def undelivered_lines(job_name, outbox):
+    """บรรทัดที่ต้องพิมพ์ซ้ำเพราะรอบก่อนส่งไม่ออก (ลิสต์ว่าง = ไม่มีอะไรค้าง)"""
+    if not _delivery_error(job_name):
+        if os.path.exists(outbox):
+            try:
+                os.remove(outbox)   # ถึงมือแล้ว
+            except Exception:
+                pass
+        return []
+    saved = _ob_read(outbox)
+    if not isinstance(saved, dict) or not saved.get("text"):
+        return []
+    return [
+        f"📮 ส่งซ้ำ — รายงานรอบ {saved.get('runAt', 'ก่อนหน้า')} ส่งไม่ออก",
+        *str(saved["text"]).splitlines(),
+        "— จบรายงานที่ส่งซ้ำ —",
+        "",
+    ]
+
+
+def remember_report(outbox, text):
+    """เก็บรายงานรอบนี้เผื่อส่งไม่ออก · heartbeat ไม่ต้องเก็บ (ดู hb ที่ผู้เรียก):
+    heartbeat ที่หายไปแก้ตัวเองรอบหน้า แต่ *คำเตือน* ที่หายคือความเสียหายจริง"""
+    if text:
+        _ob_write(outbox, {"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text})
+
+OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-worker-check.json")
+JOB_NAME = "probook-worker-check"
+
+
 def load_state():
     try:
         with open(STATE) as f:
@@ -469,10 +548,41 @@ def main():
 
     save_state(state)
 
-    if lines:
-        print("\n".join(lines[:14]))
+    # HEARTBEAT — รอบเช้าพูดเสมอ แม้ทุกอย่างปกติ
+    # เหตุผล: สคริปต์นี้ออกแบบให้ "เงียบเมื่อปกติ" ซึ่งแลกมาด้วยการที่คนอ่าน
+    # **แยกไม่ออกระหว่างเงียบเพราะปกติ กับเงียบเพราะตาย** — 20 ส.ค. แผง cron ขึ้น
+    # "No runs yet" ทั้งที่รันครบทุกรอบ และเจ้าของระบบสรุปว่ามันไม่เคยทำงาน
+    # รอบเช้า (0 9) จึงยืนยันว่ายังมีชีวิต · รอบค่ำ (0 21) ยังเงียบตามเดิม
+    # เพื่อไม่กวนวันละสองครั้งโดยไม่มีเนื้อหา
+    heartbeat = not lines and time.localtime().tm_hour < 12
+    if heartbeat:
+        ver = ""
+        try:
+            ver = json.loads(vbody).get("version", "")
+        except Exception:
+            pass
+        on = [w for w in workers if w.get("enabled")]
+        lines.append(
+            f"✅ ตรวจแล้วปกติ — worker เปิดอยู่ {len(on)}/{len(workers)} ตัว tick ครบ"
+            + (f" · prod {ver}" if ver else "")
+        )
+
+    report = "\n".join(lines[:14]) if lines else ""
+
+    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของ "รอบก่อน" ให้เสร็จก่อน แล้วจึงเขียนของรอบนี้ทับ
+    # (สลับลำดับ = undelivered_lines ลบรายงานรอบนี้ที่เพิ่งเขียนไปทิ้ง)
+    resend = undelivered_lines(JOB_NAME, OUTBOX)
+    payload = "\n".join(resend + ([report] if report else []))
+
+    # เก็บ payload ทั้งก้อน ไม่ใช่แค่ report ของรอบนี้ — ถ้าเน็ตล่มติดกันหลายรอบ
+    # ของเก่าจะได้ถูกหอบต่อไปเรื่อย ๆ แทนที่จะหล่นหายตั้งแต่รอบที่สอง (cap 60 บรรทัด)
+    # heartbeat ไม่เข้า outbox: หายไปก็แก้ตัวเองรอบหน้า ส่วนคำเตือนที่หายคือของจริง
+    remember_report(OUTBOX, "" if heartbeat else "\n".join(payload.splitlines()[:60]))
+
+    if payload:
+        print(payload)
         sys.exit(0)
-    # เงียบเมื่อปกติ — ไม่ print อะไรเลย = Hermes ไม่ส่งข้อความ
+    # เงียบเมื่อปกติ (รอบค่ำ) — ไม่ print อะไรเลย = Hermes ไม่ส่งข้อความ
 
 
 if __name__ == "__main__":
