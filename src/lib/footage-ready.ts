@@ -54,6 +54,37 @@ export function footageReadyAudience(): FootageReadyAudience {
   return v === 'everyone' || v === 'admin' ? v : 'producer'
 }
 
+/**
+ * Who gets the "footage พร้อม" mail for one booking.
+ *
+ * v1.178 — the operator's instruction was "ไม่ควรส่งให้ผมคนเดียว ควรส่งให้ทีมงานด้วย":
+ * the team is to be ADDED, not swapped in. Before this, moving the audience off
+ * 'admin' silently REMOVED his copy — the producer/everyone branch never touched
+ * the digest — so the config change that answers the complaint would also have
+ * hidden the feature from the one person who watches it.
+ *
+ *   people — one mail EACH (assignedEmails can carry a freelancer's personal
+ *            address, so the caller must never put them in a shared To:)
+ *   digest — send the admin digest as well; suppressed when the admin is already
+ *            a named recipient so nobody is mailed the same thing twice
+ */
+export function footageReadyRecipients(
+  audience: FootageReadyAudience,
+  b: { producerEmail?: string | null; createdByEmail?: string | null; assignedEmails?: string[] | null },
+  adminEmail?: string | null,
+): { people: string[]; digest: boolean } {
+  const clean = (v: unknown) => (typeof v === 'string' ? v.trim().toLowerCase() : '')
+  const admin = clean(adminEmail)
+  if (audience === 'admin') return { people: [], digest: true }
+
+  const raw =
+    audience === 'everyone'
+      ? [b.producerEmail, b.createdByEmail, ...(b.assignedEmails || [])]
+      : [b.producerEmail]
+  const people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@'))))
+  return { people, digest: !!admin && !people.includes(admin) }
+}
+
 // ── Pure settle logic (unit-tested) ────────────────────────────────────────
 
 export type ReadySnapshot = { fileCount: number; totalBytes: number; at: string }
@@ -292,12 +323,11 @@ THE STANDARD Production Booking`
     return { delivered: emailOk || discordOk, recipients: ['admin-digest'], error: emailOk || discordOk ? null : 'admin digest + discord both unavailable' }
   }
 
-  const recipients = Array.from(new Set(
-    (audience === 'everyone'
-      ? [b.producerEmail, b.createdByEmail, ...(b.assignedEmails || [])]
-      : [b.producerEmail]
-    ).filter(Boolean).map(e => (e as string).trim().toLowerCase()).filter(e => e.includes('@')),
-  ))
+  const { people: recipients, digest: alsoDigest } = footageReadyRecipients(
+    audience,
+    b,
+    process.env.REMINDER_ADMIN_EMAIL || process.env.EMAIL_FROM,
+  )
 
   if (recipients.length === 0) {
     // No producer email — tell the admin instead of retrying forever.
@@ -318,9 +348,19 @@ THE STANDARD Production Booking`
   } else {
     error = 'email not configured'
   }
+  // The operator keeps his overview copy on top of the team's mails (v1.178).
+  // Best-effort and never counted as delivery: if the digest is the ONLY thing
+  // that got through, the team still did not hear about it, and reporting that
+  // as success is how the old "ส่งให้ผมคนเดียว" state stayed invisible.
+  if (alsoDigest) await notifyEmailDigest(subject, text)
+
   // Discord summary is best-effort on top of email; it also serves as the
   // fallback channel when email is unavailable.
   const discordOk = await notifyDiscord(`${discordLine} → ${emailed}/${recipients.length} อีเมล`)
 
-  return { delivered: emailed > 0 || (!isEmailConfigured() && discordOk), recipients, error }
+  return {
+    delivered: emailed > 0 || (!isEmailConfigured() && discordOk),
+    recipients: alsoDigest ? [...recipients, 'admin-digest'] : recipients,
+    error,
+  }
 }
