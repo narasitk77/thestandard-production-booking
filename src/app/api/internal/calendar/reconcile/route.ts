@@ -34,7 +34,10 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url)
-  const limit = Number(searchParams.get('limit') || 50)
+  // v1.185.2 — default 50 → 200 (เท่าเพดานใน reconcileCalendarGuests). ที่ 50
+  // งาน CONFIRMED ใบที่ 51 ขึ้นไปไม่เคยถูก reconcile เลย เพราะ orderBy shootDate asc
+  // ทำให้ลำดับคงที่ทุกรอบ ไม่ใช่ "รอบหน้าค่อยถึง" (prod มี 62 ใบตอนเจอปัญหา)
+  const limit = Number(searchParams.get('limit') || 200)
   const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
 
   try {

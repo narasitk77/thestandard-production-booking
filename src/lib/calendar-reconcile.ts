@@ -47,6 +47,8 @@ export type ReconcileResult = {
   failed: number
   skipped: number
   items: ReconcileItem[]
+  /** v1.185.2 — true = ชนเพดาน limit; ยังมีงานที่วันถ่ายไกลกว่านี้ที่ยังไม่ถูกตรวจ */
+  truncated?: boolean
 }
 
 const DEFAULT_LIMIT = 50
@@ -609,6 +611,21 @@ export async function reconcileCalendarGuests(options: {
     })
     result.items.push(item)
     count(result, item.action)
+  }
+
+  // v1.185.2 — NO SILENT CAPS. `take: limit` + `orderBy shootDate asc` หมายความว่า
+  // ถ้าคิวยาวเกิน limit **งานที่ถ่ายไกลออกไปจะไม่เคยถูก reconcile เลย** ไม่ใช่
+  // "ช้าหน่อย" แต่คือไม่มีวันถึง เพราะลำดับคงที่ทุกรอบ
+  //
+  // เจอจริง 2026-08-21: prod มี CONFIRMED+มีครู 62 ใบ, worker default limit=50 →
+  // งาน 22 ก.ย.–11 ธ.ค. (แถวที่ 51-62) ไม่ถูกแตะเลย ต้องยิงมือด้วย ?limit=200
+  // ปฏิทินของงานพวกนั้นจึงเพี้ยนค้างได้เรื่อย ๆ โดยไม่มีใครรู้
+  if (bookings.length >= limit) {
+    result.truncated = true
+    console.warn(
+      `[calendar-reconcile] hit limit ${limit} — งานที่วันถ่ายไกลกว่านี้ยังไม่ถูกตรวจ ` +
+      `(ลำดับคงที่ทุกรอบ จึงไม่ใช่ว่ารอบหน้าจะถึง) เพิ่ม ?limit= หรือขยาย default`,
+    )
   }
 
   return result
