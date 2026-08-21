@@ -222,3 +222,34 @@ test('waiting bookings alone never alert — that is the system working', () => 
   })
   assert.deepEqual(alerts, [])
 })
+
+// ── v1.186 — บันทึกต้องตรงกับผลจริง ไม่ใช่เจตนา ─────────────────────────────
+//
+// ของจริงบนพรอด (2026-08-21): 85 การแจ้งใน 30 วัน ทุกแถวมี 'admin-digest' ใน
+// recipients และ emailError = null → /stats รายงานว่า operator ได้รับทุกครั้ง
+// ขณะที่เจ้าตัวไม่ได้เมลเลยแม้ฉบับเดียว เพราะ digest เป็น From=To=อีเมลเดียวกัน
+// ส่งผ่าน Gmail SMTP ของบัญชีตัวเอง จึงไม่เข้า Inbox
+//
+// v1.186 จึงใส่ ADMIN_DIGEST เฉพาะเมื่อ notifyEmailDigest คืน true เท่านั้น เทสนี้
+// ล็อกความหมายของ summarizeSends ไว้ว่า "แถวที่ไม่มี ADMIN_DIGEST = operator ไม่ได้ยิน"
+test('แถวที่ digest ส่งไม่ผ่าน (ไม่มี ADMIN_DIGEST) ต้องไม่ถูกนับว่าถึง operator', () => {
+  const at = new Date('2026-08-21T00:00:00Z')
+  const s = summarizeSends([
+    // ทีมได้ แต่ digest ล้ม → ยังนับ toTeam เพราะมีคนในงานได้ยิน
+    { bookingCode: 'A', at, recipients: ['producer@thestandard.co'] },
+    // ไม่มีใครได้เลย (digest ล้ม + ไม่มีคนในงาน) → adminOnly ไม่ใช่ toTeam
+    { bookingCode: 'B', at, recipients: [] },
+  ])
+  assert.equal(s.total, 2)
+  assert.equal(s.toTeam, 1)
+  assert.equal(s.adminOnly, 1, 'แถวที่ว่างเปล่าต้องอ่านว่าไม่มีใครได้ยิน')
+  assert.equal(s.peopleReached, 1)
+})
+
+test('ADMIN_DIGEST ยังไม่นับเป็นคนจริง แม้อยู่ในรายชื่อ', () => {
+  const at = new Date('2026-08-21T00:00:00Z')
+  const s = summarizeSends([{ bookingCode: 'C', at, recipients: [ADMIN_DIGEST] }])
+  assert.equal(s.toTeam, 0, 'digest ไม่ใช่คนในงาน')
+  assert.equal(s.adminOnly, 1)
+  assert.equal(s.peopleReached, 0)
+})

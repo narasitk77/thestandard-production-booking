@@ -40,6 +40,7 @@ import { latestNasState } from './nas-sync'
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
+import { ADMIN_DIGEST } from './footage-ready-health'
 
 const DAY = 86_400_000
 
@@ -395,7 +396,18 @@ export async function runFootageReadyScan(
         entityType: 'Booking',
         entityId: b.id,
         bookingCode: code,
-        changes: { audience, recipients: sent.recipients, folderCount: payload.folders.length, fileCount: payload.fileCount, emailError: sent.error, forced: forced.length > 0 || undefined },
+        changes: {
+          audience,
+          recipients: sent.recipients,
+          folderCount: payload.folders.length,
+          fileCount: payload.fileCount,
+          emailError: sent.error,
+          forced: forced.length > 0 || undefined,
+          // v1.186 — ผลจริงของช่องทาง operator: ตอบคำถาม "เขาได้ยินไหม" ได้จาก audit
+          // โดยไม่ต้องเดา (Discord คือช่องทางของ operator ตามที่ตกลง 2026-08-21 —
+          // เมล digest ส่งหาตัวเองผ่าน Gmail SMTP บัญชีเดียวกัน จึงไม่เข้า Inbox)
+          operatorChannels: sent.operatorChannels,
+        },
       })
       result.notified.push(code)
     } catch (e: any) {
@@ -412,7 +424,22 @@ async function sendFootageReadyNotification(
   b: CandidateRow,
   payload: CachedFootagePayload,
   audience: FootageReadyAudience,
-): Promise<{ delivered: boolean; recipients: string[]; error: string | null }> {
+): Promise<{
+  delivered: boolean
+  recipients: string[]
+  /**
+   * v1.186 — ผลจริงของช่องทางฝั่ง operator (ไม่ใช่ "เจตนาว่าจะส่ง")
+   *
+   * WHY. ก่อนหน้านี้ `'admin-digest'` ถูกต่อเข้า `recipients` จากตัวแปร `alsoDigest`
+   * ล้วน ๆ และค่าที่ notifyEmailDigest/notifyDiscord คืนมาถูกทิ้งทั้งคู่ → audit
+   * บันทึกว่า operator ได้รับ **85/85 ครั้งใน 30 วัน โดยไม่มี error** ขณะที่เจ้าตัว
+   * ไม่ได้เมลเลยแม้ฉบับเดียว (เมล digest เป็น From=To=อีเมลเดียวกัน ส่งผ่าน Gmail
+   * SMTP ของบัญชีตัวเอง จึงไม่เข้า Inbox) — บันทึกที่รายงานไม่ตรงของจริงทำให้
+   * ทั้ง /stats และคนอ่านสรุปผิดว่า "แจ้งแล้ว"
+   */
+  operatorChannels: { digestOk: boolean; discordOk: boolean }
+  error: string | null
+}> {
   const code = b.bookingCode as string
   const show = bookingDisplayName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
   const shootDate = new Date(b.shootDate).toISOString().slice(0, 10)
@@ -437,7 +464,13 @@ THE STANDARD Production Booking`
   if (audience === 'admin') {
     const emailOk = await notifyEmailDigest(subject, text)
     const discordOk = await notifyDiscord(discordLine)
-    return { delivered: emailOk || discordOk, recipients: ['admin-digest'], error: emailOk || discordOk ? null : 'admin digest + discord both unavailable' }
+    return {
+      delivered: emailOk || discordOk,
+      // ใส่ ADMIN_DIGEST เฉพาะเมื่อส่งผ่านจริง — ไม่ใช่เพราะ "ตั้งใจจะส่ง"
+      recipients: emailOk ? [ADMIN_DIGEST] : [],
+      operatorChannels: { digestOk: emailOk, discordOk },
+      error: emailOk || discordOk ? null : 'admin digest + discord both unavailable',
+    }
   }
 
   const { people: recipients, digest: alsoDigest } = footageReadyRecipients(
@@ -451,7 +484,12 @@ THE STANDARD Production Booking`
     // Caller stamps readyNotifiedAt, so this warns exactly once per booking.
     const warned = await notifyEmailDigest(`⚠️ ${subject} — ไม่มีอีเมล producer`, `${code} footage พร้อมแล้ว แต่ booking ไม่มี producerEmail ให้แจ้ง\n\n${text}`)
     const discordOk = await notifyDiscord(`⚠️ ${discordLine} — ไม่มีอีเมล producer ให้แจ้ง`)
-    return { delivered: warned || discordOk, recipients: [], error: 'no producer email' }
+    return {
+      delivered: warned || discordOk,
+      recipients: [],
+      operatorChannels: { digestOk: warned, discordOk },
+      error: 'no producer email',
+    }
   }
 
   let emailed = 0
@@ -469,7 +507,9 @@ THE STANDARD Production Booking`
   // Best-effort and never counted as delivery: if the digest is the ONLY thing
   // that got through, the team still did not hear about it, and reporting that
   // as success is how the old "ส่งให้ผมคนเดียว" state stayed invisible.
-  if (alsoDigest) await notifyEmailDigest(subject, text)
+  //
+  // v1.186 — เก็บค่าที่คืนมา (เดิมทิ้ง) เพราะมันคือคำตอบของคำถาม "operator ได้ยินไหม"
+  const digestOk = alsoDigest ? await notifyEmailDigest(subject, text) : false
 
   // Discord summary is best-effort on top of email; it also serves as the
   // fallback channel when email is unavailable.
@@ -477,7 +517,10 @@ THE STANDARD Production Booking`
 
   return {
     delivered: emailed > 0 || (!isEmailConfigured() && discordOk),
-    recipients: alsoDigest ? [...recipients, 'admin-digest'] : recipients,
+    // v1.186 — ADMIN_DIGEST เข้ารายชื่อเฉพาะเมื่อส่งผ่านจริง (เดิมใส่ตาม alsoDigest
+    // ล้วน ๆ ทำให้ /stats นับว่า operator ได้รับ ทั้งที่ไม่เคยได้)
+    recipients: digestOk ? [...recipients, ADMIN_DIGEST] : recipients,
+    operatorChannels: { digestOk, discordOk },
     error,
   }
 }

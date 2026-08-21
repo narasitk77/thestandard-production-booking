@@ -46,6 +46,30 @@ step 2 ของ routine เดิมหายไปตอนย้ายมา 
 
 ---
 
+## [1.186.0] — 2026-08-21
+
+### Fixed — audit บอกว่า operator ได้รับแจ้งฟุตเทจ 85/85 ครั้ง ทั้งที่ไม่ได้เมลเลยแม้ฉบับเดียว
+
+operator: *"ไม่มีอีเมลแจ้งเรื่องฟุตเทจมาสักพัก"* — ไล่แล้วพบว่าไม่ใช่ worker ล่ม ไม่ใช่ env ผิด และไม่ใช่ SMTP เสีย ทุกอย่างเขียวหมด:
+
+- `FOOTAGE_READY_WORKER_ENABLED=1`, `AUDIENCE=team`, `errors=0`, `agedOut=[]`, `neverWalked=[]`
+- `REMINDER_ADMIN_EMAIL` ชี้มาที่ operator ถูกต้อง · SMTP login ตอบ `235 2.7.0 Accepted`
+- audit 30 วัน: **85 การแจ้ง ทุกแถวมี `admin-digest` ใน `recipients` และ `emailError = null`**
+
+**สาเหตุจริงสองชั้น:**
+
+1. **บันทึกเป็นเจตนา ไม่ใช่ผล** — `'admin-digest'` ถูกต่อเข้า `recipients` จากตัวแปร `alsoDigest` ล้วน ๆ และค่าที่ `notifyEmailDigest()` / `notifyDiscord()` คืนมา**ถูกทิ้งทั้งคู่** ฉะนั้น `/stats` (ซึ่งอ่านจาก `recipients`) จึงรายงานว่า operator ได้รับทุกครั้ง โดยไม่มีอะไรตรวจเลยว่าจริงไหม
+2. **เมล digest ส่งหาตัวเองไม่ได้** — `EMAIL_FROM` = `REMINDER_ADMIN_EMAIL` = `SMTP_USER` = อีเมลเดียวกัน ส่งผ่าน Gmail SMTP ของบัญชีนั้นเอง (Gmail ไม่ให้เปลี่ยน From เป็นที่อยู่อื่น) เมลของทีมเป็น From: operator → To: คนอื่น จึงเข้าปกติ (34 คนได้รับจริง) แต่สำเนาของ operator ไม่โผล่ทั้ง Inbox และ Sent
+
+**สิ่งที่แก้:**
+- `ADMIN_DIGEST` เข้ารายชื่อผู้รับ **เฉพาะเมื่อ `notifyEmailDigest` คืน true** — /stats กลายเป็นตัวเลขที่เชื่อได้ทันทีโดยไม่ต้องแก้ endpoint
+- audit `booking.auto_notified_ready` เพิ่ม `operatorChannels: { digestOk, discordOk }` → ตอบคำถาม "operator ได้ยินไหม" ได้จาก audit ไม่ต้องเดา ครบทั้ง 3 เส้นทาง (admin / team / no-producer)
+- +2 เทสล็อกความหมายว่า "ไม่มี ADMIN_DIGEST = operator ไม่ได้ยิน" (รวม **572 ผ่าน**)
+
+**ช่องทางของ operator = Discord** (ตกลงกับ operator 2026-08-21): webhook ตรวจแล้วใช้งานได้ (ห้อง `Ohm`) และ `notifyDiscord` ถูกเรียกทุกครั้งที่แจ้งอยู่แล้ว — ตอนนี้ผลของมันถูกบันทึกด้วย ถ้า Discord ล่มจะเห็นใน audit ไม่ใช่หายเงียบ · เมลของทีมยังส่งตามเดิม ไม่ตัดใครออก
+
+บทเรียนต่อจาก v1.185.1 (`toAttendees` ผิดตัวแปร) และ v1.181 (*liveness is not delivery*): **สนามที่ยังไม่มีใครตรวจคือช่องที่ระบบโกหกได้ — ถ้าโค้ดทิ้งค่าที่ฟังก์ชันส่งกลับมา บันทึกจะกลายเป็นความตั้งใจของโปรแกรมเมอร์ ไม่ใช่สิ่งที่เกิดขึ้น**
+
 ## [1.185.2] — 2026-08-21
 
 ### Fixed — งานที่ถ่ายไกลเกินลำดับ 50 ไม่เคยถูก reconcile ปฏิทินเลย
