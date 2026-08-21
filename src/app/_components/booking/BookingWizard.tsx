@@ -22,6 +22,9 @@ import { defaultCoProducerFor } from '@/lib/outlet-coproducer'
    Payload + cascade logic preserved from v1.27 — no API change.
    ============================================================================= */
 
+/** v1.185 — ค่าใน <option> ที่หมายถึง "ไม่มีในรายชื่อ พิมพ์เอง" (ไม่ใช่อีเมลจริง) */
+const CUSTOM_PRODUCER = '__custom__'
+
 type ProjectOption = { projectId: string; projectName: string; producer?: string }
 type Person = { email: string; nickname: string }
 type OutletPerson = { email: string; name: string; nickname: string }
@@ -215,6 +218,9 @@ export default function BookingWizard() {
   const [outletPeopleLoading, setOutletPeopleLoading] = useState(false)
   const [producerSel, setProducerSel] = useState('')
   const [coProducerSel, setCoProducerSel] = useState('')
+  // v1.185 — "ไม่มีในรายชื่อ → พิมพ์เอง" (คำสั่ง operator 2026-08-21: ให้ทุกเมล
+  // @thestandard.co จองได้ ไม่ต้องรออยู่ใน roster ก่อน). ใช้ได้ทุก outlet รวม AGN
+  const [producerCustom, setProducerCustom] = useState(false)
   const [notes, setNotes] = useState('')
   const [epCount, setEpCount] = useState(1)
   const [epRows, setEpRows] = useState<EpRow[]>([{ programCode: '', title: '', contentType: 'ORIGINAL_CONTENT' }])
@@ -264,7 +270,10 @@ export default function BookingWizard() {
     // NOTE: do NOT clear producerSel/coProducerSel here — this effect also fires
     // on resumeDraft's outlet restore and would wipe the just-restored selection.
     // The genuine outlet-switch path (handleOutletChange) does the clearing instead.
-    if (!outletCode || outletCode === 'AGN') { setOutletProducers([]); setOutletCoProducers([]); return }
+    // v1.185 — AGN โหลดด้วย: ฟอร์ม AGN เคยอ่านจากชีท `_Users` อย่างเดียว ทำให้
+    // คนที่ถูกเพิ่มผ่าน /admin/permissions (เช่นหวาน v1.163.1) ไม่โผล่ในรายชื่อเลย
+    // ทั้งที่ producerOutlets={AGN} — ตอนนี้รวมสองแหล่งเข้าด้วยกัน (ดู agnProducers)
+    if (!outletCode) { setOutletProducers([]); setOutletCoProducers([]); return }
     let cancelled = false
     setOutletPeopleLoading(true)
     fetch(`/api/producers?outlet=${encodeURIComponent(outletCode)}`)
@@ -370,6 +379,66 @@ export default function BookingWizard() {
   // when there's at least one Producer OR Co-Producer; other outlets need a Producer.
   const hasDropdownPeople = outletProducers.length > 0 || (outletCode === 'PM' && outletCoProducers.length > 0)
   const useProducerDropdown = !isContentAgency && hasDropdownPeople && (shootType !== 'Event' || outletCode === 'PM')
+  // ช่องกรอก Producer เอง — ใช้ 3 ที่ (outlet ไม่มี roster / เลือก "พิมพ์เอง" ใน
+  // dropdown ของ outlet / เลือก "พิมพ์เอง" ใน AGN) ประกาศครั้งเดียวกันลอกซ้ำ
+  const manualProducerFields = (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div>
+        <Label htmlFor="producerName" required>Name</Label>
+        <input
+          id="producerName"
+          type="text"
+          className={`ops-input ${fieldErrors.producerName ? 'ops-input-invalid' : ''}`}
+          placeholder="ชื่อ-นามสกุล"
+          value={producerName}
+          onChange={e => setProducerName(e.target.value)}
+          aria-invalid={!!fieldErrors.producerName}
+        />
+        <FieldError message={fieldErrors.producerName} />
+      </div>
+      <div>
+        <Label htmlFor="producerPhone">Phone <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></Label>
+        <input
+          id="producerPhone"
+          type="tel"
+          className={`ops-input ${fieldErrors.producerPhone ? 'ops-input-invalid' : ''}`}
+          placeholder="เบอร์โทรศัพท์"
+          value={producerPhone}
+          onChange={e => setProducerPhone(e.target.value)}
+          aria-invalid={!!fieldErrors.producerPhone}
+        />
+        <FieldError message={fieldErrors.producerPhone} />
+      </div>
+      <div>
+        <Label htmlFor="producerEmailText" required>Email</Label>
+        <input
+          id="producerEmailText"
+          type="email"
+          className={`ops-input ${fieldErrors.producerEmailText ? 'ops-input-invalid' : ''}`}
+          placeholder="email@example.com"
+          value={producerEmailText}
+          onChange={e => setProducerEmailText(e.target.value)}
+          aria-invalid={!!fieldErrors.producerEmailText}
+        />
+        <FieldError message={fieldErrors.producerEmailText} />
+      </div>
+    </div>
+  )
+
+  // v1.185 — AGN: รวมชีท `_Users` (แหล่งเดิม) กับคนที่แท็ก AGN ใน User table
+  // dedupe ด้วยอีเมลไม่สนตัวพิมพ์ ชีทมาก่อนเพราะชื่อเล่นในชีทคือตัวที่ใช้กรอง Project
+  const agnProducers = useMemo(() => {
+    if (!isContentAgency) return producers
+    const out: Person[] = [...producers]
+    const seen = new Set(producers.map(p => p.email.toLowerCase()))
+    for (const p of outletProducers) {
+      const key = p.email.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ email: p.email, nickname: p.nickname })
+    }
+    return out
+  }, [isContentAgency, producers, outletProducers])
   const selProd = outletProducers.find(p => p.email === producerSel)
   const selCoProd = outletCoProducers.find(p => p.email === coProducerSel)
   // v1.183 — Co-Producer ที่ระบบจะเติมให้เองถ้าไม่เลือก (ตอนนี้: TSS → แก้ว).
@@ -380,11 +449,16 @@ export default function BookingWizard() {
 
   const selectedProject = projectOptions.find(p => p.projectId === projectId)
   const selectedProducerNickname = (
-    producers.find(p => p.email === producerEmail)?.nickname || ''
+    agnProducers.find(p => p.email === producerEmail)?.nickname || ''
   ).trim().toLowerCase()
-  const visibleProjects = selectedProducerNickname
+  // v1.185 — เดิมถ้าชื่อเล่นของ Producer ไม่ตรงกับคอลัมน์ producer ของโปรเจกต์ไหนเลย
+  // ลิสต์จะว่างและจองไม่ได้ = ตายทาง ซึ่งเกิดแน่กับคนที่เพิ่งถูกเพิ่มเข้ามาหรือกรอกเอง
+  // (ชื่อในชีทโปรเจกต์ยังไม่ใช่ชื่อเขา) → ไม่มีตัวไหนตรง = โชว์ทั้งหมด
+  const filteredProjects = selectedProducerNickname
     ? projectOptions.filter(p => (p.producer || '').trim().toLowerCase() === selectedProducerNickname)
     : projectOptions
+  const projectFilterFellBack = selectedProducerNickname !== '' && filteredProjects.length === 0 && projectOptions.length > 0
+  const visibleProjects = projectFilterFellBack ? projectOptions : filteredProjects
   const projectsUnavailable = !projectsLoading && projectOptions.length === 0
   const projectSelectable = !projectsLoading && visibleProjects.length > 0
 
@@ -409,7 +483,7 @@ export default function BookingWizard() {
     locationId, locationCustom, mapLocation, callTime, estimatedWrap,
     producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
     creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, virtualProduction, vanCount, eventExternal,
-    specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel,
+    specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, producerCustom,
     notes, epCount, epRows, step,
   })
 
@@ -473,6 +547,7 @@ export default function BookingWizard() {
       if (Array.isArray(d.selectedEpisodeIds)) setSelectedEpisodeIds(d.selectedEpisodeIds)
       if (d.producerSel != null) setProducerSel(d.producerSel)
       if (d.coProducerSel != null) setCoProducerSel(d.coProducerSel)
+      if (d.producerCustom != null) setProducerCustom(!!d.producerCustom)
       if (d.notes != null) setNotes(d.notes)
       if (typeof d.epCount === 'number') setEpCount(d.epCount)
       if (Array.isArray(d.epRows) && d.epRows.length) setEpRows(d.epRows)
@@ -499,6 +574,7 @@ export default function BookingWizard() {
     setProgramCode('')
     setProducerSel('')      // dropdown producer — was cleared by the [outletCode] effect (moved here so resumeDraft doesn't wipe it)
     setCoProducerSel('')
+    setProducerCustom(false)  // v1.185 — เปลี่ยนบ้านแล้วต้องกลับไปเลือกจากรายชื่อของบ้านใหม่ก่อน
     setProducerEmail('')
     setDirectorEmail('')
     setProducerName('')
@@ -587,15 +663,25 @@ export default function BookingWizard() {
         if (needsCustomText && !locationCustom.trim()) errs.locationCustom = 'กรุณาระบุสถานที่จริง'
       }
     } else if (s === 4) {
+      // v1.185 — "พิมพ์เอง" ใช้ได้ทุก outlet: ตรวจชื่อ+อีเมลแทนการเลือกจากรายชื่อ
+      if (producerCustom) {
+        if (!producerName.trim()) errs.producerName = 'กรุณากรอกชื่อ Producer'
+        if (!producerEmailText.trim()) errs.producerEmailText = 'กรุณากรอกอีเมล Producer'
+        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(producerEmailText.trim())) {
+          errs.producerEmailText = 'รูปแบบอีเมลไม่ถูกต้อง'
+        }
+      }
       if (isContentAgency) {
-        if (!producerEmail) errs.producerEmail = 'กรุณาเลือก Producer'
+        if (!producerEmail && !producerCustom) errs.producerEmail = 'กรุณาเลือก Producer'
         // v1.54 — Director เป็น optional สำหรับ Content Agency
         if (projectSelectable && !projectId) errs.projectId = 'กรุณาเลือก Project ID'
         if (projectId && selectedEpisodeIds.length === 0) errs.selectedEpisodeIds = 'กรุณาเลือกอย่างน้อย 1 Episode'
       } else if (useProducerDropdown) {
         // PM may leave Producer = "ไม่มี" — but then a Co-Producer is required
         // (the booking is attributed to the Co-Pro instead).
-        if (outletCode === 'PM') {
+        if (producerCustom) {
+          // ตรวจไปแล้วข้างบน — ไม่ต้องบังคับให้เลือกจาก dropdown ซ้ำ
+        } else if (outletCode === 'PM') {
           if (!producerSel && !coProducerSel) errs.producerSel = 'เลือก Producer หรือ Co-Producer อย่างน้อย 1 คน'
         } else if (!producerSel) {
           errs.producerSel = 'กรุณาเลือก Producer'
@@ -651,7 +737,7 @@ export default function BookingWizard() {
     locationId, locationCustom, needsCustomText, shootType, mapLocation,
     isContentAgency, producerEmail, directorEmail, projectId, selectedEpisodeIds,
     producerName, producerPhone, producerEmailText, epRows, projectSelectable,
-    useProducerDropdown, producerSel, coProducerSel,
+    useProducerDropdown, producerSel, coProducerSel, producerCustom,
   ])
 
   /* ---- navigation ---- */
@@ -697,6 +783,9 @@ export default function BookingWizard() {
     setError('')
     // PM "ไม่มี Producer" → the Co-Producer becomes the producer of record, so the
     // booking belongs to them (My Bookings / producer scope key off producerEmail).
+    // v1.185 — พิมพ์เอง: ชื่อ/อีเมลที่กรอกเป็นตัวจริงของ booking ทุก outlet รวม AGN
+    const customProducerName = producerName.trim()
+    const customProducerEmail = producerEmailText.trim()
     const promoteCoPro = outletCode === 'PM' && useProducerDropdown && !producerSel && !!coProducerSel
     const effProducer = promoteCoPro ? (selCoProd?.nickname || selCoProd?.name || '') : (selProd?.nickname || selProd?.name || '')
     const effProducerEmail = promoteCoPro ? coProducerSel : (producerSel || null)
@@ -716,17 +805,24 @@ export default function BookingWizard() {
           locationName: resolvedLocationName,
           callTime,
           estimatedWrap: estimatedWrap || null,
-          producer: isContentAgency
-            ? producers.find(p => p.email === producerEmail)?.nickname || ''
-            : useProducerDropdown
-              ? effProducer
-              : producerName.trim(),
-          producerEmail: isContentAgency
-            ? producerEmail
-            : useProducerDropdown
-              ? effProducerEmail
-              : (producerEmailText.trim() || null),
-          producerPhone: isContentAgency || useProducerDropdown ? null : (producerPhone.trim() || null),
+          producer: producerCustom
+            ? customProducerName
+            : isContentAgency
+              ? agnProducers.find(p => p.email === producerEmail)?.nickname || ''
+              : useProducerDropdown
+                ? effProducer
+                : customProducerName,
+          producerEmail: producerCustom
+            ? (customProducerEmail || null)
+            : isContentAgency
+              ? producerEmail
+              : useProducerDropdown
+                ? effProducerEmail
+                : (customProducerEmail || null),
+          // เบอร์เก็บได้เสมอเมื่อกรอกเอง — คนนอก roster คือคนที่ต้องโทรหาจริง ๆ
+          producerPhone: producerCustom || (!isContentAgency && !useProducerDropdown)
+            ? (producerPhone.trim() || null)
+            : null,
           director: isContentAgency
             ? directors.find(d => d.email === directorEmail)?.nickname || ''
             : null,
@@ -781,7 +877,7 @@ export default function BookingWizard() {
   }
 
   /* ---- summary values (used by both panel + review step) ---- */
-  const caProducer = producers.find(p => p.email === producerEmail)
+  const caProducer = agnProducers.find(p => p.email === producerEmail)
   const caDirector = directors.find(d => d.email === directorEmail)
   const filledEpRows = epRows.filter(r => r.title.trim())
   const summary = {
@@ -1205,24 +1301,32 @@ export default function BookingWizard() {
                     <>
                       <select
                         className={`ops-input ${fieldErrors.producerEmail ? 'ops-input-invalid' : ''}`}
-                        value={producerEmail}
-                        onChange={e => { setProducerEmail(e.target.value); setProjectId('') }}
+                        value={producerCustom ? CUSTOM_PRODUCER : producerEmail}
+                        onChange={e => {
+                          const v = e.target.value
+                          setProjectId('')
+                          if (v === CUSTOM_PRODUCER) { setProducerCustom(true); setProducerEmail(''); return }
+                          setProducerCustom(false)
+                          setProducerEmail(v)
+                        }}
                         disabled={peopleLoading}
                         aria-invalid={!!fieldErrors.producerEmail}
                       >
                         <option value="">
                           {peopleLoading
                             ? 'Loading…'
-                            : producers.length === 0
+                            : agnProducers.length === 0
                               ? '— No producers loaded (sheet unreachable) —'
                               : '— Select Producer —'}
                         </option>
-                        {producers.map(p => (
+                        {agnProducers.map(p => (
                           <option key={p.email} value={p.email}>{p.nickname} ({p.email})</option>
                         ))}
+                        <option value={CUSTOM_PRODUCER}>— ไม่มีในรายชื่อ · พิมพ์เอง —</option>
                       </select>
-                      <FieldHelp>ดึงจาก &ldquo;_Users&rdquo; tab ของ Dashboard · กรอง Project ID ด้านล่างให้</FieldHelp>
+                      <FieldHelp>รวมชีท &ldquo;_Users&rdquo; ของ Dashboard + คนที่แท็ก AGN ที่ /admin/permissions · กรอง Project ID ด้านล่างให้</FieldHelp>
                       <FieldError message={fieldErrors.producerEmail} />
+                      {producerCustom && manualProducerFields}
                     </>
                   ) : useProducerDropdown ? (
                     /* v1.59 — per-outlet Producer + Co-Producer dropdowns */
@@ -1232,8 +1336,13 @@ export default function BookingWizard() {
                         <select
                           id="producerSel"
                           className={`ops-input ${fieldErrors.producerSel ? 'ops-input-invalid' : ''}`}
-                          value={producerSel}
-                          onChange={e => setProducerSel(e.target.value)}
+                          value={producerCustom ? CUSTOM_PRODUCER : producerSel}
+                          onChange={e => {
+                            const v = e.target.value
+                            if (v === CUSTOM_PRODUCER) { setProducerCustom(true); setProducerSel(''); return }
+                            setProducerCustom(false)
+                            setProducerSel(v)
+                          }}
                           disabled={outletPeopleLoading}
                           aria-invalid={!!fieldErrors.producerSel}
                         >
@@ -1242,6 +1351,7 @@ export default function BookingWizard() {
                           {outletProducers.map(p => (
                             <option key={p.email} value={p.email}>{p.nickname}</option>
                           ))}
+                          <option value={CUSTOM_PRODUCER}>— ไม่มีในรายชื่อ · พิมพ์เอง —</option>
                         </select>
                         <FieldError message={fieldErrors.producerSel} />
                       </div>
@@ -1268,49 +1378,10 @@ export default function BookingWizard() {
                             : ''}
                         </FieldHelp>
                       </div>
+                      {producerCustom && <div className="sm:col-span-2">{manualProducerFields}</div>}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <Label htmlFor="producerName" required>Name</Label>
-                        <input
-                          id="producerName"
-                          type="text"
-                          className={`ops-input ${fieldErrors.producerName ? 'ops-input-invalid' : ''}`}
-                          placeholder="ชื่อ-นามสกุล"
-                          value={producerName}
-                          onChange={e => setProducerName(e.target.value)}
-                          aria-invalid={!!fieldErrors.producerName}
-                        />
-                        <FieldError message={fieldErrors.producerName} />
-                      </div>
-                      <div>
-                        <Label htmlFor="producerPhone">Phone <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></Label>
-                        <input
-                          id="producerPhone"
-                          type="tel"
-                          className={`ops-input ${fieldErrors.producerPhone ? 'ops-input-invalid' : ''}`}
-                          placeholder="เบอร์โทรศัพท์"
-                          value={producerPhone}
-                          onChange={e => setProducerPhone(e.target.value)}
-                          aria-invalid={!!fieldErrors.producerPhone}
-                        />
-                        <FieldError message={fieldErrors.producerPhone} />
-                      </div>
-                      <div>
-                        <Label htmlFor="producerEmailText" required>Email</Label>
-                        <input
-                          id="producerEmailText"
-                          type="email"
-                          className={`ops-input ${fieldErrors.producerEmailText ? 'ops-input-invalid' : ''}`}
-                          placeholder="email@example.com"
-                          value={producerEmailText}
-                          onChange={e => setProducerEmailText(e.target.value)}
-                          aria-invalid={!!fieldErrors.producerEmailText}
-                        />
-                        <FieldError message={fieldErrors.producerEmailText} />
-                      </div>
-                    </div>
+                    manualProducerFields
                   )}
                 </div>
 

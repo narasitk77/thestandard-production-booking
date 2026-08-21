@@ -7,6 +7,7 @@ import {
   updateCalendarEventAttendees,
 } from './google-calendar'
 import { updateBookingRow } from './google-sheets'
+import { bookingCalendarAttendees } from './calendar-attendees'
 
 type ReconcileAction = 'ok' | 'patched' | 'created' | 'failed' | 'skipped'
 
@@ -122,15 +123,6 @@ type ProcessOptions = {
 // include the producer too, or the very next tick "fixes" the event by
 // patching the producer back out. Same for the Director picked at booking
 // time (v1.143) — omit them here and the reconciler un-invites them nightly.
-export function withProducer(assignedEmails: string[], producerEmail?: string | null, directorEmail?: string | null): string[] {
-  let out = assignedEmails
-  for (const raw of [producerEmail, directorEmail]) {
-    const trimmed = (raw || '').trim()
-    if (trimmed && !out.some(e => e.toLowerCase() === trimmed.toLowerCase())) out = [...out, trimmed]
-  }
-  return out
-}
-
 async function createVerifiedCalendarEvent(booking: {
   id: string
   bookingCode?: string | null
@@ -175,11 +167,17 @@ async function createVerifiedCalendarEvent(booking: {
     )
   }
 
-  // v1.146 review fix — Director auto-invite is AGN-only (see the matching
-  // gate in google-calendar.ts's createCalendarEvent); must match here or
-  // this "wanted attendees" check would demand a director invite that
-  // createCalendarEvent deliberately never sent for other outlets.
-  const wantedAttendees = withProducer(booking.assignedEmails, booking.producerEmail, booking.outlet.code === 'AGN' ? booking.directorEmail : null)
+  // ตัวตรวจนี้ต้องคำนวณลิสต์แขก **ด้วยฟังก์ชันตัวเดียวกับที่ createCalendarEvent
+  // ใช้ส่ง** ไม่ใช่คำนวณเองซ้ำ: ถ้าสองฝั่งไม่ตรงกัน โค้ดข้างล่างจะ "ลบ event ที่
+  // เพิ่งสร้างสำเร็จทิ้ง" แล้ว throw — v1.146 เคยพลาดตรงการ์ด AGN ของ director
+  // มาแล้ว และ v1.185 (เพิ่ม Co-Producer) ก็จะพลาดซ้ำถ้ายังแยกกันคำนวณ
+  const wantedAttendees = bookingCalendarAttendees({
+    assignedEmails: booking.assignedEmails,
+    producerEmail: booking.producerEmail,
+    coProducerEmail: (booking as any).coProducerEmail,
+    directorEmail: booking.directorEmail,
+    outletCode: booking.outlet.code,
+  })
   const calendarEvent = await getCalendarEventAttendees(eventId)
   if (!sameEmails(wantedAttendees, calendarEvent.attendees)) {
     await deleteCalendarEvent(eventId)
@@ -207,7 +205,14 @@ async function processBooking(
   // the reconciler would actively PATCH the director back onto the calendar
   // event on every tick for non-AGN bookings, even though createCalendarEvent
   // never invites them at creation time for those outlets.
-  const calendarAttendees = cleanEmails(withProducer(assignedEmails, booking.producerEmail, booking.outlet.code === 'AGN' ? booking.directorEmail : null))
+  // v1.185 — helper ที่เดียว (เพิ่ม Co-Producer เข้าลิสต์ด้วย) ดู calendar-attendees.ts
+  const calendarAttendees = cleanEmails(bookingCalendarAttendees({
+    assignedEmails,
+    producerEmail: booking.producerEmail,
+    coProducerEmail: (booking as any).coProducerEmail,
+    directorEmail: booking.directorEmail,
+    outletCode: booking.outlet.code,
+  }))
   const item: ReconcileItem = {
     bookingId: booking.id,
     bookingCode: booking.bookingCode,

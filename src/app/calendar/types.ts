@@ -25,6 +25,8 @@ export interface Booking {
   locationName?: string
   producer: string
   producerEmail?: string | null
+  coProducer?: string | null
+  coProducerEmail?: string | null
   vanCount?: number
   cameraCount?: number | null
   micCount?: number | null

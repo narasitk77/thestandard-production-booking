@@ -5,6 +5,7 @@ import { logAudit } from './audit'
 import { isEmailConfigured, sendEmail } from './email'
 import { normalizeFreelancers, formatFreelancerLines, type Freelancer } from './freelancers'
 import { bookingDisplayName } from './display'
+import { bookingCalendarAttendees } from './calendar-attendees'
 
 // v1.41.0 — prefix added to the calendar event title when a booking needs a
 // company van (off-site shoots). Surfaced on both the web calendar and Google
@@ -325,6 +326,7 @@ export function buildEventDescription(booking: {
   videoType?: string | null
   locationName?: string | null
   producer: string
+  coProducer?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -356,7 +358,7 @@ Outlet: ${booking.outlet.name} (${booking.outlet.code})
 Program: ${booking.program.name} (${booking.program.code})
 Shoot Type: ${shootTypeLabel}
 Location / Room: ${location}
-Producer: ${booking.producer}
+Producer: ${booking.producer}${booking.coProducer ? `\nCo-Producer: ${booking.coProducer}` : ''}
 Crew: ${booking.crewRequired.join(', ') || '—'}
 Equipment: ${equip || '—'}${booking.equipmentNote ? `\n🎬 อุปกรณ์: ${booking.equipmentNote}` : ''}${booking.rentalGearNote ? `\n📦 เช่า: ${booking.rentalGearNote}` : ''}
 Special Equipment: ${booking.specialEquipment && booking.specialEquipment.length > 0 ? booking.specialEquipment.join(', ') : '—'}
@@ -385,6 +387,8 @@ export async function createCalendarEvent(booking: {
   locationName?: string | null
   producer: string
   producerEmail?: string | null
+  coProducer?: string | null
+  coProducerEmail?: string | null
   directorEmail?: string | null
   cameraCount?: number | null
   micCount?: number | null
@@ -451,25 +455,16 @@ export async function createCalendarEvent(booking: {
       })
       throw err
     }
-    // v1.131 — the Producer gets a calendar guest invite too, alongside crew
-    // (union'd, case-insensitive dedupe — a producer who's also crew-assigned
-    // doesn't get double-invited).
-    const producerEmailTrimmed = (booking.producerEmail || '').trim()
-    const withProducerEmails = producerEmailTrimmed && !assignedEmails.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
-      ? [...assignedEmails, producerEmailTrimmed]
-      : assignedEmails
-    // The Director picked at booking time gets a guest invite the same way —
-    // the whole point of the picker: nobody has to remember to assign them.
-    // v1.146 review fix — this auto-invite is deliberately AGN-only (ops:
-    // "REMOVED in v1.143.1 — do not re-add without asking" for other outlets),
-    // but nothing enforced that server-side; directorEmail set on any other
-    // outlet (PATCH, MCP, a future UI change) was silently auto-invited too.
-    // Gating centrally here (rather than at every place directorEmail can be
-    // set) closes the loophole regardless of how the field got populated.
-    const directorEmailTrimmed = booking.outlet.code === 'AGN' ? (booking.directorEmail || '').trim() : ''
-    const attendeeEmails = directorEmailTrimmed && !withProducerEmails.some(e => e.toLowerCase() === directorEmailTrimmed.toLowerCase())
-      ? [...withProducerEmails, directorEmailTrimmed]
-      : withProducerEmails
+    // v1.185 — ลิสต์แขกมาจาก bookingCalendarAttendees() ที่เดียว (ครู + Producer +
+    // Co-Producer + Director เฉพาะ AGN). ก่อนหน้านี้ประกอบเองตรงนี้ และอีก 3 ที่
+    // ประกอบเองด้วยตรรกะไม่ตรงกัน → Co-Producer ตกหายทั้งระบบ ดู calendar-attendees.ts
+    const attendeeEmails = bookingCalendarAttendees({
+      assignedEmails,
+      producerEmail: booking.producerEmail,
+      coProducerEmail: booking.coProducerEmail,
+      directorEmail: booking.directorEmail,
+      outletCode: booking.outlet.code,
+    })
     const attendees = canInvite ? attendeeEmails.map(email => ({ email })) : []
 
     const baseBody = {
@@ -669,6 +664,7 @@ export async function updateCalendarEventDetails(
     videoType?: string | null
     locationName?: string | null
     producer: string
+    coProducer?: string | null
     cameraCount?: number | null
     micCount?: number | null
     vanCount?: number | null

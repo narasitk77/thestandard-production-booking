@@ -46,6 +46,39 @@ step 2 ของ routine เดิมหายไปตอนย้ายมา 
 
 ---
 
+## [1.185.0] — 2026-08-21
+
+### Fixed — Co-Producer ไม่เคยได้ invite ปฏิทินเลยตั้งแต่ v1.59
+
+คำร้องจาก operator: "งานของ TSS ยังไม่ได้มีแก้วในคิวและ google calendar" ไล่แล้วเจอสองชั้น และชั้นที่สองคือของเก่าที่ค้างมานาน
+
+**ลิสต์แขกปฏิทินถูกประกอบเองอยู่ 4 ที่** (createCalendarEvent, admin assign route, calendar-reconcile 2 จุด) ด้วยตรรกะไม่ตรงกัน และ **ไม่มีที่ไหนใส่ `coProducerEmail`** → Co-Producer ของงานไม่เคยได้ invite เลย แม้ชื่อจะอยู่บน booking มาตั้งแต่ v1.59 · event body ก็มีแค่บรรทัด `Producer:` ไม่มี `Co-Producer:`
+
+- รวมเป็น `src/lib/calendar-attendees.ts` **ที่เดียว**: ครู + Producer + Co-Producer (+ Director เฉพาะ AGN) dedupe ไม่สนตัวพิมพ์ · ทุก path เรียกตัวนี้ ห้ามประกอบเองอีก
+- **ปิดบั๊กเก่าไปพร้อมกัน**: การ์ด AGN-only ของ `directorEmail` (กฎ ops v1.146 "REMOVED in v1.143.1 — do not re-add without asking") มีใน createCalendarEvent และ calendar-reconcile แต่ **ไม่มีใน assign route** → ทุกครั้งที่แอดมิน re-assign ครูของ outlet ที่ไม่ใช่ AGN ไดเรกเตอร์ถูกใส่กลับเข้าปฏิทินเงียบ ๆ
+- จุดที่อันตรายสุดคือ `createVerifiedCalendarEvent`: มันตรวจว่า event ที่เพิ่งสร้างมีแขกครบไหม แล้ว**ลบ event ทิ้ง**ถ้าไม่ครบ — ถ้าตัวตรวจกับตัวส่งคำนวณคนละสูตร ก็ลบงานที่สร้างสำเร็จ (v1.146 พลาดตรงนี้มาแล้ว) ตอนนี้ทั้งสองฝั่งเรียกฟังก์ชันเดียวกัน + มีเทสยืนยัน
+- `POST /api/admin/backfill-coproducer-emails[?apply=1]` เติม `coProducerEmail` จากชื่อเล่น จับคู่ต้องได้คนเดียวเป๊ะที่ active และแท็ก producer ของ outlet เดียวกัน ไม่งั้นข้ามและรายงาน (ใส่อีเมลผิดคน = invite ผิดคน แย่กว่าปล่อยว่าง) · dry-run เป็นค่าเริ่มต้น
+- Co-Pro โผล่ใน drawer ปฏิทินแล้ว (เก็บลง DB ตั้งแต่ v1.59 แต่ drawer ไม่เคยโชว์)
+
+**หมายเหตุข้อมูลบนพรอด (ทำไปแล้วด้วย SQL ตอน deploy ติดสิทธิ์เครื่อง)**: เติม `coProducerEmail` 21 ใบ (TSS/แก้ว 15, EVT/แอม 2, WLT/เติร์ก 2, EVT/นาเดียร์ 1, PM/เพิรล 1) และเติมแก้วเป็น Co-Producer ให้งาน TSS ที่ยัง active + วันถ่าย ≥ วันนี้ ซึ่งช่องว่างอยู่ 20 ใบ (auto-fill v1.183 ช่วยได้แค่ใบที่จองหลังจากนั้น) · ไม่ทับใบที่คนเลือกคนอื่นไว้ · หลัง deploy `calendar-reconcile` จะ patch แขกให้เองในรอบถัดไป
+
+### Added — หวานอยู่ใน dropdown Producer ของ Content Agency ได้แล้ว
+
+หวานถูกเพิ่มเข้า User table (`producerOutlets={AGN}`) ตั้งแต่ v1.163.1 แต่ไม่เคยโผล่ในฟอร์ม เพราะ **ฟอร์มของ AGN อ่านรายชื่อจากชีท `_Users` ของ Producer Dashboard อย่างเดียว** — effect ที่โหลด `/api/producers` `return` ทิ้งทันทีเมื่อ outlet เป็น AGN
+
+- AGN รวมสองแหล่งแล้ว (ชีท ∪ User table, dedupe ด้วยอีเมล) → **/admin/permissions ใช้กับ AGN ได้เหมือนบ้านอื่น ไม่ต้องรอแก้ชีท**
+- ชีทมาก่อนในลิสต์โดยเจตนา: ชื่อเล่นในชีทคือตัวที่ใช้กรอง Project ID
+
+### Added — ช่อง Producer พิมพ์เองได้ทุก outlet
+
+คำสั่ง operator: ให้ทุกเมล `@thestandard.co` เข้ามาจองได้ การล็อกอินจำกัดโดเมนอยู่แล้วและ `/new` เปิดให้ทุก tier — ตัวขวางจริงคือ dropdown ที่บังคับเลือกจาก roster
+
+- ตัวเลือก `— ไม่มีในรายชื่อ · พิมพ์เอง —` ในทุก outlet รวม AGN → เปิดช่อง Name/Phone/Email · เบอร์เก็บด้วย เพราะคนนอก roster คือคนที่ต้องโทรหาจริง ๆ
+- **ปิดทางตายของ AGN**: เดิมถ้าชื่อเล่นของ Producer ไม่ตรงคอลัมน์ producer ของโปรเจกต์ไหนเลย ลิสต์ Project จะว่าง = จองไม่ได้ ซึ่งเกิดแน่กับคนที่เพิ่งถูกเพิ่มหรือกรอกเอง → ไม่มีตัวไหนตรง = โชว์ทั้งหมด
+- เปลี่ยน outlet แล้วรีเซ็ตกลับไปเลือกจากรายชื่อของบ้านใหม่ · ฉบับร่างที่ค้างไว้จำสถานะ "พิมพ์เอง" ได้
+
+- 8 เคสทดสอบใหม่ (`calendar-attendees`) + repoint เทสของ reconcile มาที่ helper ตัวใหม่ รวม **570 ผ่าน**
+
 ## [1.184.0] — 2026-08-21
 
 ### Added — กระดิ่งแจ้งเตือนข้าง "New Booking"

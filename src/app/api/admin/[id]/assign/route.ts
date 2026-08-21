@@ -13,6 +13,7 @@ import {
   updateCalendarEventAttendees,
 } from '@/lib/google-calendar'
 import { requireConsole } from '@/lib/session'
+import { bookingCalendarAttendees } from '@/lib/calendar-attendees'
 import { syncBookingOT } from '@/lib/ot-sync'
 import { normalizeFreelancers, freelancerEmails } from '@/lib/freelancers'
 import { format } from 'date-fns'
@@ -115,20 +116,20 @@ export async function POST(
     let calendarSync: CalendarSync = { ok: true, eventId: booking.calendarEventId, action: 'deferred', note: 'Calendar event will be created when admin approves' }
     let resolvedCalendarEventId = booking.calendarEventId
 
-    // v1.131 — the Producer keeps their calendar guest invite (added at
-    // confirm-time, see approve/route.ts + google-calendar.ts createCalendarEvent)
-    // across crew re-assigns — a patch keyed on emailRecipients alone would
-    // silently drop the producer as a "removed guest".
-    const producerEmailTrimmed = (booking.producerEmail || '').trim()
-    const withProducerAttendees = producerEmailTrimmed && !emailRecipients.some(e => e.toLowerCase() === producerEmailTrimmed.toLowerCase())
-      ? [...emailRecipients, producerEmailTrimmed]
-      : emailRecipients
-    // Same for the Director picked at booking time — they must survive crew
-    // re-assign patches, not get dropped as a "removed guest".
-    const directorEmailTrimmed = (booking.directorEmail || '').trim()
-    const calendarAttendees = directorEmailTrimmed && !withProducerAttendees.some(e => e.toLowerCase() === directorEmailTrimmed.toLowerCase())
-      ? [...withProducerAttendees, directorEmailTrimmed]
-      : withProducerAttendees
+    // v1.131 — Producer/Co-Producer/Director ต้องรอด patch ของการ re-assign ครู
+    // ให้ได้ (patch แทนที่ลิสต์แขกทั้งชุด ใครหายไปจากลิสต์ = ได้ใบยกเลิก)
+    //
+    // v1.185 — ย้ายมาใช้ bookingCalendarAttendees() ที่เดียว. ตรงนี้เคยประกอบเอง
+    // และ **ไม่มีการ์ด AGN-only ของ directorEmail** ต่างจาก createCalendarEvent
+    // กับ calendar-reconcile → ทุกครั้งที่ re-assign ครูของ outlet ที่ไม่ใช่ AGN
+    // ไดเรกเตอร์ถูกใส่กลับเข้าไปเงียบ ๆ ทั้งที่ ops สั่งเอาออกตั้งแต่ v1.143.1
+    const calendarAttendees = bookingCalendarAttendees({
+      assignedEmails: emailRecipients,
+      producerEmail: booking.producerEmail,
+      coProducerEmail: (booking as any).coProducerEmail,
+      directorEmail: booking.directorEmail,
+      outletCode: booking.outlet?.code,
+    })
 
     if (booking.calendarEventId) {
       // (1) Patch existing event's attendees.

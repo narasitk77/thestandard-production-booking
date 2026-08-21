@@ -519,7 +519,11 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
                 <div className="ops-section-title mb-2">People</div>
                 <div className="text-gray-800 flex items-start gap-1.5">
                   <User className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
-                  <span>Producer: {b.producer || '—'}</span>
+                  <span>
+                    Producer: {b.producer || '—'}
+                    {/* v1.185 — Co-Producer เก็บลง DB มาตั้งแต่ v1.59 แต่ drawer ไม่เคยโชว์ */}
+                    {b.coProducer ? <> · Co-Pro: {b.coProducer}</> : null}
+                  </span>
                 </div>
                 <CrewLine crew={b.assignedCrew} meEmail={meEmail} className="text-[12px] text-gray-600 mt-1 ml-5" />
                 {bookingFreelancers.length > 0 && (
