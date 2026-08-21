@@ -883,6 +883,20 @@ model NasSyncState {
 // there: the reporter never learned whether anyone looked, and nothing tracked
 // what was still open. These two tables turn each submission into a ticket the
 // admin works and the reporter can follow, with a real conversation attached.
+// v1.184 — "คนนี้เปิดกระดิ่งแจ้งเตือนล่าสุดเมื่อไหร่" อย่างเดียว
+//
+// จงใจแยกจาก User: คอลัมน์ใน User มีความหมายว่า "ใครเป็นสตาฟ / ใครอยู่ dropdown
+// Producer" — เอา state ของ UI ไปปนจะทำให้ตารางนั้นอ่านยากขึ้น และ /admin/permissions
+// ก็ไม่ควรมีแถวโผล่มาเพราะมีคนกดกระดิ่ง (email อาจยังไม่มีแถวใน User ได้)
+//
+// ตัว feed ไม่ถูกเก็บที่ไหนเลย — derive จากสถานะจริงทุกครั้ง (ดู lib/notifications.ts)
+model NotificationSeen {
+  email String   @id
+  at    DateTime @default(now())
+
+  @@map("notification_seen")
+}
+
 model FeedbackTicket {
   id            String  @id @default(cuid())
   /// Human-facing number — rendered FB-001. Sequential so people can quote it.

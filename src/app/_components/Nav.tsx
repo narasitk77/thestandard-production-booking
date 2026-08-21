@@ -8,6 +8,7 @@ import { signOut } from 'next-auth/react'
 import { hasConsoleAccess } from '@/lib/roles'
 import { tierAllows, type Tier } from '@/lib/tiers'
 import { canReadReviewContent } from '@/lib/review-access'
+import NotificationBell from '@/app/_components/NotificationBell'
 
 interface NavProps {
   session: { email: string; role: string } | null
@@ -169,6 +170,8 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
 
         {/* Right cluster: CTA + identity (desktop) */}
         <div className="hidden md:flex items-center gap-2 ml-auto">
+          {/* v1.184 — กระดิ่งขึ้นเฉพาะคนที่ล็อกอิน (ขอบเขตเนื้อหาตัดสินฝั่ง server) */}
+          {session && <NotificationBell />}
           {canCreate && (
             <Link
               href="/new"
@@ -194,6 +197,7 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
 
         {/* Mobile right cluster: CTA + hamburger */}
         <div className="md:hidden flex items-center gap-2 ml-auto">
+          {session && <NotificationBell />}
           {canCreate && (
             <Link
               href="/new"
