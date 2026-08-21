@@ -46,6 +46,16 @@ step 2 ของ routine เดิมหายไปตอนย้ายมา 
 
 ---
 
+## [1.185.1] — 2026-08-21
+
+### Fixed — audit ของ calendar reconcile รายงานลิสต์แขกผิดตัวแปร
+
+`calendar.reconcile_patched` บันทึก `toAttendees: assignedEmails` (ลิสต์ครูเปล่า ๆ) ทั้งที่ค่าที่ patch ไปจริงคือ `calendarAttendees` (ครู + Producer + Co-Producer + Director) → audit บอกว่า Producer/Co-Producer **ไม่ได้อยู่ในลิสต์แขก ทั้งที่อยู่**
+
+เจอเพราะไล่ตรวจ v1.185 ว่า "แก้วมาปฏิทินหรือยัง": audit ตอบว่าไม่มาทั้ง 11 แถว แต่พออ่าน event จาก Google จริง (`GET /api/admin/<id>/calendar-resync`) พบว่า `phoemsiri.p@` อยู่ในแขกเรียบร้อยและ `action: "ok"` **audit ที่รายงานไม่ตรงของจริงแย่กว่าไม่มี audit เพราะมันทำให้สรุปผิด** — ถ้าเชื่อมันก็จะไป "แก้" สิ่งที่ไม่ได้พัง
+
+- `toAttendees` = ลิสต์ที่ส่งไปจริง · เพิ่มฟิลด์ `crewOnly` แยกไว้สำหรับคนที่อยากดูเฉพาะครู
+
 ## [1.185.0] — 2026-08-21
 
 ### Fixed — Co-Producer ไม่เคยได้ invite ปฏิทินเลยตั้งแต่ v1.59

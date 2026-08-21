@@ -503,7 +503,13 @@ async function processBooking(
       changes: {
         eventId: booking.calendarEventId,
         fromAttendees: calendarEvent.attendees,
-        toAttendees: assignedEmails,
+        // v1.185.1 — เคยบันทึก `assignedEmails` (ลิสต์ครูเปล่า ๆ) ทั้งที่ค่าที่ patch
+        // ไปจริงคือ `calendarAttendees` (ครู + Producer + Co-Producer + Director)
+        // ผลคือ audit บอกว่า Producer/Co-Producer ไม่ได้อยู่ในลิสต์แขก ทั้งที่อยู่ —
+        // เจอเพราะไล่เคส "แก้วมาปฏิทินหรือยัง" แล้ว audit ตอบว่าไม่มา แต่ปฏิทินจริงมี
+        // audit ที่รายงานไม่ตรงของจริงแย่กว่าไม่มี audit เพราะมันทำให้สรุปผิด
+        toAttendees: calendarAttendees,
+        crewOnly: assignedEmails,
         dryRun: Boolean(options.dryRun),
       },
     })
