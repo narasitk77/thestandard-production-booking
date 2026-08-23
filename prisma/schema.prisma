@@ -274,6 +274,8 @@ model Booking {
   assignedEmails   String[]
   mainVideographerEmail String?              // designated lead camera, picked at assign-time
   agencyRef        String?
+  /// v1.187 — เตือน Producer ให้ใส่เลข QU จริงครั้งล่าสุดเมื่อไหร่ (สัปดาห์ละครั้ง, เร่งเป็นทุกวันเมื่อใกล้ถ่าย)
+  quRemindedAt     DateTime?
   // Project ID layer — links booking to Producer Dashboard "All Projects".
   // Format PP-YY-NNN (e.g. PP-26-001). Immutable. projectName is a snapshot
   // captured at booking time so we can render without re-fetching the sheet.
@@ -565,6 +567,8 @@ enum DocKind {
 }
 
 enum ReminderType {
+  /// v1.187 — งาน AGN/Advertorial ที่ Agency Ref ยังเว้นว่างหรือเป็นตัวยึด (1234 / QU-xxxxTBC)
+  AGENCY_REF_MISSING
   LOAN_DUE
   LOAN_OVERDUE
   RENTAL_RETURN_DUE

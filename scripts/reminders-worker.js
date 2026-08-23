@@ -54,7 +54,14 @@ async function runOnce() {
     }
     const json = JSON.parse(text)
     console.log(
-      `[reminders] detected=${json.detected} created=${json.created} resolved=${json.resolved} open=${json.openCount} discord=${json.dispatched?.discord} email=${json.dispatched?.email}`,
+      "[reminders] detected=" + json.detected + " created=" + json.created + " resolved=" + json.resolved +
+        " open=" + json.openCount + " discord=" + (json.dispatched && json.dispatched.discord) +
+        " email=" + (json.dispatched && json.dispatched.email) +
+        // v1.187 — งานเตือนเลข QU ต้องมีร่องรอยใน log ไม่งั้นล้มแล้วไม่มีใครรู้
+        " | qu: pending=" + (json.quReminder && json.quReminder.pending) +
+        " emailed=" + (json.quReminder && json.quReminder.emailed) +
+        " failed=" + (json.quReminder && json.quReminder.failed) +
+        (json.quReminder && json.quReminder.error ? " ERROR=" + json.quReminder.error : ""),
     )
   } catch (err) {
     console.error('[reminders] run failed:', err?.message || err)

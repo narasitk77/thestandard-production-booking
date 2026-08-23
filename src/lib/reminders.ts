@@ -14,6 +14,8 @@ import { prisma } from './db'
 import { notifyDiscord, notifyEmailDigest } from './notify'
 import type { ReminderType } from '@prisma/client'
 import { startOfTodayBangkok } from './bangkok-day'
+import { needsRealQuRef } from './qu-reminder'
+import { runQuReminderSweep, type QuReminderResult } from './qu-reminder-dispatch'
 
 const DAY = 86_400_000
 
@@ -46,6 +48,35 @@ async function detect(today: Date): Promise<Candidate[]> {
   const repairAgingDays = envInt('REPAIR_AGING_DAYS', 7)
   const gearLookahead = envInt('SHOOT_GEAR_LOOKAHEAD_DAYS', 3)
   const warrantyLookahead = envInt('WARRANTY_LOOKAHEAD_DAYS', 30)
+
+  // 0) v1.187 — งาน Agency ที่ยังไม่มีเลข QU จริง (เว้นว่าง / 1234 / QU-xxxxTBC)
+  //
+  // อยู่ใน detect() เพื่อให้ได้ dedupe + auto-resolve + หน้า /admin/reminders ฟรี:
+  // พอ Producer ใส่เลขจริง เงื่อนไขหายเอง แถวถูก resolve เอง ไม่ต้องมีใครไปกด
+  // (เมลที่ส่งถึง **ตัว Producer** อยู่คนละที่ — runQuReminderSweep ใน
+  // qu-reminder-dispatch.ts — เพราะ digest ของ reminders ส่งถึงแอดมินเท่านั้น)
+  const agencyPending = await prisma.booking.findMany({
+    where: {
+      deletedAt: null,
+      status: { not: 'CANCELLED' },
+      category: 'ADVERTORIAL',
+      outlet: { code: 'AGN' },
+    },
+    select: { id: true, bookingCode: true, agencyRef: true, shootDate: true, producer: true },
+  })
+  for (const b of agencyPending) {
+    if (!needsRealQuRef(b.agencyRef)) continue
+    const cur = (b.agencyRef || '').trim()
+    out.push({
+      type: 'AGENCY_REF_MISSING',
+      dedupeKey: `AGENCY_REF_MISSING:${b.bookingCode || b.id}`,
+      dueDate: b.shootDate,
+      title: `ยังไม่มีเลข QU — ${b.bookingCode || b.id}`,
+      body: `Producer: ${b.producer || '—'} · ${cur === '' ? 'Agency Ref เว้นว่าง' : `Agency Ref = "${cur}" (ตัวยึด)`}`,
+      entityType: 'Booking',
+      entityId: b.id,
+    })
+  }
 
   // 1) Equipment loans due / overdue
   const loans = await prisma.equipmentLoan.findMany({
@@ -195,6 +226,7 @@ async function detect(today: Date): Promise<Candidate[]> {
 }
 
 const TYPE_HEADER: Record<ReminderType, string> = {
+  AGENCY_REF_MISSING: '🧾 ยังไม่มีเลข QU (Agency Ref)',
   LOAN_OVERDUE: '🔴 ยืมอุปกรณ์เกินกำหนด',
   LOAN_DUE: '🟡 ใกล้ครบกำหนดคืนอุปกรณ์',
   RENTAL_RETURN_DUE: '📦 ของเช่าถึงกำหนดคืน',
@@ -237,6 +269,8 @@ export type ReminderScanResult = {
   openCount: number
   dispatched: { discord: boolean; email: boolean } | null
   candidates?: Array<{ type: string; title: string; dueDate: string | null }>
+  /** v1.187 — ผลของการเตือน Producer เรื่องเลข QU (เกาะรอบเดียวกัน) */
+  quReminder?: QuReminderResult | { error: string }
 }
 
 export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<ReminderScanResult> {
@@ -245,6 +279,14 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
   const candidates = await detect(today)
 
   if (dryRun) {
+    // v1.187 — dry-run ต้องพรีวิวการเตือน QU ได้ด้วย (ไม่ส่งเมล ไม่ประทับเวลา)
+    // ไม่งั้นทางเดียวที่จะรู้ว่าจะส่งถึงใครกี่ฉบับคือ "ส่งจริงแล้วดู" ซึ่งย้อนไม่ได้
+    let quPreview: QuReminderResult | { error: string }
+    try {
+      quPreview = await runQuReminderSweep({ dryRun: true })
+    } catch (e: any) {
+      quPreview = { error: e?.message || String(e) }
+    }
     return {
       dryRun: true,
       detected: candidates.length,
@@ -253,6 +295,7 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
       openCount: candidates.length,
       dispatched: null,
       candidates: candidates.map((c) => ({ type: c.type, title: c.title, dueDate: ymd(c.dueDate) })),
+      quReminder: quPreview,
     }
   }
 
@@ -318,6 +361,17 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
     })
   }
 
+  // v1.187 — เมลถึง **ตัว Producer** ให้กลับมาใส่เลข QU จริง เกาะรอบ daily ของ
+  // reminders worker (มี heartbeat/dead-man อยู่แล้ว) แทนการตั้ง worker ตัวที่ 13
+  // ล้มแล้วต้องไม่ทำให้ reminders ทั้งรอบพัง — งานเตือนไม่ควรล้มงานเตือนอื่น
+  let quReminder: QuReminderResult | { error: string }
+  try {
+    quReminder = await runQuReminderSweep()
+  } catch (e: any) {
+    console.error('[reminders] qu-reminder sweep failed:', e?.message || e)
+    quReminder = { error: e?.message || String(e) }
+  }
+
   return {
     dryRun: false,
     detected: candidates.length,
@@ -325,5 +379,6 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
     resolved: staleIds.length,
     openCount: openReminders.length,
     dispatched,
+    quReminder,
   }
 }
