@@ -46,6 +46,30 @@ step 2 ของ routine เดิมหายไปตอนย้ายมา 
 
 ---
 
+## [1.189.0] — 2026-08-23
+
+### Fixed — หน้าสิทธิ์ติดป้าย "ผู้อนุมัติ OT" ให้ Project Manager ทั้งที่ระบบไม่ให้
+
+operator: *"พวก Project manager มันเป็นชื่อตำแหน่ง เอา OT approval ออก"* — ไล่แล้วพบว่า**ระบบไม่เคยให้สิทธิ์อยู่แล้ว** `getOTApproverAccess()` เรียก `positionGrantsOT()` ซึ่งมีการ์ด `!pos.includes('project manager')` มาตั้งแต่ v1.102.6 · Project Manager เข้าหน้าอนุมัติ OT ไม่ได้จริง ๆ และเมนู "OT · Approve" ก็ไม่ขึ้น
+
+**ที่ผิดคือหน้าจอ** — `/admin/permissions` คำนวณเองด้วย `(u.position || '').toLowerCase().includes('manager')` **โดยไม่มีการ์ดนั้น** → ติดป้ายผู้อนุมัติ OT ให้ Project Manager 7 คน และนับรวมใน `otCount`
+
+**หน้าจอบอก 12 คน · ของจริง 5 คน**
+
+- แก้ให้เรียก `positionGrantsOT` ตัวเดียวกับที่ระบบใช้ตัดสินจริง — กฎเดียว ที่เดียว
+- +3 เทสล็อก**ความหมาย** (ไม่ใช่ implementation) ด้วยตำแหน่งที่ ops ใช้จริง: `Project Manager` / `Senior Project Manager` / `Assistant Project Manager` ต้องไม่ได้สิทธิ์ · `Video Production Manager` / `Assistant to KND Manager` ยังได้ (legacy path ก่อนมี role tier) รวม **589 ผ่าน**
+
+> **หน้าจอสิทธิ์ที่บอกสิทธิ์ผิดอันตรายกว่าไม่มีหน้าจอ** เพราะคนเชื่อแล้วไปวางแผนต่อ — ตระกูลเดียวกับ v1.185.1 (`toAttendees` ผิดตัวแปร) และ v1.186 (audit อ้างว่าส่งเมลถึง 85/85 ครั้ง): **กฎเดียวกันถูกเขียนสองที่ แล้วสองที่นั้นเพี้ยนจากกัน**
+
+### Changed — ปลด `krittapon.j@` ออกจาก tier sound-mgmt (แก้ที่ข้อมูล ไม่ใช่โค้ด)
+
+operator: *"เอาติ๊กเฉพาะทีมเสียงออกจาก krittapon.j@ ตอนนี้มันบังคับเขาอยู่"* — ไม่มี "ติ๊ก" อยู่จริง มันคือกฎที่อนุมานจากตำแหน่ง: `resolveTier` เช็ค `position` มี `senior sound` ไหม **ก่อน**บรรทัด COORDINATOR (ตั้งใจตั้งแต่ v1.90) เขาเป็น COORDINATOR แต่ถูกดันลง `sound-mgmt` ที่ถูก DENY `/admin/workspace`, `/admin/routine`, `/admin/upload-review`
+
+- แก้ที่ข้อมูล: `position` `Senior Sound Engineer` → **`Sound Engineer (Senior)`** · ยังมีคำว่า sound (ยังนับเป็นช่างเสียงใน `crewRoleFromPosition` → การเตือน "⚠️ ขาดช่างเสียง" ไม่เปลี่ยน) แต่ไม่ match `senior sound` และไม่มี manager/coordinator ที่จะไปติดสิทธิ์ OT หรือ dropdown Co-Producer
+- ถาวร: `team-profiles.ts` เขียน `position` เฉพาะตอนสร้าง user ครั้งแรก ([auth.ts:75](src/lib/auth.ts)) ไม่มี import ตัวไหนทับกลับ · เจ้าตัวต้อง sign out/in ใหม่เพราะ tier ฝังใน JWT
+- ย้อนได้: `UPDATE users SET position='Senior Sound Engineer' WHERE email='krittapon.j@thestandard.co'`
+- **ยังไม่ได้แก้ที่ราก** — ถ้าต้องการให้ role COORDINATOR ชนะการอนุมานจากตำแหน่ง ต้องแก้ `resolveTier` ซึ่งกระทบทุกคนที่เป็น sound lead จึงยังไม่แตะ
+
 ## [1.188.0] — 2026-08-23
 
 ### Changed — งาน Advertorial ต้องมี Agency Ref **ทุกครั้ง ทุกบ้าน** + ตัวยึดคือ `QU-1234TBC`

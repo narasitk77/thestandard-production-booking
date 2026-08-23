@@ -89,3 +89,31 @@ test('canAddUser: Admin/Manager within their assignable set, Coordinator never',
   assert.equal(canAddUser('COORDINATOR', 'USER'), false)
   assert.equal(canAddUser('SUPPORT', 'USER'), false)
 })
+
+// ── v1.189 — Project Manager ไม่ใช่ผู้อนุมัติ OT ───────────────────────────
+//
+// ของจริงบนพรอด: หน้า /admin/permissions คำนวณเองด้วย `position.includes('manager')`
+// ซึ่งไม่มีการ์ด "project manager" ที่ v1.102.6 ใส่ไว้ใน positionGrantsOT
+// → หน้าจอบอกว่ามีผู้อนุมัติ OT 12 คน ของจริง 5 คน (Project Manager 7 คนถูกติดป้ายผิด)
+//
+// เทสนี้ล็อกความหมายไว้ ไม่ใช่ล็อก implementation: ตำแหน่งที่ ops ใช้จริงต้องได้ผลตามนี้
+test('positionGrantsOT: Project Manager (PM office) ไม่ได้สิทธิ์อนุมัติ OT', () => {
+  for (const pos of [
+    'Project Manager', 'project manager', 'Senior Project Manager',
+    'Assistant Project Manager', 'Project Manager (PM)',
+  ]) {
+    assert.equal(positionGrantsOT(pos), false, pos)
+  }
+})
+
+test('positionGrantsOT: manager อื่นยังได้สิทธิ์ (legacy path ก่อนมี role tier)', () => {
+  for (const pos of ['Video Production Manager', 'Assistant to KND Manager', 'Studio Manager']) {
+    assert.equal(positionGrantsOT(pos), true, pos)
+  }
+})
+
+test('positionGrantsOT: ตำแหน่งที่ไม่มีคำว่า manager ไม่ได้สิทธิ์', () => {
+  for (const pos of ['Sound Engineer (Senior)', 'Producer', 'Videographer', '', null, undefined]) {
+    assert.equal(positionGrantsOT(pos as any), false, String(pos))
+  }
+})

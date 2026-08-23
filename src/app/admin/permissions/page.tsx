@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import {
   ROLES, ROLE_RANK, ROLE_LABEL, canEditUser, assignableRoles,
-  canApproveOTByRole, type Role,
+  canApproveOTByRole, positionGrantsOT, type Role,
 } from '@/lib/roles'
 import { OUTLETS } from '@/lib/data'
 
@@ -126,8 +126,15 @@ export default function PermissionsPage() {
   }
 
   // ── derived helpers ───────────────────────────────────────
+  // v1.189 — ใช้ positionGrantsOT ตัวเดียวกับที่ระบบใช้ตัดสินจริง
+  // (getOTApproverAccess ใน lib/session.ts) เดิมหน้านี้คำนวณเองด้วย
+  // `position.includes('manager')` ซึ่ง **ไม่มีการ์ด "project manager"** ที่
+  // v1.102.6 ใส่ไว้ → ติดป้าย "ผู้อนุมัติ OT" ให้ Project Manager ทั้ง 7 คน
+  // ทั้งที่เข้าหน้าอนุมัติจริงไม่ได้ (หน้าจอบอก 12 คน ของจริง 5 คน)
+  //
+  // หน้าจอสิทธิ์ที่บอกสิทธิ์ผิดอันตรายกว่าไม่มีหน้าจอ เพราะคนเชื่อแล้วไปวางแผนต่อ
   const canApproveOT = (u: User) =>
-    canApproveOTByRole(u.role) || (u.position || '').toLowerCase().includes('manager')
+    canApproveOTByRole(u.role) || positionGrantsOT(u.position)
 
   const displayName = (u: User) =>
     u.thaiName || u.name || u.email.split('@')[0]
