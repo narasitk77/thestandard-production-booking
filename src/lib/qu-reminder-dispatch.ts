@@ -34,9 +34,11 @@ export function quReminderEnabled(): boolean {
 }
 
 /**
- * งานที่ต้องตามเลข QU: **AGN + ADVERTORIAL** (ขอบเขตเดียวกับกฏ QU ตอนจอง v1.161)
+ * งานที่ต้องตามเลข QU: **ADVERTORIAL ทุก outlet** (v1.188 — ขอบเขตเดียวกับกฏตอนจอง
+ * ซึ่งเลิกจำกัดเฉพาะ AGN แล้วตามคำสั่ง operator "AD Required Agency ref ทุกบ้าน")
  * ไม่รวมงานที่ยกเลิก/ถูกลบ — เลิกทำแล้วไม่ต้องตั้งเบิก
- * รวมงานที่ถ่ายจบไปแล้ว: เลขนี้ใช้ตั้งเบิก ถ่ายเสร็จแล้วก็ยังต้องได้
+ * รวมงานที่ถ่ายจบไปแล้ว: เลขนี้ใช้ตั้งเบิก ถ่ายเสร็จแล้วก็ยังต้องได้ และเจ้าของงาน
+ * แก้ Agency Ref ตอน COMPLETED ได้แล้ว (v1.188) จึงมีทางออกให้จริง
  */
 export async function findBookingsMissingQuRef(): Promise<QuPendingBooking[]> {
   const rows = await prisma.booking.findMany({
@@ -44,7 +46,6 @@ export async function findBookingsMissingQuRef(): Promise<QuPendingBooking[]> {
       deletedAt: null,
       status: { not: 'CANCELLED' },
       category: 'ADVERTORIAL',
-      outlet: { code: 'AGN' },
     },
     select: {
       bookingCode: true, agencyRef: true, shootDate: true, status: true,

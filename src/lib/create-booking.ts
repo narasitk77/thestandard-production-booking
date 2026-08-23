@@ -14,7 +14,7 @@ import { logAudit } from '@/lib/audit'
 import { maybeAlertUrgentBooking } from '@/lib/urgent-booking'
 import { vpAssigneeEmail } from '@/lib/vp-assign'
 import { deriveBookingCategory } from '@/lib/booking-category'
-import { quRuleEnabled, isAcceptableQuRef, isQuPending, normalizeQuRef, quRefRejectMessage, pullQuRefFromProject } from '@/lib/agency-ref'
+import { quRuleEnabled, isAcceptableQuRef, isQuPending, normalizeQuRef, quRefRejectMessage, pullQuRefFromProject, QU_PENDING } from '@/lib/agency-ref'
 import { applyDefaultCoProducer } from '@/lib/outlet-coproducer'
 import { isValidHHMM } from '@/lib/shoot-window'
 
@@ -250,8 +250,11 @@ export async function createBookingFromPayload(
   // 2026-08-20) แต่ยังพยายามหาเลขจริงให้ก่อน: ถ้าโปรเจกต์เดียวกันเคยมีเลข QU จริง
   // อยู่แล้ว ใช้เลขนั้น — เจตนาของคนพิมพ์ "1234" คือ "ฉันไม่มีเลข" ไม่ใช่
   // "อย่าใช้เลขของโปรเจกต์นี้" จึงเป็นพฤติกรรมเดียวกับเว้นว่าง
+  //
+  // v1.188 — operator: *"งาน AD Required Agency ref ทุกครั้ง ทุกบ้าน"* → เลิกจำกัด
+  // เฉพาะ AGN. งาน Advertorial ของทุก outlet ต้องมีเลข (หรือตัวยึด QU-1234TBC)
   let agencyRefFinal: string | null = agencyRef || null
-  if (quRuleEnabled() && isAgency && String(bookingCategory).toUpperCase() === 'ADVERTORIAL') {
+  if (quRuleEnabled() && String(bookingCategory).toUpperCase() === 'ADVERTORIAL') {
     let ref = String(agencyRef || '').trim()
     if (ref && !isAcceptableQuRef(ref)) {
       return fail(400, quRefRejectMessage(ref))
@@ -260,7 +263,7 @@ export async function createBookingFromPayload(
       ref = (await pullQuRefFromProject(String(projectId))) || ref
     }
     if (!ref) {
-      return fail(400, 'งาน Agency ต้องมีเลขใบเสนอราคา (Product Code รูปแบบ QU-xxxx) — โปรเจกต์นี้ยังไม่เคยมีเลข QU ในระบบ ถ้ายังไม่มีเลขจริง ใส่ "1234" ไว้ก่อนได้ แล้วกลับมาแก้ทีหลัง')
+      return fail(400, `งาน Advertorial ต้องมีเลขใบเสนอราคา (Agency Ref / Product Code รูปแบบ QU-xxxx) — หากยังไม่ทราบเลข ใส่ "${QU_PENDING}" ไว้ก่อนได้ แล้วกลับมาแก้ที่ใบจองเมื่อได้เลขจริง`)
     }
     agencyRefFinal = normalizeQuRef(ref)
   }

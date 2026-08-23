@@ -155,8 +155,9 @@ export async function PATCH(
     // v1.183 — ตัวยึด "1234" (ยังไม่มีเลข QU) ผ่านได้เหมือนฝั่ง create ไม่งั้น
     // แอดมินจะแก้ใบที่ค้างตัวยึดอยู่ไม่ได้เลย
     let agencyRefValidated: string | null = agencyRef || null
+    // v1.188 — ทุกบ้าน ไม่ใช่แค่ AGN
     if (agencyRef !== undefined && agencyRef && quRuleEnabled()
-        && (existing as any).outlet?.code === 'AGN' && existing.category === 'ADVERTORIAL') {
+        && existing.category === 'ADVERTORIAL') {
       if (!isAcceptableQuRef(agencyRef)) {
         return NextResponse.json({ error: quRefRejectMessage(agencyRef) }, { status: 400 })
       }

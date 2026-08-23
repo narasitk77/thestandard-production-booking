@@ -15,14 +15,14 @@ import { bookingDisplayName } from '@/lib/display'
 import { shootTypeLabel } from '@/lib/utils'
 import NumberStepper from '@/app/_components/NumberStepper'
 import { SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
-import { isQuPending, QU_PENDING } from '@/lib/qu-ref'
+import { isQuPending, QU_PENDING, QU_FIELD_HINT } from '@/lib/qu-ref'
 
 const SHOOT_TYPES = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT']
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   id: string; bookingCode?: string | null; shootDate: string; shootEndDate?: string | null
-  status: string; createdByEmail?: string | null; producerEmail?: string | null
+  status: string; category?: string | null; createdByEmail?: string | null; producerEmail?: string | null
   callTime: string; estimatedWrap?: string; shootType: string; locationName?: string
   producer: string; creative: string[]; crewRequired: string[]
   cameraCount?: number | null; micCount?: number | null; vanCount?: number; specialEquipment?: string[]
@@ -89,6 +89,11 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
   // venue pin/link often changes after approval, and pinging an admin for
   // every updated Google-Maps link was the old (painful) path.
   const locationOnly = !!booking && booking.status === 'CONFIRMED' && isOwner
+  // v1.188 — เลข QU มักมาหลังถ่ายเสร็จ ถ้าล็อกงาน COMPLETED ไว้ เจ้าของงานก็ไม่มี
+  // ทางเติมเลขจริงเลย แล้วบอทเตือนจะจี้ไปตลอดกาลโดยไม่มีทางออก
+  // (operator: "ให้เจ้าของงานเข้าแก้ไข Agency ref ได้ภายหลังด้วย")
+  const agencyRefOnly = !!booking && booking.status === 'COMPLETED' && isOwner
+  const isAdvertorial = !!booking && booking.category === 'ADVERTORIAL'
 
   const toggleSpecial = (item: string) =>
     setForm(f => ({ ...f, specialEquipment: f.specialEquipment.includes(item) ? f.specialEquipment.filter(x => x !== item) : [...f.specialEquipment, item] }))
@@ -97,7 +102,9 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
     setSaving(true)
     setSaveError('')
     try {
-      const body = locationOnly ? { locationName: form.locationName || null } : {
+      const body = agencyRefOnly
+        ? { agencyRef: form.agencyRef || null }
+        : locationOnly ? { locationName: form.locationName || null, agencyRef: form.agencyRef || null } : {
         callTime: form.callTime,
         estimatedWrap: form.estimatedWrap || null,
         shootType: form.shootType,
@@ -138,6 +145,45 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
       </div>
     )
   }
+  // v1.188 — COMPLETED + owner + งาน AD → หน้าเล็ก ๆ แก้ Agency Ref อย่างเดียว
+  if (agencyRefOnly && isAdvertorial) {
+    return (
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+        <BackButton fallback="/my-bookings" className="text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1 mb-3" iconClassName="w-3.5 h-3.5" />
+        <div className="ops-card ops-card-pad mb-3">
+          <div className="text-sm font-medium text-gray-900">
+            <span className="text-gray-500 font-normal mr-1">[{booking.outlet.code}]</span>{bookingDisplayName(booking)}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {new Date(booking.shootDate).toISOString().slice(0, 10)}
+            {booking.bookingCode && <> · {booking.bookingCode}</>}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">
+            งานถ่ายจบแล้ว — แก้ได้เฉพาะ <strong>Agency Ref</strong> (เลข QU มักมาหลังถ่าย) ฟิลด์อื่นกรุณาแจ้งทีมงาน
+          </p>
+        </div>
+        <div className="ops-card ops-card-pad space-y-4">
+          {saveError && <div className="ops-card px-3 py-2 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">{saveError}</div>}
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">Agency Ref (Product Code)</label>
+            <input className="ops-input" placeholder={`QU-4289 — ยังไม่ทราบเลข ใส่ ${QU_PENDING}`}
+              value={form.agencyRef} onChange={e => setForm({ ...form, agencyRef: e.target.value })} />
+            {isQuPending(form.agencyRef) && (
+              <p className="text-[11px] text-amber-600 mt-1">⏳ ยังไม่ทราบเลข QU — ระบบจะเตือนจนกว่าจะแก้เป็นเลขจริง</p>
+            )}
+            <p className="text-[11px] text-gray-400 mt-1">{QU_FIELD_HINT}</p>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Link href={`/dashboard/${id}`} className="ops-btn-secondary">ยกเลิก</Link>
+            <button type="button" onClick={handleSave} disabled={saving} className="ops-btn-primary">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // v1.150.1 — CONFIRMED + owner → compact location-only editor. The server
   // route enforces the same restriction; this UI just matches it.
   if (locationOnly) {
@@ -154,7 +200,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
             {booking.bookingCode && <> · {booking.bookingCode}</>}
           </div>
           <p className="text-[11px] text-gray-400 mt-1">
-            งาน Confirmed แล้ว — แก้ได้เฉพาะ <strong>สถานที่ / ลิงก์แผนที่</strong> (อัปเดตไปที่ Calendar และไฟล์ _SHOOT.txt ให้อัตโนมัติ พร้อมส่งอีเมลแจ้งทีมงาน) ฟิลด์อื่นกรุณาแจ้งทีมงาน
+            งาน Confirmed แล้ว — แก้ได้เฉพาะ <strong>สถานที่ / ลิงก์แผนที่</strong> (อัปเดตไปที่ Calendar และไฟล์ _SHOOT.txt ให้อัตโนมัติ พร้อมส่งอีเมลแจ้งทีมงาน) และ <strong>Agency Ref</strong> ฟิลด์อื่นกรุณาแจ้งทีมงาน
           </p>
         </div>
         <div className="ops-card ops-card-pad space-y-4">
@@ -169,10 +215,21 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
               onChange={e => setForm({ ...form, locationName: e.target.value })}
             />
           </div>
+          {isAdvertorial && (
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Agency Ref (Product Code)</label>
+              <input className="ops-input" placeholder={`QU-4289 — ยังไม่ทราบเลข ใส่ ${QU_PENDING}`}
+                value={form.agencyRef} onChange={e => setForm({ ...form, agencyRef: e.target.value })} />
+              {isQuPending(form.agencyRef) && (
+                <p className="text-[11px] text-amber-600 mt-1">⏳ ยังไม่ทราบเลข QU — ระบบจะเตือนจนกว่าจะแก้เป็นเลขจริง</p>
+              )}
+              <p className="text-[11px] text-gray-400 mt-1">{QU_FIELD_HINT}</p>
+            </div>
+          )}
           <div className="flex items-center justify-end gap-2 pt-1">
             <Link href={`/dashboard/${id}`} className="ops-btn-secondary">ยกเลิก</Link>
             <button type="button" onClick={handleSave} disabled={saving} className="ops-btn-primary">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึกสถานที่
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
             </button>
           </div>
         </div>

@@ -59,19 +59,36 @@ export async function PATCH(
     //                link) routinely changes after approval, and producers had
     //                no way to paste the updated link — admins were pinged for
     //                every venue-pin change. Everything else stays locked.
-    // COMPLETED/CANCELLED stay uneditable.
-    if (existing.status !== 'REQUESTED' && existing.status !== 'CONFIRMED') {
+    //   COMPLETED  → AGENCY REF ONLY (v1.188): เลข QU มักมาจากฝ่ายจัดซื้อ/ลูกค้า
+    //                **หลังถ่ายเสร็จ** ถ้าล็อกไว้ เจ้าของงานก็ไม่มีทางเติมเลขจริง
+    //                ได้เลย แล้วบอทเตือนก็จะจี้ไปตลอดกาลโดยไม่มีทางออก
+    //                (operator: "ให้เจ้าของงานเข้าแก้ไข Agency ref ได้ภายหลังด้วย")
+    // CANCELLED stays uneditable — งานที่เลิกแล้วไม่ต้องตั้งเบิก
+    if (existing.status === 'CANCELLED' || existing.deletedAt) {
       return NextResponse.json(
-        { error: 'งานนี้อยู่ในสถานะที่แก้ไขไม่ได้แล้ว — แก้ได้เฉพาะงาน Requested (ทุกฟิลด์) หรือ Confirmed (เฉพาะสถานที่)' },
+        { error: 'งานนี้ยกเลิกแล้ว แก้ไขไม่ได้' },
+        { status: 409 },
+      )
+    }
+    if (existing.status !== 'REQUESTED' && existing.status !== 'CONFIRMED' && existing.status !== 'COMPLETED') {
+      return NextResponse.json(
+        { error: 'งานนี้อยู่ในสถานะที่แก้ไขไม่ได้แล้ว' },
         { status: 409 },
       )
     }
     const locationOnly = existing.status === 'CONFIRMED'
+    const agencyRefOnly = existing.status === 'COMPLETED'
 
     const body = await request.json()
     // PRODUCER-EDITABLE WHITELIST ONLY. Anything not listed here is ignored.
     // In location-only mode every other field is dropped before destructuring.
-    const src = locationOnly ? { locationName: body?.locationName } : body
+    // v1.188 — CONFIRMED เปิดให้แก้ Agency Ref ได้ด้วย (เดิมสถานที่อย่างเดียว)
+    // และ COMPLETED เปิดเฉพาะ Agency Ref
+    const src = agencyRefOnly
+      ? { agencyRef: body?.agencyRef }
+      : locationOnly
+        ? { locationName: body?.locationName, agencyRef: body?.agencyRef }
+        : body
     const {
       callTime, estimatedWrap, shootType, locationName, producer,
       creative, crewRequired, cameraCount, micCount, vanCount,
@@ -81,8 +98,9 @@ export async function PATCH(
     // v1.161 — กฏ QU (เหมือน create/PATCH): งาน Agency (Advertorial) แก้ Agency ref
     // ได้เฉพาะรูปแบบ QU. v1.183 — ตัวยึด "1234" (ยังไม่มีเลข QU) ผ่านได้ด้วย
     let agencyRefValidated: string | null = agencyRef || null
+    // v1.188 — ทุกบ้าน ไม่ใช่แค่ AGN
     if (agencyRef !== undefined && agencyRef && quRuleEnabled()
-        && existing.outlet.code === 'AGN' && existing.category === 'ADVERTORIAL') {
+        && existing.category === 'ADVERTORIAL') {
       if (!isAcceptableQuRef(agencyRef)) {
         return NextResponse.json({ error: quRefRejectMessage(agencyRef) }, { status: 400 })
       }
@@ -179,7 +197,14 @@ export async function PATCH(
               ...Object.entries(fieldChanges).map(([k, { from, to }]) => `${FIELD_LABELS[k] || k}: ${fmt(from)} → ${fmt(to)}`),
               ...titleChanges.map(t => `Episode title — ${t}`),
             ].join('\n')
-            const text = `Producer แก้ไข${locationOnly ? 'สถานที่ (งาน Confirmed แล้ว)' : 'รายละเอียดงาน (สถานะ Requested)'}
+            // v1.188 — โหมดเพิ่มมา ป้ายต้องตรงกับสิ่งที่แก้ได้จริง ไม่งั้นเมลบอกว่า
+            // "แก้สถานที่" ทั้งที่คนแก้เลข QU
+            const modeLabel = agencyRefOnly
+              ? 'Agency Ref (งานถ่ายจบแล้ว)'
+              : locationOnly
+                ? 'สถานที่ / Agency Ref (งาน Confirmed แล้ว)'
+                : 'รายละเอียดงาน (สถานะ Requested)'
+            const text = `Producer แก้ไข${modeLabel}
 
 Booking: ${code}
 ${booking.outlet.name} · ${booking.program.name} · ${shootDate}

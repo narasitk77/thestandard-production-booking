@@ -60,7 +60,6 @@ async function detect(today: Date): Promise<Candidate[]> {
       deletedAt: null,
       status: { not: 'CANCELLED' },
       category: 'ADVERTORIAL',
-      outlet: { code: 'AGN' },
     },
     select: { id: true, bookingCode: true, agencyRef: true, shootDate: true, producer: true },
   })

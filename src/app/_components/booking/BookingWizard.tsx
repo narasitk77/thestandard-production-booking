@@ -10,7 +10,7 @@ import {
 import { OUTLETS, CREW_OPTIONS, SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation, roomDefaultCameras } from '@/lib/locations'
 import NumberStepper from '@/app/_components/NumberStepper'
-import { isAcceptableQuRef, isQuPending, QU_PENDING } from '@/lib/qu-ref'
+import { isAcceptableQuRef, isQuPending, QU_PENDING, QU_FIELD_HINT } from '@/lib/qu-ref'
 import { defaultCoProducerFor } from '@/lib/outlet-coproducer'
 
 /* =============================================================================
@@ -663,6 +663,15 @@ export default function BookingWizard() {
         if (needsCustomText && !locationCustom.trim()) errs.locationCustom = 'กรุณาระบุสถานที่จริง'
       }
     } else if (s === 4) {
+      // v1.188 — งาน AD ต้องมี Agency Ref ทุกบ้าน (ตัวตัดสินจริงอยู่ฝั่ง server
+      // แต่บอกตั้งแต่ในฟอร์มดีกว่าปล่อยให้กด submit แล้วโดนตีกลับ)
+      if (isAdvertorialBooking) {
+        if (agencyRef.trim() === '') {
+          errs.agencyRef = `กรุณากรอก Agency Ref — หากยังไม่ทราบเลข ใส่ ${QU_PENDING}`
+        } else if (!isAcceptableQuRef(agencyRef)) {
+          errs.agencyRef = `รูปแบบต้องเป็น QU ตามด้วยตัวเลข — หากยังไม่ทราบเลข ใส่ ${QU_PENDING}`
+        }
+      }
       // v1.185 — "พิมพ์เอง" ใช้ได้ทุก outlet: ตรวจชื่อ+อีเมลแทนการเลือกจากรายชื่อ
       if (producerCustom) {
         if (!producerName.trim()) errs.producerName = 'กรุณากรอกชื่อ Producer'
@@ -1604,32 +1613,35 @@ export default function BookingWizard() {
                       only relevant for Advertorial work — hidden for Original Content. */}
                   {isAdvertorialBooking && (
                     <div>
-                      <Label htmlFor="agencyRef">Product Code {isContentAgency
-                        ? <span className="ml-1 text-[11px] font-normal text-amber-600">ต้องเป็นเลข QU — เว้นว่างได้ถ้าโปรเจกต์เคยมีคิว (ระบบดึงให้) · ยังไม่มีเลขจริง ใส่ {QU_PENDING} ไว้ก่อนได้</span>
-                        : <span className="ml-1 text-[11px] font-normal text-gray-500">(optional)</span>}</Label>
+                      {/* v1.188 — งาน AD ต้องมี Agency Ref ทุกครั้ง ทุกบ้าน
+                          (เดิมบังคับเฉพาะ AGN บ้านอื่นเป็น optional) */}
+                      <Label htmlFor="agencyRef" required>Product Code (Agency Ref)</Label>
                       <input
                         id="agencyRef"
                         type="text"
-                        className="ops-input"
-                        placeholder={`e.g. QU-3108 (ยังไม่มีเลข → ${QU_PENDING})`}
+                        className={`ops-input ${fieldErrors.agencyRef ? 'ops-input-invalid' : ''}`}
+                        placeholder={`e.g. QU-4289 — ยังไม่ทราบเลข ใส่ ${QU_PENDING}`}
                         value={agencyRef}
                         onChange={e => setAgencyRef(e.target.value)}
+                        aria-invalid={!!fieldErrors.agencyRef}
                       />
-                      {/* v1.161 — กฏ QU: เตือนตั้งแต่พิมพ์ (ตัวตัดสินจริงอยู่ฝั่ง server)
+                      <FieldError message={fieldErrors.agencyRef} />
+                      {/* v1.161 — เตือนตั้งแต่พิมพ์ (ตัวตัดสินจริงอยู่ฝั่ง server)
                           v1.183 — ใช้ predicate ตัวเดียวกับ server (qu-ref.ts) จะได้ไม่
                           มีวันที่ฟอร์มบอกผ่านแต่ server ตีกลับ */}
-                      {isContentAgency && agencyRef.trim() !== '' && !isAcceptableQuRef(agencyRef) && (
+                      {agencyRef.trim() !== '' && !isAcceptableQuRef(agencyRef) && (
                         <p className="text-[11px] text-red-600 mt-1">
-                          รูปแบบต้องเป็น QU ตามด้วยตัวเลข เช่น QU-4289 (ไม่ใช่เลข EP/แคมเปญ) — ถ้ายังไม่มีเลขจริง ใส่ {QU_PENDING} ไว้ก่อนได้
+                          รูปแบบต้องเป็น QU ตามด้วยตัวเลข เช่น QU-4289 (ไม่ใช่เลข EP/แคมเปญ) — หากยังไม่ทราบเลข ใส่ {QU_PENDING}
                         </p>
                       )}
-                      {isContentAgency && isQuPending(agencyRef) && (
+                      {isQuPending(agencyRef) && (
                         <p className="text-[11px] text-amber-600 mt-1">
-                          ⏳ บันทึกเป็น &ldquo;ยังไม่มีเลข QU&rdquo; — ได้เลขจริงแล้วกลับมาแก้ที่ใบจองนี้ด้วย
-                          {' '}(ถ้าโปรเจกต์นี้เคยมีเลข QU อยู่แล้ว ระบบจะใส่เลขจริงให้แทน)
+                          ⏳ บันทึกเป็น &ldquo;ยังไม่ทราบเลข QU&rdquo; — ระบบจะส่งเมลเตือนจนกว่าจะแก้เป็นเลขจริง
+                          {isContentAgency ? ' (ถ้าโปรเจกต์นี้เคยมีเลข QU อยู่แล้ว ระบบจะใส่เลขจริงให้แทน)' : ''}
                         </p>
                       )}
-                      <FieldHelp>เขียนลงคอลัมน์ &ldquo;Product Code&rdquo; (F) ของ PD tab</FieldHelp>
+                      {/* ข้อความใต้ช่อง ตามที่ operator สั่งให้เขียนไว้ให้เห็นตอนกรอก */}
+                      <FieldHelp>{QU_FIELD_HINT} · เขียนลงคอลัมน์ &ldquo;Product Code&rdquo; (F) ของ PD tab</FieldHelp>
                     </div>
                   )}
                 </div>

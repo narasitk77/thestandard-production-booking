@@ -23,9 +23,10 @@ test('เลข QU จริงต้องไม่ถูกเตือน', (
   }
 })
 
-test('QU-1234 เฉย ๆ (ไม่มี TBC) ถือเป็นเลขจริง — ไม่ตามจี้', () => {
-  // สอดคล้องกับ qu-ref.ts: เหมาว่าเป็นตัวยึดแล้ววันหนึ่งมีใบจริงเลขนี้จะทับของจริง
-  assert.equal(needsRealQuRef('QU-1234'), false)
+test('v1.188 — ตามจี้ทุกแบบที่พิมพ์ผิด รวม QU-1234 ที่ตก TBC', () => {
+  for (const typo of ['QU-1234', 'QU 1234 TBC', 'qu.1234/tbc', 'TBC', '1234TBC']) {
+    assert.equal(needsRealQuRef(typo), true, typo)
+  }
 })
 
 test('urgency: ใกล้ถ่ายภายใน 3 วัน = urgent, เลยวันถ่ายแล้ว = normal', () => {
