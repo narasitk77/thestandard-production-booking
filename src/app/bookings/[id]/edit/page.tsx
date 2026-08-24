@@ -16,6 +16,8 @@ import { shootTypeLabel } from '@/lib/utils'
 import NumberStepper from '@/app/_components/NumberStepper'
 import { SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 import { isQuPending, QU_PENDING, QU_FIELD_HINT } from '@/lib/qu-ref'
+import { hasConsoleAccess } from '@/lib/roles'
+import { producerEditMode } from '@/lib/producer-edit-access'
 
 const SHOOT_TYPES = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT']
 
@@ -36,6 +38,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
   const router = useRouter()
   const [booking, setBooking] = useState<Booking | null>(null)
   const [meEmail, setMeEmail] = useState('')
+  const [meRole, setMeRole] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -49,7 +52,10 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
   })
 
   useEffect(() => {
-    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => setMeEmail((d?.user?.email || '').toLowerCase())).catch(() => {})
+    fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
+      setMeEmail((d?.user?.email || '').toLowerCase())
+      setMeRole(d?.user?.role || '')
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -80,19 +86,22 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
       .finally(() => setLoading(false))
   }, [id])
 
+  // v1.193 — ทีมคิวเข้าหน้านี้ได้ด้วย เพื่อเติม Agency Ref แทนงานที่ย้ายระบบมา
+  // (ฝั่ง route อนุญาตแล้ว — ถ้า UI ไม่เปิดตาม ก็ยังเป็นทางตันเหมือนเดิม)
   const isOwner = useMemo(() => {
     if (!booking || !meEmail) return false
+    if (hasConsoleAccess(meRole)) return true
     return (booking.createdByEmail || '').toLowerCase() === meEmail || (booking.producerEmail || '').toLowerCase() === meEmail
-  }, [booking, meEmail])
-  const editable = !!booking && booking.status === 'REQUESTED' && isOwner
-  // v1.150.1 — a CONFIRMED booking stays location-editable by its owner: the
-  // venue pin/link often changes after approval, and pinging an admin for
-  // every updated Google-Maps link was the old (painful) path.
-  const locationOnly = !!booking && booking.status === 'CONFIRMED' && isOwner
-  // v1.188 — เลข QU มักมาหลังถ่ายเสร็จ ถ้าล็อกงาน COMPLETED ไว้ เจ้าของงานก็ไม่มี
-  // ทางเติมเลขจริงเลย แล้วบอทเตือนจะจี้ไปตลอดกาลโดยไม่มีทางออก
-  // (operator: "ให้เจ้าของงานเข้าแก้ไข Agency ref ได้ภายหลังด้วย")
-  const agencyRefOnly = !!booking && booking.status === 'COMPLETED' && isOwner
+  }, [booking, meEmail, meRole])
+  // v1.193 — กฎเดียวกับ route และปุ่มในหน้า /my-bookings
+  const mode = producerEditMode({
+    status: booking?.status || '',
+    category: booking?.category,
+    authorized: isOwner,
+  })
+  const editable = mode === 'full'
+  const locationOnly = mode === 'location'
+  const agencyRefOnly = mode === 'agencyRef'
   const isAdvertorial = !!booking && booking.category === 'ADVERTORIAL'
 
   const toggleSpecial = (item: string) =>

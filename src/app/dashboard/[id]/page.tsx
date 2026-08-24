@@ -9,6 +9,7 @@ import BackButton from '@/app/_components/BackButton'
 import { formatDateRange, buildCalendarPacket, statusColor, statusLabel, shootTypeLabel, categoryLabel } from '@/lib/utils'
 import CalendarPacketDetails from '@/app/_components/CalendarPacketDetails'
 import { isAdvertorial, AdBadge } from '@/app/_components/StatusPill'
+import { isValidQuRef } from '@/lib/qu-ref'
 import { Copy, Check, Calendar, Folder, Upload, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 interface Episode {
@@ -254,6 +255,23 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             </div>
           )}
         </div>
+
+        {/* v1.193 — เลข QU ที่ยังไม่มีจริง: เดิมเห็นได้อย่างเดียวใน Calendar Packet
+            แต่ "แก้ไม่ได้จากที่ไหนเลย" ถ้าไม่ใช่เจ้าของงานที่ยังอยู่สถานะ Requested
+            งานที่ย้ายระบบมาจึงค้างถาวร — แถบนี้คือทางเข้าเดียวที่พาไปเติมเลขได้ */}
+        {isAdvertorial(booking.category) && booking.status !== 'CANCELLED'
+          && !isValidQuRef(booking.agencyRef || '') && (
+          <div className="mt-4 flex items-center justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-3 py-2">
+            <div className="text-xs text-amber-900">
+              <span className="font-medium">ยังไม่มีเลข QU ที่ใช้ได้</span>
+              {booking.agencyRef ? <> — ตอนนี้เป็น “{booking.agencyRef}” ซึ่งเป็นตัวยึด</> : <> — ช่อง Agency Ref ว่างอยู่</>}
+            </div>
+            <Link href={`/bookings/${booking.id}/edit`}
+              className="shrink-0 px-2.5 py-1.5 text-xs rounded border border-amber-500 text-amber-800 bg-white hover:bg-amber-500 hover:text-white">
+              🧾 ใส่เลข QU
+            </Link>
+          </div>
+        )}
 
         {/* Producer/Creative/Crew/Agency Ref moved into the Calendar Packet card
             below (v1.131 redesign) — only the actually-assigned crew (distinct

@@ -68,6 +68,8 @@ export function quReminderDue(
 }
 
 export interface QuPendingBooking {
+  // v1.193 — ใช้ทำลิงก์ตรงไปหน้าแก้ของใบนั้น ๆ (query select id อยู่แล้ว)
+  id?: string | null
   bookingCode: string | null
   agencyRef: string | null
   shootDate: Date | string
@@ -120,15 +122,18 @@ export function buildQuReminderEmail(
       const state = cur === '' ? 'ยังไม่ได้ใส่' : `ตอนนี้ใส่ "${cur}" ซึ่งเป็นตัวยึด ไม่ใช่เลขจริง`
       const flag = quUrgency(r.shootDate, now) === 'urgent' ? ' ⚠️ ใกล้ถ่าย' : ''
       const name = r.projectName ? ` · ${r.projectName}` : ''
-      return `• ${r.bookingCode || '(ไม่มีรหัส)'}${name} — ถ่าย ${fmtDate(r.shootDate)}${flag}\n  ${state}`
+      // v1.193 — ลิงก์ตรงไปหน้าแก้ของใบนั้นเลย: เดิมส่งไป /my-bookings เฉย ๆ แล้ว
+      // ให้ผู้รับไปหาปุ่มเอง ซึ่งงาน COMPLETED ไม่มีปุ่มด้วยซ้ำ (บั๊ก v1.188)
+      const link = r.id ? `\n  ${appUrl}/bookings/${r.id}/edit` : ''
+      return `• ${r.bookingCode || '(ไม่มีรหัส)'}${name} — ถ่าย ${fmtDate(r.shootDate)}${flag}\n  ${state}${link}`
     })
 
   const text =
     `สวัสดีครับ — งานเอเจนซีข้างล่างนี้ยังไม่มีเลขใบเสนอราคา (QU) ที่ใช้ได้จริง\n` +
     `เลขนี้คือช่อง Agency Ref / Product Code ที่กรอกตอนจอง และเป็นตัวที่ใช้ตั้งเบิก\n\n` +
     `${lines.join('\n')}\n\n` +
-    `ได้เลข QU แล้วรบกวนกลับมาแก้ที่ใบจองครับ (รูปแบบ QU-4289)\n` +
-    `${appUrl}/my-bookings\n\n` +
+    `ได้เลข QU แล้วกดลิงก์ของงานนั้นเพื่อเติมเลขได้เลยครับ (รูปแบบ QU-4289)\n` +
+    `รวมงานทั้งหมดของคุณ: ${appUrl}/my-bookings\n\n` +
     `ถ้ายังไม่ได้เลข ไม่ต้องทำอะไร ระบบจะเตือนอีกครั้งในสัปดาห์หน้า\n` +
     `(งานที่ใกล้ถ่ายจะเตือนถี่ขึ้นเป็นทุกวัน)\n\n` +
     `— Production Booking`

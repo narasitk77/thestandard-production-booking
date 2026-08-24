@@ -19,6 +19,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { hasConsoleAccess } from '@/lib/roles'
+import { producerEditMode } from '@/lib/producer-edit-access'
 import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { FIELD_LABELS, fmt, diffEditable } from '@/lib/producer-edit-fields'
@@ -50,7 +52,13 @@ export async function PATCH(
     const isOwner =
       (existing.createdByEmail || '').toLowerCase() === session.email ||
       (existing.producerEmail || '').toLowerCase() === session.email
-    if (!isOwner) {
+    // v1.193 — ทีมคิว (Admin/Coordinator) ก็ผ่านด่านนี้ได้ ไม่ใช่การเพิ่มอำนาจ:
+    // เขาแก้ทุกฟิลด์ผ่าน PATCH /api/bookings/:id ได้อยู่แล้ว (hasConsoleAccess
+    // เหมือนกัน) แต่ "ไม่มีหน้าจอไหนเลย" ที่แก้ Agency Ref ของใบที่มีอยู่ได้ →
+    // งานที่ย้ายระบบมา (producer เดิมไม่มีในระบบ / ไม่กลับมาแก้) จึงค้างไม่มีเลข
+    // QU ตลอดกาล และไม่มีใครเติมแทนได้ (operator 2026-08-24)
+    const isQueueTeam = hasConsoleAccess(session.role)
+    if (!isOwner && !isQueueTeam) {
       return NextResponse.json({ error: 'คุณไม่ใช่เจ้าของงานนี้' }, { status: 403 })
     }
     // v1.150.1 — two edit modes by status:
@@ -64,20 +72,26 @@ export async function PATCH(
     //                ได้เลย แล้วบอทเตือนก็จะจี้ไปตลอดกาลโดยไม่มีทางออก
     //                (operator: "ให้เจ้าของงานเข้าแก้ไข Agency ref ได้ภายหลังด้วย")
     // CANCELLED stays uneditable — งานที่เลิกแล้วไม่ต้องตั้งเบิก
-    if (existing.status === 'CANCELLED' || existing.deletedAt) {
+    // v1.193 — กฎเดียวกับที่ UI ใช้ (src/lib/producer-edit-access.ts) route ยังเป็น
+    // source of truth ของ authorization เหมือนเดิม เพียงแต่เลิกเขียนกฎซ้ำ
+    const mode = producerEditMode({
+      status: existing.status,
+      category: existing.category,
+      deleted: !!existing.deletedAt,
+      authorized: true, // ผ่านด่านเจ้าของ/ทีมคิวมาแล้วข้างบน
+    })
+    if (mode === 'none') {
       return NextResponse.json(
-        { error: 'งานนี้ยกเลิกแล้ว แก้ไขไม่ได้' },
+        {
+          error: existing.status === 'CANCELLED'
+            ? 'งานนี้ยกเลิกแล้ว แก้ไขไม่ได้'
+            : 'งานนี้อยู่ในสถานะที่แก้ไขไม่ได้แล้ว',
+        },
         { status: 409 },
       )
     }
-    if (existing.status !== 'REQUESTED' && existing.status !== 'CONFIRMED' && existing.status !== 'COMPLETED') {
-      return NextResponse.json(
-        { error: 'งานนี้อยู่ในสถานะที่แก้ไขไม่ได้แล้ว' },
-        { status: 409 },
-      )
-    }
-    const locationOnly = existing.status === 'CONFIRMED'
-    const agencyRefOnly = existing.status === 'COMPLETED'
+    const locationOnly = mode === 'location'
+    const agencyRefOnly = mode === 'agencyRef'
 
     const body = await request.json()
     // PRODUCER-EDITABLE WHITELIST ONLY. Anything not listed here is ignored.
@@ -178,7 +192,12 @@ export async function PATCH(
         entityType: 'Booking',
         entityId: booking.id,
         bookingCode: booking.bookingCode,
-        changes: { ...fieldChanges, ...(titleChanges.length ? { episodeTitles: titleChanges } : {}) },
+        changes: {
+          ...fieldChanges,
+          ...(titleChanges.length ? { episodeTitles: titleChanges } : {}),
+          // v1.193 — แยกให้ชัดว่าเจ้าของงานแก้เอง หรือทีมคิวแก้แทน
+          ...(isOwner ? {} : { onBehalfOfOwner: true, actorRole: session.role }),
+        },
       })
 
       // Email the producer-update inbox (best-effort — never fails the save).

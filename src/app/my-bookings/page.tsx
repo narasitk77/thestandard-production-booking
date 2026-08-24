@@ -8,6 +8,8 @@ import { Loader2, Plus, Search, Inbox } from 'lucide-react'
 import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
 import StatusPill, { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
+import { isValidQuRef } from '@/lib/qu-ref'
+import { producerEditMode } from '@/lib/producer-edit-access'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
 
@@ -27,6 +29,7 @@ interface Booking {
   producerEmail?: string | null
   projectName?: string | null
   category?: string | null
+  agencyRef?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -271,8 +274,27 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
   const isOwner = !!meEmail && ((b.createdByEmail || '').toLowerCase() === meEmail || (b.producerEmail || '').toLowerCase() === meEmail)
   // v1.150.1 — CONFIRMED bookings stay owner-editable for LOCATION only (the
   // venue link changes after approval more often than anything else).
-  const canEdit = (b.status === 'REQUESTED' || b.status === 'CONFIRMED') && isOwner
-  const editIsLocationOnly = b.status === 'CONFIRMED'
+  // v1.193 — งาน Advertorial ที่ COMPLETED ต้องเข้าไปเติมเลข QU ได้ด้วย. v1.188
+  // เปิดไว้แล้วทั้งฝั่ง server (producer-edit route) และหน้า /bookings/:id/edit
+  // แต่ "ปุ่มที่พาไปหน้านั้น" ไม่ได้เปิดตาม → งาน COMPLETED ไม่มีปุ่มเลย ทั้งที่
+  // บอท QU ส่งเมลบอกให้ "กลับมาแก้ที่ใบจอง" พร้อมลิงก์มาหน้านี้ = ทางตัน
+  // (operator 2026-08-24: "WLT-EXI-260826-01 ... ไปแก้เพิ่มเลข agency ref ไม่ได้")
+  const isAd = b.category === 'ADVERTORIAL'
+  const mode = producerEditMode({ status: b.status, category: b.category, authorized: isOwner })
+  const canEdit = mode !== 'none'
+  // งาน AD ที่ยังไม่มีเลข QU จริง (ว่าง หรือยังเป็นตัวยึด QU-1234TBC)
+  const quMissing = isAd && !isValidQuRef(b.agencyRef || '')
+  const editIsLocationOnly = mode === 'location'
+  const editIsQuOnly = mode === 'agencyRef'
+  const editLabel = editIsQuOnly ? '🧾 ใส่เลข QU'
+    : quMissing ? '🧾 ใส่เลข QU'
+    : editIsLocationOnly ? '📍 แก้สถานที่'
+    : '✏️ แก้ไข'
+  const editTitle = editIsQuOnly
+    ? 'งานถ่ายจบแล้ว — เติมเลขใบเสนอราคา (QU) ได้อย่างเดียว'
+    : editIsLocationOnly
+      ? 'แก้สถานที่ / ลิงก์แผนที่ และเลข QU (งาน Confirmed แก้ได้เท่านี้)'
+      : 'แก้ไขรายละเอียดงาน (เฉพาะงานสถานะ Requested)'
   return (
     <li className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${categoryCardClass(b.category)}`}>
       <Link
@@ -306,10 +328,14 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
       {canEdit && (
         <Link
           href={`/bookings/${b.id}/edit`}
-          title={editIsLocationOnly ? 'แก้สถานที่ / ลิงก์แผนที่ (งาน Confirmed แก้ได้เฉพาะสถานที่)' : 'แก้ไขรายละเอียดงาน (เฉพาะงานสถานะ Requested)'}
-          className="ml-1 shrink-0 px-2.5 py-1.5 text-xs border border-[#673ab7] text-[#673ab7] bg-white rounded hover:bg-[#673ab7] hover:text-white inline-flex items-center gap-1"
+          title={editTitle}
+          className={`ml-1 shrink-0 px-2.5 py-1.5 text-xs rounded inline-flex items-center gap-1 border ${
+            quMissing
+              ? 'border-amber-500 text-amber-800 bg-amber-50 hover:bg-amber-500 hover:text-white'
+              : 'border-[#673ab7] text-[#673ab7] bg-white hover:bg-[#673ab7] hover:text-white'
+          }`}
         >
-          {editIsLocationOnly ? <>📍 แก้สถานที่</> : <>✏️ แก้ไข</>}
+          {editLabel}
         </Link>
       )}
       {showUpload && (
