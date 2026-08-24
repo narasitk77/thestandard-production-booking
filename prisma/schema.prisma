@@ -894,6 +894,26 @@ model NasSyncState {
 // ก็ไม่ควรมีแถวโผล่มาเพราะมีคนกดกระดิ่ง (email อาจยังไม่มีแถวใน User ได้)
 //
 // ตัว feed ไม่ถูกเก็บที่ไหนเลย — derive จากสถานะจริงทุกครั้ง (ดู lib/notifications.ts)
+// v1.190 — "ใครเปิดหน้าไหนเมื่อไหร่" เฉพาะหน้าที่มีคำถามค้างอยู่ (ดู lib/page-events.ts)
+//
+// ตั้งใจให้เล็กที่สุด: ไม่เก็บ IP / user-agent / referrer / query string และเก็บ
+// path ที่ตัด id ออกแล้ว (/admin/<id> → /admin) เพราะคำถามคือ "คนรู้จักหน้านี้ไหม"
+// ไม่ใช่ "ใครดูงานใบไหน" (อย่างหลังอยู่ใน audit_logs อยู่แล้ว และมีกฏการมองเห็นคุมอยู่)
+//
+// แยกจาก audit_logs โดยเจตนา: audit คือ "ใครลงมือทำอะไร" ซึ่งใช้เป็นหลักฐานและมี
+// กฏการมองเห็น (booking-history-visibility) การเอา page view ไปปนจะทำให้ตารางนั้น
+// บวมและความหมายเบลอ
+model PageEvent {
+  id    String   @id @default(cuid())
+  email String
+  path  String
+  at    DateTime @default(now())
+
+  @@index([path, at])
+  @@index([email, path, at])
+  @@map("page_events")
+}
+
 model NotificationSeen {
   email String   @id
   at    DateTime @default(now())

@@ -4,6 +4,7 @@ import { getSession, getProducerAccess, getOTApproverAccess, getUploadAccess, ge
 import { isTeamMember } from '@/lib/team-profiles'
 import Nav from './_components/Nav'
 import FeedbackWidget from './_components/FeedbackWidget'
+import PageEventTracker from './_components/PageEventTracker'
 import { isStaging } from '@/lib/app-env'
 
 export const metadata: Metadata = {
@@ -61,6 +62,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           canApproveOT={canApproveOT}
           canUpload={canUpload}
         />
+        {/* v1.190 — บันทึกการเปิดหน้าเฉพาะหน้าใน allowlist (ดู lib/page-events.ts)
+            วางไว้หลัง session gate: ไม่มี session = endpoint ตีกลับ ไม่มีอะไรถูกเก็บ */}
+        {session && <PageEventTracker />}
         {children}
         {/* v1.133 — floating feedback box on every page (signed-in users only;
             the API needs an identity to reply to). */}
