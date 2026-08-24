@@ -1,4 +1,5 @@
 import { prisma } from './db'
+import { excludeSharedMailboxes } from './shared-mailboxes'
 import { parseTimeToMinutes } from './ot-calc'
 
 /**
@@ -27,7 +28,13 @@ export async function syncBookingOT(bookingId: string): Promise<{ created: numbe
   // caller (defense-in-depth: assign/restore call this after their own guards)
   if (booking.deletedAt) return { created: 0 }
 
-  const emails = (booking.assignedEmails || []).filter(Boolean)
+  // v1.191 — กล่องกลางของทีม (video@ / sound@ / …) ไม่ใช่คน จึงไม่ควรมีร่าง OT:
+  // ไม่มีใครเป็นเจ้าของ ไม่มีใครกดส่ง ไม่มีใครเซ็น — ของจริงบนพรอดคือ 203 จาก 513
+  // ใบ (40%) ตกอยู่กับ video@/sound@ ซึ่งเป็น noise ล้วน ๆ และทำให้ตัวเลข funnel
+  // ของ pilot ดูแย่กว่าความจริง (คำสั่ง operator 2026-08-24: "ตัดกล่องกลางออก")
+  //
+  // syncBookingOT ลบ-แล้ว-สร้างใหม่อยู่แล้ว ฉะนั้นคิวที่ถูก sync อีกครั้งจะสะอาดเอง
+  const emails = excludeSharedMailboxes(booking.assignedEmails || [])
   if (emails.length === 0) return { created: 0 }
   if (!booking.callTime) return { created: 0 }
 
