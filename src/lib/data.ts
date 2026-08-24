@@ -167,6 +167,9 @@ export const OUTLETS: Outlet[] = [
       { code: 'KDM', name: 'Kendom', category: 'Recurring' },
       { code: 'KSG', name: 'Kensight', category: 'Recurring' },
       { code: 'WYS', name: 'WYS : What your secret', category: 'Recurring', notes: 'รายการใหม่' },
+      // 2026-08-24 — สองรายการพอดแคสต์ใหม่ของ TSS (จากชีท Outlet/Program ของ operator)
+      { code: 'TID', name: 'The Ideas (Podcast)', category: 'Recurring', notes: 'รายการใหม่' },
+      { code: 'TSG', name: 'The Signal (Podcast)', category: 'Recurring', notes: 'รายการใหม่' },
     ],
   },
   {
