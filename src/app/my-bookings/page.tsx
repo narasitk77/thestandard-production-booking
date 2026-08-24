@@ -286,9 +286,10 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
   const quMissing = isAd && !isValidQuRef(b.agencyRef || '')
   const editIsLocationOnly = mode === 'location'
   const editIsQuOnly = mode === 'agencyRef'
+  // ป้ายต้องบอก "สิ่งที่ทำได้จริง" ไม่ใช่ "สิ่งที่อยากให้ทำ" — งาน Requested แก้ได้
+  // ทุกช่อง จึงต้องเป็น "แก้ไข" ต่อไป แม้เลข QU จะยังขาด (สีเหลืองทำหน้าที่เตือนแทน)
   const editLabel = editIsQuOnly ? '🧾 ใส่เลข QU'
-    : quMissing ? '🧾 ใส่เลข QU'
-    : editIsLocationOnly ? '📍 แก้สถานที่'
+    : editIsLocationOnly ? (quMissing ? '🧾 ใส่เลข QU' : '📍 แก้สถานที่')
     : '✏️ แก้ไข'
   const editTitle = editIsQuOnly
     ? 'งานถ่ายจบแล้ว — เติมเลขใบเสนอราคา (QU) ได้อย่างเดียว'
