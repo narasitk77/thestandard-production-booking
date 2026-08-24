@@ -10,23 +10,40 @@ import { todayBangkokStr } from './bangkok-day'
  *
  * Runs lazily on each /api/ot fetch — no cron needed.
  */
+/**
+ * เดือนที่เก่าที่สุดที่ยังเก็บไว้ — ทุกอย่างที่ **เก่ากว่านี้** ถูกลบ ที่เหลือเก็บหมด
+ * (รวมเดือนอนาคต ซึ่งเป็นที่อยู่ของร่าง OT ส่วนใหญ่ เพราะสร้างจากคิวถ่ายล่วงหน้า)
+ *
+ * แยกออกมาเป็นฟังก์ชันบริสุทธิ์เพื่อเทสกฏนี้ได้โดยไม่ต้องมี DB — v1.192 เพิ่งเสีย
+ * ข้อมูลจริงเพราะกฏนี้ไม่เคยถูกเทส
+ */
+export function otCleanupCutoff(todayBangkok: string): string {
+  const [year, month, day] = todayBangkok.split('-').map(Number)
+  const currentMonth = `${year}-${String(month).padStart(2, '0')}`
+  if (day > 10) return currentMonth
+  const prevDate = new Date(Date.UTC(year, month - 2, 1)) // month is 1-based; -2 = previous month index
+  return `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
 export async function cleanupOTRecords(): Promise<number> {
   // Bangkok-local date — the server runs UTC, so deriving "now" from new Date()
   // drifts a day (and the month) for the ~7h each morning that is still yesterday
   // in UTC. Use the same business-timezone source as the editable-month gate.
-  const [year, month, day] = todayBangkokStr().split('-').map(Number)
-  const currentMonth = `${year}-${String(month).padStart(2, '0')}` // e.g. "2026-04"
+  const oldestKept = otCleanupCutoff(todayBangkokStr())
 
-  const prevDate = new Date(Date.UTC(year, month - 2, 1)) // month is 1-based; -2 = previous month index
-  const prevMonth = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`
-
-  // Within 10-day grace: keep current + previous
-  // After day 10: keep only current
-  const keep = day <= 10 ? [currentMonth, prevMonth] : [currentMonth]
-
-  // 1) Drop records outside the keep window (10-day archive policy)
+  // 1) Drop records OLDER than the keep window (10-day archive policy)
+  //
+  // v1.192 — เดิมเป็น `month: { notIn: keep }` ซึ่ง **ลบเดือนอนาคตไปด้วย** ทั้งที่
+  // นโยบายที่เขียนไว้ข้างบนคือ "Older than that: deleted" เท่านั้น
+  //
+  // ผลที่เกิดจริง: ร่าง OT ถูกสร้างอัตโนมัติจากคิวถ่าย ซึ่ง**ส่วนใหญ่เป็นวันในอนาคต**
+  // → ทุกครั้งที่มีใครเปิดหน้า /ot (cleanup รันแบบ lazy ที่ GET /api/ot) ร่างของ
+  // เดือนถัดไปถูกลบทิ้งทั้งหมดเงียบ ๆ. เจอ 2026-08-24 ตอนเปิดหน้าเพื่อทดสอบเรื่องอื่น
+  // แล้วร่างเดือน ก.ย. 33 ใบหายไปทันที — ซึ่งคือเดือนที่ pilot จะใช้พอดี
+  //
+  // เทียบสตริง 'YYYY-MM' ได้ตรง ๆ เพราะ zero-padded (2026-09 < 2026-10)
   const oldDel = await prisma.oTRecord.deleteMany({
-    where: { month: { notIn: keep } },
+    where: { month: { lt: oldestKept } },
   })
 
   // 2) Drop legacy pre-v1.15 records that lack the new task fields.
