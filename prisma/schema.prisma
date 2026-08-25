@@ -226,6 +226,11 @@ model Booking {
   videoType        String?
   shootType        ShootType
   locationName     String?
+  // v1.195 — id ของห้อง/สถานที่จาก src/lib/locations.ts (เช่น `tsd-studio-1`)
+  // locationName เป็น "ข้อความที่เรนเดอร์แล้ว" ซึ่งห้องเดียวกันมีได้หลายสะกด
+  // (`สตูดิโอ 1` 129 ใบ · `Studio 1 (TSD)` 65 ใบ · `Studio 1` 11 ใบ) จึงแมปกับ
+  // ระบบจองห้องกลางไม่ได้. id-first ตามบทเรียนเดียวกับ driveFolders (v1.114)
+  locationId       String?
   callTime         String        @db.VarChar(5)
   estimatedWrap    String?       @db.VarChar(5)
   producer         String   // Content Agency: nickname from _Users tab; other outlets: per-outlet dropdown (v1.59) or free-text name

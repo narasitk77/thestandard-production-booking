@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { resolveLocationId } from '@/lib/location-resolve'
 import { getSession, requireConsole } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { canViewBooking } from '@/lib/booking-access'
@@ -243,7 +244,12 @@ export async function PATCH(
           // shootDate itself is immutable + guarded at creation, but shootEndDate
           // is editable here, so guard it too (feeds the marker date range + calendar).
           ...(shootEndDate !== undefined && { shootEndDate: shootEndDate ? (normalizeBuddhistYear(new Date(shootEndDate)) ?? null) : null }),
-          ...(locationName !== undefined && { locationName: locationName || null }),
+          ...(locationName !== undefined && {
+            locationName: locationName || null,
+            // v1.195 — สถานที่เปลี่ยน id ต้องเปลี่ยนตาม ไม่งั้นการจองห้องในระบบกลาง
+            // จะยึดห้องเดิมค้างไว้ทั้งที่งานย้ายไปแล้ว
+            locationId: resolveLocationId(locationName),
+          }),
           ...(crewRequired && Array.isArray(crewRequired) && { crewRequired }),
           ...(shootType && { shootType }),
           ...(videoType !== undefined && { videoType: videoType || null }),

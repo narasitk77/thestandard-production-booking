@@ -812,6 +812,9 @@ export default function BookingWizard() {
           category: CATEGORY_VALUES[category],
           shootType: SHOOT_TYPE_VALUES[shootType],
           locationName: resolvedLocationName,
+          // v1.195 — ส่ง id ที่ฟอร์มรู้อยู่แล้วขึ้นไปด้วย (เดิมทิ้งไว้ฝั่ง client
+          // แล้วให้ server เดาจากข้อความ ซึ่งเดาไม่ได้ทุกเคส)
+          locationId: locationId || null,
           callTime,
           estimatedWrap: estimatedWrap || null,
           producer: producerCustom

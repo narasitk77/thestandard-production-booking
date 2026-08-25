@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import BackButton from '@/app/_components/BackButton'
 import { Loader2, CalendarPlus, X, Trash2, Check, AlertTriangle } from 'lucide-react'
 import { OUTLETS, OUTLET_MAP } from '@/lib/data'
+import { LOCATIONS, LOCATION_GROUPS, findLocation } from '@/lib/locations'
 import { generateRoutineDates } from '@/lib/routine'
 import NumberStepper from './NumberStepper'
 
@@ -53,7 +54,7 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   const [category, setCategory] = useState('ORIGINAL_CONTENT')
   const [callTime, setCallTime] = useState('10:00')
   const [estimatedWrap, setEstimatedWrap] = useState('')
-  const [locationName, setLocationName] = useState('')
+  const [locationId, setLocationId] = useState('')
   const [producer, setProducer] = useState('')
   const [crewRequired, setCrewRequired] = useState<string[]>(['Videographer', 'Sound'])
   const [cameraCount, setCameraCount] = useState('')
@@ -121,7 +122,8 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
         body: JSON.stringify({
           action: 'create',
           outletCode, programCode, episodeTitle, category, shootType,
-          callTime, estimatedWrap, locationName, producer,
+          callTime, estimatedWrap, locationId,
+          locationName: findLocation(locationId)?.fullName || null, producer,
           crewRequired, cameraCount, micCount, notes,
           plan: { startDate, endDate, weekdays, skipHolidays, customSkip },
         }),
@@ -267,7 +269,19 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
             </div>
             <div>
               <label className="ops-label">Location</label>
-              <input className="ops-input" value={locationName} onChange={e => setLocationName(e.target.value)} placeholder="เช่น Studio 1" />
+              {/* v1.195 — เดิมเป็นช่องพิมพ์อิสระ ผลคือมีคนพิมพ์ "สตูดิโอ 1" แล้วสร้าง
+                  ไป 128 ใบ กลายเป็นค่าสถานที่ที่พบมากที่สุดในระบบ ซึ่งแมปกับห้องจริง
+                  ไม่ได้เลย. ใช้ลิสต์เดียวกับฟอร์มจองปกติ (locations.ts) */}
+              <select className="ops-input" value={locationId} onChange={e => setLocationId(e.target.value)}>
+                <option value="">— เลือกห้อง / สถานที่ —</option>
+                {LOCATION_GROUPS.map(g => (
+                  <optgroup key={g.key} label={g.label}>
+                    {LOCATIONS.filter(l => l.group === g.key).map(l => (
+                      <option key={l.id} value={l.id}>{l.fullName}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
             </div>
             <div>
               <label className="ops-label">Crew</label>

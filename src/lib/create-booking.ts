@@ -5,6 +5,7 @@
  * 1:1 move of the route logic; the route keeps only auth + HTTP shaping.
  */
 import { prisma } from '@/lib/db'
+import { resolveLocationId } from '@/lib/location-resolve'
 import { generateEpisodeId, parseEpisodeId, formatShootDateForId } from '@/lib/episode-id'
 import { normalizeBuddhistYear } from '@/lib/thai-date'
 import { getOutlet, getProgram } from '@/lib/data'
@@ -45,6 +46,7 @@ export async function createBookingFromPayload(
     videoType,
     shootType,
     locationName,
+    locationId,
     callTime,
     estimatedWrap,
     producer,
@@ -378,6 +380,11 @@ export async function createBookingFromPayload(
       videoType: videoType || null,
       shootType,
       locationName: locationName || null,
+      // v1.195 — ทางเข้าเดียวของทุก path ที่สร้าง booking (ฟอร์มจอง, RoutinePlanner,
+      // importer) จึงแปลงตรงนี้ที่เดียว: ถ้าผู้เรียกส่ง id มาให้ใช้เลย ถ้าไม่ส่ง
+      // ค่อยเดาจากข้อความ. RoutinePlanner เคยเป็นช่องพิมพ์อิสระและสร้าง `สตูดิโอ 1`
+      // ไป 128 ใบ ซึ่งเป็นค่าสถานที่ที่พบมากที่สุดในระบบ
+      locationId: (locationId as string | null | undefined) || resolveLocationId(locationName) || null,
       callTime,
       estimatedWrap: estimatedWrap || null,
       producer,

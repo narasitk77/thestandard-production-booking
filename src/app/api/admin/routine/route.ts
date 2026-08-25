@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
   // ── create ──────────────────────────────────────────────────────────
   const {
     outletCode, programCode, episodeTitle, category, videoType, shootType,
-    callTime, estimatedWrap, locationName, producer, producerEmail,
+    callTime, estimatedWrap, locationName, locationId, producer, producerEmail,
     crewRequired, cameraCount, micCount, vanCount, videographerCount, switcherCount, notes,
     plan,
   } = body || {}
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
   const routineGroupId = crypto.randomUUID()
   const base = {
     outletCode, programCode, category, videoType, shootType,
-    callTime, estimatedWrap, locationName, producer, producerEmail,
+    callTime, estimatedWrap, locationName, locationId, producer, producerEmail,
     crewRequired, cameraCount, micCount, vanCount, videographerCount, switcherCount, notes,
     isRoutine: true,
     routineGroupId,

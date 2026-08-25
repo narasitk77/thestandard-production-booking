@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
 import { prisma } from '@/lib/db'
+import { resolveLocationId } from '@/lib/location-resolve'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { producerEditMode } from '@/lib/producer-edit-access'
@@ -144,7 +145,11 @@ export async function PATCH(
           ...(callTime && { callTime }),
           ...(estimatedWrap !== undefined && { estimatedWrap: estimatedWrap || null }),
           ...(shootType && { shootType }),
-          ...(locationName !== undefined && { locationName: locationName || null }),
+          ...(locationName !== undefined && {
+            locationName: locationName || null,
+            // v1.195 — เจ้าของงานแก้สถานที่ได้ตอน CONFIRMED → id ต้องตามไปด้วย
+            locationId: resolveLocationId(locationName),
+          }),
           ...(producer && { producer }),
           ...(Array.isArray(creative) && { creative }),
           ...(Array.isArray(crewRequired) && { crewRequired }),
