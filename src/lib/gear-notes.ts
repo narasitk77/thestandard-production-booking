@@ -81,25 +81,30 @@ export function formatProductionIds(ids: string[]): string {
 }
 
 /**
- * ข้อความสำหรับวางในบอท — **หนึ่ง Production ID ต่อหนึ่งบล็อก**
+ * ข้อความสำหรับวางในบอท — **หนึ่งกองต่อหนึ่งบล็อก**
  *
  * Norbert เป็นคนแยกต่อเป็นรายคนเอง (operator ยืนยัน 2026-08-25) ฝั่งเราจึงส่ง
  * ID + อุปกรณ์ + รายชื่อครูไปให้ครบ แล้วไม่ต้องเดาว่าใครถืออะไร
  *
- * อุปกรณ์กับเช่าขึ้นทั้งคู่เสมอ แม้ว่าง — บรรทัดที่หายไปอ่านว่า "ไม่ต้องใช้"
- * ส่วน "—" อ่านว่า "ยังไม่มีใครกรอก" ซึ่งเป็นสิ่งที่ operator ตามอยู่
+ * **ไม่ส่งช่อง "เช่า" ไปด้วย** (operator 2026-08-25: "ตอนส่งให้ช่างภาพเอาอันนี้ออก")
+ * — ของเช่าเป็นเรื่องจัดซื้อ/ประสานงาน ไม่ใช่สิ่งที่ช่างภาพต้องยืนยัน ช่องนี้ยัง
+ * กรอกและดูได้ตามปกติในหน้า Week Plan และยังขึ้นในปฏิทิน/หน้า Booking เหมือนเดิม
+ *
+ * อุปกรณ์ขึ้นเสมอแม้ว่าง — "—" อ่านว่า "ยังไม่มีใครกรอก" ซึ่งเป็นสิ่งที่ operator ตามอยู่
  */
 export function buildGearExportText(input: {
   heading: string
   rows: GearExportRow[]
   filledOnly?: boolean
 }): string {
+  // filledOnly อิง "อุปกรณ์" อย่างเดียว เพราะเช่าไม่ได้ถูกส่งไป — ถ้าเอาเช่ามานับด้วย
+  // กองที่กรอกแต่เช่าจะโผล่ในข้อความโดยมี "อุปกรณ์: —" ซึ่งอ่านแล้วงง
   const rows = input.filledOnly
-    ? input.rows.filter(r => clean(r.equipment) || clean(r.rental))
+    ? input.rows.filter(r => clean(r.equipment))
     : input.rows
   const out: string[] = [input.heading, '']
   if (rows.length === 0) {
-    out.push(input.filledOnly ? '(ยังไม่มี Production ID ที่กรอกอุปกรณ์/เช่า)' : '(ไม่มีงานในช่วงนี้)')
+    out.push(input.filledOnly ? '(ยังไม่มีกองที่กรอกอุปกรณ์)' : '(ไม่มีงานในช่วงนี้)')
     return out.join('\n').trimEnd() + '\n'
   }
   for (const r of rows) {
@@ -107,7 +112,6 @@ export function buildGearExportText(input: {
       .filter(Boolean).join('  ')
     out.push(`━━ ${head}`)
     out.push(`อุปกรณ์: ${clean(r.equipment) ? clean(r.equipment).replace(/\s*\n\s*/g, ' / ') : DASH}`)
-    out.push(`เช่า: ${clean(r.rental) ? clean(r.rental).replace(/\s*\n\s*/g, ' / ') : DASH}`)
     if (r.crew && r.crew.length > 0) out.push(`ทีม: ${r.crew.join(', ')}`)
     out.push('')
   }

@@ -61,8 +61,9 @@ test('ข้อความส่งบอท — หนึ่งบล็อก
   assert.ok(text.includes('━━ TSS-TSS-260907-01  🕐 09:00 → 18:00  The Secret Sauce'))
   // ขึ้นบรรทัดใหม่ในช่องกรอก → " / " เพื่อให้วางในแชตแล้วไม่แตก
   assert.ok(text.includes('อุปกรณ์: FX3 x2 / ขาตั้ง'))
-  assert.ok(text.includes('เช่า: —'))       // ว่าง = ยังไม่มีใครกรอก ต้องเห็น
   assert.ok(text.includes('ทีม: ซัง, ไนซ์'))
+  // operator: "ตอนส่งให้ช่างภาพเอาอันนี้ออก" — ของเช่าไม่ใช่เรื่องของช่างภาพ
+  assert.ok(!text.includes('เช่า'), 'ข้อความส่งบอทต้องไม่มีช่องเช่า')
 })
 
 test('filledOnly ตัดกองที่ยังไม่กรอกออก', () => {
@@ -80,7 +81,7 @@ test('filledOnly ตัดกองที่ยังไม่กรอกออ
 test('ไม่มีอะไรให้ส่ง → บอกว่าไม่มี ไม่ใช่ข้อความเปล่า', () => {
   assert.ok(buildGearExportText({ heading: 'h', rows: [] }).includes('(ไม่มีงานในช่วงนี้)'))
   assert.ok(buildGearExportText({ heading: 'h', rows: [{ productionIds: ['A'] }], filledOnly: true })
-    .includes('(ยังไม่มี Production ID ที่กรอกอุปกรณ์/เช่า)'))
+    .includes('(ยังไม่มีกองที่กรอกอุปกรณ์)'))
 })
 
 // v1.198 — กองเดียว 2 ID เบิกชุดเดียว: ต้องโชว์ ID คู่กัน ไม่แตกเป็นสองบล็อก
@@ -104,4 +105,14 @@ test('formatProductionIds — เต็มทุกตัว ไม่ย่อ 
   assert.equal(formatProductionIds(['A-01', 'A-01']), 'A-01')
   assert.equal(formatProductionIds([' A-01 ', '', 'A-02']), 'A-01 + A-02')
   assert.equal(formatProductionIds([]), '')
+})
+
+// เช่าอยู่ในข้อมูลได้ แต่ต้องไม่หลุดไปในข้อความที่ส่งช่างภาพ
+test('กรอกแต่เช่า ไม่กรอกอุปกรณ์ → filledOnly ต้องไม่หยิบมา', () => {
+  const rows = [{ productionIds: ['A-01'], rental: 'เลนส์ 24-70' }]
+  const only = buildGearExportText({ heading: 'h', rows, filledOnly: true })
+  assert.ok(only.includes('(ยังไม่มีกองที่กรอกอุปกรณ์)'))
+  const all = buildGearExportText({ heading: 'h', rows })
+  assert.ok(all.includes('อุปกรณ์: —'))
+  assert.ok(!all.includes('เลนส์ 24-70'), 'ของเช่าต้องไม่หลุดไปในข้อความ')
 })

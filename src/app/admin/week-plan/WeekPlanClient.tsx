@@ -205,10 +205,10 @@ export default function WeekPlanClient() {
         return (
           <div className="border border-gray-200 rounded-lg bg-white p-3 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-medium text-gray-700">📄 ข้อความราย Production ID</span>
+              <span className="text-sm font-medium text-gray-700">📄 ข้อความส่งช่างภาพ</span>
               <label className="text-xs text-gray-600 inline-flex items-center gap-1">
                 <input type="checkbox" checked={filledOnly} onChange={e => { setFilledOnly(e.target.checked); setCopied(false) }} />
-                เฉพาะ ID ที่กรอกแล้ว
+                เฉพาะกองที่กรอกอุปกรณ์แล้ว
               </label>
               <button
                 onClick={async () => {
@@ -229,7 +229,7 @@ export default function WeekPlanClient() {
             </div>
             <textarea readOnly value={text} onFocus={e => e.currentTarget.select()}
               className="w-full h-56 text-xs font-mono border border-gray-200 rounded p-2 bg-gray-50" />
-            <p className="text-[11px] text-gray-400">แตะในกล่องเพื่อเลือกทั้งหมด — วางลงบอทได้เลย</p>
+            <p className="text-[11px] text-gray-400">แตะในกล่องเพื่อเลือกทั้งหมด — วางลงบอทได้เลย · <b>ไม่มีช่องเช่า</b>ในข้อความนี้ (ของเช่ายังกรอกและดูได้ตามปกติในตาราง)</p>
           </div>
         )
       })()}
