@@ -1,0 +1,84 @@
+/**
+ * v1.197 — สรุประดับใบจองเป็น "ค่าที่คำนวณมา" จากโน้ตราย Production ID
+ * เทสพวกนี้ล็อกไว้ว่าใบที่มี ID เดียว (84% ของงานจริง) หน้าตาต้องไม่เปลี่ยนเลย
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { summarizeGearNotes, buildGearExportText } from '../gear-notes'
+
+test('ใบที่มี Production ID เดียว → ข้อความเดิมเป๊ะ ไม่มีคำนำหน้า', () => {
+  const eps = [{ episodeId: 'TSS-TSS-260907-01', equipmentNote: 'FX3 x2 · ขาตั้ง' }]
+  assert.equal(summarizeGearNotes(eps, 'equipmentNote'), 'FX3 x2 · ขาตั้ง')
+})
+
+test('ไม่มีใครกรอก → null (เหมือนเดิม ไม่ใช่ข้อความว่าง)', () => {
+  assert.equal(summarizeGearNotes([{ episodeId: 'A' }, { episodeId: 'B' }], 'equipmentNote'), null)
+  assert.equal(summarizeGearNotes([{ episodeId: 'A', equipmentNote: '   ' }], 'equipmentNote'), null)
+  assert.equal(summarizeGearNotes([], 'equipmentNote'), null)
+})
+
+test('ทุก ID ข้อความเหมือนกัน → ไม่เขียนซ้ำ (กันปฏิทินรก)', () => {
+  const eps = [
+    { episodeId: 'A-01', equipmentNote: 'FX3 x2' },
+    { episodeId: 'A-02', equipmentNote: 'FX3 x2' },
+  ]
+  assert.equal(summarizeGearNotes(eps, 'equipmentNote'), 'FX3 x2')
+})
+
+test('ต่างกัน → บรรทัดละ ID', () => {
+  const eps = [
+    { episodeId: 'A-01', equipmentNote: 'FX3 x2' },
+    { episodeId: 'A-02', equipmentNote: 'FX30 + ไฟ' },
+  ]
+  assert.equal(summarizeGearNotes(eps, 'equipmentNote'), 'A-01: FX3 x2\nA-02: FX30 + ไฟ')
+})
+
+test('กรอกแค่ ID เดียวจากหลาย ID → ไม่ต้องมีคำนำหน้าเช่นกัน', () => {
+  const eps = [
+    { episodeId: 'A-01', equipmentNote: 'FX3 x2' },
+    { episodeId: 'A-02' },
+  ]
+  assert.equal(summarizeGearNotes(eps, 'equipmentNote'), 'FX3 x2')
+})
+
+test('เช่า กับ อุปกรณ์ แยกกันจริง', () => {
+  const eps = [
+    { episodeId: 'A-01', equipmentNote: 'FX3', rentalGearNote: 'เลนส์ 24-70' },
+    { episodeId: 'A-02', equipmentNote: 'FX3' },
+  ]
+  assert.equal(summarizeGearNotes(eps, 'equipmentNote'), 'FX3')
+  assert.equal(summarizeGearNotes(eps, 'rentalGearNote'), 'เลนส์ 24-70')
+})
+
+test('ข้อความส่งบอท — หนึ่งบล็อกต่อหนึ่ง Production ID', () => {
+  const text = buildGearExportText({
+    heading: '📅 อุปกรณ์ราย Production ID · 25–31 ส.ค.',
+    rows: [
+      { productionId: 'TSS-TSS-260907-01', title: 'The Secret Sauce', time: '09:00 → 18:00',
+        crew: ['ซัง', 'ไนซ์'], equipment: 'FX3 x2\nขาตั้ง', rental: null },
+    ],
+  })
+  assert.ok(text.includes('━━ TSS-TSS-260907-01  🕐 09:00 → 18:00  The Secret Sauce'))
+  // ขึ้นบรรทัดใหม่ในช่องกรอก → " / " เพื่อให้วางในแชตแล้วไม่แตก
+  assert.ok(text.includes('อุปกรณ์: FX3 x2 / ขาตั้ง'))
+  assert.ok(text.includes('เช่า: —'))       // ว่าง = ยังไม่มีใครกรอก ต้องเห็น
+  assert.ok(text.includes('ทีม: ซัง, ไนซ์'))
+})
+
+test('filledOnly ตัด ID ที่ยังไม่กรอกออก', () => {
+  const rows = [
+    { productionId: 'A-01', equipment: 'FX3' },
+    { productionId: 'A-02' },
+  ]
+  const all = buildGearExportText({ heading: 'h', rows })
+  const only = buildGearExportText({ heading: 'h', rows, filledOnly: true })
+  assert.ok(all.includes('A-02'))
+  assert.ok(!only.includes('A-02'))
+  assert.ok(only.includes('A-01'))
+})
+
+test('ไม่มีอะไรให้ส่ง → บอกว่าไม่มี ไม่ใช่ข้อความเปล่า', () => {
+  assert.ok(buildGearExportText({ heading: 'h', rows: [] }).includes('(ไม่มีงานในช่วงนี้)'))
+  assert.ok(buildGearExportText({ heading: 'h', rows: [{ productionId: 'A' }], filledOnly: true })
+    .includes('(ยังไม่มี Production ID ที่กรอกอุปกรณ์/เช่า)'))
+})

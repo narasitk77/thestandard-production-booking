@@ -269,8 +269,18 @@ export async function PATCH(
           ...(switcherCount !== undefined && { switcherCount: Math.max(1, Math.min(10, parseInt(switcherCount, 10) || 1)) }),
           ...(vanCount !== undefined && { vanCount: Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)) }),
           ...(Array.isArray(specialEquipment) && { specialEquipment: specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
-          ...(equipmentNote !== undefined && { equipmentNote: equipmentNote || null }),
-          ...(rentalGearNote !== undefined && { rentalGearNote: rentalGearNote || null }),
+          // v1.197 — ช่องระดับใบจองเป็น "สรุปที่คำนวณมา" จาก Episode แล้ว การเขียน
+          // ตรงนี้จึงต้อง write-through ลงทุก Production ID ของใบนั้น ไม่งั้นสรุป
+          // จะหลุดจากตัวจริงทันทีที่มีคนแก้จากหน้า Booking/Drawer
+          // (แก้แยกราย ID ได้ที่หน้า Week Plan — ที่นี่ = ใช้กับทุก ID ของงานนี้)
+          ...(equipmentNote !== undefined && {
+            equipmentNote: equipmentNote || null,
+            episodes: { updateMany: { where: {}, data: { equipmentNote: equipmentNote || null } } },
+          }),
+          ...(rentalGearNote !== undefined && {
+            rentalGearNote: rentalGearNote || null,
+            episodes: { updateMany: { where: {}, data: { rentalGearNote: rentalGearNote || null } } },
+          }),
           ...(itinerary !== undefined && { itinerary: itinerary || null }),
           ...(Array.isArray(assignedEquipmentIds) && { assignedEquipmentIds: assignedEquipmentIds.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') }),
           // Staff dismissed the cancellation request (keep the job) — clears the

@@ -395,6 +395,10 @@ model Episode {
   // Category enum; only ORIGINAL_CONTENT / ADVERTORIAL are used here. Null for
   // legacy rows and Content Agency episodes (which carry it at booking level).
   contentType Category?
+  // v1.197 — อุปกรณ์ / ของเช่า ราย Production ID (ตัวจริง). ช่องชื่อเดียวกันที่
+  // Booking กลายเป็น "สรุปที่คำนวณมา" จากตรงนี้ (ดู src/lib/gear-notes.ts)
+  equipmentNote  String?
+  rentalGearNote String?
   booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   bookingId   String
   program     Program  @relation(fields: [programId], references: [id])
