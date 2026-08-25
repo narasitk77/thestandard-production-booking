@@ -164,3 +164,16 @@ test('ชื่อตอน "-" ต้องตกไปใช้ชื่อร
   const good = buildRoomBookingTitle('NWS-GLF-260825-01', 'NWS · Global Focus')
   assert.equal(good, '[PB-NWS-GLF-260825-01] NWS · Global Focus')
 })
+
+// v1.202.3 — ล็อกว่า "ตัวประกอบเดียวกัน" ยังไม่พอ ถ้า select ต่างกัน preview ก็ยังโกหก
+// (ของจริง 2026-08-25: dry-run ได้ "POP · 7 THINGS WE LOVE ABOUT..." แต่ที่จองจริง
+//  ได้ "POP · OG EP.1 / OG EP.2" เพราะเส้นทางจริงไม่ได้ดึง program ของแต่ละตอน)
+test('ROOM_BOOKING_SELECT ต้องมีทุกฟิลด์ที่ชื่อการจองพึ่งพา', async () => {
+  const { ROOM_BOOKING_SELECT } = await import('../room-booking-sync')
+  const sel: any = ROOM_BOOKING_SELECT
+  assert.equal(sel.projectName, true, 'ขาด projectName → bookingDisplayName ตกไปใช้ชื่ออื่น')
+  assert.ok(sel.episodes?.select?.program?.select?.name,
+    'ขาด program ของแต่ละตอน → ได้ชื่อประเภทเนื้อหาแทนชื่อรายการ')
+  assert.equal(sel.episodes.select.title, true)
+  assert.equal(sel.episodes.select.episodeId, true)
+})

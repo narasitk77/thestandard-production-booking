@@ -1,6 +1,6 @@
 {
   "name": "thestandard-production-booking",
-  "version": "1.202.2",
+  "version": "1.202.3",
   "private": true,
   "scripts": {
     "dev": "next dev",

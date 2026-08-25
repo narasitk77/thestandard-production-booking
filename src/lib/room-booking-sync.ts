@@ -102,13 +102,13 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
 
   const b = await prisma.booking.findUnique({
     where: { id: bookingId },
+    // v1.202.3 — ต้องใช้ select ชุดเดียวกับ dry-run เป๊ะ ไม่งั้นตัวประกอบ payload
+    // ตัวเดียวกันได้ข้อมูลไม่เท่ากันสองทาง แล้ว preview ก็ยังโกหกอยู่ดี
+    // (ของจริง: dry-run ได้ชื่อ "7 THINGS WE LOVE ABOUT..." แต่ที่จองจริงได้
+    //  "OG EP.1 / OG EP.2" เพราะทางนี้ไม่ได้ดึง projectName + program ของตอน)
     select: {
-      id: true, bookingCode: true, locationId: true, shootDate: true, shootEndDate: true,
-      callTime: true, estimatedWrap: true, producer: true, producerEmail: true,
+      ...ROOM_BOOKING_SELECT,
       roomBookingNo: true, status: true, deletedAt: true,
-      outlet: { select: { code: true, name: true } },
-      program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true } },
     },
   })
   // งานที่ยกเลิก/ถูกลบไม่ต้องจองห้อง — ส่วนสถานะอื่น (รวม COMPLETED ตอนทดสอบย้อนหลัง)
