@@ -375,6 +375,38 @@ export async function PATCH(
       }).catch(e => console.error('updateBookingRow (episodeTitles) error:', e?.message || e))
     }
 
+    // Gear & logistics edits flow to the Bookings tab (cols AJ–AR). Week Plan
+    // is where equipment/rental actually get filled in — days AFTER the booking
+    // was created — so without this patch those columns would stay empty for
+    // every real booking and the downstream Airtable sync would keep having to
+    // scrape the calendar event description instead.
+    // Fire-and-forget, same shape as the episodeTitles patch above: a sheet
+    // hiccup must never fail the edit the user just made.
+    if (existing.sheetRowIndex && (
+      equipmentNote !== undefined || rentalGearNote !== undefined ||
+      itinerary !== undefined || agencyRef !== undefined ||
+      cameraCount !== undefined || micCount !== undefined ||
+      vanCount !== undefined || specialEquipment !== undefined ||
+      // isBlockShot แก้ได้ผ่าน PATCH นี้เหมือนกัน ถ้าไม่นับด้วย คอลัมน์ Block Shot
+      // จะค้างค่าตอนสร้างตลอดไป — อาการเดียวกับที่ PR นี้ตั้งใจแก้
+      typeof isBlockShot === 'boolean'
+    )) {
+      updateBookingRow(booking.bookingCode || '', {
+        // Always send the post-update values from `booking` (not the request
+        // body): equipmentNote/rentalGearNote are the summary recomputed from
+        // the per-episode notes, so the body's raw value can differ.
+        equipmentNote: booking.equipmentNote || '',
+        rentalGearNote: booking.rentalGearNote || '',
+        cameraCount: booking.cameraCount == null ? '' : String(booking.cameraCount),
+        micCount: booking.micCount == null ? '' : String(booking.micCount),
+        vanCount: booking.vanCount == null ? '' : String(booking.vanCount),
+        specialEquipment: (booking.specialEquipment || []).join(', '),
+        agencyRef: booking.agencyRef || '',
+        blockShot: booking.isBlockShot ? 'Yes' : '',
+        itinerary: booking.itinerary || '',
+      }).catch(e => console.error('updateBookingRow (gear) error:', e?.message || e))
+    }
+
     // Re-sync OT if scheduling fields changed and booking is active
     if (
       booking.status !== 'CANCELLED' && (

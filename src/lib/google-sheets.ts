@@ -46,6 +46,19 @@ const HEADERS = [
   // can link footage without a name walk.
   'Delivered At', 'Delivered By', 'Cancel Reason', 'Episode Titles',
   'Drive Box ID',
+  // Gear & logistics (append-only, cols AJ–AR). PMDC's Airtable sync needs
+  // these per shoot; until now the only place they existed outside this app
+  // was the Google Calendar event *description*, so the downstream pipeline had
+  // to parse presentation text (`Equipment: 🎥 2 · 🎙 1`, `Van required: Yes 🚐 × 1`)
+  // to recover them. That coupling breaks silently whenever the description is
+  // reworded — which it just was (v1.19x added a `Co-Producer:` line). Columns
+  // make it a real contract instead.
+  //
+  // `Equipment Note` / `Rental Gear Note` are the booking-level SUMMARY that
+  // `summarizeGearNotes()` computes from the per-episode notes (v1.197) — the
+  // same value the calendar description carries, not a second source of truth.
+  'Equipment Note', 'Rental Gear Note', 'Camera Count', 'Mic Count',
+  'Van Count', 'Special Equipment', 'Agency Ref', 'Block Shot', 'Itinerary',
 ]
 
 // 1-indexed column positions for partial updates.
@@ -74,6 +87,18 @@ const COL = {
   cancelReason: 33,
   episodeTitles: 34,
   driveBoxId: 35,
+  // Gear & logistics (cols AJ–AR). These MUST be patchable, not append-only:
+  // the crew fills equipment/rental in Week Plan days after the booking was
+  // created, so a create-time-only write would leave the columns empty forever.
+  equipmentNote: 36,
+  rentalGearNote: 37,
+  cameraCount: 38,
+  micCount: 39,
+  vanCount: 40,
+  specialEquipment: 41,
+  agencyRef: 42,
+  blockShot: 43,
+  itinerary: 44,
 } as const
 
 /**
@@ -252,6 +277,17 @@ export type BookingRow = {
   deliveredBy?: string | null
   cancelReason?: string | null
   driveFolders?: unknown
+  // Gear & logistics (cols AJ–AR). All optional so existing callers that build
+  // a BookingRow by hand keep compiling — they just leave the cells blank.
+  equipmentNote?: string | null
+  rentalGearNote?: string | null
+  cameraCount?: number | null
+  micCount?: number | null
+  vanCount?: number | null
+  specialEquipment?: string[] | null
+  agencyRef?: string | null
+  isBlockShot?: boolean | null
+  itinerary?: string | null
 }
 
 /**
@@ -320,6 +356,18 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       booking.cancelReason || '', // Cancel Reason
       joinEpisodeTitles(booking.episodes), // Episode Titles
       getDriveLink(booking.driveFolders, 'box') || '', // Drive Box ID
+      // Cols AJ–AR — gear & logistics. Numbers are written as strings so an
+      // absent count stays an empty cell rather than becoming a misleading 0
+      // (0 vans is a real answer; "not specified" is a different one).
+      booking.equipmentNote || '', // Equipment Note (summary of the per-episode notes)
+      booking.rentalGearNote || '', // Rental Gear Note
+      booking.cameraCount == null ? '' : String(booking.cameraCount), // Camera Count
+      booking.micCount == null ? '' : String(booking.micCount), // Mic Count
+      booking.vanCount == null ? '' : String(booking.vanCount), // Van Count
+      (booking.specialEquipment || []).join(', '), // Special Equipment
+      booking.agencyRef || '', // Agency Ref
+      booking.isBlockShot ? 'Yes' : '', // Block Shot
+      booking.itinerary || '', // Itinerary
     ]
 
     const appendRes = await sheets.spreadsheets.values.append({
@@ -372,6 +420,17 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
   cancelReason: string
   episodeTitles: string
   driveBoxId: string
+  /** Cols AJ–AR (gear & logistics). Pre-formatted strings, same convention as
+   *  the delivery columns above — the caller decides how a null renders. */
+  equipmentNote: string
+  rentalGearNote: string
+  cameraCount: string
+  micCount: string
+  vanCount: string
+  specialEquipment: string
+  agencyRef: string
+  blockShot: string
+  itinerary: string
 }>): Promise<SheetUpdateResult> {
   if (!hasCredentials() || !bookingCode) return 'skipped'
   try {
