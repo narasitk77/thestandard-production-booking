@@ -413,6 +413,20 @@ echo "==> Starting reminder worker (supervised)..."
   done
 ) &
 
+# v1.204 — room-booking reconcile worker. Stays dormant when
+# ROOM_BOOKING_WORKER_ENABLED is unset/0; supervisor still re-launches so
+# flipping the env var live in Portainer is enough. Keeps the central room
+# system (service.thestandard.co) in step with our queue: releases rooms held
+# for cancelled/moved shoots, books the ones still missing.
+echo "==> Starting room-booking reconcile worker (supervised)..."
+(
+  while true; do
+    node scripts/room-booking-worker.js
+    echo "[room-booking] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 # v1.147 — footage-ready worker. Stays dormant when FOOTAGE_READY_WORKER_ENABLED
 # is unset/0; supervisor still re-launches so flipping the env var live in
 # Portainer is enough. Sweeps recent bookings and auto-notifies once footage is

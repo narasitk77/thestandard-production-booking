@@ -86,6 +86,7 @@ const SCRIPT_TO_KEY: Record<string, string> = {
   'landing-worker.js': 'landing',
   'prep-folders-worker.js': 'prep-folders',
   'reminders-worker.js': 'reminders',
+  'room-booking-worker.js': 'room-booking-reconcile',
   'shoot-marker-worker.js': 'shoot-marker',
   'shoot-review-worker.js': 'shoot-review',
   'sound-merge-worker.js': 'sound-merge',

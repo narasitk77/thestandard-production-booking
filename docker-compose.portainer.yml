@@ -224,6 +224,13 @@ services:
       # ทยอยเปิดทีละห้อง เช่น "15,1" = Studio 1/2 (ว่าง = ทุกห้องที่แมปไว้)
       ROOM_BOOKING_ROOMS: ${ROOM_BOOKING_ROOMS:-}
       ROOM_BOOKING_BASE_URL: ${ROOM_BOOKING_BASE_URL:-https://service.thestandard.co}
+      # v1.204 — ตัวกวาดให้ระบบกลางตรงกับคิวถ่าย (ปลดห้องค้าง/ห้องที่ย้ายไปแล้ว
+      # และจองใบที่ยังขาด) เปิดได้แม้ ROOM_BOOKING_ENABLED ยังปิด — ตอนนั้นมันจะ
+      # ทำแค่ "ปลดห้องที่ไม่ควรถูกยึด" ซึ่งปลอดภัยและเป็นงานที่ค้างอยู่จริงตอนนี้
+      ROOM_BOOKING_WORKER_ENABLED: ${ROOM_BOOKING_WORKER_ENABLED:-0}
+      ROOM_BOOKING_WORKER_INTERVAL_MS: ${ROOM_BOOKING_WORKER_INTERVAL_MS:-3600000}
+      ROOM_BOOKING_RECONCILE_DAYS: ${ROOM_BOOKING_RECONCILE_DAYS:-45}
+      ROOM_BOOKING_RECONCILE_MAX: ${ROOM_BOOKING_RECONCILE_MAX:-8}
 
       # --- Folder integrity check-and-repair (v1.151) ---
       # Hourly pass over every active booking: creates missing box/EP/CAM/AUDIO

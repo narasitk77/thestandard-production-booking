@@ -54,6 +54,11 @@ export function workerSpecs(): WorkerSpec[] {
       intervalMs: posInt(process.env.VIDEO_MERGE_FALLBACK_MS, 6 * HOUR) },
     { key: 'backup', label: 'DB backup', enabled: enabled(process.env.BACKUP_WORKER_ENABLED),
       intervalMs: posInt(process.env.BACKUP_INTERVAL_MS, 24 * HOUR) },
+    // v1.204 — ตัวกวาดการจองห้องในระบบกลางให้ตรงกับคิวถ่าย (ปลดห้องค้าง/จองที่ขาด)
+    // ต้องมี spec ที่นี่ ไม่งั้น worker ตายแล้วห้องค้างสะสมโดยไม่มีใครรู้ — ซึ่งเป็น
+    // อาการเดียวกับที่ worker ตัวนี้ถูกสร้างมาเพื่อแก้
+    { key: 'room-booking-reconcile', label: 'Room booking reconcile', enabled: enabled(process.env.ROOM_BOOKING_WORKER_ENABLED),
+      intervalMs: posInt(process.env.ROOM_BOOKING_WORKER_INTERVAL_MS, HOUR) },
     // v1.147 — auto "footage ready" notification sweep.
     { key: 'footage-ready', label: 'Footage ready notify', enabled: enabled(process.env.FOOTAGE_READY_WORKER_ENABLED),
       intervalMs: posInt(process.env.FOOTAGE_READY_INTERVAL_MS, 30 * MINUTE) },
