@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
 import { prisma } from '@/lib/db'
+import { updateBookingRow } from '@/lib/google-sheets'
 import { resolveLocationId } from '@/lib/location-resolve'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
@@ -186,6 +187,21 @@ export async function PATCH(
         refreshShootMarker(booking).catch(e =>
           console.error('[producer-edit] marker refresh failed (non-fatal):', e?.message || e))
       }
+    }
+
+    // v1.203 — เลข QU ที่ "เจ้าของงาน" กรอกเองต้องถึงชีทด้วย
+    //
+    // PR #18 ต่อการเขียนคอลัมน์ Agency Ref ไว้ที่ PATCH ของแอดมินอย่างเดียว แต่
+    // ทางหลักที่เลข QU ถูกกรอกจริงคือหน้านี้ (v1.188/v1.193 เปิดให้เจ้าของงานแก้เอง
+    // และตอนนี้ยังมีงานรอเขากรอกอยู่อีกหลายใบ) — ถ้าไม่ต่อตรงนี้ คอลัมน์จะมีค่า
+    // เฉพาะใบที่แอดมินแก้ ส่วนที่โปรดิวเซอร์กรอกจะว่างตลอด ซึ่งพังเงียบแบบเดียว
+    // กับที่ PR นี้ตั้งใจแก้
+    //
+    // fire-and-forget เส้นเดียวกับที่อื่น — ชีทสะดุดต้องไม่ทำให้การบันทึกล้ม
+    if (fieldChanges.agencyRef && existing.sheetRowIndex) {
+      updateBookingRow(booking.bookingCode || '', {
+        agencyRef: booking.agencyRef || '',
+      }).catch(e => console.error('[producer-edit] updateBookingRow (agencyRef) error:', e?.message || e))
     }
 
     if (hasChanges) {

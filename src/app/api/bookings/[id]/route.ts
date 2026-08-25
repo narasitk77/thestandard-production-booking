@@ -386,7 +386,10 @@ export async function PATCH(
       equipmentNote !== undefined || rentalGearNote !== undefined ||
       itinerary !== undefined || agencyRef !== undefined ||
       cameraCount !== undefined || micCount !== undefined ||
-      vanCount !== undefined || specialEquipment !== undefined
+      vanCount !== undefined || specialEquipment !== undefined ||
+      // isBlockShot แก้ได้ผ่าน PATCH นี้เหมือนกัน ถ้าไม่นับด้วย คอลัมน์ Block Shot
+      // จะค้างค่าตอนสร้างตลอดไป — อาการเดียวกับที่ PR นี้ตั้งใจแก้
+      typeof isBlockShot === 'boolean'
     )) {
       updateBookingRow(booking.bookingCode || '', {
         // Always send the post-update values from `booking` (not the request
@@ -399,6 +402,7 @@ export async function PATCH(
         vanCount: booking.vanCount == null ? '' : String(booking.vanCount),
         specialEquipment: (booking.specialEquipment || []).join(', '),
         agencyRef: booking.agencyRef || '',
+        blockShot: booking.isBlockShot ? 'Yes' : '',
         itinerary: booking.itinerary || '',
       }).catch(e => console.error('updateBookingRow (gear) error:', e?.message || e))
     }
