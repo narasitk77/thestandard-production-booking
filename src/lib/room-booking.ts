@@ -179,3 +179,197 @@ function addHours(hhmm: string, hours: number): string {
 function nextDay(ymd: string): string {
   return new Date(Date.parse(`${ymd}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v1.200 — ฝั่ง "เขียน": จองห้องจริงในระบบกลาง
+//
+// สเปคจาก IT (เอกสาร Probook × TSD Room Booking Integration, 2026-08-25)
+//   POST /api/liff/booking  · header `x-service-key`
+//   body: roomId, startDate, startTime, endDate, endTime, title, name, email,
+//         department, notes?   — **เวลาเป็นเวลาไทยตรง ๆ ไม่ใช่ UTC**
+//         (คนละแบบกับ check-conflict ที่รับ ISO UTC — IT เตือนไว้เองในเอกสาร)
+//   ตอบ 200: { success: true, bookingNo: "BK-0412" }
+//
+// ⚠️ **ข้อที่เปลี่ยนวิธีออกแบบทั้งหมด: ระบบเขาไม่มี idempotency — ยิงซ้ำ = จองซ้ำ**
+// ฉะนั้นห้าม retry แบบเดิม ๆ เด็ดขาด เส้นทางที่ปลอดภัยคือ
+//   1. ฝั่งเราจำ bookingNo ไว้ → มีแล้วไม่ยิงอีก
+//   2. ถ้าผลลัพธ์ "ไม่รู้" (timeout/เน็ตหลุด) → **อ่านกลับก่อนเสมอ** ด้วย marker
+//      `[PB-<bookingCode>]` ใน title แล้วค่อยตัดสินใจ ไม่ใช่ยิงใหม่
+//
+// อีกข้อที่อ่านผิดง่าย: **"ห้องถูกจองแล้ว" ตอบกลับมาเป็น 500 ไม่ใช่ 409**
+// ถ้าเหมา 5xx = ชั่วคราวแล้ว retry จะกลายเป็นยิงซ้ำใส่ห้องที่เต็มอยู่แล้วไม่รู้จบ
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** marker ที่ฝังใน title — ใช้ทั้ง trace ย้อนหลังและอ่านกลับมาจับคู่ */
+export function roomBookingMarker(bookingCode: string): string {
+  return `[PB-${bookingCode}]`
+}
+
+export function buildRoomBookingTitle(bookingCode: string, showName: string): string {
+  return `${roomBookingMarker(bookingCode)} ${showName}`.trim()
+}
+
+export interface RoomBookingPayload {
+  roomId: number
+  startDate: string
+  startTime: string
+  endDate: string
+  endTime: string
+  title: string
+  name: string
+  email: string
+  department: string
+  notes?: string
+}
+
+/**
+ * ประกอบ body ให้ตรงสเปค — **เวลาไทยตรง ๆ ไม่แปลงเป็น UTC**
+ * คืน null พร้อมเหตุผลเมื่อประกอบไม่ได้ ดีกว่าเดาค่าแล้วจองผิดเวลา
+ */
+export function buildRoomBookingPayload(input: {
+  roomId: number
+  bookingCode: string
+  showName: string
+  shootDate: string
+  shootEndDate?: string | null
+  callTime: string
+  estimatedWrap?: string | null
+  producerName?: string | null
+  producerEmail?: string | null
+  department?: string | null
+  notes?: string | null
+}): { payload: RoomBookingPayload } | { error: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.shootDate)) return { error: 'shootDate ไม่ใช่ YYYY-MM-DD' }
+  if (!/^\d{2}:\d{2}$/.test(input.callTime)) return { error: 'callTime ไม่ใช่ HH:mm' }
+  const email = (input.producerEmail || '').trim()
+  // ระบบเขาปฏิเสธอีเมลนอกโดเมนพนักงาน (ตอบ 500) — กันไว้ก่อนยิงดีกว่าไปเจอปลายทาง
+  if (!/^[^@\s]+@thestandard\.co$/i.test(email)) {
+    return { error: `ต้องมีอีเมลโปรดิวเซอร์ @thestandard.co (ตอนนี้: ${email || 'ว่าง'})` }
+  }
+  const wrap = (input.estimatedWrap || '').trim()
+  const endTime = /^\d{2}:\d{2}$/.test(wrap) ? wrap : addHours(input.callTime, 8)
+  const sameDay = !input.shootEndDate || input.shootEndDate === input.shootDate
+  // ถ่ายข้ามคืน: wrap **น้อยกว่า** call แปลว่าเลิกวันถัดไป
+  // ต่างจาก ot-sync ที่ใช้ <= โดยตั้งใจ — wrap เท่ากับ call เป๊ะ (09:00→09:00) ที่นี่
+  // จะกลายเป็นยึดห้องยาว 24 ชม. ซึ่งน่าจะเป็นการกรอกผิดมากกว่างานจริง จึงให้ตกไป
+  // เป็น error ให้คนมาดู ดีกว่าไปล็อกห้องทั้งวันของคนอื่น
+  const overnight = sameDay && endTime < input.callTime
+  const endDate = input.shootEndDate || (overnight ? nextDay(input.shootDate) : input.shootDate)
+
+  const spanDays = Math.round((Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${input.shootDate}T00:00:00Z`)) / 86_400_000)
+  if (spanDays < 0) return { error: 'วันจบอยู่ก่อนวันเริ่ม' }
+  if (spanDays > 10) return { error: 'ช่วงจองเกิน 10 วัน (กติกาของระบบกลาง)' }
+  if (spanDays === 0 && endTime <= input.callTime) return { error: 'เวลาจบต้องหลังเวลาเริ่ม' }
+
+  return {
+    payload: {
+      roomId: input.roomId,
+      startDate: input.shootDate,
+      startTime: input.callTime,
+      endDate,
+      endTime,
+      title: buildRoomBookingTitle(input.bookingCode, input.showName),
+      name: (input.producerName || '').trim() || email.split('@')[0],
+      email,
+      department: (input.department || '').trim() || 'Production',
+      ...(input.notes?.trim() ? { notes: input.notes.trim() } : {}),
+    },
+  }
+}
+
+export type RoomBookingOutcome =
+  | { kind: 'ok'; bookingNo: string }
+  | { kind: 'conflict'; message: string }      // ห้องเต็ม — ห้าม retry
+  | { kind: 'invalid'; message: string }       // ข้อมูลเราผิด — ห้าม retry จนกว่าจะแก้
+  | { kind: 'unknown'; message: string }       // ไม่รู้ผล — **ต้องอ่านกลับก่อนตัดสินใจ**
+
+/**
+ * แปลงคำตอบของระบบกลางเป็นผลที่ตัดสินใจต่อได้
+ *
+ * แยก "ห้ามยิงซ้ำ" ออกจาก "ไม่รู้ผล" ให้ชัด เพราะระบบเขาไม่มี idempotency —
+ * เดาผิดฝั่งไหนก็เจ็บ: เหมาว่าไม่รู้ผลแล้วยิงซ้ำ = จองซ้ำ, เหมาว่าสำเร็จ = ห้องไม่ถูกจอง
+ */
+export function classifyRoomBookingResponse(
+  status: number,
+  body: any,
+): RoomBookingOutcome {
+  const message = String(body?.error || body?.message || '').trim()
+  if (status === 200 && body?.success && body?.bookingNo) {
+    return { kind: 'ok', bookingNo: String(body.bookingNo) }
+  }
+  if (status === 401) return { kind: 'invalid', message: message || 'service key ผิดหรือไม่ได้แนบ' }
+  if (status === 400) return { kind: 'invalid', message: message || 'ข้อมูลไม่ผ่านการตรวจ' }
+  // เขาใช้ 500 ทั้งกรณีห้องเต็มและอีเมลผิดโดเมน — ต้องอ่านข้อความ ไม่ใช่ดูแค่รหัส
+  if (message.includes('ถูกจองในช่วงเวลาดังกล่าวแล้ว')) return { kind: 'conflict', message }
+  if (message.includes('อีเมลพนักงาน')) return { kind: 'invalid', message }
+  if (status === 200) return { kind: 'unknown', message: 'ตอบ 200 แต่ไม่มี bookingNo' }
+  return { kind: 'unknown', message: message || `HTTP ${status}` }
+}
+
+/** เปิดใช้การจองห้องอัตโนมัติหรือยัง — ปิดไว้เป็นค่าเริ่มต้น */
+export function roomBookingEnabled(): boolean {
+  return process.env.ROOM_BOOKING_ENABLED?.trim() === '1'
+}
+
+/**
+ * เปิดเฉพาะบางห้องได้ — `ROOM_BOOKING_ROOMS="15,1"` (ว่าง = ทุกห้องที่แมปไว้)
+ * ใช้ตอนทยอยเปิด เริ่มจาก Studio 1/2 ซึ่งเป็นห้องที่ใช้จริงเกือบทั้งหมด
+ */
+export function roomBookingAllowed(roomId: number): boolean {
+  const raw = process.env.ROOM_BOOKING_ROOMS?.trim()
+  if (!raw) return true
+  return raw.split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite).includes(roomId)
+}
+
+/**
+ * หาการจองของเราในระบบกลาง ด้วย marker ใน title
+ *
+ * ใช้ `bookings-calendar` (ไม่ใช่ `room-slots`) เพราะอันนี้คืน `bookingNo` มาด้วย
+ * ซึ่งเป็นสิ่งที่เราต้องเก็บไว้กันยิงซ้ำ ส่วน room-slots คืนแค่ title/เวลา
+ */
+export async function findExistingRoomBooking(
+  bookingCode: string,
+  year: number,
+  month: number,
+): Promise<{ bookingNo: string; title: string } | null> {
+  const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
+  const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
+  const marker = roomBookingMarker(bookingCode)
+  const hit = rows.find(r => String(r?.title || '').includes(marker))
+  return hit ? { bookingNo: String(hit.bookingNo || ''), title: String(hit.title || '') } : null
+}
+
+/**
+ * ยิงจองจริง — **เรียกได้ต่อเมื่อผู้เรียกเช็คแล้วว่ายังไม่มี roomBookingNo**
+ * ไม่ retry เองเด็ดขาด: ผลลัพธ์ `unknown` เป็นหน้าที่ของผู้เรียกที่จะอ่านกลับก่อน
+ */
+export async function createRoomBooking(
+  payload: RoomBookingPayload,
+  opts: { timeoutMs?: number } = {},
+): Promise<RoomBookingOutcome> {
+  const key = process.env.ROOM_BOOKING_SERVICE_KEY?.trim()
+  if (!key) return { kind: 'invalid', message: 'ยังไม่ได้ตั้ง ROOM_BOOKING_SERVICE_KEY' }
+
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20_000)
+  try {
+    const res = await fetch(`${ROOM_BOOKING_BASE_URL}/api/liff/booking`, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-service-key': key,
+        // Cloudflare ตอบ 403 "error code: 1010" ถ้าไม่มี User-Agent
+        'User-Agent': 'probook/1.0 (+production-booking)',
+      },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    return classifyRoomBookingResponse(res.status, body)
+  } catch (e: any) {
+    // timeout / เน็ตหลุด = **ไม่รู้ว่าเขาบันทึกไปแล้วหรือยัง** ห้ามสรุปว่าล้มเหลว
+    return { kind: 'unknown', message: e?.name === 'AbortError' ? 'timeout' : (e?.message || String(e)) }
+  } finally {
+    clearTimeout(t)
+  }
+}

@@ -226,6 +226,14 @@ model Booking {
   videoType        String?
   shootType        ShootType
   locationName     String?
+  // v1.200 — การจองห้องในระบบกลาง service.thestandard.co
+  // ระบบเขา **ไม่มี idempotency** (ยิงซ้ำ = จองซ้ำ) ฝั่งเราจึงต้องจำเองว่ายิงไปแล้ว
+  // roomBookingNo = "BK-0412" ที่เขาคืนมา · มีค่า = ห้ามยิงอีกเด็ดขาด
+  roomBookingNo     String?
+  // PENDING | OK | CONFLICT | INVALID | UNKNOWN | SKIPPED
+  roomBookingStatus String?
+  roomBookingError  String?
+  roomBookingAt     DateTime?
   // v1.195 — id ของห้อง/สถานที่จาก src/lib/locations.ts (เช่น `tsd-studio-1`)
   // locationName เป็น "ข้อความที่เรนเดอร์แล้ว" ซึ่งห้องเดียวกันมีได้หลายสะกด
   // (`สตูดิโอ 1` 129 ใบ · `Studio 1 (TSD)` 65 ใบ · `Studio 1` 11 ใบ) จึงแมปกับ

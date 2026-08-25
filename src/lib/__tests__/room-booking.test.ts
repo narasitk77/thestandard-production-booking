@@ -74,3 +74,83 @@ test('ช่วง UTC → วันไทยที่พาดผ่าน (ต
   // 1 ก.ย. 20:00 → 2 ก.ย. 02:00 เวลาไทย
   assert.deepEqual(utcRangeToBangkokDates('2026-09-01T13:00:00.000Z', '2026-09-01T19:00:00.000Z'), ['2026-09-01', '2026-09-02'])
 })
+
+// ── v1.200 ฝั่งเขียน ──────────────────────────────────────────────────────────
+import {
+  buildRoomBookingPayload, classifyRoomBookingResponse,
+  buildRoomBookingTitle, roomBookingMarker,
+} from '../room-booking'
+
+const BASE = {
+  roomId: 15, bookingCode: 'TSS-TSS-260907-01', showName: 'The Secret Sauce',
+  shootDate: '2026-09-07', callTime: '09:00', estimatedWrap: '18:00',
+  producerName: 'แพร', producerEmail: 'ingtawan.s@thestandard.co',
+}
+
+test('payload ใช้เวลาไทยตรง ๆ ไม่แปลงเป็น UTC (คนละแบบกับ check-conflict)', () => {
+  const r = buildRoomBookingPayload(BASE) as any
+  assert.equal(r.payload.startDate, '2026-09-07')
+  assert.equal(r.payload.startTime, '09:00')   // ไม่ใช่ 02:00Z
+  assert.equal(r.payload.endTime, '18:00')
+  assert.equal(r.payload.roomId, 15)
+  assert.equal(r.payload.department, 'Production')
+})
+
+test('title ฝัง marker ไว้ trace + อ่านกลับได้', () => {
+  const r = buildRoomBookingPayload(BASE) as any
+  assert.equal(r.payload.title, '[PB-TSS-TSS-260907-01] The Secret Sauce')
+  assert.ok(r.payload.title.includes(roomBookingMarker('TSS-TSS-260907-01')))
+  assert.equal(buildRoomBookingTitle('A-01', ''), '[PB-A-01]')
+})
+
+test('ไม่มี wrap → +8 ชม. ตามที่ระบบใช้อยู่', () => {
+  const r = buildRoomBookingPayload({ ...BASE, estimatedWrap: null }) as any
+  assert.equal(r.payload.endTime, '17:00')
+})
+
+test('ถ่ายข้ามคืน → endDate เป็นวันถัดไป', () => {
+  const r = buildRoomBookingPayload({ ...BASE, callTime: '20:00', estimatedWrap: '02:00' }) as any
+  assert.equal(r.payload.startDate, '2026-09-07')
+  assert.equal(r.payload.endDate, '2026-09-08')
+})
+
+test('กติกาของระบบกลาง — กันไว้ก่อนยิง ไม่ใช่ไปเจอปลายทาง', () => {
+  // เกิน 10 วัน
+  const long = buildRoomBookingPayload({ ...BASE, shootEndDate: '2026-09-30' }) as any
+  assert.ok(long.error.includes('10 วัน'))
+  // อีเมลนอกโดเมน (ระบบเขาตอบ 500 ซึ่งอ่านเหมือน error ชั่วคราว)
+  const gmail = buildRoomBookingPayload({ ...BASE, producerEmail: 'someone@gmail.com' }) as any
+  assert.ok(gmail.error.includes('@thestandard.co'))
+  const noEmail = buildRoomBookingPayload({ ...BASE, producerEmail: null }) as any
+  assert.ok(noEmail.error.includes('ว่าง'))
+  // wrap เท่ากับ call เป๊ะ = น่าจะกรอกผิด — ต้องไม่กลายเป็นยึดห้อง 24 ชม.
+  const zero = buildRoomBookingPayload({ ...BASE, callTime: '09:00', estimatedWrap: '09:00' }) as any
+  assert.ok(zero.error, 'wrap = call ต้องเป็น error ไม่ใช่จองข้ามคืน 24 ชม.')
+})
+
+test('ไม่มีข้อจำกัดเวลาทำการ — ถ่ายตี 5 จองได้ (IT ยืนยัน 08:00–21:00 เป็นแค่ฟอร์ม)', () => {
+  const r = buildRoomBookingPayload({ ...BASE, callTime: '05:00', estimatedWrap: '23:30' }) as any
+  assert.equal(r.payload.startTime, '05:00')
+  assert.equal(r.payload.endTime, '23:30')
+})
+
+// ⚠️ เคสที่ตัดสินว่าจะจองซ้ำหรือไม่ — ระบบเขาไม่มี idempotency
+test('แยก "ห้ามยิงซ้ำ" ออกจาก "ไม่รู้ผล" ให้ขาด', () => {
+  assert.deepEqual(
+    classifyRoomBookingResponse(200, { success: true, bookingNo: 'BK-0412' }),
+    { kind: 'ok', bookingNo: 'BK-0412' })
+
+  // ห้องเต็มตอบ **500** ไม่ใช่ 409 — เหมา 5xx = ชั่วคราวแล้ว retry จะยิงซ้ำไม่จบ
+  const full = classifyRoomBookingResponse(500, { error: 'ห้องนี้ถูกจองในช่วงเวลาดังกล่าวแล้วครับ' })
+  assert.equal(full.kind, 'conflict')
+
+  const badEmail = classifyRoomBookingResponse(500, { error: 'กรุณาใช้อีเมลพนักงานของคุณ' })
+  assert.equal(badEmail.kind, 'invalid')
+
+  assert.equal(classifyRoomBookingResponse(401, { error: 'Invalid service key' }).kind, 'invalid')
+  assert.equal(classifyRoomBookingResponse(400, { error: 'จองได้สูงสุด 10 วัน' }).kind, 'invalid')
+
+  // 5xx อื่น / ตอบแปลก = ไม่รู้ผล → ต้องอ่านกลับก่อน ห้ามยิงใหม่ทันที
+  assert.equal(classifyRoomBookingResponse(502, {}).kind, 'unknown')
+  assert.equal(classifyRoomBookingResponse(200, { success: true }).kind, 'unknown')
+})
