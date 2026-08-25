@@ -17,7 +17,7 @@ import NumberStepper from '@/app/_components/NumberStepper'
 import { SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 import { isQuPending, QU_PENDING, QU_FIELD_HINT } from '@/lib/qu-ref'
 import { hasConsoleAccess } from '@/lib/roles'
-import { producerEditMode } from '@/lib/producer-edit-access'
+import { producerEditMode, isBookingOwner } from '@/lib/producer-edit-access'
 
 const SHOOT_TYPES = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT']
 
@@ -91,7 +91,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
   const isOwner = useMemo(() => {
     if (!booking || !meEmail) return false
     if (hasConsoleAccess(meRole)) return true
-    return (booking.createdByEmail || '').toLowerCase() === meEmail || (booking.producerEmail || '').toLowerCase() === meEmail
+    return isBookingOwner(booking, meEmail)
   }, [booking, meEmail, meRole])
   // v1.193 — กฎเดียวกับ route และปุ่มในหน้า /my-bookings
   const mode = producerEditMode({

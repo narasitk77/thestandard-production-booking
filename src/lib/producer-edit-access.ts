@@ -45,3 +45,20 @@ export function producerEditMode(s: ProducerEditSubject): ProducerEditMode {
 export function canEditAgencyRef(mode: ProducerEditMode): boolean {
   return mode === 'full' || mode === 'location' || mode === 'agencyRef'
 }
+
+/**
+ * สิทธิ์ **แก้ไข** ใบจอง — คนสร้าง หรือ โปรดิวเซอร์ที่ถูกระบุชื่อ
+ *
+ * v1.196 — ย้ายมาไว้ที่เดียวกับ producerEditMode เพราะเดิมกฎนี้ถูกเขียนซ้ำใน
+ * route กับหน้า my-bookings และ "แคบกว่า" กฎการมองเห็นคนละแบบ (ดู my-bookings-scope.ts)
+ * แคบกว่า "งานของฉัน" โดยตั้งใจ: ครูที่ถูก assign เห็นงานได้ แต่ไม่ควรแก้รายละเอียดงาน
+ */
+export function isBookingOwner(
+  b: { createdByEmail?: string | null; producerEmail?: string | null },
+  email: string | null | undefined,
+): boolean {
+  const me = (email || '').trim().toLowerCase()
+  if (!me) return false
+  return (b.createdByEmail || '').trim().toLowerCase() === me
+    || (b.producerEmail || '').trim().toLowerCase() === me
+}

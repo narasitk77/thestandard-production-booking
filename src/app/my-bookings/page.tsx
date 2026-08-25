@@ -9,7 +9,7 @@ import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
 import StatusPill, { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
 import { isValidQuRef } from '@/lib/qu-ref'
-import { producerEditMode } from '@/lib/producer-edit-access'
+import { producerEditMode, isBookingOwner } from '@/lib/producer-edit-access'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
 
@@ -271,7 +271,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
   const d = parseISO(b.shootDate)
   const valid = !isNaN(d.getTime())
   const showUpload = canUpload && (b.status === 'CONFIRMED' || b.status === 'COMPLETED')
-  const isOwner = !!meEmail && ((b.createdByEmail || '').toLowerCase() === meEmail || (b.producerEmail || '').toLowerCase() === meEmail)
+  const isOwner = isBookingOwner(b, meEmail)
   // v1.150.1 — CONFIRMED bookings stay owner-editable for LOCATION only (the
   // venue link changes after approval more often than anything else).
   // v1.193 — งาน Advertorial ที่ COMPLETED ต้องเข้าไปเติมเลข QU ได้ด้วย. v1.188

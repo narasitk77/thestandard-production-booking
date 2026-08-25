@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { myBookingsWhere } from '@/lib/my-bookings-scope'
 import { getSession } from '@/lib/session'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { createBookingFromPayload } from '@/lib/create-booking'
@@ -53,15 +54,14 @@ export async function GET(request: NextRequest) {
     // the upload rows stay behind canViewBooking (booking-access.ts), and only
     // the owner/console can EDIT. This is a read-scope change on the schedule,
     // not a permissions change.
+    // v1.196 — scope=mine เดิมนับแค่ "คนสร้าง หรือ ครูในงาน" ทำให้โปรดิวเซอร์ของงาน
+    // มองไม่เห็นงานตัวเองถ้าคนอื่นเป็นคนกดสร้าง (ของจริง 59 ใบบนพรอด) — และบอท QU
+    // ส่งเมลไปหา producerEmail พร้อมลิงก์มาหน้านี้พอดี. นิยามอยู่ที่
+    // src/lib/my-bookings-scope.ts ที่เดียวแล้ว
     const userFilter = scope === 'producer'
       ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
       : scope === 'mine'
-        ? {
-            OR: [
-              { createdByEmail: session.email },
-              { assignedEmails: { has: session.email } },
-            ],
-          }
+        ? myBookingsWhere(session.email)
         : {}
 
     // ?cancelRequested=1 — the "ขอยกเลิก" tab: bookings someone asked to cancel

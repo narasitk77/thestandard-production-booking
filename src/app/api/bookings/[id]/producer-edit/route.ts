@@ -21,7 +21,7 @@ import { prisma } from '@/lib/db'
 import { resolveLocationId } from '@/lib/location-resolve'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
-import { producerEditMode } from '@/lib/producer-edit-access'
+import { producerEditMode, isBookingOwner } from '@/lib/producer-edit-access'
 import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { FIELD_LABELS, fmt, diffEditable } from '@/lib/producer-edit-fields'
@@ -50,9 +50,7 @@ export async function PATCH(
 
     // Owner = the booking's creator OR the named producer (case-insensitive;
     // session.email is already lowercased by getSession). Only while REQUESTED.
-    const isOwner =
-      (existing.createdByEmail || '').toLowerCase() === session.email ||
-      (existing.producerEmail || '').toLowerCase() === session.email
+    const isOwner = isBookingOwner(existing, session.email)
     // v1.193 — ทีมคิว (Admin/Coordinator) ก็ผ่านด่านนี้ได้ ไม่ใช่การเพิ่มอำนาจ:
     // เขาแก้ทุกฟิลด์ผ่าน PATCH /api/bookings/:id ได้อยู่แล้ว (hasConsoleAccess
     // เหมือนกัน) แต่ "ไม่มีหน้าจอไหนเลย" ที่แก้ Agency Ref ของใบที่มีอยู่ได้ →
