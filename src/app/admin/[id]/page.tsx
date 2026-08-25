@@ -1356,12 +1356,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             {/* v1.62.0 — Auto-Planning fields. Filling these replaces the manual
                 calendar→planning-sheet copy; they show in /admin/workspace + the
                 planning export, and feed the "shoot missing gear" reminder. */}
-            {/* v1.197 — อุปกรณ์เก็บราย Production ID แล้ว ช่องนี้เขียนทับทุก ID ของงาน
-                ถ้าจะแยกต่อ ID ต้องไปที่ Week Plan — บอกให้เห็นก่อนพิมพ์ ไม่ใช่หลังกดบันทึก */}
+            {/* v1.198 — กองเดียวหลาย Production ID เบิกอุปกรณ์ชุดเดียว (operator ยืนยัน)
+                ช่องนี้จึงครอบคลุมทุก ID ของกอง — บอกให้เห็นก่อนพิมพ์ ไม่ใช่หลังกดบันทึก */}
             {(booking.episodes?.length ?? 0) > 1 && (
               <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                งานนี้มี {booking.episodes.length} Production ID — แก้ที่นี่จะใช้กับ<b>ทุก ID</b>{' '}
-                <Link href="/admin/week-plan" className="underline">แยกราย ID ที่ Week Plan</Link>
+                กองนี้มี {booking.episodes.length} Production ID ถ่ายต่อเนื่อง — อุปกรณ์ชุดนี้ใช้กับ<b>ทุก ID</b>{' '}
+                <Link href="/admin/week-plan" className="underline">ดูภาพรวมทั้งสัปดาห์</Link>
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -50,9 +50,16 @@ export function summarizeGearNotes(eps: EpisodeGear[], field: GearField): string
   return filled.map(e => `${e.id}: ${e.text}`).join('\n')
 }
 
-/** แถวหนึ่งของข้อความที่ส่งให้บอท Norbert — หนึ่งแถว = หนึ่ง Production ID */
+/**
+ * แถวหนึ่งของข้อความที่ส่งให้บอท Norbert — **หนึ่งแถว = หนึ่งกอง (หนึ่งอีเวนต์ปฏิทิน)**
+ *
+ * v1.198 — operator 2026-08-25: *"ถ้ามี 2 ไอดีในงานเดียว ให้รวมกัน · 1 calendar
+ * 2 id เขาจะเบิกชุดเดียวกัน แต่ใช้ต่อเนื่อง อาจจะโชว์ ID คู่กันไปเลย"* —
+ * การเบิกอุปกรณ์เกิดต่อกอง ไม่ใช่ต่อ Production ID จึงรวมเป็นบล็อกเดียวแล้วลิสต์
+ * ID ทุกตัวที่ชุดอุปกรณ์นั้นครอบคลุม (ลิสต์เต็มเสมอ ไม่ย่อ — บอทต้องจับคู่ ID ได้)
+ */
 export interface GearExportRow {
-  productionId: string
+  productionIds: string[]
   /** ชื่อรายการ/ตอน เพื่อให้คนอ่านรู้ว่าใบไหน */
   title?: string | null
   /** "08:00 → 18:00" */
@@ -63,6 +70,15 @@ export interface GearExportRow {
 }
 
 const DASH = '—'
+
+/**
+ * ลิสต์ Production ID ของกองเดียวกัน — เต็มทุกตัว คั่นด้วย " + "
+ * ไม่ย่อ prefix ร่วม เพราะปลายทางเป็นบอทที่ต้องจับคู่เลข ID ตรง ๆ
+ */
+export function formatProductionIds(ids: string[]): string {
+  const seen = ids.map(s => (s || '').trim()).filter(Boolean)
+  return Array.from(new Set(seen)).join(' + ')
+}
 
 /**
  * ข้อความสำหรับวางในบอท — **หนึ่ง Production ID ต่อหนึ่งบล็อก**
@@ -87,7 +103,7 @@ export function buildGearExportText(input: {
     return out.join('\n').trimEnd() + '\n'
   }
   for (const r of rows) {
-    const head = [r.productionId, r.time ? `🕐 ${r.time}` : '', clean(r.title)]
+    const head = [formatProductionIds(r.productionIds), r.time ? `🕐 ${r.time}` : '', clean(r.title)]
       .filter(Boolean).join('  ')
     out.push(`━━ ${head}`)
     out.push(`อุปกรณ์: ${clean(r.equipment) ? clean(r.equipment).replace(/\s*\n\s*/g, ' / ') : DASH}`)
