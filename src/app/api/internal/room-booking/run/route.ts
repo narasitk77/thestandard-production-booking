@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { prisma } from '@/lib/db'
-import { syncRoomBooking, cancelRoomBookingFor } from '@/lib/room-booking-sync'
-import { roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload, roomBookingEnabled } from '@/lib/room-booking'
+import { syncRoomBooking, cancelRoomBookingFor, buildPayloadForBooking, ROOM_BOOKING_SELECT } from '@/lib/room-booking-sync'
+import { roomBookingEnabled } from '@/lib/room-booking'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -67,37 +67,18 @@ export async function GET(request: NextRequest) {
         ? { bookingCode: { in: codes }, status: { not: 'CANCELLED' } }
         : { status: 'CONFIRMED', shootDate: { gte: from, lt: to } }),
     },
-    select: {
-      id: true, bookingCode: true, locationId: true, locationName: true,
-      shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
-      producer: true, producerEmail: true, roomBookingStatus: true,
-      outlet: { select: { code: true, name: true } },
-      program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true } },
-    },
+    // select ชุดเดียวกับที่ตัวประกอบ payload ต้องการ — กันสองฝั่งหลุดจากกัน
+    select: ROOM_BOOKING_SELECT,
     orderBy: { shootDate: 'asc' },
   })
 
-  const ymd = (d: Date) => d.toISOString().slice(0, 10)
   const plan: any[] = []
   const skipped: Record<string, number> = {}
 
   for (const b of candidates) {
-    const t = roomTargetForBooking({
-      locationId: b.locationId, shootDate: ymd(b.shootDate),
-      shootEndDate: b.shootEndDate ? ymd(b.shootEndDate) : null,
-      callTime: b.callTime, estimatedWrap: b.estimatedWrap,
-    })
-    if ('skip' in t) { skipped[t.skip] = (skipped[t.skip] || 0) + 1; continue }
-    const roomId = roomIdForLocation(b.locationId)!
-    const built = buildRoomBookingPayload({
-      roomId, bookingCode: b.bookingCode || b.id,
-      showName: [b.outlet.code, b.episodes[0]?.title?.trim() || b.program.name].filter(Boolean).join(' · '),
-      shootDate: ymd(b.shootDate), shootEndDate: b.shootEndDate ? ymd(b.shootEndDate) : null,
-      callTime: b.callTime, estimatedWrap: b.estimatedWrap,
-      producerName: b.producer, producerEmail: b.producerEmail,
-      department: b.outlet.name, notes: b.episodes.map(e => e.episodeId).join(', '),
-    })
+    // ตัวประกอบตัวเดียวกับที่เส้นทางจริงใช้ → preview คือของจริงเสมอ
+    const built = buildPayloadForBooking(b)
+    if ('skip' in built) { skipped[built.skip] = (skipped[built.skip] || 0) + 1; continue }
     if ('error' in built) {
       plan.push({ code: b.bookingCode, room: b.locationName, blocked: built.error })
       continue

@@ -27,6 +27,67 @@ export type RoomSyncResult =
   | { status: 'INVALID'; message: string }
   | { status: 'UNKNOWN'; message: string }
 
+
+/** รูปแบบข้อมูลใบจองที่ต้องใช้ประกอบ payload — ให้ทั้งสองเส้นทาง select เหมือนกัน */
+export const ROOM_BOOKING_SELECT = {
+  id: true, bookingCode: true, locationId: true, locationName: true,
+  shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
+  producer: true, producerEmail: true,
+  outlet: { select: { code: true, name: true } },
+  program: { select: { name: true } },
+  episodes: { orderBy: { sequence: 'asc' as const }, select: { episodeId: true, title: true } },
+} as const
+
+/**
+ * ประกอบ payload จากใบจอง — **ที่เดียวเท่านั้น**
+ *
+ * v1.202 — เดิม endpoint dry-run ประกอบเองแยกจาก syncRoomBooking ผลคือ preview
+ * โชว์ notes คนละแบบกับที่จะส่งจริง. preview ที่โกหกแย่กว่าไม่มี preview เลย
+ * เพราะคนดูแล้วอนุมัติจากสิ่งที่ไม่ใช่ของจริง
+ */
+export function buildPayloadForBooking(b: {
+  id: string; bookingCode: string | null; locationId: string | null
+  shootDate: Date; shootEndDate: Date | null
+  callTime: string; estimatedWrap: string | null
+  producer: string | null; producerEmail: string | null
+  outlet: { code: string; name: string }; program: { name: string }
+  episodes: { episodeId: string; title: string }[]
+}): { payload: ReturnType<typeof buildRoomBookingPayload> extends any ? any : never } | { skip: RoomSkipReason } | { error: string } {
+  const ymd = (d: Date) => d.toISOString().slice(0, 10)
+  const target = roomTargetForBooking({
+    locationId: b.locationId,
+    shootDate: ymd(b.shootDate),
+    shootEndDate: b.shootEndDate ? ymd(b.shootEndDate) : null,
+    callTime: b.callTime,
+    estimatedWrap: b.estimatedWrap,
+  })
+  if ('skip' in target) return { skip: target.skip }
+  const roomId = roomIdForLocation(b.locationId)!
+  const code = b.bookingCode || b.id
+
+  // ชื่อตอนที่เป็น "-" คือ "ยังไม่ตั้งชื่อ" ไม่ใช่ชื่อจริง — กฎเดียวกับ bookingDisplayName
+  // (ถ้าไม่กัน title จะกลายเป็น "[PB-xxx] NWS · -" ซึ่งอ่านไม่รู้เรื่อง)
+  const epTitle = (b.episodes[0]?.title || '').trim()
+  const showName = [b.outlet.code, epTitle && epTitle !== '-' ? epTitle : b.program.name]
+    .filter(Boolean).join(' · ')
+
+  const built = buildRoomBookingPayload({
+    roomId, bookingCode: code, showName,
+    shootDate: ymd(b.shootDate),
+    shootEndDate: b.shootEndDate ? ymd(b.shootEndDate) : null,
+    callTime: b.callTime, estimatedWrap: b.estimatedWrap,
+    producerName: b.producer, producerEmail: b.producerEmail,
+    department: b.outlet.name,
+    // ต้องมีอะไรยึดโยงสองระบบได้ (operator 2026-08-25)
+    notes: [
+      `Production ID: ${b.episodes.map(e => e.episodeId).join(', ') || code}`,
+      'จองอัตโนมัติจากระบบคิวถ่าย Probook',
+    ].join('\n'),
+  })
+  if ('error' in built) return { error: built.error }
+  return { payload: built.payload }
+}
+
 export async function syncRoomBooking(bookingId: string, opts: { force?: boolean } = {}): Promise<RoomSyncResult> {
   if (!roomBookingEnabled() && !opts.force) return { status: 'SKIPPED', reason: 'disabled' }
 
@@ -46,44 +107,18 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
   if (!b || b.deletedAt || b.status === 'CANCELLED') return { status: 'SKIPPED', reason: 'no-location' }
   if (b.roomBookingNo) return { status: 'SKIPPED', reason: 'already-booked' }
 
-  const ymd = (d: Date) => d.toISOString().slice(0, 10)
-  const target = roomTargetForBooking({
-    locationId: b.locationId,
-    shootDate: ymd(b.shootDate),
-    shootEndDate: b.shootEndDate ? ymd(b.shootEndDate) : null,
-    callTime: b.callTime,
-    estimatedWrap: b.estimatedWrap,
-  })
-  if ('skip' in target) {
-    await stamp(b.id, 'SKIPPED', null, target.skip)
-    return { status: 'SKIPPED', reason: target.skip }
-  }
-  const roomId = roomIdForLocation(b.locationId)!
-  if (!roomBookingAllowed(roomId)) return { status: 'SKIPPED', reason: 'room-not-enabled' }
-
   const code = b.bookingCode || b.id
-  const showName = [b.outlet.code, b.episodes[0]?.title?.trim() || b.program.name]
-    .filter(Boolean).join(' · ')
-
-  const built = buildRoomBookingPayload({
-    roomId, bookingCode: code, showName,
-    shootDate: ymd(b.shootDate),
-    shootEndDate: b.shootEndDate ? ymd(b.shootEndDate) : null,
-    callTime: b.callTime, estimatedWrap: b.estimatedWrap,
-    producerName: b.producer, producerEmail: b.producerEmail,
-    department: b.outlet.name,
-    // v1.201 — ต้องมีอะไรยึดโยงสองระบบได้ (operator): title มี [PB-<รหัส>] อยู่แล้ว
-    // ส่วน notes เขียน Production ID ทุกตัวแบบเต็มพร้อมป้ายกำกับ เพื่อให้คนที่เปิดดู
-    // ในระบบกลางรู้ทันทีว่าอันนี้มาจากคิวไหน และค้นด้วยเลข ID ได้
-    notes: [
-      `Production ID: ${b.episodes.map(e => e.episodeId).join(', ') || (b.bookingCode || '-')}`,
-      'จองอัตโนมัติจากระบบคิวถ่าย Probook',
-    ].join('\n'),
-  })
+  const built = buildPayloadForBooking(b)
+  if ('skip' in built) {
+    await stamp(b.id, 'SKIPPED', null, built.skip)
+    return { status: 'SKIPPED', reason: built.skip }
+  }
   if ('error' in built) {
     await stamp(b.id, 'INVALID', built.error)
     return { status: 'INVALID', message: built.error }
   }
+  const roomId = built.payload.roomId
+  if (!roomBookingAllowed(roomId)) return { status: 'SKIPPED', reason: 'room-not-enabled' }
 
   // ── ขั้นที่ 2: อ่านกลับก่อนยิงเสมอ ────────────────────────────────────────
   const d = b.shootDate

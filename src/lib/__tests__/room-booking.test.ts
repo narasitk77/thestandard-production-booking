@@ -154,3 +154,13 @@ test('แยก "ห้ามยิงซ้ำ" ออกจาก "ไม่�
   assert.equal(classifyRoomBookingResponse(502, {}).kind, 'unknown')
   assert.equal(classifyRoomBookingResponse(200, { success: true }).kind, 'unknown')
 })
+
+// v1.202 — ชื่อตอนที่เป็น "-" คือ "ยังไม่ตั้งชื่อ" ไม่ใช่ชื่อจริง
+// (เจอตอน dry-run ของจริง: title กลายเป็น "[PB-NWS-GLF-260825-01] NWS · -")
+test('ชื่อตอน "-" ต้องตกไปใช้ชื่อรายการแทน', () => {
+  const dash = buildRoomBookingTitle('NWS-GLF-260825-01', 'NWS · -')
+  // ตัว title เองไม่รู้จักกฎนี้ — ผู้ประกอบ showName ต้องกันมาก่อน
+  assert.equal(dash, '[PB-NWS-GLF-260825-01] NWS · -')
+  const good = buildRoomBookingTitle('NWS-GLF-260825-01', 'NWS · Global Focus')
+  assert.equal(good, '[PB-NWS-GLF-260825-01] NWS · Global Focus')
+})
