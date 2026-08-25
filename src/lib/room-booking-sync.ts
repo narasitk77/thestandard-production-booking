@@ -41,6 +41,8 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true } },
     },
   })
+  // งานที่ยกเลิก/ถูกลบไม่ต้องจองห้อง — ส่วนสถานะอื่น (รวม COMPLETED ตอนทดสอบย้อนหลัง)
+  // ปล่อยผ่าน เพราะผู้เรียกเป็นคนเลือกใบมาแล้ว
   if (!b || b.deletedAt || b.status === 'CANCELLED') return { status: 'SKIPPED', reason: 'no-location' }
   if (b.roomBookingNo) return { status: 'SKIPPED', reason: 'already-booked' }
 

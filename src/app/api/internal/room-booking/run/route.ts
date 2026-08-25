@@ -44,11 +44,13 @@ export async function GET(request: NextRequest) {
   const candidates = await prisma.booking.findMany({
     where: {
       deletedAt: null,
-      status: 'CONFIRMED',
       roomBookingNo: null,
+      // สั่งเจาะจงรหัส = "เอาใบนี้แหละ" จึงไม่กรองสถานะ (ยกเว้นที่ยกเลิกไปแล้ว)
+      // — ใช้ตอนทดสอบกับงานที่จบไปแล้ว หรือตามเก็บใบที่ตกหล่น
+      // ส่วนการกวาดตามช่วงวันยังจำกัดที่ CONFIRMED เหมือนเดิม
       ...(codes.length > 0
-        ? { bookingCode: { in: codes } }
-        : { shootDate: { gte: from, lt: to } }),
+        ? { bookingCode: { in: codes }, status: { not: 'CANCELLED' } }
+        : { status: 'CONFIRMED', shootDate: { gte: from, lt: to } }),
     },
     select: {
       id: true, bookingCode: true, locationId: true, locationName: true,
