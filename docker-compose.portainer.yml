@@ -215,6 +215,16 @@ services:
       FOOTAGE_READY_MAX_PER_RUN: ${FOOTAGE_READY_MAX_PER_RUN:-5}
       FOOTAGE_READY_SECRET: ${FOOTAGE_READY_SECRET:-${NEXTAUTH_SECRET}}
 
+      # --- จองห้องในระบบกลาง service.thestandard.co (v1.200) ---
+      # ROOM_BOOKING_SERVICE_KEY = คีย์ที่ IT ออกให้ (Admin → Settings → Integrations)
+      # ไม่มีคีย์ = ไม่ยิงจองเลย (โค้ดคืน INVALID พร้อมข้อความ ไม่ใช่ยิงแบบไม่มี auth)
+      ROOM_BOOKING_SERVICE_KEY: ${ROOM_BOOKING_SERVICE_KEY:-}
+      # ปิดไว้เป็นค่าเริ่มต้น — เปิดเมื่อทดสอบกับงานจริงผ่านแล้ว
+      ROOM_BOOKING_ENABLED: ${ROOM_BOOKING_ENABLED:-0}
+      # ทยอยเปิดทีละห้อง เช่น "15,1" = Studio 1/2 (ว่าง = ทุกห้องที่แมปไว้)
+      ROOM_BOOKING_ROOMS: ${ROOM_BOOKING_ROOMS:-}
+      ROOM_BOOKING_BASE_URL: ${ROOM_BOOKING_BASE_URL:-https://service.thestandard.co}
+
       # --- Folder integrity check-and-repair (v1.151) ---
       # Hourly pass over every active booking: creates missing box/EP/CAM/AUDIO
       # folders, renames stale ones in place (retitled job/episode, hand-made
