@@ -1,5 +1,6 @@
 import { prisma } from './db'
 import { logAudit } from './audit'
+import { bookingDisplayName } from './display'
 import {
   roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload,
   createRoomBooking, findExistingRoomBooking, cancelRoomBooking,
@@ -33,9 +34,16 @@ export const ROOM_BOOKING_SELECT = {
   id: true, bookingCode: true, locationId: true, locationName: true,
   shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
   producer: true, producerEmail: true,
+  // projectName + program ของ "แต่ละตอน" จำเป็นสำหรับ bookingDisplayName —
+  // ชื่อรายการจริงอยู่ที่ตอน ส่วน program ระดับใบจองมักเป็นแค่ประเภทเนื้อหา
+  // ("Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว") ซึ่งเอาไปตั้งชื่อการจองห้องไม่ได้
+  projectName: true,
   outlet: { select: { code: true, name: true } },
   program: { select: { name: true } },
-  episodes: { orderBy: { sequence: 'asc' as const }, select: { episodeId: true, title: true } },
+  episodes: {
+    orderBy: { sequence: 'asc' as const },
+    select: { episodeId: true, title: true, program: { select: { name: true } } },
+  },
 } as const
 
 /**
@@ -50,8 +58,9 @@ export function buildPayloadForBooking(b: {
   shootDate: Date; shootEndDate: Date | null
   callTime: string; estimatedWrap: string | null
   producer: string | null; producerEmail: string | null
+  projectName?: string | null
   outlet: { code: string; name: string }; program: { name: string }
-  episodes: { episodeId: string; title: string }[]
+  episodes: { episodeId: string; title: string; program?: { name: string } | null }[]
 }): { payload: ReturnType<typeof buildRoomBookingPayload> extends any ? any : never } | { skip: RoomSkipReason } | { error: string } {
   const ymd = (d: Date) => d.toISOString().slice(0, 10)
   const target = roomTargetForBooking({
@@ -65,11 +74,11 @@ export function buildPayloadForBooking(b: {
   const roomId = roomIdForLocation(b.locationId)!
   const code = b.bookingCode || b.id
 
-  // ชื่อตอนที่เป็น "-" คือ "ยังไม่ตั้งชื่อ" ไม่ใช่ชื่อจริง — กฎเดียวกับ bookingDisplayName
-  // (ถ้าไม่กัน title จะกลายเป็น "[PB-xxx] NWS · -" ซึ่งอ่านไม่รู้เรื่อง)
-  const epTitle = (b.episodes[0]?.title || '').trim()
-  const showName = [b.outlet.code, epTitle && epTitle !== '-' ? epTitle : b.program.name]
-    .filter(Boolean).join(' · ')
+  // ใช้ bookingDisplayName — กฎ "ใบจองนี้ชื่ออะไร" ที่ทั้งระบบใช้ร่วมกัน
+  // (ปฏิทิน, my-bookings, อีเมล) เขียนเองซ้ำแล้วได้ชื่อผิด: ครั้งแรกได้ "NWS · -"
+  // เพราะชื่อตอนเป็น "-" ครั้งที่สองได้ชื่อ *ประเภทเนื้อหา* เพราะ program ระดับ
+  // ใบจองคือ bucket ไม่ใช่ชื่อรายการ — ชื่อจริงอยู่ที่ program ของแต่ละตอน
+  const showName = [b.outlet.code, bookingDisplayName(b)].filter(Boolean).join(' · ')
 
   const built = buildRoomBookingPayload({
     roomId, bookingCode: code, showName,
