@@ -181,10 +181,17 @@ test('ROOM_BOOKING_SELECT ต้องมีทุกฟิลด์ที่ช
 // v1.204 — worker ต้องมีสเปคเหมือน worker ตัวอื่น: ปิดไว้เป็นค่าเริ่มต้น,
 // อ่าน secret ชุดเดียวกัน, และ start.sh ต้องเลี้ยงมันจริง ไม่ใช่เขียนไฟล์ทิ้งไว้
 test('room-booking worker ถูกลงทะเบียนครบทั้งสามที่', async () => {
-  const { readFileSync } = await import('fs')
+  const { readFileSync, existsSync } = await import('fs')
   const worker = readFileSync('scripts/room-booking-worker.js', 'utf8')
   const start = readFileSync('start.sh', 'utf8')
-  const compose = readFileSync('docker-compose.portainer.yml', 'utf8')
+  // .dockerignore ตัด docker-compose*.yml ออกจาก build context โดยตั้งใจ
+  // (daemon/orchestrator อ่าน ไม่ใช่ตัวแอป) — แต่ `npm run build` รัน `npm test`
+  // ข้างใน Docker ด้วย ถ้าอ่านตรง ๆ เทสนี้จะทำให้ image build ล้มทั้งใบ
+  // (เกิดจริง v1.204/v1.205) → ตรวจเฉพาะตอนไฟล์มีอยู่ ซึ่งคือใน CI และเครื่อง dev
+  // อันเป็นที่ที่การตรวจนี้มีความหมายจริง
+  const compose = existsSync('docker-compose.portainer.yml')
+    ? readFileSync('docker-compose.portainer.yml', 'utf8')
+    : null
 
   // ปิดไว้เป็นค่าเริ่มต้น — worker ที่เปิดเองตั้งแต่ deploy แรกคือความเสี่ยง
   assert.ok(worker.includes('ROOM_BOOKING_WORKER_ENABLED'))
@@ -194,6 +201,8 @@ test('room-booking worker ถูกลงทะเบียนครบทั้
   // supervisor เลี้ยงจริง
   assert.ok(start.includes('scripts/room-booking-worker.js'), 'start.sh ไม่ได้เลี้ยง worker นี้')
   // ตัวแปรถูกส่งเข้าคอนเทนเนอร์ (บทเรียน: stack env ไม่ไหลเข้าเอง)
-  assert.ok(compose.includes('ROOM_BOOKING_WORKER_ENABLED:'), 'compose ไม่ได้ส่ง flag เข้าคอนเทนเนอร์')
-  assert.ok(compose.includes('ROOM_BOOKING_SERVICE_KEY:'), 'compose ไม่ได้ส่ง service key เข้าคอนเทนเนอร์')
+  if (compose) {
+    assert.ok(compose.includes('ROOM_BOOKING_WORKER_ENABLED:'), 'compose ไม่ได้ส่ง flag เข้าคอนเทนเนอร์')
+    assert.ok(compose.includes('ROOM_BOOKING_SERVICE_KEY:'), 'compose ไม่ได้ส่ง service key เข้าคอนเทนเนอร์')
+  }
 })
