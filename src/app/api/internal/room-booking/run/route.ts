@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { prisma } from '@/lib/db'
-import { syncRoomBooking } from '@/lib/room-booking-sync'
+import { syncRoomBooking, cancelRoomBookingFor } from '@/lib/room-booking-sync'
 import { roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload, roomBookingEnabled } from '@/lib/room-booking'
 
 export const dynamic = 'force-dynamic'
@@ -33,9 +33,24 @@ export async function GET(request: NextRequest) {
   }
   const sp = new URL(request.url).searchParams
   const dryRun = sp.get('dryRun') !== '0'
+  // ?cancel=CODE — ยกเลิกการจองห้องของใบนั้นในระบบกลาง (ต้องใส่ dryRun=0 ด้วย)
+  const cancelCode = (sp.get('cancel') || '').trim()
   const days = Math.min(120, Math.max(1, parseInt(sp.get('days') || '30', 10) || 30))
   const max = Math.min(20, Math.max(1, parseInt(sp.get('max') || '5', 10) || 5))
   const codes = (sp.get('codes') || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 25)
+
+  if (cancelCode) {
+    if (dryRun) {
+      return NextResponse.json({ dryRun: true, wouldCancel: cancelCode, note: 'ใส่ dryRun=0 เพื่อยกเลิกจริง' })
+    }
+    const row = await prisma.booking.findFirst({
+      where: { bookingCode: cancelCode, deletedAt: null },
+      select: { id: true, bookingCode: true },
+    })
+    if (!row) return NextResponse.json({ error: `ไม่พบใบจอง ${cancelCode}` }, { status: 404 })
+    const r = await cancelRoomBookingFor(row.id)
+    return NextResponse.json({ dryRun: false, cancel: cancelCode, ...r })
+  }
 
   const today = new Date()
   const from = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))

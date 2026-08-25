@@ -331,12 +331,68 @@ export async function findExistingRoomBooking(
   bookingCode: string,
   year: number,
   month: number,
-): Promise<{ bookingNo: string; title: string } | null> {
+): Promise<{ id: number | null; bookingNo: string; title: string } | null> {
   const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
   const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
   const marker = roomBookingMarker(bookingCode)
   const hit = rows.find(r => String(r?.title || '').includes(marker))
-  return hit ? { bookingNo: String(hit.bookingNo || ''), title: String(hit.title || '') } : null
+  if (!hit) return null
+  // `id` เป็นเลขที่ path ของ endpoint ยกเลิกใช้ ส่วน `bookingNo` (BK-####) ไว้ให้คนอ่าน
+  const id = Number(hit.id)
+  return {
+    id: Number.isFinite(id) ? id : null,
+    bookingNo: String(hit.bookingNo || ''),
+    title: String(hit.title || ''),
+  }
+}
+
+export type RoomCancelOutcome =
+  | { kind: 'ok' }
+  | { kind: 'not-found' }
+  | { kind: 'forbidden'; message: string }   // service key ใช้กับ endpoint นี้ไม่ได้
+  | { kind: 'unknown'; message: string }
+
+/**
+ * ยกเลิกการจองในระบบกลาง
+ *
+ * v1.200.2 — **ยังไม่รู้ว่า service key ใช้กับ endpoint นี้ได้ไหม** เอกสารของ IT
+ * ระบุแค่ว่า `POST /booking` ต้องใช้คีย์ ไม่ได้พูดถึง cancel เลย
+ * ถ้าได้ 401/403 กลับมา แปลว่าต้องให้ IT เปิดสิทธิ์เพิ่ม — แยกผลนั้นออกมาให้ชัด
+ * (`forbidden`) จะได้ไม่ไปปนกับ error ชั่วคราวแล้วเข้าใจผิดว่าลองใหม่ได้
+ */
+export async function cancelRoomBooking(
+  roomBookingId: number,
+  opts: { timeoutMs?: number } = {},
+): Promise<RoomCancelOutcome> {
+  const key = process.env.ROOM_BOOKING_SERVICE_KEY?.trim()
+  if (!key) return { kind: 'forbidden', message: 'ยังไม่ได้ตั้ง ROOM_BOOKING_SERVICE_KEY' }
+
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20_000)
+  try {
+    const res = await fetch(`${ROOM_BOOKING_BASE_URL}/api/liff/bookings/${roomBookingId}/cancel`, {
+      method: 'PATCH',
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-service-key': key,
+        'User-Agent': 'probook/1.0 (+production-booking)',
+      },
+      body: JSON.stringify({}),
+    })
+    const body = await res.json().catch(() => ({}))
+    const message = String(body?.error || body?.message || '').trim()
+    if (res.ok) return { kind: 'ok' }
+    if (res.status === 401 || res.status === 403) {
+      return { kind: 'forbidden', message: message || `HTTP ${res.status} — คีย์อาจใช้กับ cancel ไม่ได้` }
+    }
+    if (res.status === 404) return { kind: 'not-found' }
+    return { kind: 'unknown', message: message || `HTTP ${res.status}` }
+  } catch (e: any) {
+    return { kind: 'unknown', message: e?.name === 'AbortError' ? 'timeout' : (e?.message || String(e)) }
+  } finally {
+    clearTimeout(t)
+  }
 }
 
 /**

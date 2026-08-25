@@ -2,8 +2,8 @@ import { prisma } from './db'
 import { logAudit } from './audit'
 import {
   roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload,
-  createRoomBooking, findExistingRoomBooking, roomBookingEnabled, roomBookingAllowed,
-  RoomSkipReason,
+  createRoomBooking, findExistingRoomBooking, cancelRoomBooking,
+  roomBookingEnabled, roomBookingAllowed, RoomSkipReason,
 } from './room-booking'
 
 /**
@@ -141,4 +141,59 @@ async function stamp(
       ...(bookingNo ? { roomBookingNo: bookingNo } : {}),
     },
   })
+}
+
+/**
+ * ยกเลิกการจองห้องของคิวถ่ายใบหนึ่ง
+ *
+ * หาเลข id ของระบบเขาจาก marker ในปฏิทิน (ไม่เก็บเป็นคอลัมน์ เพราะ bookingNo
+ * ที่เราเก็บไว้เป็นคนละเลขกับ id ที่ path ของ cancel ใช้ — อ่านสดตอนจะลบชัวร์กว่า)
+ *
+ * ล้าง roomBookingNo หลังลบสำเร็จ เพื่อให้ระบบมองว่า "ยังไม่ได้จอง" และจองใหม่ได้
+ */
+export async function cancelRoomBookingFor(bookingId: string): Promise<
+  | { status: 'CANCELLED'; bookingNo: string }
+  | { status: 'NOT_FOUND' }
+  | { status: 'FORBIDDEN'; message: string }
+  | { status: 'UNKNOWN'; message: string }
+> {
+  const b = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { id: true, bookingCode: true, shootDate: true, roomBookingNo: true },
+  })
+  if (!b?.bookingCode) return { status: 'NOT_FOUND' }
+
+  const d = b.shootDate
+  let found
+  try {
+    found = await findExistingRoomBooking(b.bookingCode, d.getUTCFullYear(), d.getUTCMonth() + 1)
+  } catch (e: any) {
+    return { status: 'UNKNOWN', message: `อ่านปฏิทินระบบกลางไม่สำเร็จ: ${e?.message || e}` }
+  }
+  if (!found || found.id === null) {
+    // ไม่มีอยู่แล้ว — ล้างสถานะฝั่งเราให้ตรงความจริง
+    await prisma.booking.update({
+      where: { id: b.id },
+      data: { roomBookingNo: null, roomBookingStatus: 'SKIPPED', roomBookingError: 'ไม่พบการจองในระบบกลาง', roomBookingAt: new Date() },
+    })
+    return { status: 'NOT_FOUND' }
+  }
+
+  const out = await cancelRoomBooking(found.id)
+  logAudit({
+    actorEmail: 'room-booking', action: 'booking.room_cancelled', entityType: 'Booking',
+    entityId: b.id, bookingCode: b.bookingCode,
+    changes: { outcome: out.kind, bookingNo: found.bookingNo, roomBookingId: found.id, ...('message' in out ? { message: out.message } : {}) },
+  })
+
+  if (out.kind === 'ok') {
+    await prisma.booking.update({
+      where: { id: b.id },
+      data: { roomBookingNo: null, roomBookingStatus: 'SKIPPED', roomBookingError: `ยกเลิกแล้ว (เดิม ${found.bookingNo})`, roomBookingAt: new Date() },
+    })
+    return { status: 'CANCELLED', bookingNo: found.bookingNo }
+  }
+  if (out.kind === 'not-found') return { status: 'NOT_FOUND' }
+  if (out.kind === 'forbidden') return { status: 'FORBIDDEN', message: out.message }
+  return { status: 'UNKNOWN', message: out.message }
 }
