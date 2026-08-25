@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
@@ -54,6 +55,8 @@ export async function POST(
   await clearBookingOT(id).catch(e =>
     console.warn(`[soft-delete] OT clear failed: ${e}`)
   )
+  // v1.201 — ลบคิว = คืนห้องในระบบกลางด้วย เหตุผลเดียวกับตอนยกเลิก
+  releaseRoomForBooking(id, 'booking-deleted')
 
   await prisma.booking.update({
     where: { id },

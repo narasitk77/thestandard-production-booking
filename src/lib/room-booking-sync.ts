@@ -72,7 +72,13 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     callTime: b.callTime, estimatedWrap: b.estimatedWrap,
     producerName: b.producer, producerEmail: b.producerEmail,
     department: b.outlet.name,
-    notes: b.episodes.map(e => e.episodeId).join(', '),
+    // v1.201 — ต้องมีอะไรยึดโยงสองระบบได้ (operator): title มี [PB-<รหัส>] อยู่แล้ว
+    // ส่วน notes เขียน Production ID ทุกตัวแบบเต็มพร้อมป้ายกำกับ เพื่อให้คนที่เปิดดู
+    // ในระบบกลางรู้ทันทีว่าอันนี้มาจากคิวไหน และค้นด้วยเลข ID ได้
+    notes: [
+      `Production ID: ${b.episodes.map(e => e.episodeId).join(', ') || (b.bookingCode || '-')}`,
+      'จองอัตโนมัติจากระบบคิวถ่าย Probook',
+    ].join('\n'),
   })
   if ('error' in built) {
     await stamp(b.id, 'INVALID', built.error)
@@ -196,4 +202,39 @@ export async function cancelRoomBookingFor(bookingId: string): Promise<
   if (out.kind === 'not-found') return { status: 'NOT_FOUND' }
   if (out.kind === 'forbidden') return { status: 'FORBIDDEN', message: out.message }
   return { status: 'UNKNOWN', message: out.message }
+}
+
+/**
+ * คืนห้องในระบบกลางเมื่อคิวถูกยกเลิก/ลบ — fire-and-forget
+ *
+ * v1.201 (operator 2026-08-25: *"เมื่อคิวยกเลิกจาก probook ห้องต้องยกเลิกด้วย"*)
+ *
+ * เรียกจากทุกเส้นทางที่ทำให้คิว "ไม่เกิดขึ้นแล้ว": ยกเลิกสถานะ, soft-delete,
+ * ยกเลิก routine ทั้งกลุ่ม. ห้ามทำให้การยกเลิกคิวล้มเหลว — เส้นเดียวกับปฏิทิน/OT
+ *
+ * ออกทันทีถ้าใบนั้นไม่เคยจองห้องไว้ (ไม่มี roomBookingNo) จึงไม่ยิงเน็ตเปล่า ๆ
+ * ตอน flag ปิดอยู่หรือคิวไม่ได้ใช้ห้องในตึก
+ */
+export function releaseRoomForBooking(bookingId: string, reason: string): void {
+  void (async () => {
+    try {
+      const b = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        select: { roomBookingNo: true, bookingCode: true },
+      })
+      if (!b?.roomBookingNo) return
+      const r = await cancelRoomBookingFor(bookingId)
+      if (r.status !== 'CANCELLED') {
+        // คืนห้องไม่สำเร็จ = ห้องค้างอยู่ในระบบเขาโดยไม่มีใครใช้ ต้องเห็น ไม่ใช่เงียบ
+        console.warn(`[room-booking] คืนห้องไม่สำเร็จ ${b.bookingCode} (${reason}):`, r)
+        logAudit({
+          actorEmail: 'room-booking', action: 'booking.room_release_failed',
+          entityType: 'Booking', entityId: bookingId, bookingCode: b.bookingCode,
+          changes: { reason, ...r },
+        })
+      }
+    } catch (e: any) {
+      console.error('[room-booking] releaseRoomForBooking error:', e?.message || e)
+    }
+  })()
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { prisma } from '@/lib/db'
 import { requireConsole, requireAdmin } from '@/lib/session'
 import { createBookingFromPayload } from '@/lib/create-booking'
@@ -92,6 +93,9 @@ export async function POST(request: NextRequest) {
         updateBookingRow(r.bookingCode || r.id, { status: 'CANCELLED', calendarEventId: '' }).catch(() => {})
       }
     }
+    // v1.201 — คืนห้องก่อน updateMany เพราะหลังจากนั้น deletedAt จะถูกตั้ง
+    // แล้ว releaseRoomForBooking จะมองว่าใบถูกลบไปแล้ว
+    for (const r of rows) releaseRoomForBooking(r.id, 'routine-cancelled')
     await prisma.booking.updateMany({
       where: { routineGroupId: groupId, deletedAt: null },
       data: { deletedAt: new Date(), calendarEventId: null, calendarSyncStatus: null, calendarSyncError: null },

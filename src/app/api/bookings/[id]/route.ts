@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { resolveLocationId } from '@/lib/location-resolve'
+import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { getSession, requireConsole } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { canViewBooking } from '@/lib/booking-access'
@@ -347,6 +348,11 @@ export async function PATCH(
         data: { calendarEventId: null },
       })
       clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
+      // v1.201 — ยกเลิกคิว = ต้องคืนห้องในระบบกลางด้วย (operator 2026-08-25:
+      // "เมื่อคิวยกเลิกจาก probook ห้องต้องยกเลิกด้วย") ไม่งั้นห้องถูกยึดค้างไว้
+      // โดยไม่มีใครใช้ และไม่มีใครรู้ว่าต้องไปปลดที่ไหน
+      // fire-and-forget เส้นเดียวกับปฏิทิน/OT — ยกเลิกคิวต้องไม่ล้มเพราะระบบเขาสะดุด
+      releaseRoomForBooking(params.id, 'booking-cancelled')
     } else if (booking.calendarEventId) {
       // v1.41.0 — edits to a synced booking (time, episode titles, location,
       // video type, equipment, van) must flow to the Google Calendar event.
