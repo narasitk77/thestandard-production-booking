@@ -3,7 +3,7 @@ import { logAudit } from './audit'
 import { notifyDiscord } from './notify'
 import {
   findExistingRoomBooking, cancelRoomBooking, roomIdForLocation,
-  roomTargetForBooking, roomBookingEnabled, roomBookingAllowed,
+  roomTargetForBooking, roomBookingEnabled, roomBookingAllowed, listRoomBookings,
 } from './room-booking'
 import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './room-booking-sync'
 
@@ -36,6 +36,7 @@ export interface RoomReconcileResult {
   staleCancelled: string[]     // ห้องค้างที่ยกเลิกสำเร็จ
   staleStuck: { code: string; bookingNo: string; reason: string }[]  // ยกเลิกไม่ได้ ต้องมือ
   wrongRoomReleased: string[]  // ห้อง/เวลาไม่ตรง ปลดของเดิมแล้ว
+  vanished: string[]           // เราคิดว่าจองไว้ แต่หายไปจากระบบเขาแล้ว
   booked: { code: string; bookingNo: string }[]
   failed: { code: string; status: string; message?: string }[]
   dryRun: boolean
@@ -87,9 +88,37 @@ export async function reconcileRoomBookings(opts: {
 
   const out: RoomReconcileResult = {
     scanned: rows.length, staleCancelled: [], staleStuck: [],
-    wrongRoomReleased: [], booked: [], failed: [], dryRun,
+    wrongRoomReleased: [], vanished: [], booked: [], failed: [], dryRun,
   }
   let writes = 0
+
+  /**
+   * v1.207 — การจองที่ยังมีชีวิตในระบบเขา ดึงเดือนละครั้งแล้วใช้ร่วมกัน
+   *
+   * ต้องมีเพราะเดิม reconciler ตรวจแค่ "ห้องที่ไม่ควรถูกยึด" — **ไม่เคยยืนยันว่า
+   * ห้องที่เราคิดว่าจองไว้ยังอยู่จริง** ถ้ามีคนไปยกเลิกในพอร์ทัล (หรือ IT ลบ)
+   * เราจะเชื่อว่ายังมีห้องตลอดไป ทั้งที่ห้องว่างและกองไม่มีที่ถ่าย
+   * ไม่มีอะไรจับได้เลยจนถึงวันถ่าย
+   */
+  const monthCache = new Map<string, Set<string>>()
+  async function liveKeys(d: Date): Promise<Set<string> | null> {
+    const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1
+    const key = `${y}-${m}`
+    if (monthCache.has(key)) return monthCache.get(key)!
+    try {
+      const list = await listRoomBookings(y, m)
+      const set = new Set<string>()
+      for (const r of list) {
+        if (r.bookingNo) set.add(`no:${r.bookingNo}`)
+        if (r.id !== null) set.add(`id:${r.id}`)
+      }
+      monthCache.set(key, set)
+      return set
+    } catch {
+      // อ่านไม่ได้ = ตัดสินไม่ได้ → ห้ามสรุปว่าหาย (จะกลายเป็นจองซ้ำ)
+      return null
+    }
+  }
 
   for (const b of rows as any[]) {
     if (writes >= max) break
@@ -134,6 +163,29 @@ export async function reconcileRoomBookings(opts: {
       }
     }
 
+    // ── 2.5 เราคิดว่าจองไว้ และควรมีจริง — แต่ยังอยู่ในระบบเขาไหม ──────────
+    if (b.roomBookingNo && want !== null) {
+      const live = await liveKeys(b.shootDate)
+      if (live !== null) {
+        const stillThere = live.has(`no:${b.roomBookingNo}`)
+          || (b.roomBookingRef != null && live.has(`id:${b.roomBookingRef}`))
+        if (!stillThere) {
+          out.vanished.push(code)
+          if (!dryRun) {
+            // ล้างของเราให้ตรงความจริงก่อน — ไม่งั้นรอบหน้าก็ยังคิดว่ามีห้อง
+            await stampCleared(b.id, 'หายไปจากระบบกลาง (มีคนยกเลิกฝั่งนั้น?)')
+            logAudit({
+              actorEmail: 'room-reconcile', action: 'booking.room_vanished',
+              entityType: 'Booking', entityId: b.id, bookingCode: b.bookingCode,
+              changes: { bookingNo: b.roomBookingNo, roomBookingRef: b.roomBookingRef },
+            })
+            // เปิดจองอัตโนมัติอยู่ → จองคืนให้เลยในบล็อกถัดไปของรอบนี้
+            ;(b as any).roomBookingNo = null
+          }
+        }
+      }
+    }
+
     // ── 3. ควรมีห้องแต่ยังไม่มี ────────────────────────────────────────────
     if (!b.roomBookingNo && want !== null && roomBookingEnabled() && roomBookingAllowed(want.roomId)) {
       const built = buildPayloadForBooking(b)
@@ -150,6 +202,16 @@ export async function reconcileRoomBookings(opts: {
   }
 
   // เตือนเฉพาะสิ่งที่ตัวเองแก้ไม่ได้ — ไม่ใช่รายงานทุกอย่างจนกลายเป็น noise
+  if (!dryRun && out.vanished.length > 0 && !roomBookingEnabled()) {
+    // จองอัตโนมัติปิดอยู่ → จองคืนเองไม่ได้ ต้องบอกคน
+    await notifyDiscord(
+      `🚪 **ห้องหายไปจากระบบกลาง ${out.vanished.length} รายการ**\n` +
+      `probook คิดว่าจองไว้ แต่ไม่พบในระบบแล้ว (น่าจะมีคนยกเลิกฝั่งนั้น)\n\n` +
+      out.vanished.map(c => `• ${c}`).join('\n') +
+      `\n\nกองพวกนี้กำลังจะไม่มีห้อง — จองใหม่ที่ https://service.thestandard.co/booking หรือเปิด ROOM_BOOKING_ENABLED ให้ระบบจองคืนเอง`,
+    ).catch(e => console.error('[room-reconcile] discord failed:', e?.message || e))
+  }
+
   if (!dryRun && out.staleStuck.length > 0) {
     const lines = out.staleStuck.map(s => `• ${s.bookingNo} — ${s.code} (${s.reason})`).join('\n')
     await notifyDiscord(

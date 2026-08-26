@@ -349,6 +349,27 @@ export async function findExistingRoomBooking(
   }
 }
 
+/**
+ * การจองทั้งเดือนของระบบกลาง — ดึงทีเดียวแล้วเอาไปเช็คหลายใบ
+ *
+ * v1.207 — reconciler ต้องยืนยันว่าห้องที่เราคิดว่าจองไว้ **ยังอยู่จริง** ถ้าถามทีละใบ
+ * จะกิน request เท่าจำนวนใบและชน rate limit (20/5 นาที) เดือนละ request เดียวพอ
+ */
+export async function listRoomBookings(year: number, month: number): Promise<{
+  id: number | null; bookingNo: string; title: string
+}[]> {
+  const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
+  const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
+  return rows.map(r => {
+    const id = Number(r?.id)
+    return {
+      id: Number.isFinite(id) ? id : null,
+      bookingNo: String(r?.bookingNo || ''),
+      title: String(r?.title || ''),
+    }
+  })
+}
+
 export type RoomCancelOutcome =
   | { kind: 'ok' }
   | { kind: 'not-found' }

@@ -220,3 +220,16 @@ test('เก็บเลข id จากคำตอบตอนจอง (ค�
   const junk = classifyRoomBookingResponse(200, { success: true, bookingNo: 'BK-1', id: 'ไม่ใช่ตัวเลข' })
   assert.equal((junk as any).id, null)
 })
+
+// v1.207 — reconciler ต้องยืนยันว่าห้องที่เราคิดว่าจองไว้ยังอยู่จริง
+// เดิมตรวจแค่ "ห้องที่ไม่ควรถูกยึด" → ถ้ามีคนยกเลิกฝั่งพอร์ทัล เราจะเชื่อว่ายังมีห้อง
+// ตลอดไป ทั้งที่ห้องว่างและกองไม่มีที่ถ่าย ไม่มีอะไรจับได้จนถึงวันถ่าย
+test('reconciler มีการตรวจ "หายไปจากระบบกลาง"', async () => {
+  const { readFileSync } = await import('fs')
+  const src = readFileSync('src/lib/room-booking-reconcile.ts', 'utf8')
+  assert.ok(src.includes('vanished'), 'ไม่มีการตรวจว่าการจองหายไป')
+  assert.ok(src.includes('listRoomBookings'), 'ต้องดึงรายเดือนทีเดียว ไม่ถามทีละใบ (rate limit 20/5 นาที)')
+  // อ่านไม่ได้ = ตัดสินไม่ได้ ห้ามสรุปว่าหาย ไม่งั้นจะจองซ้ำ
+  assert.ok(/return null/.test(src) && src.includes('ห้ามสรุปว่าหาย'),
+    'ต้องกันเคสอ่านปฏิทินไม่ได้ ไม่ให้ตีความว่าการจองหายไป')
+})
