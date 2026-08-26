@@ -3,7 +3,7 @@ import { getSession } from '@/lib/session'
 import { runVideoMerge } from '@/lib/video-merge'
 import { recordHeartbeat } from '@/lib/heartbeat'
 import { internalSecretAllowed } from '@/lib/internal-auth'
-import { notifyDiscord } from '@/lib/notify'
+import { notifyChat } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // walking + moving footage across folders can take a while
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     const result = await runVideoMerge({ dryRun, onlyCode })
     if (!dryRun) await recordHeartbeat('video-merge').catch(() => {})
     if (notify && !dryRun && !result.skipped && (result.moved + result.movedFolders > 0 || result.errors > 0)) {
-      await notifyDiscord(
+      await notifyChat(
         `🎬 NAS sync เขียวแล้ว → รวมไฟล์วิดีโอ: ย้าย ${result.moved} ไฟล์ + ${result.movedFolders} โฟลเดอร์` +
         ` (${result.bookings} งาน${result.errors ? ` · ⚠️ error ${result.errors}` : ''})`,
       ).catch(() => {})

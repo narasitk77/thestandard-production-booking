@@ -32,7 +32,7 @@
 import { prisma } from './db'
 import { logAudit } from './audit'
 import { sendEmail, isEmailConfigured } from './email'
-import { notifyDiscord, notifyEmailDigest } from './notify'
+import { notifyChatDetailed, notifyEmailDigest } from './notify'
 import { getCachedFootagePayload, type CachedFootagePayload, type BookingForFootagePayload } from './footage-folders'
 import { isPhotoAlbumBooking } from './outlet-folders'
 import { isShootOver } from './shoot-window'
@@ -437,7 +437,7 @@ async function sendFootageReadyNotification(
    * SMTP ของบัญชีตัวเอง จึงไม่เข้า Inbox) — บันทึกที่รายงานไม่ตรงของจริงทำให้
    * ทั้ง /stats และคนอ่านสรุปผิดว่า "แจ้งแล้ว"
    */
-  operatorChannels: { digestOk: boolean; discordOk: boolean }
+  operatorChannels: { digestOk: boolean; discordOk: boolean; larkOk: boolean }
   error: string | null
 }> {
   const code = b.bookingCode as string
@@ -463,13 +463,13 @@ THE STANDARD Production Booking`
 
   if (audience === 'admin') {
     const emailOk = await notifyEmailDigest(subject, text)
-    const discordOk = await notifyDiscord(discordLine)
+    const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(discordLine)
     return {
-      delivered: emailOk || discordOk,
+      delivered: emailOk || chatOk,
       // ใส่ ADMIN_DIGEST เฉพาะเมื่อส่งผ่านจริง — ไม่ใช่เพราะ "ตั้งใจจะส่ง"
       recipients: emailOk ? [ADMIN_DIGEST] : [],
-      operatorChannels: { digestOk: emailOk, discordOk },
-      error: emailOk || discordOk ? null : 'admin digest + discord both unavailable',
+      operatorChannels: { digestOk: emailOk, discordOk, larkOk },
+      error: emailOk || chatOk ? null : 'admin digest + chat (discord/lark) both unavailable',
     }
   }
 
@@ -483,11 +483,11 @@ THE STANDARD Production Booking`
     // No producer email — tell the admin instead of retrying forever.
     // Caller stamps readyNotifiedAt, so this warns exactly once per booking.
     const warned = await notifyEmailDigest(`⚠️ ${subject} — ไม่มีอีเมล producer`, `${code} footage พร้อมแล้ว แต่ booking ไม่มี producerEmail ให้แจ้ง\n\n${text}`)
-    const discordOk = await notifyDiscord(`⚠️ ${discordLine} — ไม่มีอีเมล producer ให้แจ้ง`)
+    const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`⚠️ ${discordLine} — ไม่มีอีเมล producer ให้แจ้ง`)
     return {
-      delivered: warned || discordOk,
+      delivered: warned || chatOk,
       recipients: [],
-      operatorChannels: { digestOk: warned, discordOk },
+      operatorChannels: { digestOk: warned, discordOk, larkOk },
       error: 'no producer email',
     }
   }
@@ -513,14 +513,14 @@ THE STANDARD Production Booking`
 
   // Discord summary is best-effort on top of email; it also serves as the
   // fallback channel when email is unavailable.
-  const discordOk = await notifyDiscord(`${discordLine} → ${emailed}/${recipients.length} อีเมล`)
+  const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`${discordLine} → ${emailed}/${recipients.length} อีเมล`)
 
   return {
-    delivered: emailed > 0 || (!isEmailConfigured() && discordOk),
+    delivered: emailed > 0 || (!isEmailConfigured() && chatOk),
     // v1.186 — ADMIN_DIGEST เข้ารายชื่อเฉพาะเมื่อส่งผ่านจริง (เดิมใส่ตาม alsoDigest
     // ล้วน ๆ ทำให้ /stats นับว่า operator ได้รับ ทั้งที่ไม่เคยได้)
     recipients: digestOk ? [...recipients, ADMIN_DIGEST] : recipients,
-    operatorChannels: { digestOk, discordOk },
+    operatorChannels: { digestOk, discordOk, larkOk },
     error,
   }
 }

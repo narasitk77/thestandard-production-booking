@@ -186,6 +186,17 @@ services:
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       # footage (default) = only file news reaches Discord | all = ops too
       DISCORD_NOTIFY_SCOPE: ${DISCORD_NOTIFY_SCOPE:-footage}
+      # v1.209 — Lark (Feishu) custom-bot webhook, sent ALONGSIDE Discord so
+      # nothing goes dark while the org moves chat platforms. Unset = off.
+      # Get the URL from: <group> → Settings → Bots → Add Bot → Custom Bot
+      # (desktop app only — the Lark web client has no Add-Bot button).
+      # Secret: set the VALUE as a Portainer stack env var, never here.
+      LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:-}
+      # Only if the bot has signature verification switched on.
+      LARK_WEBHOOK_SECRET: ${LARK_WEBHOOK_SECRET:-}
+      # all (default) = Lark is a purpose-made alerts room, so ops belongs there
+      # too | footage = narrow it the way Discord is narrowed.
+      LARK_NOTIFY_SCOPE: ${LARK_NOTIFY_SCOPE:-all}
       REMINDER_ADMIN_EMAIL: ${REMINDER_ADMIN_EMAIL:-}
       INVOICE_AGING_DAYS: ${INVOICE_AGING_DAYS:-7}
       SHOOT_GEAR_LOOKAHEAD_DAYS: ${SHOOT_GEAR_LOOKAHEAD_DAYS:-3}

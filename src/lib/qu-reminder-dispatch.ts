@@ -12,7 +12,7 @@
 import { prisma } from './db'
 import { sendEmail, isEmailConfigured } from './email'
 import { logAudit } from './audit'
-import { notifyDiscord } from './notify'
+import { notifyChat } from './notify'
 import {
   needsRealQuRef, groupByProducer, producerDue, buildQuReminderEmail,
   type QuPendingBooking,
@@ -124,7 +124,7 @@ export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promi
   }
 
   if (!opts.dryRun && (emailed > 0 || failed > 0)) {
-    await notifyDiscord(
+    await notifyChat(
       `📮 เตือนเลข QU: ส่งถึง Producer ${emailed} คน` +
       (failed ? ` · ส่งไม่ผ่าน ${failed}` : '') +
       ` · ค้างทั้งหมด ${rows.length} ใบ` +

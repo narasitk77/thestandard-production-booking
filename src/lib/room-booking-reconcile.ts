@@ -1,6 +1,6 @@
 import { prisma } from './db'
 import { logAudit } from './audit'
-import { notifyDiscord } from './notify'
+import { notifyChat } from './notify'
 import {
   findExistingRoomBooking, cancelRoomBooking, roomIdForLocation,
   roomTargetForBooking, roomBookingEnabled, roomBookingAllowed, listRoomBookings,
@@ -206,7 +206,7 @@ export async function reconcileRoomBookings(opts: {
   // เตือนเฉพาะสิ่งที่ตัวเองแก้ไม่ได้ — ไม่ใช่รายงานทุกอย่างจนกลายเป็น noise
   if (!dryRun && out.vanished.length > 0 && !roomBookingEnabled()) {
     // จองอัตโนมัติปิดอยู่ → จองคืนเองไม่ได้ ต้องบอกคน
-    await notifyDiscord(
+    await notifyChat(
       `🚪 **ห้องหายไปจากระบบกลาง ${out.vanished.length} รายการ**\n` +
       `probook คิดว่าจองไว้ แต่ไม่พบในระบบแล้ว (น่าจะมีคนยกเลิกฝั่งนั้น)\n\n` +
       out.vanished.map(c => `• ${c}`).join('\n') +
@@ -216,7 +216,7 @@ export async function reconcileRoomBookings(opts: {
 
   if (!dryRun && out.staleStuck.length > 0) {
     const lines = out.staleStuck.map(s => `• ${s.bookingNo} — ${s.code} (${s.reason})`).join('\n')
-    await notifyDiscord(
+    await notifyChat(
       `🚪 **ห้องค้างในระบบกลาง ${out.staleStuck.length} รายการ**\n` +
       `คิวถ่ายยกเลิก/ย้ายไปแล้ว แต่ผมปลดห้องเองไม่ได้\n\n${lines}\n\n` +
       `ปลดมือที่ https://service.thestandard.co/booking — หรือรอ IT เปิดสิทธิ์ยกเลิกให้ service key แล้วผมจะเก็บกวาดเองรอบถัดไป`,

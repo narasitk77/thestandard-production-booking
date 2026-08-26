@@ -3,7 +3,7 @@
 // silently-dead worker (app still up, worker gone) becomes a same-minute alert
 // instead of hours of unnoticed downtime.
 import { prisma } from './db'
-import { notifyDiscord, notifyEmailDigest } from './notify'
+import { notifyChat, notifyEmailDigest } from './notify'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -137,7 +137,7 @@ export async function maybeAlertStaleWorkers(): Promise<void> {
     const msg = `⚠️ Production Booking: worker(s) ไม่ตอบสนอง\n${lines.join('\n')}\nตรวจ container logs / restart stack`
     // v1.152.2 — 'ops': worker health is not footage news, so it stays off
     // Discord by default and reaches the admin by email.
-    await Promise.all([notifyDiscord(msg, 'ops'), notifyEmailDigest('⚠️ Worker หยุดทำงาน — Production Booking', msg)])
+    await Promise.all([notifyChat(msg, 'ops'), notifyEmailDigest('⚠️ Worker หยุดทำงาน — Production Booking', msg)])
   } catch (e: any) {
     console.warn('[heartbeat] stale-worker alert failed:', e?.message || e)
   }

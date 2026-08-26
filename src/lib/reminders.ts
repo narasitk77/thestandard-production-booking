@@ -11,7 +11,7 @@
 // dismiss/resolve an item — which is exactly the point for a solo admin who
 // forgets. Dismiss on /admin/reminders to silence one; resolve when handled.
 import { prisma } from './db'
-import { notifyDiscord, notifyEmailDigest } from './notify'
+import { notifyChat, notifyEmailDigest } from './notify'
 import type { ReminderType } from '@prisma/client'
 import { startOfTodayBangkok } from './bangkok-day'
 import { needsRealQuRef } from './qu-reminder'
@@ -351,7 +351,7 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
     const text = `${subject}\n\n${body}\n\n— Production Booking · /admin/reminders`
     // v1.152.2 — 'ops': overdue rentals / invoices / gear are not footage news.
     // The daily digest email remains the channel for these.
-    const [discord, email] = await Promise.all([notifyDiscord(text, 'ops'), notifyEmailDigest(subject, text)])
+    const [discord, email] = await Promise.all([notifyChat(text, 'ops'), notifyEmailDigest(subject, text)])
     dispatched = { discord, email }
     // Mark the freshly-created PENDING ones as SENT (already-SENT rows keep their timestamp).
     await prisma.reminder.updateMany({

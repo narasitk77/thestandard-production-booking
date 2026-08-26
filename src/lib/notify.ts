@@ -1,7 +1,9 @@
 // Notification dispatch for the reminder engine.
 //
-// Two channels today:
+// Chat + email today:
 //   - Discord: a single incoming-webhook POST. No SDK, no bot, no token dance.
+//   - Lark:    same shape, a Custom Bot incoming webhook (v1.209). Runs
+//              ALONGSIDE Discord — notifyChat() sends to both.
 //   - Email:   the existing sendEmail() (Resend / SendGrid / SMTP). Note the
 //              background worker has no logged-in user, so Gmail-OAuth is NOT
 //              available here — a non-interactive provider (SMTP_USER/PASS or
@@ -10,6 +12,7 @@
 // LINE is a deliberate TODO: LINE Notify was shut down Mar 2025, so it needs a
 // Messaging-API bot. The channel seam lives here so adding it later is one
 // function (notifyLine) wired into reminders.ts — nothing else changes.
+import { createHmac } from 'crypto'
 import { sendEmail, isEmailConfigured } from './email'
 
 /**
@@ -62,6 +65,120 @@ export async function notifyDiscord(content: string, category: NotifyCategory = 
     console.error('[notify] discord failed:', err?.message || err)
     return false
   }
+}
+
+/* ─────────────────────────── Lark (Feishu) ───────────────────────────
+ * v1.209 — a second chat channel next to Discord. Added because the org is
+ * moving onto Lark; Discord stays ON so nothing goes dark during the move
+ * (see the footage-ready lesson: *a record is not delivery* — an alert sent
+ * to a room nobody reads is the same as no alert).
+ *
+ * Delivery is a Custom Bot incoming webhook: one POST, no app, no token
+ * refresh. Set LARK_WEBHOOK_URL to the URL Lark gives you in
+ *   <group> → Settings → Bots → Add Bot → Custom Bot.
+ *
+ * ⚠️ Lark answers HTTP 200 even when it REJECTS the message — the real status
+ * is `code` in the JSON body (0 = delivered, anything else = not delivered,
+ * e.g. 19021 "sign match fail", 9499 "bot not enabled"). Trusting res.ok here
+ * would report success for messages that were never posted, which is exactly
+ * the failure mode this codebase has been bitten by before. So: parse the body.
+ *
+ * Optional LARK_WEBHOOK_SECRET — only when the bot has signature verification
+ * switched on. Lark signs the EMPTY string with key `${timestamp}\n${secret}`.
+ *
+ * Scope defaults to 'all' (unlike Discord, which is footage-only): the Lark
+ * group is a fresh, purpose-made alerts room, not the crew's footage channel.
+ */
+function larkAllows(category: NotifyCategory): boolean {
+  const scope = (process.env.LARK_NOTIFY_SCOPE || 'all').trim().toLowerCase()
+  return scope === 'all' || scope === category
+}
+
+function larkSignature(timestampSec: number, secret: string): string {
+  // Lark: HMAC-SHA256 over an EMPTY payload, keyed by "<timestamp>\n<secret>".
+  const key = `${timestampSec}\n${secret}`
+  return createHmac('sha256', key).update('').digest('base64')
+}
+
+/**
+ * POST a message to the configured Lark custom-bot webhook. Returns false
+ * (never throws) when unset, filtered out by scope, or rejected.
+ */
+export async function notifyLark(content: string, category: NotifyCategory = 'footage'): Promise<boolean> {
+  if (!larkAllows(category)) return false
+  const url = process.env.LARK_WEBHOOK_URL?.trim()
+  if (!url) return false
+
+  const body: Record<string, unknown> = {
+    msg_type: 'text',
+    // Lark's cap is ~30KB per text message; stay well inside it.
+    content: { text: content.slice(0, 20000) },
+  }
+  const secret = process.env.LARK_WEBHOOK_SECRET?.trim()
+  if (secret) {
+    const ts = Math.floor(Date.now() / 1000)
+    body.timestamp = String(ts)
+    body.sign = larkSignature(ts, secret)
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const raw = await res.text().catch(() => '')
+    if (!res.ok) {
+      console.error(`[notify] lark ${res.status}: ${raw.slice(0, 300)}`)
+      return false
+    }
+    // The 200-with-an-error case. A body we cannot parse is NOT proof of
+    // delivery either — fail closed.
+    let parsed: any = null
+    try { parsed = JSON.parse(raw) } catch { /* handled below */ }
+    if (!parsed || typeof parsed.code !== 'number') {
+      console.error(`[notify] lark: unreadable response body: ${raw.slice(0, 300)}`)
+      return false
+    }
+    if (parsed.code !== 0) {
+      console.error(`[notify] lark rejected (code ${parsed.code}): ${String(parsed.msg || '').slice(0, 200)}`)
+      return false
+    }
+    return true
+  } catch (err: any) {
+    console.error('[notify] lark failed:', err?.message || err)
+    return false
+  }
+}
+
+/**
+ * Fan out one message to every configured chat channel (Discord + Lark).
+ *
+ * Returns true when AT LEAST ONE channel accepted it — callers that use the
+ * result as "a human was told" (footage-ready's email fallback) stay correct.
+ * Both legs run even if one fails; neither can throw.
+ */
+export async function notifyChat(content: string, category: NotifyCategory = 'footage'): Promise<boolean> {
+  return (await notifyChatDetailed(content, category)).any
+}
+
+/**
+ * Same fan-out, but says WHICH channel took it.
+ *
+ * Callers that record delivery in an audit trail must use this one: collapsing
+ * two channels into a single boolean is how `operatorChannels.discordOk` would
+ * start claiming Discord delivered a message that only Lark did (v1.186:
+ * บันทึกที่รายงานไม่ตรงของจริง). Report per channel, not per attempt.
+ */
+export async function notifyChatDetailed(
+  content: string,
+  category: NotifyCategory = 'footage',
+): Promise<{ discord: boolean; lark: boolean; any: boolean }> {
+  const [discord, lark] = await Promise.all([
+    notifyDiscord(content, category),
+    notifyLark(content, category),
+  ])
+  return { discord, lark, any: discord || lark }
 }
 
 /** Send the daily digest email to REMINDER_ADMIN_EMAIL. Best-effort. */

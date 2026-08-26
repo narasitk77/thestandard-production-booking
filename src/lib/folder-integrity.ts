@@ -35,7 +35,7 @@
  */
 import { prisma } from './db'
 import { logAudit } from './audit'
-import { notifyDiscord } from './notify'
+import { notifyChat } from './notify'
 import { snapshotIdFirst, formatIdFirstDigest } from './id-first-metrics'
 import {
   hasDriveCredentials, findEpisodeFolderUrls, listChildFolders, getFileName, renameDriveItem,
@@ -692,7 +692,7 @@ export async function maybeSendDailyDigest(now: Date = new Date()): Promise<bool
   })
   const idFirst = formatIdFirstDigest(gauge)
   const full = idFirst ? `${text}\n\n${idFirst}` : text
-  const sent = await notifyDiscord(full, 'footage')
+  const sent = await notifyChat(full, 'footage')
   if (sent) snapshotIdFirst(true) // clear the counters now that they've been reported
   // Mark the day done even if Discord is unset/failed, so a broken webhook
   // doesn't retry every hour for the rest of the day.
