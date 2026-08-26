@@ -211,7 +211,7 @@ export async function reconcileRoomBookings(opts: {
       `probook คิดว่าจองไว้ แต่ไม่พบในระบบแล้ว (น่าจะมีคนยกเลิกฝั่งนั้น)\n\n` +
       out.vanished.map(c => `• ${c}`).join('\n') +
       `\n\nกองพวกนี้กำลังจะไม่มีห้อง — จองใหม่ที่ https://service.thestandard.co/booking หรือเปิด ROOM_BOOKING_ENABLED ให้ระบบจองคืนเอง`,
-    ).catch(e => console.error('[room-reconcile] discord failed:', e?.message || e))
+    ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
   }
 
   if (!dryRun && out.staleStuck.length > 0) {
@@ -220,7 +220,7 @@ export async function reconcileRoomBookings(opts: {
       `🚪 **ห้องค้างในระบบกลาง ${out.staleStuck.length} รายการ**\n` +
       `คิวถ่ายยกเลิก/ย้ายไปแล้ว แต่ผมปลดห้องเองไม่ได้\n\n${lines}\n\n` +
       `ปลดมือที่ https://service.thestandard.co/booking — หรือรอ IT เปิดสิทธิ์ยกเลิกให้ service key แล้วผมจะเก็บกวาดเองรอบถัดไป`,
-    ).catch(e => console.error('[room-reconcile] discord failed:', e?.message || e))
+    ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
   }
 
   return out

@@ -11,7 +11,7 @@
 // dismiss/resolve an item — which is exactly the point for a solo admin who
 // forgets. Dismiss on /admin/reminders to silence one; resolve when handled.
 import { prisma } from './db'
-import { notifyChat, notifyEmailDigest } from './notify'
+import { notifyChatDetailed, notifyEmailDigest } from './notify'
 import type { ReminderType } from '@prisma/client'
 import { startOfTodayBangkok } from './bangkok-day'
 import { needsRealQuRef } from './qu-reminder'
@@ -266,7 +266,7 @@ export type ReminderScanResult = {
   created: number
   resolved: number
   openCount: number
-  dispatched: { discord: boolean; email: boolean } | null
+  dispatched: { discord: boolean; lark: boolean; email: boolean } | null
   candidates?: Array<{ type: string; title: string; dueDate: string | null }>
   /** v1.187 — ผลของการเตือน Producer เรื่องเลข QU (เกาะรอบเดียวกัน) */
   quReminder?: QuReminderResult | { error: string }
@@ -344,15 +344,21 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
     orderBy: [{ dueDate: 'asc' }],
   })
 
-  let dispatched: { discord: boolean; email: boolean } | null = null
+  let dispatched: { discord: boolean; lark: boolean; email: boolean } | null = null
   if (openReminders.length) {
     const body = buildDigest(openReminders.map((r) => ({ type: r.type, title: r.title, body: r.body })))
     const subject = `⏰ เตือนงานค้าง ${openReminders.length} รายการ — ${ymd(today)}`
     const text = `${subject}\n\n${body}\n\n— Production Booking · /admin/reminders`
     // v1.152.2 — 'ops': overdue rentals / invoices / gear are not footage news.
     // The daily digest email remains the channel for these.
-    const [discord, email] = await Promise.all([notifyChat(text, 'ops'), notifyEmailDigest(subject, text)])
-    dispatched = { discord, email }
+    // v1.209.1 — ต้องเป็น notifyChatDetailed ไม่ใช่ notifyChat: ข้อความนี้เป็น
+    // category 'ops' ซึ่ง Discord **ทิ้งตั้งแต่ก่อนยิง** (DISCORD_NOTIFY_SCOPE
+    // ดีฟอลต์ = footage) ส่วน Lark รับ ('all') ถ้ายุบสองช่องเป็น boolean เดียว
+    // แล้วเก็บลงช่องชื่อ `discord` มันจะกลายเป็น **จริงเสมอ** ทันทีที่เปิด Lark
+    // ทั้งที่ Discord ไม่ได้รับอะไรเลย — หน้า /admin/reminders กับ log ของ worker
+    // พิมพ์ค่านี้ตรง ๆ ก็จะโกหกทั้งคู่ (บทเรียน v1.186: *a record is not delivery*)
+    const [chat, email] = await Promise.all([notifyChatDetailed(text, 'ops'), notifyEmailDigest(subject, text)])
+    dispatched = { discord: chat.discord, lark: chat.lark, email }
     // Mark the freshly-created PENDING ones as SENT (already-SENT rows keep their timestamp).
     await prisma.reminder.updateMany({
       where: { status: 'PENDING' },

@@ -56,6 +56,7 @@ async function runOnce() {
     console.log(
       "[reminders] detected=" + json.detected + " created=" + json.created + " resolved=" + json.resolved +
         " open=" + json.openCount + " discord=" + (json.dispatched && json.dispatched.discord) +
+        " lark=" + (json.dispatched && json.dispatched.lark) +
         " email=" + (json.dispatched && json.dispatched.email) +
         // v1.187 — งานเตือนเลข QU ต้องมีร่องรอยใน log ไม่งั้นล้มแล้วไม่มีใครรู้
         " | qu: pending=" + (json.quReminder && json.quReminder.pending) +

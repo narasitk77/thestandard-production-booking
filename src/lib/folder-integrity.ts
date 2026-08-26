@@ -698,8 +698,8 @@ export async function maybeSendDailyDigest(now: Date = new Date()): Promise<bool
   // doesn't retry every hour for the rest of the day.
   await prisma.systemHeartbeat.upsert({
     where: { key: KEY },
-    create: { key: KEY, at: now, note: sent ? 'sent' : 'discord-unavailable' },
-    update: { at: now, note: sent ? 'sent' : 'discord-unavailable' },
+    create: { key: KEY, at: now, note: sent ? 'sent' : 'chat-unavailable' },
+    update: { at: now, note: sent ? 'sent' : 'chat-unavailable' },
   }).catch(() => {})
   return sent
 }

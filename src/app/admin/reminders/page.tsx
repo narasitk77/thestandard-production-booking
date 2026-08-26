@@ -89,7 +89,7 @@ export default function RemindersPage() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
       setScanMsg(
-        `สแกนเสร็จ: เจอ ${json.detected} · สร้างใหม่ ${json.created} · ปิดอัตโนมัติ ${json.resolved} · ค้าง ${json.openCount} · Discord ${json.dispatched?.discord ? '✓' : '—'} · Email ${json.dispatched?.email ? '✓' : '—'}`,
+        `สแกนเสร็จ: เจอ ${json.detected} · สร้างใหม่ ${json.created} · ปิดอัตโนมัติ ${json.resolved} · ค้าง ${json.openCount} · Discord ${json.dispatched?.discord ? '✓' : '—'} · Lark ${json.dispatched?.lark ? '✓' : '—'} · Email ${json.dispatched?.email ? '✓' : '—'}`,
       )
       await load()
     } catch (e: any) {
