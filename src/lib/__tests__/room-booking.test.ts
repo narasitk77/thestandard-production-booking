@@ -233,3 +233,14 @@ test('reconciler มีการตรวจ "หายไปจากระบ�
   assert.ok(/return null/.test(src) && src.includes('ห้ามสรุปว่าหาย'),
     'ต้องกันเคสอ่านปฏิทินไม่ได้ ไม่ให้ตีความว่าการจองหายไป')
 })
+
+// v1.208 — feed ของเขามี status/cancelledAt ให้อยู่แล้ว ใช้ตัดสินตรง ๆ
+// ดีกว่าอาศัย "ไม่อยู่ในลิสต์ = ยกเลิก" ซึ่งเป็นพฤติกรรมที่เขาไม่ได้รับปากไว้
+test('รายการที่ถูกยกเลิกต้องไม่ถูกนับว่ายังมีชีวิต', async () => {
+  const { readFileSync } = await import('fs')
+  const src = readFileSync('src/lib/room-booking.ts', 'utf8')
+  assert.ok(src.includes('cancelledAt'), 'ต้องดู cancelledAt')
+  assert.ok(/status !== 'cancelled'/.test(src), 'ต้องดู status ไม่ใช่แค่การมีอยู่ในลิสต์')
+  const rec = readFileSync('src/lib/room-booking-reconcile.ts', 'utf8')
+  assert.ok(/if \(!r\.live\) continue/.test(rec), 'reconciler ต้องกรองเฉพาะรายการที่ยังมีชีวิต')
+})

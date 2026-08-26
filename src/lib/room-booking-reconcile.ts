@@ -109,6 +109,8 @@ export async function reconcileRoomBookings(opts: {
       const list = await listRoomBookings(y, m)
       const set = new Set<string>()
       for (const r of list) {
+        // นับเฉพาะรายการที่ยังมีชีวิต — รายการที่ถูกยกเลิกแล้วต้องไม่ทำให้เราคิดว่าห้องยังอยู่
+        if (!r.live) continue
         if (r.bookingNo) set.add(`no:${r.bookingNo}`)
         if (r.id !== null) set.add(`id:${r.id}`)
       }
