@@ -134,7 +134,7 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
   try {
     const existing = await findExistingRoomBooking(code, d.getUTCFullYear(), d.getUTCMonth() + 1)
     if (existing) {
-      await stamp(b.id, 'OK', null, undefined, existing.bookingNo)
+      await stamp(b.id, 'OK', null, undefined, existing.bookingNo, existing.id)
       logAudit({
         actorEmail: 'room-booking', action: 'booking.room_reserved', entityType: 'Booking',
         entityId: b.id, bookingCode: b.bookingCode,
@@ -154,7 +154,8 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
   const statusMap = { ok: 'OK', conflict: 'CONFLICT', invalid: 'INVALID', unknown: 'UNKNOWN' } as const
   const dbStatus = statusMap[out.kind]
   await stamp(b.id, dbStatus, out.kind === 'ok' ? null : out.message,
-              undefined, out.kind === 'ok' ? out.bookingNo : undefined)
+              undefined, out.kind === 'ok' ? out.bookingNo : undefined,
+              out.kind === 'ok' ? out.id : undefined)
 
   logAudit({
     actorEmail: 'room-booking',
@@ -181,6 +182,7 @@ async function stamp(
   error: string | null,
   skipReason?: string,
   bookingNo?: string,
+  ref?: number | null,
 ) {
   await prisma.booking.update({
     where: { id },
@@ -189,6 +191,7 @@ async function stamp(
       roomBookingError: error || (skipReason ? `skip: ${skipReason}` : null),
       roomBookingAt: new Date(),
       ...(bookingNo ? { roomBookingNo: bookingNo } : {}),
+      ...(ref !== undefined ? { roomBookingRef: ref } : {}),
     },
   })
 }
@@ -209,22 +212,28 @@ export async function cancelRoomBookingFor(bookingId: string): Promise<
 > {
   const b = await prisma.booking.findUnique({
     where: { id: bookingId },
-    select: { id: true, bookingCode: true, shootDate: true, roomBookingNo: true },
+    select: { id: true, bookingCode: true, shootDate: true, roomBookingNo: true, roomBookingRef: true },
   })
   if (!b?.bookingCode) return { status: 'NOT_FOUND' }
 
+  // v1.206 — id ที่เก็บไว้ตอนจองมาก่อนเสมอ: ตรงตัว ไม่ต้องพึ่งการค้นปฏิทิน
+  // (ค้นได้ทีละเดือน และอาศัย marker ใน title ซึ่งถ้าใครไปแก้ชื่อการจองก็หาไม่เจอ)
+  let found: { id: number | null; bookingNo: string } | null =
+    b.roomBookingRef != null ? { id: b.roomBookingRef, bookingNo: b.roomBookingNo || '' } : null
+
   const d = b.shootDate
-  let found
-  try {
-    found = await findExistingRoomBooking(b.bookingCode, d.getUTCFullYear(), d.getUTCMonth() + 1)
-  } catch (e: any) {
-    return { status: 'UNKNOWN', message: `อ่านปฏิทินระบบกลางไม่สำเร็จ: ${e?.message || e}` }
+  if (!found) {
+    try {
+      found = await findExistingRoomBooking(b.bookingCode, d.getUTCFullYear(), d.getUTCMonth() + 1)
+    } catch (e: any) {
+      return { status: 'UNKNOWN', message: `อ่านปฏิทินระบบกลางไม่สำเร็จ: ${e?.message || e}` }
+    }
   }
   if (!found || found.id === null) {
     // ไม่มีอยู่แล้ว — ล้างสถานะฝั่งเราให้ตรงความจริง
     await prisma.booking.update({
       where: { id: b.id },
-      data: { roomBookingNo: null, roomBookingStatus: 'SKIPPED', roomBookingError: 'ไม่พบการจองในระบบกลาง', roomBookingAt: new Date() },
+      data: { roomBookingNo: null, roomBookingRef: null, roomBookingStatus: 'SKIPPED', roomBookingError: 'ไม่พบการจองในระบบกลาง', roomBookingAt: new Date() },
     })
     return { status: 'NOT_FOUND' }
   }
@@ -239,7 +248,7 @@ export async function cancelRoomBookingFor(bookingId: string): Promise<
   if (out.kind === 'ok') {
     await prisma.booking.update({
       where: { id: b.id },
-      data: { roomBookingNo: null, roomBookingStatus: 'SKIPPED', roomBookingError: `ยกเลิกแล้ว (เดิม ${found.bookingNo})`, roomBookingAt: new Date() },
+      data: { roomBookingNo: null, roomBookingRef: null, roomBookingStatus: 'SKIPPED', roomBookingError: `ยกเลิกแล้ว (เดิม ${found.bookingNo})`, roomBookingAt: new Date() },
     })
     return { status: 'CANCELLED', bookingNo: found.bookingNo }
   }

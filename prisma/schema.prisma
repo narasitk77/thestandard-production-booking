@@ -230,6 +230,10 @@ model Booking {
   // ระบบเขา **ไม่มี idempotency** (ยิงซ้ำ = จองซ้ำ) ฝั่งเราจึงต้องจำเองว่ายิงไปแล้ว
   // roomBookingNo = "BK-0412" ที่เขาคืนมา · มีค่า = ห้ามยิงอีกเด็ดขาด
   roomBookingNo     String?
+  // v1.206 — เลข id (primary key) ของระบบกลาง ซึ่ง **คนละเลขกับ bookingNo**
+  // endpoint ยกเลิกใช้เลขนี้ใน path (IT ยืนยัน 2026-08-25) เก็บตั้งแต่ตอนจอง
+  // จะได้ไม่ต้องไปไล่หาในปฏิทินของเขาทีหลัง ซึ่งค้นได้ทีละเดือนและพึ่ง marker ใน title
+  roomBookingRef    Int?
   // PENDING | OK | CONFLICT | INVALID | UNKNOWN | SKIPPED
   roomBookingStatus String?
   roomBookingError  String?

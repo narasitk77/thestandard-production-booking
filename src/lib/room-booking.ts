@@ -278,7 +278,9 @@ export function buildRoomBookingPayload(input: {
 }
 
 export type RoomBookingOutcome =
-  | { kind: 'ok'; bookingNo: string }
+  // v1.206 — `id` คือเลขที่ endpoint ยกเลิกใช้ (คนละเลขกับ bookingNo) IT เพิ่มมาให้
+  // ในคำตอบของ POST แล้ว เก็บไว้ตั้งแต่ตอนจองดีกว่าไปไล่หาทีหลัง
+  | { kind: 'ok'; bookingNo: string; id: number | null }
   | { kind: 'conflict'; message: string }      // ห้องเต็ม — ห้าม retry
   | { kind: 'invalid'; message: string }       // ข้อมูลเราผิด — ห้าม retry จนกว่าจะแก้
   | { kind: 'unknown'; message: string }       // ไม่รู้ผล — **ต้องอ่านกลับก่อนตัดสินใจ**
@@ -295,7 +297,8 @@ export function classifyRoomBookingResponse(
 ): RoomBookingOutcome {
   const message = String(body?.error || body?.message || '').trim()
   if (status === 200 && body?.success && body?.bookingNo) {
-    return { kind: 'ok', bookingNo: String(body.bookingNo) }
+    const id = Number(body.id)
+    return { kind: 'ok', bookingNo: String(body.bookingNo), id: Number.isFinite(id) ? id : null }
   }
   if (status === 401) return { kind: 'invalid', message: message || 'service key ผิดหรือไม่ได้แนบ' }
   if (status === 400) return { kind: 'invalid', message: message || 'ข้อมูลไม่ผ่านการตรวจ' }

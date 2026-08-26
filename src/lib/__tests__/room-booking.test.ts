@@ -137,8 +137,8 @@ test('ไม่มีข้อจำกัดเวลาทำการ — ถ
 // ⚠️ เคสที่ตัดสินว่าจะจองซ้ำหรือไม่ — ระบบเขาไม่มี idempotency
 test('แยก "ห้ามยิงซ้ำ" ออกจาก "ไม่รู้ผล" ให้ขาด', () => {
   assert.deepEqual(
-    classifyRoomBookingResponse(200, { success: true, bookingNo: 'BK-0412' }),
-    { kind: 'ok', bookingNo: 'BK-0412' })
+    classifyRoomBookingResponse(200, { success: true, bookingNo: 'BK-0412', id: 412 }),
+    { kind: 'ok', bookingNo: 'BK-0412', id: 412 })
 
   // ห้องเต็มตอบ **500** ไม่ใช่ 409 — เหมา 5xx = ชั่วคราวแล้ว retry จะยิงซ้ำไม่จบ
   const full = classifyRoomBookingResponse(500, { error: 'ห้องนี้ถูกจองในช่วงเวลาดังกล่าวแล้วครับ' })
@@ -205,4 +205,18 @@ test('room-booking worker ถูกลงทะเบียนครบทั้
     assert.ok(compose.includes('ROOM_BOOKING_WORKER_ENABLED:'), 'compose ไม่ได้ส่ง flag เข้าคอนเทนเนอร์')
     assert.ok(compose.includes('ROOM_BOOKING_SERVICE_KEY:'), 'compose ไม่ได้ส่ง service key เข้าคอนเทนเนอร์')
   }
+})
+
+// v1.206 — IT ยืนยัน: endpoint ยกเลิกใช้ `id` (primary key) ไม่ใช่ `bookingNo`
+// และเพิ่ม id มาในคำตอบของ POST แล้ว → ต้องเก็บไว้ ไม่ใช่ไปไล่หาทีหลัง
+test('เก็บเลข id จากคำตอบตอนจอง (คนละเลขกับ bookingNo)', () => {
+  const ok = classifyRoomBookingResponse(200, { success: true, bookingNo: 'BK-0412', id: 412 })
+  assert.deepEqual(ok, { kind: 'ok', bookingNo: 'BK-0412', id: 412 })
+
+  // ระบบเก่าที่ยังไม่ส่ง id มา ต้องไม่พัง — คืน null แล้วให้ไปหาจากปฏิทินแทน
+  const noId = classifyRoomBookingResponse(200, { success: true, bookingNo: 'BK-0412' })
+  assert.deepEqual(noId, { kind: 'ok', bookingNo: 'BK-0412', id: null })
+
+  const junk = classifyRoomBookingResponse(200, { success: true, bookingNo: 'BK-1', id: 'ไม่ใช่ตัวเลข' })
+  assert.equal((junk as any).id, null)
 })

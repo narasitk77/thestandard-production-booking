@@ -80,7 +80,7 @@ export async function reconcileRoomBookings(opts: {
     },
     select: {
       ...ROOM_BOOKING_SELECT,
-      roomBookingNo: true, roomBookingStatus: true, status: true, deletedAt: true,
+      roomBookingNo: true, roomBookingRef: true, roomBookingStatus: true, status: true, deletedAt: true,
     },
     orderBy: { shootDate: 'asc' },
   })
@@ -107,8 +107,11 @@ export async function reconcileRoomBookings(opts: {
           continue
         }
         writes++
-        const found = await findExistingRoomBooking(code, b.shootDate.getUTCFullYear(), b.shootDate.getUTCMonth() + 1)
-          .catch(() => null)
+        // v1.206 — ใช้ id ที่เก็บไว้ตอนจองก่อน ประหยัด request และไม่พึ่ง marker ใน title
+        const found = b.roomBookingRef != null
+          ? { id: b.roomBookingRef as number, bookingNo: b.roomBookingNo as string }
+          : await findExistingRoomBooking(code, b.shootDate.getUTCFullYear(), b.shootDate.getUTCMonth() + 1)
+              .catch(() => null)
         if (!found || found.id === null) {
           // ไม่มีอยู่ในระบบเขาแล้ว — ล้างของเราให้ตรงความจริง
           await stampCleared(b.id, 'ไม่พบการจองในระบบกลาง')
@@ -164,6 +167,7 @@ async function stampCleared(id: string, note: string) {
     where: { id },
     data: {
       roomBookingNo: null,
+      roomBookingRef: null,
       roomBookingStatus: 'SKIPPED',
       roomBookingError: note,
       roomBookingAt: new Date(),
