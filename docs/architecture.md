@@ -198,7 +198,8 @@ Not worker-driven, but still background:
   capability); the capability helpers decide **what a role can do** (console /
   OT approve / role management). Managed at `/admin/permissions`.
 - **UI tiers** (`src/lib/tiers.ts`, v1.90) collapse (role × position) into
-  `admin · coordinator · sound-mgmt · producer · crew`. **One source of truth
+  `admin · coordinator · producer · crew` (v1.210 removed `sound-mgmt`: it
+  existed for one person and silently granted LESS than his COORDINATOR role). **One source of truth
   used by both `Nav.tsx` and `middleware.ts`**, so menu and access cannot drift.
   Pages whose own data layer authorizes by ownership (`/new`, `/producer`,
   `/ot`, `/review`, `/feedback`, `/dashboard/[id]`) are deliberately ALWAYS

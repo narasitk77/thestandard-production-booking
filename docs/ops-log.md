@@ -5,6 +5,65 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-08-27 · v1.209 → v1.210 — Lark, ปลดล็อกทีมเสียง, error ที่แกล้งเป็นความว่างเปล่า
+
+### v1.209 · ต่อ Lark ควบคู่ Discord (`dec7239`, deploy `sha-dec7239`)
+
+องค์กรย้ายไป Lark — เพิ่ม `notifyLark()` + `notifyChat()/notifyChatDetailed()` แทน
+`notifyDiscord()` ที่จุดเรียกทั้ง 11 จุด **โดยไม่ปิด Discord** เพื่อไม่ให้มีช่วงเงียบ
+
+- ⚠️ **Lark ตอบ HTTP 200 ทั้งที่ปฏิเสธข้อความ** — สถานะจริงอยู่ใน `body.code`
+  (0 = ส่งได้) เช็ค `res.ok` อย่างเดียวจะรายงานว่าส่งสำเร็จทั้งที่ไม่มีใครได้รับ
+  อ่าน body ไม่ออก = fail closed
+- `LARK_WEBHOOK_URL` / `LARK_WEBHOOK_SECRET` / `LARK_NOTIFY_SCOPE` (ดีฟอลต์ `all`
+  ต่างจาก Discord ที่เป็น `footage`) — ประกาศใน service `environment:` ของ compose
+  **ยืนยันแล้วว่าโผล่ใน `Config.Env` ของคอนเทนเนอร์จริง** (บทเรียน v1.202.2)
+- `GET /api/internal/notify-test` ยิงจริงจากในคอนเทนเนอร์ แล้วบอกว่าช่องไหนถึง/ไม่ถึง
+
+**ยังไม่ทำงาน** — Lark เวอร์ชันเว็บ**ไม่มีปุ่มเพิ่ม Custom Bot** ต้องทำจากแอปเดสก์ท็อป
+ยังไม่ได้ webhook URL · และ workspace Lark **ยังไม่มีกลุ่มทีมเลยสักกลุ่ม** ถ้าย้าย
+แจ้งเตือนไปตอนนี้จะเข้าห้องที่ไม่มีคนอ่าน — อาการเดียวกับเมลไฟล์ที่เงียบไป 5 สัปดาห์
+
+### v1.209.1 · reminders บันทึกผลราย channel (`be8924c`)
+
+รีวิว adversarial จับได้ก่อนขึ้น prod: `reminders.ts` เก็บค่า fan-out
+(`discord || lark`) ลงฟิลด์ชื่อ `discord` ตรง ๆ ทั้งที่รอบนั้นเป็น category `'ops'`
+ซึ่ง Discord **ตัดทิ้งก่อนยิง** เสมอ → พอเปิด Lark ฟิลด์นี้จะเป็น `true` ตลอด
+ขณะที่ Discord ไม่ได้ส่งอะไรเลย และ `/admin/reminders` กับ log ของ worker
+พิมพ์ค่านี้ออกมาตรง ๆ — คือ *a record is not delivery* เกิดซ้ำในผิวใหม่
+
+### v1.210 · ปลดล็อก Senior Sound Engineer — ลบ tier `sound-mgmt` (`af69661`)
+
+`resolveTier()` แม็ป position "Senior Sound Engineer" → tier `sound-mgmt` ซึ่ง
+**ทับ role จริง** (COORDINATOR): คิวถูกบังคับกรองเฉพาะงานมีไมค์ ติ๊กออกไม่ได้ และ
+บล็อก `/admin/workspace`, `/admin/routine`, `/admin/upload-review`
+ขณะที่ `/admin/permissions` แสดงว่าเขาเป็น "Coordinator"
+
+**ตรวจ DB จริงก่อนแก้:** มีคนเดียวในระบบที่ position นี้ (krittapon.j@, COORDINATOR,
+active) ที่เหลือเป็น "Sound Engineer"/"Sound Recorder" role USER → tier นี้มีไว้เพื่อ
+คนเดียว จึงลบทิ้งทั้งก้อน (type, ALLOW, DENY, tierHome, การล็อกช่องติ๊ก)
+ทีมเสียงที่เหลือไม่กระทบ — **มีเทสล็อกไว้ทั้งสองด้าน**
+
+> **บทเรียน:** position ไม่ควรเงียบ ๆ ให้สิทธิ์**น้อยกว่า** role ที่หน้าจอสิทธิ์แสดงอยู่
+> ผู้ใช้จะไม่มีทางรู้เลยว่าทำไมตัวเองมองไม่เห็นงาน และไม่มีหน้าไหนอธิบายได้
+
+### v1.210 · error ไม่ใช่ความว่างเปล่า (episodes)
+
+`PP-26-039` จองไม่ได้ ขึ้นว่า "ไม่มี episode ที่ถ่ายได้" — **ของจริงมี 15 ตอน**
+ต้นเหตุ: `fetch(...).then(r => r.ok ? r.json() : { episodes: [] })` กลืนทุกความล้มเหลว
+ให้กลายเป็นลิสต์ว่าง หน้าตาจึงเหมือน "ไม่มี" เป๊ะ และผู้ใช้ไม่มีเหตุให้กดใหม่
+
+- client: แบนเนอร์เหลือง + ปุ่ม "ลองใหม่" (ช่อง Project ID มีแบนเนอร์แบบนี้มาตั้งแต่แรก
+  ช่อง Episodes ไม่เคยมี — ทำครึ่งเดียว)
+- server: `listProjectEpisodes` ลองใหม่ 1 ครั้งด้วย JWT ใหม่ — Google เด้ง
+  `unauthorized_client` เป็นระยะ (เจอใน log วันนี้ตอน startup)
+
+**ยังเหลือที่อื่นที่เป็นแบบเดียวกัน** (pre-existing ไม่ได้แก้รอบนี้): RoutinePlanner
+โชว์ "ยังไม่มีชุด Routine" เมื่อโหลดพลาด · หน้า booking detail ซ่อนลิงก์ footage ทั้งหมด
+เมื่อ `/ep-folders` ล้ม · ปุ่ม "ส่งงาน" หายไปเมื่อดึงรายงาน footage ไม่สำเร็จ
+
+---
+
 ## 2026-08-19 · ช่องว่างของ log นี้ + เหตุการณ์ปฏิบัติการที่มีหลักฐาน   🟡 บันทึกย้อนหลัง
 
 **ช่องว่าง:** log นี้ไม่มีรายการระหว่าง **2026-07-24 (v1.155.0)** ถึงวันนี้ ทั้งที่

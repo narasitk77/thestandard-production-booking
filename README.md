@@ -75,7 +75,7 @@ Producer กรอก Booking ครั้งเดียว → Coordinator app
 | Feature | Detail |
 |---------|--------|
 | Role tiers | DB roles 5 ชั้น: `USER / COORDINATOR / MANAGER / SUPPORT / ADMIN` |
-| UI tiers (v1.90) | `src/lib/tiers.ts` ยุบ (role × position) เป็น 5 tier — `admin · coordinator · sound-mgmt · producer · crew` · **ใช้ที่เดียวทั้ง Nav และ middleware** เมนูกับสิทธิ์จึงเพี้ยนกันไม่ได้ |
+| UI tiers (v1.90) | `src/lib/tiers.ts` ยุบ (role × position) เป็น 4 tier — `admin · coordinator · producer · crew` (v1.210 ถอด `sound-mgmt` ออก — มันมีไว้เพื่อคนเดียวและไปทับ role จริงของเขา) · **ใช้ที่เดียวทั้ง Nav และ middleware** เมนูกับสิทธิ์จึงเพี้ยนกันไม่ได้ |
 | Team roster | `/admin/team` — crew CRUD |
 | Permissions | `/admin/permissions` — เพิ่ม Producer/Co-producer ได้โดยไม่ต้อง deploy |
 | OT | `/ot` self-service (HOLIDAY / OVERTIME) → `/ot/admin` manager sign-off · ลายเซ็นดิจิทัลที่ `/profile/signature`, export PDF |
