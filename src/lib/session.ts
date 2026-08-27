@@ -50,7 +50,7 @@ export async function requireConsole() {
   return s
 }
 
-// v1.90 — resolve the signed-in user's UI tier (admin/coordinator/sound-mgmt/
+// v1.90 — resolve the signed-in user's UI tier (admin/coordinator/
 // producer/crew) from role + position, for the role-aware nav. Defaults to 'crew'
 // (least-privileged) when the user can't be read.
 export async function getUserTier(email: string | null | undefined): Promise<import('./tiers').Tier> {

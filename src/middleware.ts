@@ -40,7 +40,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // v1.90 — tier-based page access (admin/coordinator/sound-mgmt/producer/crew).
+  // v1.90 — tier-based page access (admin/coordinator/producer/crew).
   // Pages only (never /api — routes do their own auth). Gated only once the token
   // carries `position` (pre-v1.90 tokens have it undefined; the jwt callback fills
   // it on the next session read), so an old session is never wrongly locked out —

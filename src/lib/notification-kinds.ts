@@ -153,7 +153,7 @@ export function countUnread(items: NotifItem[], seenAt: string | null): number {
  *   console      คิวยกเลิก + คิวแก้ไข — ADMIN/SUPPORT/MANAGER/COORDINATOR
  *                ทั้งหมดนี้เขาเปิด /admin เห็นอยู่แล้ว กระดิ่งไม่เปิดเผยอะไรใหม่
  *   systemErrors worker ค้าง — tier admin เท่านั้น (เรื่อง infra ไม่ใช่คิวงาน;
- *                coordinator/sound-mgmt ทำคิว ไม่ได้ดูแล container)
+ *                coordinator ทำคิว ไม่ได้ดูแล container)
  *
  * "ผลงานของตัวเอง" ไม่มี scope เพราะทุกคนได้ แต่กรองด้วยความเป็นเจ้าของ + allowlist
  */

@@ -256,12 +256,27 @@ export async function listProjectEpisodes(projectId: string): Promise<ListEpisod
   if (!/^PP-\d{2}-\d{3}$/.test(pid)) return { ok: false, error: `bad projectId: ${pid}` }
   if (!hasCredentials()) return { ok: false, error: 'Google service account not configured' }
 
-  try {
-    const spreadsheetId = getSheetId()
-    const sheets = google.sheets({ version: 'v4', auth: getAuth() })
-    const all = await fetchAllEpisodeRows(sheets, spreadsheetId)
-    return { ok: true, episodes: bookableEpisodesFor(all, pid) }
-  } catch (e: any) {
-    return { ok: false, error: (e && e.message) || String(e) }
+  const spreadsheetId = getSheetId()
+  // v1.210 — one retry with a FRESH JWT.
+  //
+  // Google intermittently answers this service account with
+  // `unauthorized_client` (seen ~twice a day in the app log, and again at
+  // 2026-08-27 startup). One blip used to be enough to tell a producer their
+  // project had no bookable episodes at all — PP-26-039 has 15. getAuth()
+  // mints a new JWT per call, so a second attempt genuinely re-authenticates
+  // rather than replaying the same bad token. Bounded at one extra call:
+  // this runs on every booking-form open and the read quota is 60/min/user.
+  let lastError = ''
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const sheets = google.sheets({ version: 'v4', auth: getAuth() })
+      const all = await fetchAllEpisodeRows(sheets, spreadsheetId)
+      return { ok: true, episodes: bookableEpisodesFor(all, pid) }
+    } catch (e: any) {
+      lastError = (e && e.message) || String(e)
+      if (attempt === 1) console.warn(`[episodes] ${pid} attempt 1 failed, retrying: ${lastError}`)
+    }
   }
+  console.error(`[episodes] ${pid} failed after retry: ${lastError}`)
+  return { ok: false, error: lastError }
 }

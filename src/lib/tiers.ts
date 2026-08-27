@@ -6,19 +6,22 @@
  *
  *   admin        ADMIN / SUPPORT / MANAGER          → everything
  *   coordinator  COORDINATOR                        → full booking queue
- *   sound-mgmt   position "Senior Sound Engineer"   → the queue (sound-focused)
  *   producer     position contains "producer"       → My Bookings / Producer
  *   crew         everyone else (Videographer/Sound/  → Upload job task
  *                Switcher/Director/Editor/…)
  */
-export type Tier = 'admin' | 'coordinator' | 'sound-mgmt' | 'producer' | 'crew'
+export type Tier = 'admin' | 'coordinator' | 'producer' | 'crew'
 
 export function resolveTier(role?: string | null, position?: string | null): Tier {
   const pos = (position || '').toLowerCase()
   if (role === 'ADMIN' || role === 'SUPPORT' || role === 'MANAGER') return 'admin'
-  // Sound lead — focused on the sound queue even though they hold a COORDINATOR
-  // role. Checked before the plain COORDINATOR branch on purpose.
-  if (pos.includes('senior sound')) return 'sound-mgmt'
+  // v1.210 — the 'sound-mgmt' tier (position "Senior Sound Engineer" → a
+  // queue locked to sound jobs, no console tools) is GONE. It existed for
+  // exactly one person, whose actual role is COORDINATOR; the tier silently
+  // overrode that role to grant LESS than the /admin/permissions screen said
+  // he had, which is why "why can't I see the other jobs" had no answer
+  // anywhere in the UI. Sound staff who are not coordinators still land on
+  // 'crew' via the fall-through below, unchanged.
   if (role === 'COORDINATOR') return 'coordinator'
   if (pos.includes('producer')) return 'producer' // Producer + Co-Producer
   return 'crew'
@@ -29,7 +32,6 @@ export function tierHome(tier: Tier): string {
   switch (tier) {
     case 'producer': return '/my-bookings'
     case 'crew': return '/upload'
-    case 'sound-mgmt': return '/admin'
     default: return '/'
   }
 }
@@ -63,19 +65,9 @@ const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog'
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],
-  // sound engineers upload their own sound footage (getUploadAccess → true for the
-  // sound roster role; v1.108 sound-staging workflow) — the tier gate must match,
-  // else the Upload buttons shown to them everywhere bounce to /admin.
-  'sound-mgmt': ['/admin', '/upload'],
   producer: ['/producer', '/new'],
   crew: ['/upload'],
 }
-// Sub-paths a tier may NOT open even though a broader prefix is allowed.
-const DENY: Partial<Record<Tier, string[]>> = {
-  // The sound lead sees the queue, not the full-console reporting/automation tools.
-  'sound-mgmt': ['/admin/workspace', '/admin/routine', '/admin/upload-review'],
-}
-
 function underAny(path: string, prefixes: string[]): boolean {
   return prefixes.some(p => path === p || path.startsWith(p + '/'))
 }
@@ -85,7 +77,5 @@ export function tierAllows(tier: Tier, path: string): boolean {
   if (tier === 'admin') return true
   if (path === '/') return true
   if (underAny(path, ALWAYS)) return true
-  const deny = DENY[tier]
-  if (deny && underAny(path, deny)) return false
   return underAny(path, ALLOW[tier as Exclude<Tier, 'admin'>])
 }

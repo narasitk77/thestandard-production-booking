@@ -10,8 +10,10 @@ test('resolveTier maps real role × position values', () => {
   assert.equal(resolveTier('ADMIN', 'Head of Video Director'), 'admin')
   assert.equal(resolveTier('MANAGER', 'Video Production Manager'), 'admin')
   assert.equal(resolveTier('SUPPORT', null), 'admin')
-  // Senior Sound Engineer wins over the COORDINATOR role → sound-mgmt.
-  assert.equal(resolveTier('COORDINATOR', 'Senior Sound Engineer'), 'sound-mgmt')
+  // v1.210 — the Senior Sound Engineer is a COORDINATOR and is treated as one.
+  // A position must never quietly grant LESS than the role the permissions
+  // screen shows; the old 'sound-mgmt' tier did exactly that for one person.
+  assert.equal(resolveTier('COORDINATOR', 'Senior Sound Engineer'), 'coordinator')
   assert.equal(resolveTier('COORDINATOR', 'Production Coordinator'), 'coordinator')
   // Producer + Co-Producer (USER) → producer.
   assert.equal(resolveTier('USER', 'Producer'), 'producer')
@@ -43,7 +45,7 @@ test('tierAllows: producer = bookings/producer, not console/upload', () => {
 test('tierAllows: every tier can open its OWN booking detail + self-edit (v1.92.1 lockout fix)', () => {
   // /dashboard/[id] and /bookings/[id]/edit are linked from /my-bookings and
   // authorize by owner server-side — the tier gate must NOT bounce them.
-  for (const tier of ['producer', 'crew', 'coordinator', 'sound-mgmt'] as const) {
+  for (const tier of ['producer', 'crew', 'coordinator'] as const) {
     assert.equal(tierAllows(tier, '/dashboard/cmq123'), true, `${tier} → /dashboard/[id]`)
     assert.equal(tierAllows(tier, '/bookings/cmq123/edit'), true, `${tier} → /bookings/[id]/edit`)
   }
@@ -60,7 +62,7 @@ test('tierAllows: /producer is open to every tier (v1.148.2 — producing is a r
   // 9 real producers (assistants/creators/PMs, e.g. aphisit.h with 16 bookings)
   // sat in the crew tier and couldn't reach /producer to send edit requests.
   // The page scopes all data by the session's own producerEmail, so this is safe.
-  for (const tier of ['crew', 'producer', 'coordinator', 'sound-mgmt', 'admin'] as const) {
+  for (const tier of ['crew', 'producer', 'coordinator', 'admin'] as const) {
     assert.equal(tierAllows(tier, '/producer'), true, `${tier} must reach /producer`)
   }
 })
@@ -68,7 +70,7 @@ test('tierAllows: /producer is open to every tier (v1.148.2 — producing is a r
 test('tierAllows: every signed-in tier can open /new (the booking wizard is for everyone)', () => {
   // /new + POST /api/bookings are session-only; blocking the crew tier trapped
   // brand-new users with no way to request a booking. Regression for that.
-  for (const tier of ['crew', 'producer', 'coordinator', 'sound-mgmt', 'admin'] as const) {
+  for (const tier of ['crew', 'producer', 'coordinator', 'admin'] as const) {
     assert.equal(tierAllows(tier, '/new'), true, `${tier} → /new`)
   }
 })
@@ -77,20 +79,32 @@ test('tierAllows: every tier reaches /booking/success + /ot (layouts do the real
   // After submitting the wizard, every tier must see the success/confirmation
   // screen at /booking/success (singular /booking). /ot is self-service overtime
   // for the whole roster (ot/layout.tsx gates to team members + approvers).
-  for (const tier of ['crew', 'producer', 'coordinator', 'sound-mgmt', 'admin'] as const) {
+  for (const tier of ['crew', 'producer', 'coordinator', 'admin'] as const) {
     assert.equal(tierAllows(tier, '/booking/success'), true, `${tier} → /booking/success`)
     assert.equal(tierAllows(tier, '/ot'), true, `${tier} → /ot`)
     assert.equal(tierAllows(tier, '/ot/admin'), true, `${tier} → /ot/admin`)
   }
 })
 
-test('tierAllows: sound-mgmt = queue only, not the console tools', () => {
-  assert.equal(tierAllows('sound-mgmt', '/admin'), true)
-  assert.equal(tierAllows('sound-mgmt', '/admin/abc123'), true) // booking detail
-  assert.equal(tierAllows('sound-mgmt', '/admin/workspace'), false)
-  assert.equal(tierAllows('sound-mgmt', '/admin/routine'), false)
-  assert.equal(tierAllows('sound-mgmt', '/admin/upload-review'), false)
-  assert.equal(tierAllows('sound-mgmt', '/upload'), true) // sound engineers upload sound footage
+test('v1.210: the Senior Sound Engineer gets the full coordinator console', () => {
+  // Regression for the unlock. He holds role COORDINATOR; the 'sound-mgmt' tier
+  // used to override that to hide the queue's non-sound jobs and block three
+  // console pages. These are the exact paths that were denied.
+  const tier = resolveTier('COORDINATOR', 'Senior Sound Engineer')
+  assert.equal(tier, 'coordinator')
+  for (const path of ['/admin', '/admin/workspace', '/admin/routine', '/admin/upload-review', '/upload']) {
+    assert.equal(tierAllows(tier, path), true, `senior sound engineer → ${path}`)
+  }
+})
+
+test('v1.210: sound staff who are NOT coordinators are unaffected', () => {
+  // The unlock must not hand the console to the rest of the sound roster —
+  // they are USER-role and stay on the crew tier exactly as before.
+  for (const pos of ['Sound Engineer', 'Sound Recorder', 'Senior Sound Engineer']) {
+    assert.equal(resolveTier('USER', pos), 'crew', pos)
+  }
+  assert.equal(tierAllows('crew', '/admin'), false)
+  assert.equal(tierAllows('crew', '/upload'), true)
 })
 
 test('tierAllows: coordinator = the booking queue + crew tools', () => {
@@ -103,7 +117,6 @@ test('tierAllows: coordinator = the booking queue + crew tools', () => {
 test('tierHome targets each tier’s main surface', () => {
   assert.equal(tierHome('crew'), '/upload')
   assert.equal(tierHome('producer'), '/my-bookings')
-  assert.equal(tierHome('sound-mgmt'), '/admin')
   assert.equal(tierHome('admin'), '/')
   assert.equal(tierHome('coordinator'), '/')
 })
@@ -115,7 +128,7 @@ test('/review and /feedback are open to every tier — crew are the whole audien
   // feedback page is for everyone who ever used the floating box. Both authorize
   // at the data layer (token / session-scoped query), so the tier gate must not
   // bounce them to /admin — that would make the emailed link dead on arrival.
-  for (const tier of ['crew', 'producer', 'sound-mgmt', 'coordinator'] as const) {
+  for (const tier of ['crew', 'producer', 'coordinator'] as const) {
     assert.equal(tierAllows(tier, '/review/sometoken'), true, `${tier} → /review`)
     assert.equal(tierAllows(tier, '/feedback'), true, `${tier} → /feedback`)
   }

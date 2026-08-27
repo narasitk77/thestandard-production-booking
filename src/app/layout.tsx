@@ -35,7 +35,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // /upload link in the nav so crew can find their assigned bookings to
   // upload footage to.
   const canUpload = await getUploadAccess(session?.email)
-  // v1.90 — UI tier (admin/coordinator/sound-mgmt/producer/crew): the nav hides
+  // v1.90 — UI tier (admin/coordinator/producer/crew): the nav hides
   // items a tier shouldn't see; middleware blocks the pages to match.
   const tier = await getUserTier(session?.email)
 

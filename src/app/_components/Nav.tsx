@@ -70,7 +70,7 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     { href: '/admin', label: 'คิวงาน', show: isConsole, match: () => queueActive },
     { href: '/admin/production-space', label: 'Admin', show: isAdmin, match: (p) => ADMIN_HUB.test(p) },
     // v1.90 — tier narrows the role/flag-based visibility (crew/producer don't
-    // see console; sound-mgmt doesn't see the full-console tools).
+    // see console).
   ] as Item[]).filter(i => i.show && tierAllows(tier, i.href))
 
   const secondary: Item[] = [

@@ -207,6 +207,12 @@ export default function BookingWizard() {
   const [projectEpisodes, setProjectEpisodes] = useState<ProjectEpisode[]>([])
   const [selectedEpisodeIds, setSelectedEpisodeIds] = useState<string[]>([])
   const [episodesLoading, setEpisodesLoading] = useState(false)
+  // v1.210 — "โหลดไม่ได้" must never render as "ไม่มี episode". The fetch used to
+  // swallow every non-OK response into an empty list, so a transient Sheets/auth
+  // blip told the producer their project had nothing bookable and gave them no
+  // reason to retry. `episodesReload` re-fires the effect from the retry button.
+  const [episodesError, setEpisodesError] = useState<string | null>(null)
+  const [episodesReload, setEpisodesReload] = useState(0)
   const [producers, setProducers] = useState<Person[]>([])
   const [directors, setDirectors] = useState<Person[]>([])
   const [peopleLoading, setPeopleLoading] = useState(true)
@@ -285,19 +291,27 @@ export default function BookingWizard() {
   }, [outletCode])
 
   useEffect(() => {
-    if (!projectId) { setProjectEpisodes([]); setSelectedEpisodeIds([]); return }
+    if (!projectId) { setProjectEpisodes([]); setSelectedEpisodeIds([]); setEpisodesError(null); return }
     let cancelled = false
     setEpisodesLoading(true)
     // NOTE: do NOT clear selectedEpisodeIds here — this effect also fires on
     // resumeDraft's projectId restore and would wipe the just-restored episodes.
     // The genuine project-switch path (the Project ID <select> onChange) clears it.
     fetch(`/api/projects/${encodeURIComponent(projectId)}/episodes`)
-      .then(r => r.ok ? r.json() : { episodes: [] })
-      .then(d => { if (!cancelled) setProjectEpisodes(d.episodes || []) })
-      .catch(() => { if (!cancelled) setProjectEpisodes([]) })
+      .then(async r => {
+        if (r.ok) return r.json()
+        const body = await r.json().catch(() => ({} as any))
+        throw new Error(body?.error || `HTTP ${r.status}`)
+      })
+      .then(d => { if (!cancelled) { setProjectEpisodes(d.episodes || []); setEpisodesError(null) } })
+      .catch(err => {
+        if (cancelled) return
+        setProjectEpisodes([])
+        setEpisodesError(String(err?.message || err) || 'unknown error')
+      })
       .finally(() => { if (!cancelled) setEpisodesLoading(false) })
     return () => { cancelled = true }
-  }, [projectId])
+  }, [projectId, episodesReload])
 
   // v1.177 — picking a room that has a permanent rig pre-fills the camera count
   // (Studio 1 = Sony FX30 × 3). Only fills a BLANK field, and only when the room
@@ -1450,6 +1464,18 @@ export default function BookingWizard() {
                         <Label required>Episodes ที่จะถ่ายรอบนี้</Label>
                         {episodesLoading ? (
                           <p className="text-sm text-gray-400 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังโหลด episodes…</p>
+                        ) : episodesError ? (
+                          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                            <div className="font-medium">⚠️ โหลด episode ไม่สำเร็จ — ไม่ได้แปลว่าโปรเจกต์นี้ไม่มี episode</div>
+                            <div className="mt-0.5 text-amber-700">อ่านชีต Producer Dashboard ไม่ได้ตอนนี้ ({episodesError})</div>
+                            <button
+                              type="button"
+                              onClick={() => setEpisodesReload(n => n + 1)}
+                              className="mt-1.5 px-2 py-1 rounded border border-amber-400 text-amber-900 hover:bg-amber-100 transition-colors"
+                            >
+                              ลองใหม่
+                            </button>
+                          </div>
                         ) : projectEpisodes.length === 0 ? (
                           <p className="text-sm text-gray-400">— ไม่มี episode ที่ถ่ายได้ (Published หมดแล้ว หรือยังไม่ถูกสร้างในชีต) —</p>
                         ) : (

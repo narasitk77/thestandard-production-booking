@@ -63,8 +63,7 @@ export default function AdminPage() {
   // v1.51 — soft delete (hide test queues) is an ADMIN power; the Deleted tab
   // and the trash buttons only render for ADMIN.
   const [isAdmin, setIsAdmin] = useState(false)
-  // v1.91 — sound-mgmt tier (Senior Sound Engineer) sees the queue filtered to
-  // jobs that need sound/mics; everyone else can toggle it.
+  // v1.90 — UI tier drives which console links render (see tierAllows below).
   const [tier, setTier] = useState<Tier>('crew')
   const [soundOnly, setSoundOnly] = useState(false)
   // v1.107 — CONFIRMED tab: spot jobs whose crew isn't fully assigned yet.
@@ -89,9 +88,7 @@ export default function AdminPage() {
     fetch('/api/me').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.user?.canUpload) setCanUpload(true)
       if (d?.user?.role === 'ADMIN') setIsAdmin(true)
-      const t = resolveTier(d?.user?.role, d?.user?.position)
-      setTier(t)
-      if (t === 'sound-mgmt') setSoundOnly(true) // auto-on + locked below
+      setTier(resolveTier(d?.user?.role, d?.user?.position))
     }).catch(() => {})
   }, [])
 
@@ -137,7 +134,7 @@ export default function AdminPage() {
     const d = new Date(ym + '-01')
     return isNaN(d.getTime()) ? ym : d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
   }
-  // A job "needs sound" when it requests mics. sound-mgmt is locked to this view.
+  // A job "needs sound" when it requests mics. Opt-in filter, off by default.
   // Then filter by selected month and sort by shoot date (default earliest first).
   const visibleBookings = (() => {
     let list = soundOnly ? bookings.filter(b => (b.micCount ?? 0) > 0) : bookings
@@ -233,7 +230,7 @@ export default function AdminPage() {
           <h1 className="text-xl sm:text-2xl font-normal text-gray-800">คิวงาน</h1>
           {/* v1.73 — queue-only tools. Back-office + system (Reminders/Team/
               Health/Permissions) moved to the Admin hub (/admin/production-space). */}
-          {/* v1.91 — hide console-tool links for sound-mgmt (they're blocked by middleware too) */}
+          {/* Links render only where the tier may actually go (middleware blocks the rest). */}
           <div className="flex gap-2">
             {tierAllows(tier, '/admin/workspace') && (
               <Link href="/admin/workspace" className="px-3 py-1.5 text-xs sm:text-sm border border-[#673ab7] text-[#673ab7] rounded hover:bg-[#673ab7] hover:text-white transition-colors">
@@ -343,12 +340,12 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* v1.91 — sound/mic filter. Locked on for sound-mgmt (ทีมเสียง); a toggle for the rest. */}
+      {/* v1.210 — a plain opt-in filter for everyone. It used to be forced ON and
+          un-untickable for the sound lead; that tier is gone (see src/lib/tiers.ts). */}
       <label className="flex items-center gap-2 mb-4 text-sm text-gray-600 w-fit cursor-pointer">
-        <input type="checkbox" checked={soundOnly} disabled={tier === 'sound-mgmt'}
+        <input type="checkbox" checked={soundOnly}
           onChange={e => setSoundOnly(e.target.checked)} className="accent-[#673ab7]" />
         🎙️ เฉพาะงานที่ต้องการเสียง/ไมค์
-        {tier === 'sound-mgmt' && <span className="text-[10px] text-amber-700">(ล็อกสำหรับทีมเสียง)</span>}
       </label>
 
       {/* v1.107 — CONFIRMED tab only: filter to jobs whose crew isn't fully assigned */}
