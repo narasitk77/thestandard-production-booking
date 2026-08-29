@@ -3,7 +3,7 @@
 > ระบบ Booking การผลิต · Production ID auto-generation · Google Calendar sync · Drive footage pipeline · คลังอุปกรณ์ · OT
 
 **Live**: https://probook.xtec9.xyz (self-hosted Docker via Portainer)
-**Version**: 1.177.1 · Next.js 14 · 483 tests passing
+**Version**: 1.211.0 · Next.js 14 · 695 tests passing
 
 ---
 
@@ -26,6 +26,7 @@ Producer กรอก Booking ครั้งเดียว → Coordinator app
 | Producer self-service | แก้ไข/ขอเลื่อนเวลาเองได้ที่ `/producer` และ `/bookings/[id]/edit` ตอนยัง REQUESTED |
 | Week plan (v1.175) | `/admin/week-plan` — export ตารางทั้งสัปดาห์เป็นข้อความ |
 | Room / studio schedule | `/admin/room-schedule` — ตารางว่างต่อห้องต่อวัน สำหรับวางแผนกำลังผลิต |
+| Switcher live log (v1.211) | `/switcher` — สวิตเชอร์ลงหมายไลฟ์ที่สั่งกันในไลน์เอง · Production ID `[OUT]-LIV-[YYMMDD]-[NN]` ออกให้อัตโนมัติ · กล่อง "ต้องตามต่อ" สำหรับลิงก์ที่ยังไม่มา · ตะเข็บรับข้อมูลจากไลน์ `POST /api/internal/switcher/prefill` |
 | Calendar Packet | Auto-generated, copy-paste ready for coordinator |
 
 ### Google Calendar

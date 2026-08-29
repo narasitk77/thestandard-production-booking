@@ -235,3 +235,52 @@ export async function requireOTApprover() {
   const ok = await getOTApproverAccess(s.email)
   return ok ? s : null
 }
+
+// v1.211 — สิทธิ์หน้า /switcher (บันทึกงานไลฟ์ของสวิตเชอร์)
+//
+// สามคำถามคนละคำถาม จึงตอบแยกกัน แทนที่จะยุบเป็น boolean เดียวแล้วให้ที่เรียก
+// เดาเอา (บทเรียน v1.210: ชั้นสิทธิ์ที่ให้ "น้อยกว่า" ที่หน้า permissions บอก
+// แล้วไม่มีใครอธิบายได้ว่าทำไม):
+//   isSwitcher  — งานนี้เป็นงานประจำของเขา → ขึ้นเป็นแท็บหลักในเมนู
+//   canOpen     — เปิดหน้าได้ (สวิตเชอร์ + console ที่ต้องดูภาพรวม)
+//   canEditAll  — แก้/ลบแถวของคนอื่นได้ (ADMIN/MANAGER ไว้ซ่อมข้อมูลผิด)
+//
+// "เป็นสวิตเชอร์" อ่านจากสองแหล่งที่ระบบใช้จริงอยู่แล้ว: roster ที่ /admin/team
+// (TeamMember.role='switcher' — ตัวเดียวกับที่ assign งานถ่าย) หรือ position ที่
+// /admin/permissions ตั้งไว้ ทั้งคู่แก้ได้จากหน้าเว็บ ไม่ต้อง deploy เพิ่มคน
+export interface SwitcherAccess {
+  isSwitcher: boolean
+  canOpen: boolean
+  canEditAll: boolean
+}
+
+export async function getSwitcherAccess(
+  email: string | null | undefined,
+  role?: string | null,
+): Promise<SwitcherAccess> {
+  const deny: SwitcherAccess = { isSwitcher: false, canOpen: false, canEditAll: false }
+  if (!email) return deny
+  const lower = email.toLowerCase()
+  try {
+    const [user, member] = await Promise.all([
+      prisma.user.findUnique({ where: { email: lower }, select: { role: true, position: true, active: true } }),
+      prisma.teamMember.findUnique({ where: { email: lower }, select: { role: true, active: true } }),
+    ])
+    if (user && user.active === false) return deny
+    const effectiveRole = user?.role ?? role ?? null
+    const isSwitcher =
+      (!!member && member.active && member.role === 'switcher') ||
+      (user?.position || '').toLowerCase().includes('switcher')
+    const canEditAll = effectiveRole === 'ADMIN' || effectiveRole === 'MANAGER'
+    return {
+      isSwitcher,
+      canOpen: isSwitcher || hasConsoleAccess(effectiveRole),
+      canEditAll,
+    }
+  } catch {
+    // DB อ่านไม่ได้ = ไม่เดาให้สิทธิ์ (fail closed) แต่ ADMIN ที่รู้จากโทเคนอยู่แล้ว
+    // ยังเข้าได้ ไม่งั้นคนที่ต้องเข้าไปแก้ตอนระบบมีปัญหาจะโดนล็อกออกไปด้วย
+    const isAdmin = role === 'ADMIN'
+    return { isSwitcher: false, canOpen: isAdmin, canEditAll: isAdmin }
+  }
+}

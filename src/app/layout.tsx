@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
-import { getSession, getProducerAccess, getOTApproverAccess, getUploadAccess, getUserTier } from '@/lib/session'
+import { getSession, getProducerAccess, getOTApproverAccess, getUploadAccess, getUserTier, getSwitcherAccess } from '@/lib/session'
 import { isTeamMember } from '@/lib/team-profiles'
 import Nav from './_components/Nav'
 import FeedbackWidget from './_components/FeedbackWidget'
@@ -38,6 +38,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // v1.90 — UI tier (admin/coordinator/producer/crew): the nav hides
   // items a tier shouldn't see; middleware blocks the pages to match.
   const tier = await getUserTier(session?.email)
+  // v1.211 — /switcher (บันทึกงานไลฟ์). isSwitcher = แท็บหลัก · canOpen = อยู่ใน More
+  // บทเรียน v1.168: หน้าที่ไม่มีทางเข้าในเมนู = หน้าที่ยังไม่ได้ปล่อยจริง
+  const switcher = await getSwitcherAccess(session?.email, session?.role)
 
   return (
     <html lang="th">
@@ -61,6 +64,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           canSeeProducer={canSeeProducer}
           canApproveOT={canApproveOT}
           canUpload={canUpload}
+          canSeeSwitcher={switcher.canOpen}
+          isSwitcher={switcher.isSwitcher}
         />
         {/* v1.190 — บันทึกการเปิดหน้าเฉพาะหน้าใน allowlist (ดู lib/page-events.ts)
             วางไว้หลัง session gate: ไม่มี session = endpoint ตีกลับ ไม่มีอะไรถูกเก็บ */}

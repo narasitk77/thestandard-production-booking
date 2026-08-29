@@ -142,3 +142,12 @@ test('the v1.166 pages are reachable by the tiers that need them', () => {
   assert.equal(tierAllows('coordinator', '/admin/feedback'), true)
   assert.equal(tierAllows('admin', '/admin/reviews'), true)
 })
+
+test('tierAllows: /switcher เปิดได้ทุก tier — สวิตเชอร์อยู่ tier crew (v1.211)', () => {
+  // เคสที่ต้องกัน: สวิตเชอร์ (position 'Switcher' → tier 'crew') กดแท็บของตัวเอง
+  // แล้ว middleware เด้งไป /upload · ประตูตัวจริงคือ src/app/switcher/layout.tsx
+  assert.equal(resolveTier('USER', 'Switcher'), 'crew')
+  for (const tier of ['admin', 'coordinator', 'producer', 'crew'] as const) {
+    assert.equal(tierAllows(tier, '/switcher'), true, `${tier} → /switcher`)
+  }
+})

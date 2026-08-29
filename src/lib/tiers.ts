@@ -61,7 +61,11 @@ export function tierHome(tier: Tier): string {
 // token-only and never trusts the session, /feedback scopes every query to the
 // session's own email server-side. Leaving them out bounced exactly the people
 // the feature exists for (crew tier) straight to /admin.
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer', '/review', '/feedback']
+// v1.211 — '/switcher' เข้า ALWAYS ด้วยเหตุผลเดียวกับ '/ot': สวิตเชอร์อยู่ tier
+// 'crew' ซึ่งเปิดได้แค่ /upload ถ้าไม่ปล่อยตรงนี้ middleware จะเด้งคนที่ฟีเจอร์นี้
+// สร้างมาเพื่อเขาออกไปทุกครั้ง · การตัดสินตัวจริงอยู่ที่ src/app/switcher/layout.tsx
+// ซึ่งรู้จัก roster (แบบเดียวกับ /ot ที่ ot/layout.tsx เป็นคนตัดสิน)
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer', '/review', '/feedback', '/switcher']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],

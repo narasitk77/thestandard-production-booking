@@ -20,6 +20,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/my-bookings') ||
     pathname.startsWith('/calendar') ||
     pathname.startsWith('/ot') ||
+    pathname.startsWith('/switcher') ||
     pathname === '/'
 
   if (isAuthRequired && !hasSession) {

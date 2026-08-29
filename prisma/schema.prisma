@@ -1048,3 +1048,56 @@ model ShootReviewInvite {
   @@index([bookingId])
   @@map("shoot_review_invites")
 }
+
+// ─── v1.211 — บันทึกงานไลฟ์ของสวิตเชอร์ ────────────────────────────────────────
+// งานสวิตช์ไลฟ์ลงโซเชียลถูกสั่งกันในกลุ่มไลน์ ไม่เคยผ่าน booking flow เลย จึงไม่มี
+// ที่ไหนในระบบรู้ว่ามีงานนี้อยู่ ตารางนี้คือ "สมุดบันทึกของสวิตเชอร์" ที่เจ้าตัวมา
+// ลงเองหลังงานจบ — ไม่ใช่ Booking (ไม่มีการ approve/assign/ปฏิทิน/โฟลเดอร์ไดรฟ์)
+// จึงแยกตารางแทนที่จะยัดลงตาราง bookings ที่มี 60 คอลัมน์และ worker 12 ตัวคอยแตะ
+model SwitcherJob {
+  id            String    @id @default(cuid())
+  /// Production ID `[OUT]-LIV-[YYMMDD]-[NN]` เช่น `NWS-LIV-260829-01`
+  /// **ออกเลขตอนสวิตเชอร์กดบันทึกเท่านั้น** — แถว DRAFT ที่ระบบเตรียมไว้จาก
+  /// ข้อความในไลน์ยังไม่มีเลข (ไม่งั้นงานที่ไม่มีจริงจะกินเลขในลำดับไปเปล่า ๆ)
+  /// เลขนี้ immutable เหมือน Booking.bookingCode: ออกแล้ว outletCode/workDate
+  /// ล็อกตาม ห้ามแก้ ไม่งั้นเลขกับวันในแถวเดียวกันจะเพี้ยนคนละทาง
+  productionId  String?   @unique
+  /// รหัสสังกัด (NWS/WLT/POP/…) — ส่วน [OUT] ของเลขข้างบน
+  outletCode    String    @db.VarChar(3)
+  /// ชื่อหมาย — ข้อความที่เรียกงานนี้กันในกลุ่มไลน์
+  jobName       String
+  /// วันไลฟ์ (ปฏิทินกรุงเทพ) — เป็นทั้งวันที่ในเลขและตัวจัดกลุ่มลำดับ
+  workDate      DateTime  @db.Date
+  /// เวลาทำงานจริง HH:MM 24 ชม. zero-pad (เทียบสตริงได้ตรง ๆ เหมือน callTime)
+  startTime     String?   @db.VarChar(5)
+  endTime       String?   @db.VarChar(5)
+  /// ไลฟ์ที่ข้ามเที่ยงคืน: 0 = จบวันเดียวกัน · 1 = จบวันถัดไป
+  endDayOffset  Int       @default(0)
+  /// ลิงก์ที่ออกอากาศ `[{ platform: 'YOUTUBE'|'FACEBOOK'|'TIKTOK'|'OTHER', url }]`
+  /// ว่างได้ตั้งใจ — ลิงก์มักมาช้ากว่าตัวงาน หน้าเว็บจึงมีรายการ "ยังไม่ใส่ลิงก์"
+  /// ไว้ตามต่อ แทนที่จะบังคับกรอกแล้วได้ลิงก์มั่ว ๆ มาแทน
+  links         Json?
+  /// ผู้สั่งงาน / คนที่ทักมาในไลน์
+  requestedBy   String?
+  notes         String?
+  /// เจ้าของแถว = สวิตเชอร์ที่คุมงานนี้ · null ได้เฉพาะแถว DRAFT ที่ยังไม่มีใครรับ
+  switcherEmail String?
+  /// MANUAL = สวิตเชอร์กรอกเอง · LINE = ระบบเตรียมให้จากข้อความในกลุ่ม
+  source        String    @default("MANUAL")
+  /// กุญแจกันซ้ำจากต้นทางภายนอก (เช่น message id ของไลน์)
+  /// ตัวป้อนข้อมูลอัตโนมัติอ่านข้อความเดิมซ้ำได้เสมอ (บอทรีสตาร์ท / ยิงซ้ำตอน
+  /// timeout) ถ้าไม่มีกุญแจนี้ ทุกครั้งที่อ่านซ้ำ = แถวใหม่ แล้วรายการ "รอกรอก"
+  /// จะบวมจนไม่มีใครกล้าดู · null ได้ (แถวที่คนกรอกเองไม่มีต้นทาง)
+  externalKey   String?   @unique
+  /// DRAFT = ตั้งรอสวิตเชอร์มากรอก (ยังไม่มี productionId) · LOGGED = กรอกแล้ว
+  status        String    @default("LOGGED")
+  /// soft delete — ทั้งรีโปนี้ไม่มีการลบถาวร และเลขที่ออกไปแล้วต้องไม่ถูกใช้ซ้ำ
+  deletedAt     DateTime?
+  createdByEmail String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([deletedAt, workDate])
+  @@index([switcherEmail, workDate])
+  @@map("switcher_jobs")
+}
