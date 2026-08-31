@@ -6,40 +6,31 @@
  * requests, cancel bookings. See docs/mcp.md for connection setup.
  *
  * Auth: `Authorization: Bearer <key>` (constant-time compared). Keys come
- * from the stack env:
+ * from the stack env (parsing + scope logic lives in @/lib/mcp/auth):
  *   - MCP_API_KEY  — the original single shared key (still works as-is)
  *   - MCP_API_KEYS — v1.146, OPTIONAL: comma-separated per-client keys,
  *     each either "<key>" or "<label>:<key>" (label = which client holds
  *     it, e.g. "claude-desktop:abc123,n8n:def456"). Lets one leaked key
  *     be revoked without rotating every client at once.
- * No key configured at all = the endpoint is OFF (503). MCP callers act
- * at staff level under the MCP_ACTOR_EMAIL identity; admin actions are
- * not exposed as tools.
+ *   - MCP_API_KEYS_READONLY — v1.212, OPTIONAL: same format, but these
+ *     keys get ONLY the read tools (schedule/projects/equipment/rental
+ *     queries) — create/cancel/repair/mark-paid are absent from
+ *     tools/list and rejected on tools/call. For headless bots that
+ *     only query (e.g. Pigwidgeon), so a leaked bot key cannot write.
+ * No key configured at all = the endpoint is OFF (503). Full-scope
+ * callers act at staff level under the MCP_ACTOR_EMAIL identity; admin
+ * actions are not exposed as tools to any key.
  *
  * v1.146 review fix — repeated auth failures back off per source IP
  * (10 fails / 15 min → 429): a leaked URL can't be brute-forced quietly,
  * and each rejection is one map lookup instead of a full request.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { timingSafeEqual } from 'crypto'
-import { handleMcpMessage } from '@/lib/mcp/server'
+import { handleMcpMessage, filterRegistry } from '@/lib/mcp/server'
 import { buildMcpRegistry } from '@/lib/mcp/tools'
+import { configuredKeys, resolveBearerKey, READ_ONLY_TOOLS, type McpKey } from '@/lib/mcp/auth'
 
 export const dynamic = 'force-dynamic'
-
-function configuredKeys(): Array<{ label: string; key: string }> {
-  const out: Array<{ label: string; key: string }> = []
-  const single = process.env.MCP_API_KEY?.trim()
-  if (single) out.push({ label: 'default', key: single })
-  for (const entry of (process.env.MCP_API_KEYS || '').split(',')) {
-    const e = entry.trim()
-    if (!e) continue
-    const sep = e.indexOf(':')
-    if (sep > 0) out.push({ label: e.slice(0, sep).trim() || 'unnamed', key: e.slice(sep + 1).trim() })
-    else out.push({ label: 'unnamed', key: e })
-  }
-  return out.filter(k => k.key)
-}
 
 // In-memory failed-auth backoff — single-container deployment, so a restart
 // clearing it is fine. Entries expire after the window; map is pruned on
@@ -70,24 +61,14 @@ function recordAuthFail(ip: string): void {
   else rec.count += 1
 }
 
-function authorizedKeyLabel(request: NextRequest): string | null {
-  const keys = configuredKeys()
-  if (keys.length === 0) return null
-  const header = request.headers.get('authorization') || ''
-  const token = header.replace(/^Bearer\s+/i, '').trim()
-  if (!token) return null
-  const a = Buffer.from(token)
-  for (const { label, key } of keys) {
-    const b = Buffer.from(key)
-    if (a.length === b.length && timingSafeEqual(a, b)) return label
-  }
-  return null
+function authorizedKey(request: NextRequest): McpKey | null {
+  return resolveBearerKey(request.headers.get('authorization'))
 }
 
 export async function POST(request: NextRequest) {
   if (configuredKeys().length === 0) {
     return NextResponse.json(
-      { error: 'MCP is not enabled — set MCP_API_KEY (or MCP_API_KEYS) in the stack env' },
+      { error: 'MCP is not enabled — set MCP_API_KEY (or MCP_API_KEYS / MCP_API_KEYS_READONLY) in the stack env' },
       { status: 503 },
     )
   }
@@ -98,8 +79,8 @@ export async function POST(request: NextRequest) {
       { status: 429, headers: { 'Retry-After': String(Math.ceil(AUTH_FAIL_WINDOW_MS / 1000)) } },
     )
   }
-  const keyLabel = authorizedKeyLabel(request)
-  if (!keyLabel) {
+  const key = authorizedKey(request)
+  if (!key) {
     recordAuthFail(ip)
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -115,13 +96,19 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const response = await handleMcpMessage(message, buildMcpRegistry(), {
+  const registry = key.scope === 'read'
+    ? filterRegistry(buildMcpRegistry(), READ_ONLY_TOOLS)
+    : buildMcpRegistry()
+  const instructions = key.scope === 'read'
+    ? 'Production Booking ของ THE STANDARD: ดูตารางถ่าย โปรเจกต์/Episode ของ Content Agency และคลังอุปกรณ์/ยืม/เช่า/ซ่อม. ' +
+      'This key is READ-ONLY — booking creation/cancellation is done in the web app, not through this connection.'
+    : 'Production Booking ของ THE STANDARD: จองคิวถ่ายทำ (booking) ดูตารางถ่าย ดูโปรเจกต์/Episode ของ Content Agency. ' +
+      'Before create_booking, call list_outlets_and_programs (outlet bookings) or list_projects + list_project_episodes (Content Agency). ' +
+      'New bookings start as REQUESTED and wait for admin approval.'
+  const response = await handleMcpMessage(message, registry, {
     name: 'production-booking',
     version: process.env.npm_package_version || '0.0.0',
-    instructions:
-      'Production Booking ของ THE STANDARD: จองคิวถ่ายทำ (booking) ดูตารางถ่าย ดูโปรเจกต์/Episode ของ Content Agency. ' +
-      'Before create_booking, call list_outlets_and_programs (outlet bookings) or list_projects + list_project_episodes (Content Agency). ' +
-      'New bookings start as REQUESTED and wait for admin approval.',
+    instructions,
   })
 
   // Notifications get no body — 202 Accepted per Streamable HTTP.

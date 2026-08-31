@@ -10,6 +10,7 @@ import {
   PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID,
 } from '@/lib/google-config'
 import { getCalendarImpersonateSubject, getCalendarAuth } from '@/lib/google-calendar'
+import { configuredKeys as mcpConfiguredKeys } from '@/lib/mcp/auth'
 import { getSheetsWriteAuth, getSheetsReadAuth } from '@/lib/google-sheets'
 import { fetchAllEpisodeRows, isPublishedStatus } from '@/lib/dashboard-episodes'
 
@@ -86,9 +87,12 @@ export async function GET(_req: NextRequest) {
       smtpUserSet: !!process.env.SMTP_USER?.trim(),
       smtpPassSet: !!process.env.SMTP_PASS?.trim(),
     },
-    // v1.49.0 — MCP endpoint for external AI clients (docs/mcp.md)
+    // v1.49.0 — MCP endpoint for external AI clients (docs/mcp.md).
+    // v1.212: enabled must mirror the route's own 503 gate (any of
+    // MCP_API_KEY / MCP_API_KEYS / MCP_API_KEYS_READONLY) — checking only
+    // MCP_API_KEY reported "disabled" for keys-list-only deployments.
     mcp: {
-      enabled: !!process.env.MCP_API_KEY?.trim(),
+      enabled: mcpConfiguredKeys().length > 0,
       actorEmail: process.env.MCP_ACTOR_EMAIL?.trim() || 'mcp@probook (default)',
     },
   }
