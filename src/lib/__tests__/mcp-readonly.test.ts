@@ -115,13 +115,17 @@ test('prototype-chain names are unknown tools, not inherited functions — filte
 
 // tools.ts pulls Prisma + Google-backed modules at import time — swap them for
 // inert stubs; this test only inspects tool NAMES, never runs handlers.
-mock.module('@/lib/db', { namedExports: { prisma: {} } })
-mock.module('@/lib/projects', { namedExports: { listProjects: async () => [] } })
-mock.module('@/lib/dashboard-episodes', { namedExports: { listProjectEpisodes: async () => [] } })
-mock.module('@/lib/create-booking', { namedExports: { createBookingFromPayload: async () => ({}) } })
-mock.module('@/lib/google-calendar', { namedExports: { deleteCalendarEvent: async () => undefined } })
-mock.module('@/lib/audit', { namedExports: { logAudit: async () => undefined } })
-mock.module('@/lib/ot-sync', { namedExports: { clearBookingOT: async () => undefined } })
+// NOTE: relative specifiers on purpose ('../db', not '@/lib/db') — CI's
+// mock.module() resolves the specifier with plain node rules (no tsconfig
+// alias), same as heartbeat-specs.test.ts. Interception still applies to
+// tools.ts's '@/lib/...' imports because both resolve to the same file.
+mock.module('../db', { namedExports: { prisma: {} } })
+mock.module('../projects', { namedExports: { listProjects: async () => [] } })
+mock.module('../dashboard-episodes', { namedExports: { listProjectEpisodes: async () => [] } })
+mock.module('../create-booking', { namedExports: { createBookingFromPayload: async () => ({}) } })
+mock.module('../google-calendar', { namedExports: { deleteCalendarEvent: async () => undefined } })
+mock.module('../audit', { namedExports: { logAudit: async () => undefined } })
+mock.module('../ot-sync', { namedExports: { clearBookingOT: async () => undefined } })
 
 const KNOWN_WRITE_TOOLS = ['create_booking', 'cancel_booking', 'create_repair_ticket', 'mark_rental_paid']
 
