@@ -1101,3 +1101,39 @@ model SwitcherJob {
   @@index([switcherEmail, workDate])
   @@map("switcher_jobs")
 }
+
+// ─── v1.212 — บันทึกการส่งออกข้อมูลไป Lark รายวัน ─────────────────────────────
+// แถวละหนึ่งรอบของ src/lib/lark-export.ts
+//
+// ทำไมต้องมีตารางนี้ ทั้งที่มี heartbeat อยู่แล้ว: heartbeat ตอบได้แค่ "worker
+// ยังเต้นอยู่ไหม" แต่คำถามจริงคือ "ไฟล์ลงที่ Lark จริงหรือเปล่า และเมื่อวานมีแถว
+// ไหนหายไปบ้าง" — ซึ่งต้องเทียบกับรอบก่อนหน้า ตารางนี้คือที่เก็บฐานเปรียบเทียบนั้น
+//
+// `keysGz` = gzip(JSON) ของ { ชื่อตาราง: { primary key: ป้ายชื่อสั้น ๆ } } ของรอบนี้
+// รอบถัดไปเอามาลบกันเพื่อหา "แถวที่หายไป" แล้วบันทึกเป็น tombstone ใน Lark Base
+// เก็บแค่ key + ป้ายชื่อ ไม่เก็บเนื้อแถว เพราะเนื้อเต็มอยู่ในไฟล์ snapshot ของวันนั้น
+// อยู่แล้ว (`fileName`) — tombstone ชี้ไปที่ไฟล์นั้นแทนที่จะทำสำเนาซ้อนใน DB ที่
+// ตัวเองกำลังพยายามปกป้อง
+model LarkExportRun {
+  id        String   @id @default(cuid())
+  at        DateTime @default(now())
+  ok        Boolean  @default(false)
+  /// วันตามปฏิทินกรุงเทพของ snapshot (YYYY-MM-DD) — หนึ่งไฟล์ต่อหนึ่งวัน
+  day       String?
+  fileName  String?
+  /// file_token ที่ Lark ตอบกลับ = หลักฐานว่าไฟล์ลงจริง (ไม่ใช่แค่ยิงไปแล้วไม่ error)
+  fileToken String?
+  sizeBytes Int?
+  /// { ชื่อตาราง: จำนวนแถว } ของรอบนี้
+  counts    Json?
+  /// ผลการ mirror ลง Lark Base: { ชื่อตาราง: { written, truncatedCells, skipped } }
+  mirrored  Json?
+  /// จำนวนแถวที่หายไปเทียบกับรอบก่อน (ถูกบันทึกเป็น tombstone แล้ว)
+  vanished  Int      @default(0)
+  keysGz    Bytes?
+  error     String?
+
+  @@index([at])
+  @@index([day])
+  @@map("lark_export_runs")
+}

@@ -487,6 +487,20 @@ echo "==> Starting shoot-review worker (supervised)..."
   done
 ) &
 
+# v1.212 — daily export to Lark (23:00 BKK). DORMANT until LARK_EXPORT_ENABLED=1.
+# Archives the whole database as one immutable gzipped JSON per day into a Lark
+# Drive folder, mirrors the browsable tables into a Lark Base, and records every
+# row that disappeared since the previous run. Complements the pg_dump backup,
+# which prunes itself at 30 days — this one is never pruned.
+echo "==> Starting Lark export worker (supervised)..."
+(
+  while true; do
+    node scripts/lark-export-worker.js
+    echo "[lark-export] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 # v1.127 — video-merge worker. ON BY DEFAULT (idempotent MOVE; re-runs only handle
 # the remainder). With NAS_DSM_URL/USER/PASS set it fires the merge the moment the
 # NAS Cloud Sync turns green (uptodate); without them it falls back to a plain

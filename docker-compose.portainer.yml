@@ -70,6 +70,23 @@ services:
       INITIAL_ADMIN_EMAILS: ${INITIAL_ADMIN_EMAILS:-}
       NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL — public URL of the app}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
+      # v1.212 — AUTH_SECRET was set on the stack but compose never passed it in,
+      # so the container could not see it. Every /api/internal/* route advertises
+      # AUTH_SECRET as an accepted shared secret (src/lib/internal-auth.ts matches
+      # against the full set of CONFIGURED values, by design since v1.123) — but a
+      # value the process cannot read is not configured, so every caller holding it
+      # got a 401 that reads like "the secret was rotated".
+      #
+      # Measured 2026-08-31: the Hermes probook-landing-cleanup cron had been
+      # failing this way (its own message guessed "prod หมุน NEXTAUTH_SECRET?"),
+      # and the nightly check's footage-delivery probe was 401ing for the same
+      # reason — the check added specifically so footage mail could not go
+      # unnoticed again. Exactly the v1.164 kill-switch bug: a var honoured by the
+      # code, set by the operator, and dropped on the floor by compose.
+      #
+      # To retire the old value instead, delete this line and put the current
+      # NEXTAUTH_SECRET in ~/.hermes/scripts/probook.env.
+      AUTH_SECRET: ${AUTH_SECRET:-}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-${NEXTAUTH_URL}}
 
       # --- Google OAuth (only used when AUTH_DISABLED=0) ---
@@ -331,6 +348,76 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       BACKUP_SECRET: ${BACKUP_SECRET:-${NEXTAUTH_SECRET}}
 
+      # --- คลังข้อมูลรายวันบน Lark (v1.212) ---
+      # scripts/lark-export-worker.js ยิง /api/internal/lark-export/run วันละครั้ง
+      # (LARK_EXPORT_HOUR, ค่าเริ่มต้น 23:00 BKK — ก่อน nightly check เที่ยงคืน 1 ชม.)
+      #
+      # ทำไมต้องมี ทั้งที่มี BACKUP_WORKER อยู่แล้ว: pg_dump ลบตัวเองที่ 30 วัน และ
+      # เป็น .sql.gz ที่เปิดย้อนดูไม่ได้ ส่วนแอปนี้ลบแถวจริงตามนโยบาย (audit_logs
+      # > 90 วัน ทุกครั้งที่ container boot · ot_records นอกหน้าต่าง 10 วัน ทุกครั้ง
+      # ที่มีคนเปิด /api/ot · ลบ booking ลากทั้ง audit/footage/OT ของใบนั้นไปด้วย)
+      # → แถวที่ถูกลบไปเกิน 30 วันจะไม่เหลือในสำเนาไหนเลย ตัวนี้คือฝั่งที่ไม่ลบ
+      #
+      # ⚠️ ต้องเป็น **self-built app** ใน Lark Developer Console — webhook ของ
+      # custom bot (LARK_WEBHOOK_URL ข้างบน) ส่งได้แค่ข้อความ เขียนไฟล์/ตารางไม่ได้
+      # scope ที่ต้องมี: drive:drive (อัปไฟล์) + bitable:app (เขียน Base)
+      # และต้อง **แชร์โฟลเดอร์กับ Base ให้แอปเป็น editor** — มี scope อย่างเดียว
+      # ยังเขียนไม่ได้ ตรวจด้วย GET /api/internal/lark-export/preflight?write=1
+      LARK_EXPORT_ENABLED: ${LARK_EXPORT_ENABLED:-0}
+      LARK_EXPORT_HOUR: ${LARK_EXPORT_HOUR:-23}
+      LARK_APP_ID: ${LARK_APP_ID:-}
+      LARK_APP_SECRET: ${LARK_APP_SECRET:-}
+      # larksuite.com = Lark สากล (ไทยใช้ตัวนี้) · feishu.cn = ฉบับจีน คนละระบบกัน
+      LARK_BASE_URL: ${LARK_BASE_URL:-https://open.larksuite.com}
+      # โทเคนในลิงก์โฟลเดอร์ Lark Drive (…/drive/folder/<token>) — ที่เก็บไฟล์ archive
+      LARK_DRIVE_FOLDER_TOKEN: ${LARK_DRIVE_FOLDER_TOKEN:-}
+      # app_token ของ Lark Base ที่จะ mirror ตารางลงไป (ว่าง = ได้แค่ไฟล์ ไม่มีตาราง
+      # ให้เปิดดู และไม่มีบันทึก "ของที่หายไป")
+      LARK_BASE_APP_TOKEN: ${LARK_BASE_APP_TOKEN:-}
+      # ปิด mirror อย่างเดียวโดยยังเก็บไฟล์ archive ต่อ (ไฟล์คือคำสัญญา ตารางคือความสะดวก)
+      LARK_MIRROR_ENABLED: ${LARK_MIRROR_ENABLED:-1}
+      # เพดานแถวต่อหนึ่งตารางใน Base — เกินนี้ตัดโดยเก็บของใหม่ไว้ก่อน และ **รายงาน
+      # จำนวนที่ตัดเสมอ** ไฟล์ archive ไม่เคยถูกตัด
+      LARK_BASE_MAX_ROWS_PER_TABLE: ${LARK_BASE_MAX_ROWS_PER_TABLE:-5000}
+      # ตารางอ่อนไหวที่ปิดไว้เป็นค่าเริ่มต้น (users, ot_records, page_events,
+      # feedback_*) เปิดกลับได้ด้วยการใส่ชื่อคั่นจุลภาค — ส่วน shoot_reviews และ
+      # shoot_review_invites บล็อกในโค้ด เปิดด้วย env ไม่ได้โดยตั้งใจ
+      LARK_EXPORT_INCLUDE: ${LARK_EXPORT_INCLUDE:-}
+      LARK_EXPORT_EXCLUDE: ${LARK_EXPORT_EXCLUDE:-}
+      LARK_EXPORT_SECRET: ${LARK_EXPORT_SECRET:-${NEXTAUTH_SECRET}}
+
+      # --- MCP endpoint for external AI clients (v1.49; docs/mcp.md) ---
+      # 2026-09-01: these four were NEVER declared here, which is why setting
+      # them in Portainer did nothing — the same class of bug as AUTH_SECRET
+      # above. `/api/mcp` reads process.env inside the container, and a stack
+      # variable compose does not reference does not exist to the app. So the
+      # endpoint has been un-turn-on-able since v1.49, and the first person to
+      # try would have seen 503 with a correct-looking config.
+      #
+      # ALL FOUR DEFAULT TO EMPTY = MCP stays OFF (the route 503s when no key is
+      # configured). Declaring them changes nothing until a key is set.
+      #
+      # ⚠️ WHICH VARIABLE YOU SET IS THE WHOLE SECURITY DECISION:
+      #   MCP_API_KEY / MCP_API_KEYS  — FULL scope. Holder can create AND cancel
+      #                                 bookings, open repair tickets, mark
+      #                                 rentals paid, as MCP_ACTOR_EMAIL.
+      #   MCP_API_KEYS_READONLY       — v1.212 (PR #19). Read tools only; the
+      #                                 write tools are absent from tools/list
+      #                                 and rejected on tools/call.
+      # A headless bot in a group chat belongs in the READONLY list. Putting a
+      # bot key in MCP_API_KEYS instead hands the room the ability to book and
+      # cancel — and it would look identical from the outside until it did.
+      #
+      # Format for both lists: comma-separated `<label>:<key>`. The label exists
+      # so one client can be revoked without rotating everyone else's key. The
+      # BEARER TOKEN THE CLIENT SENDS IS ONLY THE PART AFTER THE COLON.
+      MCP_API_KEY: ${MCP_API_KEY:-}
+      MCP_API_KEYS: ${MCP_API_KEYS:-}
+      MCP_API_KEYS_READONLY: ${MCP_API_KEYS_READONLY:-}
+      # Identity written into the audit trail for MCP-driven writes. Read-only
+      # keys never reach a write handler, so this only matters for full keys.
+      MCP_ACTOR_EMAIL: ${MCP_ACTOR_EMAIL:-}
+
       # v1.111 — NAS ↔ Production Team sync verification. The Mac agent
       # (scripts/nas-manifest-agent.sh) POSTs NAS manifests with x-nas-secret;
       # sync-complete + daily digest emails go to NAS_REPORT_EMAIL
@@ -381,6 +468,10 @@ services:
       # The workers authenticate to /api/internal/* with this. Same value as the
       # app, or every request comes back 401/403.
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      # Mirror of the app service (v1.212) — a worker that authenticates with a
+      # different set of secrets than the app accepts is the same 401 by another
+      # route.
+      AUTH_SECRET: ${AUTH_SECRET:-}
       RECONCILE_SECRET: ${RECONCILE_SECRET:-}
       NAS_MANIFEST_SECRET: ${NAS_MANIFEST_SECRET:-}
       # Which workers are on. Mirror these with the app's values so flipping one
@@ -397,6 +488,11 @@ services:
       REMINDERS_WORKER_ENABLED: ${REMINDERS_WORKER_ENABLED:-0}
       BACKUP_WORKER_ENABLED: ${BACKUP_WORKER_ENABLED:-0}
       SHOOT_REVIEW_ENABLED: ${SHOOT_REVIEW_ENABLED:-0}
+      # v1.212 — ตัวนี้เป็น scheduler ล้วน (ยิง HTTP ไปที่ app) จึงต้องรู้แค่ว่า
+      # เปิดไหม/กี่โมง/ความลับอะไร ส่วน LARK_APP_* กับโทเคนโฟลเดอร์อยู่ฝั่ง app
+      LARK_EXPORT_ENABLED: ${LARK_EXPORT_ENABLED:-0}
+      LARK_EXPORT_HOUR: ${LARK_EXPORT_HOUR:-23}
+      LARK_EXPORT_SECRET: ${LARK_EXPORT_SECRET:-${NEXTAUTH_SECRET}}
       # Timing knobs, same defaults as the app.
       PREP_FOLDERS_INTERVAL_MS: ${PREP_FOLDERS_INTERVAL_MS:-3600000}
       SOUND_MERGE_INTERVAL_MS: ${SOUND_MERGE_INTERVAL_MS:-3600000}

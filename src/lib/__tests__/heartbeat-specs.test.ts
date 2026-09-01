@@ -84,6 +84,7 @@ const SCRIPT_TO_KEY: Record<string, string> = {
   'footage-ready-worker.js': 'footage-ready',
   'footage-sheet-sync-worker.js': 'footage',
   'landing-worker.js': 'landing',
+  'lark-export-worker.js': 'lark-export',
   'prep-folders-worker.js': 'prep-folders',
   'reminders-worker.js': 'reminders',
   'room-booking-worker.js': 'room-booking-reconcile',
