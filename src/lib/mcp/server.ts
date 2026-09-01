@@ -33,6 +33,24 @@ export type McpRegistry = {
   handlers: Record<string, McpToolHandler>
 }
 
+/**
+ * Restrict a registry to the named tools. Dropped tools disappear from
+ * BOTH surfaces at once: tools/list (def filtered out) and tools/call
+ * (handler absent → "Unknown tool"), so there is a single choke point
+ * for scoping instead of two checks that can drift apart. Returns a new
+ * registry — the input is not mutated.
+ */
+export function filterRegistry(registry: McpRegistry, allowedNames: Iterable<string>): McpRegistry {
+  const allow = new Set(allowedNames)
+  const defs = registry.defs.filter(d => allow.has(d.name))
+  const handlers: Record<string, McpToolHandler> = {}
+  for (const d of defs) {
+    const h = registry.handlers[d.name]
+    if (h) handlers[d.name] = h
+  }
+  return { defs, handlers }
+}
+
 type JsonRpcId = string | number | null
 
 export type JsonRpcResponse = {
@@ -104,7 +122,13 @@ export async function handleMcpMessage(
     case 'tools/call': {
       const name = params?.name
       const args = (params?.arguments ?? {}) as Record<string, unknown>
-      const handler = typeof name === 'string' ? registry.handlers[name] : undefined
+      // Own-property lookup only: a plain-object registry would otherwise
+      // resolve prototype names ("constructor", "toString", …) to inherited
+      // functions and "call" them instead of rejecting — which would also
+      // dodge the read-only registry filter's unknown-tool rejection.
+      const handler = typeof name === 'string' && Object.hasOwn(registry.handlers, name)
+        ? registry.handlers[name]
+        : undefined
       if (!handler) {
         return rpcError(id!, -32602, `Unknown tool: ${String(name)}`)
       }

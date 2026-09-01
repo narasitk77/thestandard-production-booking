@@ -2,11 +2,16 @@
  * MCP tool registry — what an external AI (Claude via claude.ai
  * connector / Claude Code / any MCP client) can do against Production
  * Booking. Read tools cover schedule/projects/reference data; write
- * tools (create_booking, cancel_booking) run the SAME shared logic as
- * the web app and are audit-logged with the MCP actor identity.
+ * tools (create_booking, cancel_booking, create_repair_ticket,
+ * mark_rental_paid) run the SAME shared logic as the web app and are
+ * audit-logged with the MCP actor identity.
  *
  * Auth happens in the route (Bearer MCP_API_KEY) — by the time a tool
- * runs, the caller is trusted at "staff" level. Admin-only surfaces
+ * runs, the caller is trusted at "staff" level. Read-only keys
+ * (MCP_API_KEYS_READONLY, v1.212) never reach the write handlers at
+ * all: the route filters this registry down to READ_ONLY_TOOLS
+ * (@/lib/mcp/auth) before serving them — add a new READ tool there too
+ * or read-only keys won't see it. Admin-only surfaces
  * (approve/assign/hard-delete/purge) are deliberately NOT exposed.
  */
 import { prisma } from '@/lib/db'
