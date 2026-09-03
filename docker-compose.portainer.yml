@@ -466,6 +466,77 @@ services:
 
       # (Wasabi fully removed — v1.130 dropped the env vars, v1.146 dropped the DB columns.)
 
+      # ─── v1.214 — สวิตช์/ที่อยู่ที่ operator ควรตั้งได้ แต่ตั้งไม่ได้จริงมาตลอด ───
+      #
+      # สคริปต์ไล่เทียบ `process.env.X` ทุกตัวในโค้ดกับไฟล์นี้ (เทส
+      # `compose-env-coverage.test.ts` ที่รันทุก build) พบว่าโค้ดอ่าน env 182 ตัว
+      # แต่ compose ประกาศไม่ครบ — ตัวที่ขาดคือ "ตั้งบน stack แล้วไม่มีอะไรเกิดขึ้น"
+      # ซึ่งเป็นบั๊กเดียวกับ AUTH_SECRET (v1.212) · MCP_* (v1.213) · QU_REMINDER_*
+      # (v1.214) ที่โดนมาสี่รอบภายในสองวัน
+      #
+      # ⚠️ กฏของบล็อกนี้: **ค่า default ต้องตรงกับ default ในโค้ดเป๊ะ ๆ** เพราะ
+      # compose ส่ง "สตริงว่าง" ไม่ใช่ "ไม่ได้ตั้ง" — ต่างกันเมื่อโค้ดใช้ `??`
+      # หรือเช็ค `>= 0` (`Number('')` = 0 ซึ่งผ่าน) · ตัวที่ปล่อยว่างได้คือตัวที่
+      # โค้ดใช้ `||` / `?.trim() ||` / `if (!raw)` ซึ่งสตริงว่างตกไปใช้ default เอง
+      # ตรวจมาแล้วทีละตัว ณ 2026-09-03 — ถ้าแก้ default ในโค้ด ต้องแก้ที่นี่ด้วย
+
+      # กฎ/สวิตช์ — ทั้งหมด "เปิดอยู่ ปิดด้วยการตั้ง 0"
+      AGENCY_REF_QU_RULE: ${AGENCY_REF_QU_RULE:-1}
+      AUTO_COPRODUCER: ${AUTO_COPRODUCER:-1}
+      DELIVERY_TICK_ENABLED: ${DELIVERY_TICK_ENABLED:-1}
+      MOVE_OUTLET_ENABLED: ${MOVE_OUTLET_ENABLED:-1}
+      MOVE_OUTLET_ID_FIRST: ${MOVE_OUTLET_ID_FIRST:-1}
+      UPLOAD_ID_FIRST: ${UPLOAD_ID_FIRST:-1}
+      PAGE_EVENTS_ENABLED: ${PAGE_EVENTS_ENABLED:-1}
+
+      # ที่อยู่ปลายทาง — ว่าง = ใช้ค่าที่ฝังในโค้ด (ดู lib ที่เกี่ยวข้อง)
+      URGENT_NOTIFY_EMAIL: ${URGENT_NOTIFY_EMAIL:-}
+      CANCEL_NOTIFY_EMAIL: ${CANCEL_NOTIFY_EMAIL:-}
+      PRODUCER_UPDATE_NOTIFY_EMAIL: ${PRODUCER_UPDATE_NOTIFY_EMAIL:-}
+      PURCHASE_APPROVER_EMAIL: ${PURCHASE_APPROVER_EMAIL:-}
+      CALENDAR_ALERT_EMAIL: ${CALENDAR_ALERT_EMAIL:-}
+      VP_ASSIGNEE_EMAIL: ${VP_ASSIGNEE_EMAIL:-}
+      SHARED_MAILBOXES: ${SHARED_MAILBOXES:-}
+      FOOTAGE_READY_INTERNAL_DOMAINS: ${FOOTAGE_READY_INTERNAL_DOMAINS:-}
+      RESEND_FROM: ${RESEND_FROM:-}
+      SENDGRID_FROM: ${SENDGRID_FROM:-}
+      # `parseInt('')` = NaN → ตกไปใช้ 2 อยู่แล้ว แต่เขียนไว้ให้ตรงกับโค้ด
+      URGENT_LEAD_DAYS: ${URGENT_LEAD_DAYS:-2}
+
+      # ชื่อแท็บในชีท — nightly check ข้อ 4d เตือนไว้เองว่าเปลี่ยนชื่อแท็บแล้ว
+      # automation พังเงียบ ตัวแปรที่ควรใช้แก้กลับส่งไปไม่ถึงจนถึงวันนี้
+      PRODUCER_DASHBOARD_TAB: ${PRODUCER_DASHBOARD_TAB:-}
+      PRODUCER_DASHBOARD_EPS_TAB: ${PRODUCER_DASHBOARD_EPS_TAB:-}
+      BOOKINGS_TAB: ${BOOKINGS_TAB:-}
+      DELIVERY_TICK_SHEET_ID: ${DELIVERY_TICK_SHEET_ID:-}
+
+      # รากโฟลเดอร์ Drive — ว่าง = id ที่ฝังในโค้ด
+      DRIVE_PHOTO_ROOT: ${DRIVE_PHOTO_ROOT:-}
+      DRIVE_PRODUCTION_TEAM_ROOT: ${DRIVE_PRODUCTION_TEAM_ROOT:-}
+
+      # NAS gate ของ video-merge — ต้องครบ URL+USER+PASS ถึงจะเข้าโหมด GATED
+      # ตรวจ 2026-09-03: ตั้งไว้แค่ URL บน stack (และ compose ก็ไม่เคยส่ง) จึงวิ่ง
+      # โหมด PLAIN รายชั่วโมงมาตลอด — ไม่เคยรอสัญญาณ sync เสร็จจริงสักครั้ง
+      NAS_DSM_URL: ${NAS_DSM_URL:-}
+      NAS_DSM_USER: ${NAS_DSM_USER:-}
+      NAS_DSM_PASS: ${NAS_DSM_PASS:-}
+      NAS_DSM_CONN_NAME: ${NAS_DSM_CONN_NAME:-}
+      # โค้ดใช้ `?? '1'` ไม่ใช่ `|| '1'` — สตริงว่างไม่ใช่ nullish จึงไม่ตกไปใช้ '1'
+      # แต่ผลลัพธ์เท่ากัน (`'' !== '0'`) · เขียน 1 ไว้ให้ตรงเจตนา
+      NAS_DSM_INSECURE_TLS: ${NAS_DSM_INSECURE_TLS:-1}
+      VIDEO_MERGE_INTERVAL_MS: ${VIDEO_MERGE_INTERVAL_MS:-3600000}
+
+      # LINE — ยังไม่ได้ตั้ง (LINE Notify ปิดตัว มี.ค. 2025 ต้องใช้ Messaging API)
+      LINE_CHANNEL_TOKEN: ${LINE_CHANNEL_TOKEN:-}
+      LINE_URGENT_USER_ID: ${LINE_URGENT_USER_ID:-}
+
+      # secret ของ worker ที่ fallback ไป NEXTAUTH_SECRET — ตั้งบน stack แล้วเงียบ
+      # เพราะไม่เคยถูกส่งเข้ามา (คลาสเดียวกับ AUTH_SECRET)
+      PREP_FOLDERS_SECRET: ${PREP_FOLDERS_SECRET:-}
+      SOUND_MERGE_SECRET: ${SOUND_MERGE_SECRET:-}
+      VIDEO_MERGE_SECRET: ${VIDEO_MERGE_SECRET:-}
+      WORKER_HTTP_TIMEOUT_MS: ${WORKER_HTTP_TIMEOUT_MS:-}
+
       # --- App ---
       UPLOAD_DIR: /app/uploads
     volumes:
