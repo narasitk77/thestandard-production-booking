@@ -20,7 +20,25 @@ services:
   db:
     image: postgres:16-alpine
     container_name: production-booking-db
-    restart: unless-stopped
+    # v1.214 — `always`, not `unless-stopped`.
+    #
+    # 2026-09-02 ~22:57 something issued a stop across the whole Docker host: 21
+    # of 23 containers went down (probook, staging, vaultwarden, helpdesk,
+    # tsd-360, thestandard-*, mimir, hermes). Only `portainer` and
+    # `management-npm` came back on their own — and the ONLY difference between
+    # them and everything else was this line.
+    #
+    # `unless-stopped` means "restart on daemon start UNLESS this container was
+    # stopped on purpose", and docker REMEMBERS that intent across a daemon
+    # restart. So one bulk stop takes prod down until a human notices and clicks
+    # Start. `always` restarts regardless — which is what a production service
+    # that nobody is watching at 23:00 actually needs.
+    #
+    # The cost is small and worth naming: to keep this container down for
+    # maintenance you must leave the daemon alone, because a docker/host restart
+    # will bring it back up. Use `docker stop` + do the work, or scale the stack
+    # down, rather than expecting a stopped container to stay stopped forever.
+    restart: always
     environment:
       # NOTE: db name + user are hardcoded — they're internal identifiers, not
       # secrets, and making them user-configurable led to silent typo failures.
@@ -41,7 +59,7 @@ services:
   app:
     image: ghcr.io/narasitk77/thestandard-production-booking:${IMAGE_TAG:-latest}
     container_name: production-booking-app
-    restart: unless-stopped
+    restart: always
     depends_on:
       db:
         condition: service_healthy
@@ -459,7 +477,7 @@ services:
     image: ghcr.io/narasitk77/thestandard-production-booking:${IMAGE_TAG:-latest}
     container_name: production-booking-worker
     profiles: ["workers"]
-    restart: unless-stopped
+    restart: always
     depends_on:
       - app
     environment:
