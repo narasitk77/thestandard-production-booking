@@ -233,6 +233,22 @@ services:
       # too | footage = narrow it the way Discord is narrowed.
       LARK_NOTIFY_SCOPE: ${LARK_NOTIFY_SCOPE:-all}
       REMINDER_ADMIN_EMAIL: ${REMINDER_ADMIN_EMAIL:-}
+
+      # --- เตือนตามเลข QU (v1.188; ประกาศที่นี่ครั้งแรก v1.214) ---
+      # รันอยู่ในรอบของ reminders worker (ไม่ใช่ worker แยก) กวาดงาน ADVERTORIAL
+      # ที่ยังไม่มี Agency Ref แล้วเมลหาโปรดิวเซอร์เจ้าของงาน
+      #
+      # ทั้งสามตัวนี้โค้ดอ่านมาตลอดแต่ compose ไม่เคยส่งเข้า container — สวิตช์
+      # ปิดจึงกดไม่ลง: ตั้ง QU_REMINDER_ENABLED=0 บน stack แล้วเมลยังส่งต่อไป
+      # เหมือนเดิม (คลาสเดียวกับ AUTH_SECRET/MCP_* ที่แก้ไปใน v1.212–213)
+      #
+      # ⚠️ ค่า default ตรงนี้ต้องตรงกับ default ในโค้ดเป๊ะ ๆ ห้ามปล่อยว่าง:
+      # `${QU_REMINDER_URGENT_DAYS:-}` จะส่งสตริงว่างเข้าไป ทำให้ Number('')=0
+      # ผ่านเงื่อนไข `n >= 0` แล้วกลายเป็น 0 วัน = ไม่มีงานไหนถูกนับว่าด่วนอีกเลย
+      # (โค้ดจริง: qu-reminder.ts urgent=3, interval=7, enabled = ไม่เท่ากับ '0')
+      QU_REMINDER_ENABLED: ${QU_REMINDER_ENABLED:-1}
+      QU_REMINDER_URGENT_DAYS: ${QU_REMINDER_URGENT_DAYS:-3}
+      QU_REMINDER_INTERVAL_DAYS: ${QU_REMINDER_INTERVAL_DAYS:-7}
       INVOICE_AGING_DAYS: ${INVOICE_AGING_DAYS:-7}
       SHOOT_GEAR_LOOKAHEAD_DAYS: ${SHOOT_GEAR_LOOKAHEAD_DAYS:-3}
       # REMINDERS_URL: ${REMINDERS_URL:-}  # override only if app isn't on 127.0.0.1:3000
@@ -363,7 +379,12 @@ services:
       BACKUP_WORKER_ENABLED: ${BACKUP_WORKER_ENABLED:-0}
       BACKUP_DRIVE_FOLDER_ID: ${BACKUP_DRIVE_FOLDER_ID:-}
       BACKUP_INTERVAL_MS: ${BACKUP_INTERVAL_MS:-86400000}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      # v1.214 — 30 → 365 วัน. `ot_records` ถูกลบทุกเดือนตามนโยบาย 10 วัน และ
+      # `audit_logs` ถูกลบที่ 90 วัน ฉะนั้นดัมป์คือสำเนาสุดท้ายของแถวพวกนั้น —
+      # เก็บ 30 วันแปลว่าแถวที่ถูกลบไป 31 วันไม่เหลืออยู่ในสำเนาไหนเลย
+      # วัดราคาจริงแล้ว 2026-09-02: ดัมป์วันละ ~950KB (DB ทั้งก้อน 18MB)
+      # → 365 วัน ≈ 350MB บน Drive ซึ่งถูกกว่าการเสียข้อมูลถาวรมาก
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-365}
       BACKUP_SECRET: ${BACKUP_SECRET:-${NEXTAUTH_SECRET}}
 
       # --- คลังข้อมูลรายวันบน Lark (v1.212) ---
