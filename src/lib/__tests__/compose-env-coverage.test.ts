@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync } from 'fs'
+import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
 import { join } from 'path'
 
 // v1.214 — every env var the code reads must be declared in the Portainer
@@ -127,7 +127,28 @@ function usedInCode(): Map<string, string> {
   return found
 }
 
-test('every env var the code reads is declared in the Portainer compose file', () => {
+/**
+ * The compose file is deliberately NOT in the Docker build context —
+ * `.dockerignore` drops `docker-compose*.yml` because the running app never
+ * reads it, and that list is kept narrow on purpose. But the Dockerfile runs
+ * `npm run build`, which runs `npm test`, so this test executes inside the image
+ * build with the file absent. Left alone it fails there and takes the whole
+ * image with it (caught on v1.215: CI green, "Build and Push Docker Image" red).
+ *
+ * So: skip when the file genuinely is not there, and say why in the output
+ * rather than passing quietly. The guarantee is unaffected — CI and every local
+ * `npm test` run with the file present, which is where a missing declaration
+ * would be introduced in the first place. A silent `if (!exists) return` is what
+ * would have made this guard worthless.
+ */
+const COMPOSE_MISSING = !existsSync(COMPOSE)
+const SKIP_REASON =
+  'docker-compose.portainer.yml is not in the Docker build context (.dockerignore). ' +
+  'This guard runs in CI and locally, where the file is present.'
+
+test('every env var the code reads is declared in the Portainer compose file', {
+  skip: COMPOSE_MISSING ? SKIP_REASON : false,
+}, () => {
   const declared = declaredInCompose()
   const used = usedInCode()
 
