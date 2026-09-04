@@ -1174,10 +1174,14 @@ model MixJob {
 
   /// คนขอ — มาจาก session ตอนสร้าง ไม่มีช่องให้พิมพ์แทนกัน
   requesterEmail String
-  /// วิศวกรเสียงที่รับงานนี้ · null = ยังอยู่ในคิว ไม่มีใครรับ
+  /// วิศวกรเสียงที่ทำงานนี้ · null = ยังอยู่ในคิว ยังไม่ถูกแจก
   assigneeEmail  String?
-  /// เวลาที่ถูกรับ — แยกจาก updatedAt เพื่อวัดว่าคิวรอนานแค่ไหนก่อนมีคนหยิบ
+  /// เวลาที่มีเจ้าของ — แยกจาก updatedAt เพื่อวัดว่าคิวรอนานแค่ไหนก่อนถูกแจก
   claimedAt      DateTime?
+  /// v1.216 — **ใครเป็นคนแจก** · null = เจ้าตัวหยิบเอง (ทางสำรองตอน coordinator ไม่อยู่)
+  /// เก็บแยกจาก assigneeEmail เพราะ "ใครทำ" กับ "ใครสั่งให้ทำ" เป็นคนละคำถาม และ
+  /// คำถามหลังคือสิ่งที่ทำให้ตามได้ว่างานค้างเพราะไม่มีคนแจก หรือเพราะแจกแล้วไม่มีคนทำ
+  assignedByEmail String?
 
   /// กำหนดส่ง (วันเดียว ไม่มีเวลา) — ตัวจัดลำดับคิวจริง ๆ แทนช่อง priority
   /// ที่ทุกคนจะติ๊ก "ด่วน" เหมือนกันหมด
@@ -1201,6 +1205,7 @@ model MixJob {
 
   @@index([status, dueDate])
   @@index([assigneeEmail, status])
+  @@index([assignedByEmail])
   @@index([requesterEmail, createdAt])
   @@index([bookingId])
   @@map("mix_jobs")

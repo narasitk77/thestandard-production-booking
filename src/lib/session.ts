@@ -269,15 +269,34 @@ export async function requireOTApprover() {
 // 'mixer' ใน roster แล้วแคบที่บรรทัดเดียวข้างล่าง
 export interface SoundAccess {
   isSound: boolean
+  /** v1.216 — coordinator ของทีมเสียง: คนที่ **แจกงานให้คนอื่น** ได้ */
+  isCoordinator: boolean
   canOpen: boolean
   canEditAll: boolean
+}
+
+/**
+ * v1.216 — ใครคือ coordinator ของทีมเสียง
+ *
+ * ค่าเริ่มต้นคือ krittapon.j@ (role COORDINATOR · position Senior Sound Engineer
+ * ยืนยันจาก prod 2026-09-03) แต่อ่านจาก env ได้เพื่อให้เปลี่ยนตัวหรือเพิ่มคนสำรอง
+ * ได้โดยไม่ต้อง deploy — คนลาพักร้อนแล้วคิวค้างทั้งคิวคือความเสี่ยงที่จริงกว่า
+ * ความเรียบร้อยของการฮาร์ดโค้ด
+ *
+ * ⚠️ ต้องประกาศใน docker-compose.portainer.yml ด้วย ไม่งั้นตั้งบน stack แล้วเงียบ
+ * (compose-env-coverage.test.ts บังคับข้อนี้ให้อยู่แล้ว)
+ */
+export function soundCoordinatorEmails(): string[] {
+  const raw = process.env.SOUND_COORDINATOR_EMAILS?.trim()
+  if (!raw) return ['krittapon.j@thestandard.co']
+  return raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
 }
 
 export async function getSoundAccess(
   email: string | null | undefined,
   role?: string | null,
 ): Promise<SoundAccess> {
-  const deny: SoundAccess = { isSound: false, canOpen: false, canEditAll: false }
+  const deny: SoundAccess = { isSound: false, isCoordinator: false, canOpen: false, canEditAll: false }
   if (!email) return deny
   const lower = email.toLowerCase()
   try {
@@ -293,6 +312,7 @@ export async function getSoundAccess(
       position.includes('sound') || position.includes('audio') || position.includes('mix')
     return {
       isSound,
+      isCoordinator: soundCoordinatorEmails().includes(lower),
       // ล็อกอินได้ = ตั้งคำขอได้ (ดูเหตุผลในคอมเมนต์ข้างบน)
       canOpen: true,
       canEditAll: effectiveRole === 'ADMIN' || effectiveRole === 'MANAGER',
@@ -301,7 +321,7 @@ export async function getSoundAccess(
     // DB ล่ม = ไม่เดาให้สิทธิ์ทีมเสียง แต่ยังเปิดหน้าให้ดูได้ และ ADMIN ที่รู้จาก
     // โทเคนยังซ่อมข้อมูลได้ (เหตุผลเดียวกับ getSwitcherAccess)
     const isAdmin = role === 'ADMIN'
-    return { isSound: isAdmin, canOpen: true, canEditAll: isAdmin }
+    return { isSound: isAdmin, isCoordinator: isAdmin, canOpen: true, canEditAll: isAdmin }
   }
 }
 

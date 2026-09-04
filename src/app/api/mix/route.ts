@@ -15,6 +15,7 @@ import { logAudit } from '@/lib/audit'
 import {
   OPEN_MIX_STATUSES, validateMixJob, formatMixNumber, mixFlag, compareMixQueue,
 } from '@/lib/mix-jobs'
+import { notifyMixRequested } from '@/lib/mix-notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +40,17 @@ export async function GET(request: NextRequest) {
           ? { deletedAt: null }
           : { deletedAt: null, status: { in: [...OPEN_MIX_STATUSES] } }
 
-    const rows = await prisma.mixJob.findMany({ where, take: LIST_LIMIT, orderBy: { number: 'desc' } })
+    // roster ส่งไปกับคิวเลย เพื่อให้ coordinator มี dropdown เลือกคนได้โดยไม่ต้อง
+    // ยิงอีกรอบ — และเพื่อให้หน้าเว็บใช้ "รายชื่อเดียวกับที่ route ใช้ตรวจ" ไม่งั้น
+    // dropdown จะโชว์คนที่ฝั่งเซิร์ฟเวอร์ปฏิเสธ
+    const [rows, roster] = await Promise.all([
+      prisma.mixJob.findMany({ where, take: LIST_LIMIT, orderBy: { number: 'desc' } }),
+      prisma.teamMember.findMany({
+        where: { role: 'sound', active: true },
+        select: { email: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+    ])
 
     const jobs = rows
       .sort(compareMixQueue)
@@ -49,9 +60,11 @@ export async function GET(request: NextRequest) {
       jobs,
       scope,
       truncated: rows.length === LIST_LIMIT,
+      soundTeam: roster,
       me: {
         email: session.email,
         isSound: access.isSound,
+        isCoordinator: access.isCoordinator,
         canEditAll: access.canEditAll,
         // ทุกคนที่เปิดหน้าได้ตั้งคำขอได้ — ไม่มีเงื่อนไขซ่อน
         canCreate: true,
@@ -102,16 +115,28 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    // แจ้งกล่องกลางทีมเสียง + coordinator · รอผลก่อนตอบกลับ เพื่อบอกคนขอได้ตรง ๆ
+    // ว่าแจ้งถึงใครแล้วบ้าง — "ส่งคำขอแล้ว" ที่ไม่มีใครได้รับคือคำโกหกที่สุภาพ
+    const notified = await notifyMixRequested(job)
+    if (!notified.sent) console.warn(`[mix] แจ้งเตือนไม่ออก: ${notified.reason}`)
+
     logAudit({
       actorEmail: session.email,
       action: 'mix.request',
       entityType: 'MixJob',
       entityId: job.id,
       bookingCode,
-      changes: { number: job.number, title: job.title, dueDate: clean.value.dueDate },
+      // บันทึกผลการแจ้งเตือนแบบราย recipient ไม่ยุบเป็น boolean (บทเรียน v1.186)
+      changes: {
+        number: job.number, title: job.title, dueDate: clean.value.dueDate,
+        notified: notified.sent, notifiedTo: notified.to, notifyError: notified.reason ?? null,
+      },
     })
 
-    return NextResponse.json({ job: { ...job, code: formatMixNumber(job.number) } }, { status: 201 })
+    return NextResponse.json({
+      job: { ...job, code: formatMixNumber(job.number) },
+      notified,
+    }, { status: 201 })
   } catch (e) {
     console.error('POST /api/mix error:', e)
     return NextResponse.json({ error: 'ตั้งคำขอไม่สำเร็จ' }, { status: 500 })

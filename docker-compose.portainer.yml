@@ -466,6 +466,22 @@ services:
 
       # (Wasabi fully removed — v1.130 dropped the env vars, v1.146 dropped the DB columns.)
 
+      # --- คิวงานมิกซ์เสียง /mix (v1.215; แจ้งเตือน + coordinator v1.216) ---
+      # กระบวนการที่ operator ออกแบบ 2026-09-03: คนขอส่งคำขอพร้อมกำหนดส่ง →
+      # แจ้ง SOUND_TEAM_EMAIL + coordinator → coordinator แจกงานให้ทีม → บันทึกไว้
+      #
+      # SOUND_COORDINATOR_EMAILS = คนที่ "แจกงานให้คนอื่น" ได้ (คั่นด้วยจุลภาค)
+      # ว่าง = ใช้ค่าในโค้ด `krittapon.j@thestandard.co` (role COORDINATOR ·
+      # position Senior Sound Engineer — ยืนยันจาก prod 2026-09-03)
+      # ตั้งเพิ่มคนสำรองได้ที่นี่โดยไม่ต้อง deploy: coordinator คนเดียวลาหยุดแล้ว
+      # คิวค้างทั้งคิว เป็นความเสี่ยงที่จริงกว่าความเรียบร้อยของการฮาร์ดโค้ด
+      SOUND_COORDINATOR_EMAILS: ${SOUND_COORDINATOR_EMAILS:-}
+      # กล่องกลางที่รับแจ้งคำขอใหม่ · ว่าง = sound@thestandard.co ตามค่าในโค้ด
+      # ⚠️ ห้ามตั้งเป็นที่อยู่เดียวกับ SMTP_USER — Gmail ไม่ส่งเมลถึงตัวเอง เมลจะ
+      # หายเงียบโดยไม่มี error (สาเหตุจริงของ footage-ready ที่ "ส่งสำเร็จ" 103 ครั้ง
+      # โดยไม่มีใครได้รับ 5 สัปดาห์) · โค้ดมี dropSender() กันไว้อีกชั้น
+      SOUND_TEAM_EMAIL: ${SOUND_TEAM_EMAIL:-}
+
       # ─── v1.214 — สวิตช์/ที่อยู่ที่ operator ควรตั้งได้ แต่ตั้งไม่ได้จริงมาตลอด ───
       #
       # สคริปต์ไล่เทียบ `process.env.X` ทุกตัวในโค้ดกับไฟล์นี้ (เทส

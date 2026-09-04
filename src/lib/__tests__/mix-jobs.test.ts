@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MIX_STATUSES, isMixStatus, formatMixNumber, canTransition,
-  canEditMixJob, canClaimMixJob, canSetMixStatus,
+  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isAssignableTo,
   mixFlag, deliveredOnTime, validateMixJob, compareMixQueue,
   type MixActor,
 } from '../mix-jobs'
@@ -11,10 +11,12 @@ import {
 // บั๊กสิทธิ์คือบั๊กที่มองไม่เห็นจากตาแอดมิน (v1.196: โปรดิวเซอร์มองไม่เห็นงาน
 // ตัวเอง 59 ใบ) เทสจึงเขียนจากมุมของแต่ละคน ไม่ใช่มุมของคนที่เห็นทุกอย่าง
 
-const requester: MixActor = { email: 'pd@thestandard.co', isSound: false, canEditAll: false }
-const engineer: MixActor = { email: 'sound@thestandard.co', isSound: true, canEditAll: false }
-const other: MixActor = { email: 'someone@thestandard.co', isSound: false, canEditAll: false }
-const admin: MixActor = { email: 'admin@thestandard.co', isSound: false, canEditAll: true }
+const requester: MixActor = { email: 'pd@thestandard.co', isSound: false, isCoordinator: false, canEditAll: false }
+const engineer: MixActor = { email: 'sound@thestandard.co', isSound: true, isCoordinator: false, canEditAll: false }
+const other: MixActor = { email: 'someone@thestandard.co', isSound: false, isCoordinator: false, canEditAll: false }
+const admin: MixActor = { email: 'admin@thestandard.co', isSound: false, isCoordinator: false, canEditAll: true }
+/** v1.216 — krittapon.j@ ตัวจริงบน prod: อยู่ในทีมเสียงและเป็นคนแจกงาน */
+const coordinator: MixActor = { email: 'krittapon.j@thestandard.co', isSound: true, isCoordinator: true, canEditAll: false }
 
 const queued = { status: 'QUEUED', requesterEmail: 'pd@thestandard.co', assigneeEmail: null }
 const claimed = { status: 'IN_PROGRESS', requesterEmail: 'pd@thestandard.co', assigneeEmail: 'sound@thestandard.co' }
@@ -173,4 +175,42 @@ test('คิวเรียง: งานที่ยังเดินอยู
   ]
   const order = [...rows].sort(compareMixQueue).map(r => r.number)
   assert.deepEqual(order, [4, 5, 3, 2, 1])
+})
+
+
+/* ───────────────── v1.216 — coordinator เป็นคนแจกงาน ───────────────── */
+
+const SOUND_ROSTER = [
+  'daejarnat.d@thestandard.co',
+  'krittapon.j@thestandard.co',
+  'nuthkitta.c@thestandard.co',
+  'thaphat.t@thestandard.co',
+]
+
+test('เฉพาะ coordinator (และแอดมิน) เท่านั้นที่แจกงานให้คนอื่นได้', () => {
+  assert.equal(canAssignMixJob(coordinator, queued), true)
+  assert.equal(canAssignMixJob(admin, queued), true)
+  assert.equal(canAssignMixJob(engineer, queued), false,
+    'วิศวกรเสียงธรรมดาหยิบงานเองได้ แต่สั่งให้คนอื่นทำไม่ได้ — คนละอำนาจ')
+  assert.equal(canAssignMixJob(requester, queued), false)
+  assert.equal(canAssignMixJob(other, queued), false)
+})
+
+test('แจกซ้ำได้ระหว่างงานเดินอยู่ (คนป่วย/งานด่วนแทรก) แต่งานที่จบแล้วแจกไม่ได้', () => {
+  assert.equal(canAssignMixJob(coordinator, claimed), true, 'เปลี่ยนตัวคนทำกลางทางได้')
+  assert.equal(canAssignMixJob(coordinator, { status: 'DONE', assigneeEmail: 'x@y' }), false)
+  assert.equal(canAssignMixJob(coordinator, { status: 'CANCELLED' }), false)
+})
+
+test('แจกได้เฉพาะคนที่อยู่ในทีมเสียงจริง — กันตัวเลขภาระงานเพี้ยน', () => {
+  assert.equal(isAssignableTo('thaphat.t@thestandard.co', SOUND_ROSTER), true)
+  assert.equal(isAssignableTo('  Krittapon.J@THESTANDARD.co ', SOUND_ROSTER), true,
+    'ช่องว่างและตัวพิมพ์ใหญ่ต้องไม่ทำให้แจกไม่ได้')
+  assert.equal(isAssignableTo('pd@thestandard.co', SOUND_ROSTER), false, 'คนนอกทีมเสียง')
+  assert.equal(isAssignableTo('', SOUND_ROSTER), false)
+})
+
+test('การหยิบงานเองยังอยู่ — กันคิวค้างทั้งคิวตอน coordinator ลาหยุด', () => {
+  assert.equal(canClaimMixJob(engineer, queued), true)
+  assert.equal(canClaimMixJob(coordinator, queued), true)
 })

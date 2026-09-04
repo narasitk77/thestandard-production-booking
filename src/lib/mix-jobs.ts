@@ -39,8 +39,10 @@ export interface MixJobLike {
 
 export interface MixActor {
   email: string
-  /** ทีมเสียง — รับงาน/เปลี่ยนสถานะได้ */
+  /** ทีมเสียง — เปลี่ยนสถานะงานได้ และหยิบงานที่ยังไม่มีเจ้าของได้ */
   isSound: boolean
+  /** v1.216 — coordinator ของทีมเสียง (ค่าเริ่มต้น krittapon.j@) — **แจกงานให้คนอื่นได้** */
+  isCoordinator: boolean
   /** ADMIN / MANAGER — ทำได้ทุกอย่างกับทุกแถว */
   canEditAll: boolean
 }
@@ -98,15 +100,47 @@ export function canEditMixJob(actor: MixActor, job: MixJobLike): boolean {
 }
 
 /**
- * "รับงาน" ได้ไหม — เฉพาะทีมเสียง และเฉพาะแถวที่ยังไม่มีเจ้าของ
+ * "หยิบงานเอง" ได้ไหม — เฉพาะทีมเสียง และเฉพาะแถวที่ยังไม่มีเจ้าของ
  *
- * ตั้งใจไม่ให้คนขอรับงานของตัวเอง: คิวนี้มีไว้เพื่อให้เห็นว่าใครกำลังทำอะไร
- * ถ้าใครก็ตั้งตัวเองเป็นคนมิกซ์ได้ ตัวเลขภาระงานของทีมเสียงจะเชื่อไม่ได้
+ * v1.216: กระบวนการหลักคือ **coordinator แจก** (ดู canAssignMixJob) — ตัวนี้เป็น
+ * ทางสำรองไว้ตอน coordinator ไม่อยู่ ไม่งั้นคิวจะค้างทั้งคิวเพราะคนเดียวลาหยุด
+ * ซึ่งเป็น single point of failure ที่ไม่คุ้มกับความเรียบร้อยของกระบวนการ
+ *
+ * ตั้งใจไม่ให้คนขอหยิบงานของตัวเอง: ถ้าใครก็ตั้งตัวเองเป็นคนมิกซ์ได้
+ * ตัวเลขภาระงานของทีมเสียงจะเชื่อไม่ได้
  */
 export function canClaimMixJob(actor: MixActor, job: MixJobLike): boolean {
   if (job.assigneeEmail) return false
   if ((job.status || 'QUEUED') === 'CANCELLED') return false
   return actor.isSound || actor.canEditAll
+}
+
+/**
+ * v1.216 — **แจกงานให้คนอื่น** ได้ไหม · นี่คือเส้นทางหลักที่ operator ออกแบบไว้:
+ * คำขอเข้ามา → coordinator ได้รับแจ้ง → coordinator แจกให้ทีมงาน
+ *
+ * ต่างจาก canClaimMixJob ตรงที่ตัวนั้นคือ "หยิบให้ตัวเอง" ส่วนตัวนี้คือ "สั่งให้คนอื่นทำ"
+ * ซึ่งเป็นอำนาจคนละระดับ — จึงจำกัดไว้ที่ coordinator กับ admin เท่านั้น
+ *
+ * แจกซ้ำได้ (เปลี่ยนตัวคนทำ) ตราบใดที่งานยังไม่จบ — คนป่วย งานด่วนแทรก เป็นเรื่องปกติ
+ */
+export function canAssignMixJob(actor: MixActor, job: MixJobLike): boolean {
+  const status = (job.status || 'QUEUED') as MixStatus
+  if (status === 'DONE' || status === 'CANCELLED') return false
+  return actor.isCoordinator || actor.canEditAll
+}
+
+/**
+ * คนที่จะถูกแจกงานได้ ต้องอยู่ในทีมเสียงจริง
+ *
+ * เช็คที่นี่ไม่ใช่ที่ route เพราะ "แจกงานให้คนที่ไม่ใช่ทีมเสียง" ทำให้ตัวเลขภาระงาน
+ * เพี้ยนแบบเดียวกับการให้คนขอหยิบงานเอง · ส่งรายชื่อ roster เข้ามาแทนที่จะไปอ่าน DB
+ * เองเพื่อให้ฟังก์ชันนี้ยังเทสได้โดยไม่ต้องมีฐานข้อมูล
+ */
+export function isAssignableTo(email: string, soundRoster: readonly string[]): boolean {
+  const lower = email.trim().toLowerCase()
+  if (!lower) return false
+  return soundRoster.some(r => r.trim().toLowerCase() === lower)
 }
 
 /** เปลี่ยนสถานะได้ไหม — คนขอ "ยกเลิกงานตัวเอง" ได้ นอกนั้นเป็นเรื่องของทีมเสียง */

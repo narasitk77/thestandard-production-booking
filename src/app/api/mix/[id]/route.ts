@@ -10,9 +10,10 @@ import { prisma } from '@/lib/db'
 import { getSession, getSoundAccess } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import {
-  canEditMixJob, canClaimMixJob, canSetMixStatus, isMixStatus,
-  validateMixJob, formatMixNumber, type MixActor, type MixStatus,
+  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isMixStatus,
+  isAssignableTo, validateMixJob, formatMixNumber, type MixActor, type MixStatus,
 } from '@/lib/mix-jobs'
+import { notifyMixAssigned } from '@/lib/mix-notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +31,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const existing = await load(params.id)
     if (!existing) return NextResponse.json({ error: 'ไม่พบงานนี้' }, { status: 404 })
 
-    const actor: MixActor = { email: session.email, isSound: access.isSound, canEditAll: access.canEditAll }
+    const actor: MixActor = {
+      email: session.email,
+      isSound: access.isSound,
+      isCoordinator: access.isCoordinator,
+      canEditAll: access.canEditAll,
+    }
     const body = await request.json().catch(() => ({}))
     const data: Record<string, unknown> = {}
     const changes: Record<string, unknown> = {}
@@ -48,6 +54,34 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       // รับงานแล้วยังอยู่ QUEUED ไม่มีความหมาย — เดินหน้าให้เลย
       if (existing.status === 'QUEUED') data.status = 'IN_PROGRESS'
       changes.claimedBy = session.email
+    }
+
+    // ── coordinator แจกงานให้ทีมงาน (เส้นทางหลักตามที่ operator ออกแบบ) ──────
+    let assignedTo: string | null = null
+    if (typeof body.assigneeEmail === 'string' && body.assigneeEmail.trim()) {
+      if (!canAssignMixJob(actor, existing)) {
+        return NextResponse.json(
+          { error: 'เฉพาะ coordinator ของทีมเสียง (หรือแอดมิน) เท่านั้นที่แจกงานได้' },
+          { status: 403 },
+        )
+      }
+      // แจกได้เฉพาะคนใน roster จริง — แจกให้คนนอกทำให้ตัวเลขภาระงานทีมเสียงเพี้ยน
+      const roster = await prisma.teamMember.findMany({
+        where: { role: 'sound', active: true }, select: { email: true },
+      })
+      const target = body.assigneeEmail.trim()
+      if (!isAssignableTo(target, roster.map(r => r.email))) {
+        return NextResponse.json(
+          { error: `${target} ไม่ได้อยู่ในทีมเสียง — เพิ่มที่ /admin/team ก่อน` },
+          { status: 400 },
+        )
+      }
+      data.assigneeEmail = target
+      data.assignedByEmail = session.email
+      data.claimedAt = existing.claimedAt ?? new Date()
+      if (existing.status === 'QUEUED') data.status = 'IN_PROGRESS'
+      assignedTo = target
+      changes.assignedTo = target
     }
 
     // ── เปลี่ยนสถานะ ────────────────────────────────────────────────────────
@@ -95,15 +129,27 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const job = await prisma.mixJob.update({ where: { id: existing.id }, data })
+
+    // แจ้งคนที่ถูกแจก + คนขอ · ไม่ throw ไม่ว่ากรณีใด งานที่แจกไปแล้วต้องไม่ถูก
+    // ย้อนกลับเพราะเมลไม่ออก
+    let notified: Awaited<ReturnType<typeof notifyMixAssigned>> | null = null
+    if (assignedTo) {
+      notified = await notifyMixAssigned(job, assignedTo, session.email)
+      if (!notified.sent) console.warn(`[mix] แจ้งคนที่ถูกแจกไม่ออก: ${notified.reason}`)
+    }
+
     logAudit({
       actorEmail: session.email,
       action: 'mix.update',
       entityType: 'MixJob',
       entityId: job.id,
       bookingCode: job.bookingCode,
-      changes: { number: job.number, ...changes },
+      changes: {
+        number: job.number, ...changes,
+        ...(notified ? { notified: notified.sent, notifiedTo: notified.to, notifyError: notified.reason ?? null } : {}),
+      },
     })
-    return NextResponse.json({ job: { ...job, code: formatMixNumber(job.number) } })
+    return NextResponse.json({ job: { ...job, code: formatMixNumber(job.number) }, notified })
   } catch (e) {
     console.error('PATCH /api/mix/[id] error:', e)
     return NextResponse.json({ error: 'บันทึกไม่สำเร็จ' }, { status: 500 })
@@ -120,7 +166,12 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
     const existing = await load(params.id)
     if (!existing) return NextResponse.json({ error: 'ไม่พบงานนี้' }, { status: 404 })
 
-    const actor: MixActor = { email: session.email, isSound: access.isSound, canEditAll: access.canEditAll }
+    const actor: MixActor = {
+      email: session.email,
+      isSound: access.isSound,
+      isCoordinator: access.isCoordinator,
+      canEditAll: access.canEditAll,
+    }
     if (!canEditMixJob(actor, existing)) {
       return NextResponse.json({ error: 'ลบได้เฉพาะคำขอของตัวเองที่ยังไม่มีคนรับ' }, { status: 403 })
     }

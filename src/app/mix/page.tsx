@@ -21,9 +21,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Check, Clock, Loader2, Plus, Trash2, X } from 'lucide-react'
 import {
-  MIX_STATUS_LABEL, MIX_FLAG_LABEL, canClaimMixJob, canEditMixJob, canSetMixStatus,
-  type MixActor, type MixStatus, type MixFlag,
+  MIX_STATUS_LABEL, MIX_FLAG_LABEL, canClaimMixJob, canAssignMixJob, canEditMixJob,
+  canSetMixStatus, type MixActor, type MixStatus, type MixFlag,
 } from '@/lib/mix-jobs'
+
+interface SoundMember { email: string; name: string | null }
 
 interface Job {
   id: string
@@ -39,10 +41,11 @@ interface Job {
   deliveredAt: string | null
   sourceLink: string | null
   notes: string | null
+  assignedByEmail: string | null
   flag: MixFlag
 }
 
-interface Me { email: string; isSound: boolean; canEditAll: boolean; canCreate: boolean }
+interface Me { email: string; isSound: boolean; isCoordinator: boolean; canEditAll: boolean; canCreate: boolean }
 
 const SCOPES = [
   { key: 'open', label: 'คิวปัจจุบัน' },
@@ -66,6 +69,7 @@ const STATUS_STYLE: Record<string, string> = {
 export default function MixQueuePage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [me, setMe] = useState<Me | null>(null)
+  const [soundTeam, setSoundTeam] = useState<SoundMember[]>([])
   const [scope, setScope] = useState<'open' | 'mine' | 'all'>('open')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -86,6 +90,7 @@ export default function MixQueuePage() {
       const data = await res.json()
       setJobs(data.jobs || [])
       setMe(data.me || null)
+      setSoundTeam(data.soundTeam || [])
     } catch (e: any) {
       setError(e?.message || 'โหลดคิวไม่สำเร็จ')
       setJobs([])
@@ -131,7 +136,7 @@ export default function MixQueuePage() {
   }
 
   const actor: MixActor | null = me
-    ? { email: me.email, isSound: me.isSound, canEditAll: me.canEditAll }
+    ? { email: me.email, isSound: me.isSound, isCoordinator: me.isCoordinator, canEditAll: me.canEditAll }
     : null
 
   const open = jobs.filter(j => j.status === 'QUEUED' || j.status === 'IN_PROGRESS')
@@ -236,7 +241,9 @@ export default function MixQueuePage() {
                     )}
                     <span>ขอโดย {job.requesterEmail.split('@')[0]}</span>
                     <span>
-                      {job.assigneeEmail ? `มิกซ์โดย ${job.assigneeEmail.split('@')[0]}` : 'ยังไม่มีคนรับ'}
+                      {job.assigneeEmail
+                        ? `มิกซ์โดย ${job.assigneeEmail.split('@')[0]}${job.assignedByEmail ? ` (แจกโดย ${job.assignedByEmail.split('@')[0]})` : ' (หยิบเอง)'}`
+                        : 'รอ coordinator แจกงาน'}
                     </span>
                   </div>
                   {job.sourceLink && (
@@ -250,13 +257,33 @@ export default function MixQueuePage() {
                 {actor && (
                   <div className="flex items-center gap-1.5 shrink-0">
                     {busy === job.id && <Loader2 className="animate-spin text-gray-400" size={15} />}
-                    {canClaimMixJob(actor, job) && (
+                    {/* v1.216 — coordinator แจกงาน: เส้นทางหลักที่ operator ออกแบบ
+                      * รายชื่อมาจาก roster ชุดเดียวกับที่ route ใช้ตรวจ ไม่งั้น
+                      * dropdown จะโชว์คนที่ฝั่งเซิร์ฟเวอร์ปฏิเสธ */}
+                    {canAssignMixJob(actor, job) && soundTeam.length > 0 && (
+                      <select
+                        value={job.assigneeEmail || ''}
+                        disabled={busy === job.id}
+                        onChange={e => e.target.value && act(job.id, { assigneeEmail: e.target.value })}
+                        className="px-2 py-1 text-xs border border-gray-300 rounded bg-white disabled:opacity-50"
+                        title="มอบหมายให้ทีมงาน"
+                      >
+                        <option value="">— แจกงานให้ —</option>
+                        {soundTeam.map(m => (
+                          <option key={m.email} value={m.email}>
+                            {m.name || m.email.split('@')[0]}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {/* หยิบเอง — ทางสำรองตอน coordinator ไม่อยู่ ไม่ใช่เส้นทางหลัก */}
+                    {canClaimMixJob(actor, job) && !canAssignMixJob(actor, job) && (
                       <button
                         onClick={() => act(job.id, { claim: true })}
                         disabled={busy === job.id}
                         className="px-2.5 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                       >
-                        รับงาน
+                        รับงานเอง
                       </button>
                     )}
                     {canSetMixStatus(actor, job, 'DONE') && job.status === 'IN_PROGRESS' && (
