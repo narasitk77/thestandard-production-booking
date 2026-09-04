@@ -28,13 +28,19 @@ export async function GET(request: NextRequest) {
     const access = await getSoundAccess(session.email, session.role)
     if (!access.canOpen) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const scope = new URL(request.url).searchParams.get('scope') || 'open'
+    const sp = new URL(request.url).searchParams
+    const scope = sp.get('scope') || 'open'
+    // v1.219 — ดูคำขอของใบจองใบเดียว (การ์ดบนหน้าใบจองใช้ตัวนี้)
+    // แยกจาก scope โดยตั้งใจ: ถามว่า "ใบนี้มีคำขออะไรบ้าง" ไม่ใช่ "คิวตอนนี้เป็นไง"
+    // และต้องเห็นทุกสถานะ รวมที่จบแล้ว ไม่งั้นคนจะขอซ้ำเพราะไม่เห็นของเดิม
+    const bookingId = sp.get('bookingId')?.trim() || null
 
     // ทั้งคิวมองเห็นได้หมดโดยตั้งใจ — คนขอต้องเห็นว่าคิวยาวแค่ไหนก่อนไปรับปาก
     // ลูกค้าว่าจะได้วันไหน · และกฎ "เห็นเฉพาะของตัวเอง" คือคลาสบั๊กที่ทำให้
     // โปรดิวเซอร์ 59 คนมองไม่เห็นงานตัวเองใน v1.196 — เลี่ยงทั้งคลาสไปเลย
-    const where =
-      scope === 'mine'
+    const where = bookingId
+      ? { deletedAt: null, bookingId }
+      : scope === 'mine'
         ? { deletedAt: null, OR: [{ requesterEmail: session.email }, { assigneeEmail: session.email }] }
         : scope === 'all'
           ? { deletedAt: null }

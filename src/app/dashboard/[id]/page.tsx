@@ -3,6 +3,7 @@
 import { bookingDisplayName } from '@/lib/display'
 import { hasConsoleAccess } from '@/lib/roles'
 import EquipmentRequest from './EquipmentRequest'
+import MixRequests from './MixRequests'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import BackButton from '@/app/_components/BackButton'
@@ -50,6 +51,8 @@ interface BookingDetail {
   vanCount?: number | null
   agencyRef?: string
   notes?: string
+  /** v1.219 — API คืนมาอยู่แล้ว แค่ยังไม่เคยประกาศในไทป์ฝั่งนี้ */
+  bookingCode?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -351,6 +354,10 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
 
       {/* Crew equipment requisition (เบิกอุปกรณ์) — gated by canViewBooking at the API */}
       <EquipmentRequest bookingId={id} myEmail={myEmail} />
+
+      {/* v1.219 — คิวมิกซ์ของงานนี้ · วางต่อจากเบิกอุปกรณ์เพราะเป็นของประเภทเดียวกัน
+          คือ "ขออะไรเพิ่มสำหรับงานใบนี้" ไม่ใช่ข้อมูลของตัวใบจองเอง */}
+      <MixRequests bookingId={id} bookingCode={booking?.bookingCode ?? null} />
 
       {/* Calendar packet */}
       <div className="gf-card p-5">

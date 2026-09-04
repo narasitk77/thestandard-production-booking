@@ -15,9 +15,13 @@ import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
 /** ฟอร์มตั้งคำขอ — สั้นที่สุดเท่าที่ยังบอกทีมเสียงได้ว่าไฟล์อยู่ไหน */
-export default function MixRequestForm({ onDone }: { onDone: (created: { code: string; notifiedTo: string[] }) => void }) {
+export default function MixRequestForm({ onDone, initialBookingCode }: {
+  onDone: (created: { code: string; notifiedTo: string[] }) => void
+  /** v1.219 — เติมรหัสมาให้เมื่อกดขอจากหน้าใบจอง คนจะได้ไม่ต้องจำเลขไปพิมพ์เอง */
+  initialBookingCode?: string
+}) {
   const [title, setTitle] = useState('')
-  const [bookingCode, setBookingCode] = useState('')
+  const [bookingCode, setBookingCode] = useState(initialBookingCode || '')
   const [dueDate, setDueDate] = useState('')
   const [sourceLink, setSourceLink] = useState('')
   const [notes, setNotes] = useState('')
@@ -70,7 +74,9 @@ export default function MixRequestForm({ onDone }: { onDone: (created: { code: s
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs text-gray-500 mb-1">รหัสใบจอง (ถ้ามี)</label>
+          <label className="block text-xs text-gray-500 mb-1">
+            รหัสใบจอง (ถ้ามี){initialBookingCode && <span className="text-green-600 ml-1">· เติมให้แล้ว</span>}
+          </label>
           <input
             value={bookingCode} onChange={e => setBookingCode(e.target.value)}
             placeholder="AGN-260903-01"

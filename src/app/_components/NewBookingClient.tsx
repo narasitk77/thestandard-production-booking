@@ -24,8 +24,9 @@
    อ่านว่า "ครั้งเดียว vs รายสัปดาห์ vs เสียง" ซึ่งไม่เข้าพวกกัน
    ============================================================================= */
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { CalendarDays, Repeat, SlidersHorizontal, CheckCircle2 } from 'lucide-react'
 import { hasConsoleAccess } from '@/lib/roles'
 import BookingWizard from '@/app/_components/booking/BookingWizard'
@@ -34,9 +35,29 @@ import MixRequestForm from '@/app/_components/MixRequestForm'
 
 type Mode = 'single' | 'mix' | 'routine'
 
+/**
+ * v1.219 — เข้ามาที่โหมดมิกซ์ตรง ๆ ได้จาก `?mode=mix&booking=<รหัส>`
+ *
+ * ใช้โดยปุ่ม "ขอมิกซ์เสียง" บนหน้าใบจอง — เลือกวิธีนี้แทนการฝังฟอร์มลงหน้าใบจอง
+ * เพราะฟอร์มมีที่อยู่ที่เดียว (MixRequestForm) และหน้าใบจองก็ยาวพออยู่แล้ว
+ * ผลพลอยได้: ลิงก์นี้ส่งต่อในแชทได้ กดแล้วเปิดฟอร์มพร้อมรหัสเติมไว้
+ *
+ * Suspense ครอบเพราะ useSearchParams ต้องการ — ไม่มีแล้ว build จะเตือน
+ */
 export default function NewBookingClient() {
+  return (
+    <Suspense fallback={<div className="max-w-5xl mx-auto px-4 py-10 text-sm text-gray-400">กำลังโหลด…</div>}>
+      <NewBookingInner />
+    </Suspense>
+  )
+}
+
+function NewBookingInner() {
+  const params = useSearchParams()
+  const wantMix = params.get('mode') === 'mix'
+  const prefillBooking = params.get('booking')?.trim() || ''
   const [isConsole, setIsConsole] = useState(false)
-  const [mode, setMode] = useState<Mode>('single')
+  const [mode, setMode] = useState<Mode>(wantMix ? 'mix' : 'single')
   const [sent, setSent] = useState<{ code: string; notifiedTo: string[] } | null>(null)
 
   useEffect(() => {
@@ -105,7 +126,7 @@ export default function NewBookingClient() {
               <p className="text-sm text-gray-500 mb-4">
                 ขอที่นี่แทนการทักในแชท — ทีมเสียงจะได้รับแจ้งทันที และตามงานได้จากคิว
               </p>
-              <MixRequestForm onDone={setSent} />
+              <MixRequestForm onDone={setSent} initialBookingCode={prefillBooking || undefined} />
             </>
           )}
         </div>
