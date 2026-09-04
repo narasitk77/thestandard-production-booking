@@ -21,6 +21,9 @@ interface NavProps {
   canSeeSwitcher?: boolean
   /** v1.211 — เป็นสวิตเชอร์เอง = งานประจำ ขึ้นเป็นแท็บหลัก ไม่ใช่ซ่อนใน More */
   isSwitcher?: boolean
+  /** v1.215 — เป็นทีมเสียง = คิวมิกซ์คืองานประจำ ขึ้นแถวหลัก · คนอื่นไปอยู่ More
+   *  (ทุกคนที่ล็อกอินเข้า /mix ได้ เพราะครึ่งหนึ่งของหน้านั้นคือ 'ตั้งคำขอ') */
+  isSound?: boolean
 }
 
 /**
@@ -30,7 +33,7 @@ interface NavProps {
  * Pages a user touches daily live in `primary`; docs/dev utilities live
  * in `secondary` behind a divider.
  */
-export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeeProducer = false, canApproveOT = false, canUpload = false, canSeeSwitcher = false, isSwitcher = false }: NavProps) {
+export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeeProducer = false, canApproveOT = false, canUpload = false, canSeeSwitcher = false, isSwitcher = false, isSound}: NavProps) {
   const [open, setOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const pathname = usePathname() || '/'
@@ -75,6 +78,8 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     // แถวหลัก ส่วน console ที่แค่ "ดูภาพรวมได้" ไปอยู่ใน More ข้างล่าง — ไม่งั้น
     // แถวหลักของแอดมินยาวจนอ่านไม่ทัน
     { href: '/switcher', label: '🎛 สวิตเชอร์', show: !!isSwitcher },
+    // v1.215 — ทีมเสียงเปิดคิวมิกซ์ทุกวัน จึงอยู่แถวหลักเหมือนสวิตเชอร์
+    { href: '/mix', label: '🎚 คิวมิกซ์', show: !!isSound },
     { href: '/admin', label: 'คิวงาน', show: isConsole, match: () => queueActive },
     { href: '/admin/production-space', label: 'Admin', show: isAdmin, match: (p) => ADMIN_HUB.test(p) },
     // v1.90 — tier narrows the role/flag-based visibility (crew/producer don't
@@ -91,6 +96,9 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     { href: '/admin/routine', label: 'Routine', show: isConsole },
     // v1.211 — คนที่ไม่ได้เป็นสวิตเชอร์แต่ต้องดูภาระงานไลฟ์ (coordinator/manager)
     { href: '/switcher', label: '🎛 งานไลฟ์ (สวิตเชอร์)', show: !!canSeeSwitcher && !isSwitcher },
+    // v1.215 — คนที่ไม่ใช่ทีมเสียงมาที่นี่เพื่อ 'ขอ' ไม่ใช่เพื่อทำ จึงอยู่ใน More
+    // แต่ต้องมี ไม่งั้นไม่มีใครหาเจอแล้วก็กลับไปทักในแชทเหมือนเดิม
+    { href: '/mix', label: '🎚 ขอมิกซ์เสียง', show: !!session && !isSound },
     // v1.131 — per-room/day availability view for Management (capacity planning).
     { href: '/admin/room-schedule', label: 'ห้อง/สตูดิโอ', show: isConsole },
     { href: '/profile/signature', label: 'ลายเซ็น', show: !!session },

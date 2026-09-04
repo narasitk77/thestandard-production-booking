@@ -1,0 +1,401 @@
+'use client'
+
+/**
+ * v1.215 — /mix · คิวงานมิกซ์เสียง
+ *
+ * ที่มา: งานมิกซ์ถูกสั่งกันในแชท ไม่มีที่ไหนตอบได้ว่าคิวยาวแค่ไหน ใครกำลังทำอะไร
+ * และงานไหนเลยกำหนดไปแล้ว
+ *
+ * **จงใจเป็นคิวจอง ไม่ใช่สมุดบันทึก** — /switcher เป็น log ให้คนทำงานมากรอกย้อนหลัง
+ * และมี 0 แถวตั้งแต่ปล่อยมา ที่นี่กลับด้าน: คนที่กรอกคือคนที่อยากได้ของ ไม่กรอก
+ * แล้วไม่ได้งาน ส่วนบันทึกว่าใครทำอะไรเกิดขึ้นเองเป็นผลพลอยได้
+ *
+ * สองอย่างที่ตั้งใจออกแบบ:
+ *  - **ทุกคนเห็นคิวทั้งหมด** ไม่ใช่เฉพาะของตัวเอง — คนขอต้องเห็นว่าคิวยาวแค่ไหน
+ *    ก่อนไปรับปากลูกค้าว่าจะได้วันไหน (และกฎ "เห็นเฉพาะของตัวเอง" คือคลาสบั๊ก
+ *    ที่ทำให้โปรดิวเซอร์ 59 คนมองไม่เห็นงานตัวเองใน v1.196)
+ *  - **ไม่มีช่อง "ด่วน"** มีแต่กำหนดส่ง — ถ้ามีช่องด่วนทุกคนจะติ๊กเหมือนกันหมด
+ *    แล้วมันก็ไม่ได้บอกอะไรอีกต่อไป
+ */
+
+import { useCallback, useEffect, useState } from 'react'
+import { AlertTriangle, Check, Clock, Loader2, Plus, Trash2, X } from 'lucide-react'
+import {
+  MIX_STATUS_LABEL, MIX_FLAG_LABEL, canClaimMixJob, canEditMixJob, canSetMixStatus,
+  type MixActor, type MixStatus, type MixFlag,
+} from '@/lib/mix-jobs'
+
+interface Job {
+  id: string
+  number: number
+  code: string
+  title: string
+  bookingId: string | null
+  bookingCode: string | null
+  requesterEmail: string
+  assigneeEmail: string | null
+  dueDate: string | null
+  status: string
+  deliveredAt: string | null
+  sourceLink: string | null
+  notes: string | null
+  flag: MixFlag
+}
+
+interface Me { email: string; isSound: boolean; canEditAll: boolean; canCreate: boolean }
+
+const SCOPES = [
+  { key: 'open', label: 'คิวปัจจุบัน' },
+  { key: 'mine', label: 'ของฉัน' },
+  { key: 'all', label: 'ทั้งหมด' },
+] as const
+
+const FLAG_STYLE: Record<Exclude<MixFlag, null>, string> = {
+  OVERDUE: 'bg-red-50 text-red-700 border-red-200',
+  DUE_SOON: 'bg-amber-50 text-amber-700 border-amber-200',
+  UNCLAIMED: 'bg-slate-50 text-slate-600 border-slate-200',
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  QUEUED: 'bg-slate-100 text-slate-700',
+  IN_PROGRESS: 'bg-blue-50 text-blue-700',
+  DONE: 'bg-green-50 text-green-700',
+  CANCELLED: 'bg-gray-100 text-gray-400 line-through',
+}
+
+export default function MixQueuePage() {
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [me, setMe] = useState<Me | null>(null)
+  const [scope, setScope] = useState<'open' | 'mine' | 'all'>('open')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+
+  const load = useCallback(async (s: string) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/mix?scope=${s}`)
+      // v1.210 บทเรียน: `res.ok ? json : []` ทำให้ error หน้าตาเหมือน "ไม่มีข้อมูล"
+      // แล้วคนเชื่อว่าคิวว่าง ทั้งที่จริงคือโหลดไม่ได้ — แยกสองอย่างนี้ให้ขาด
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `โหลดไม่สำเร็จ (${res.status})`)
+      }
+      const data = await res.json()
+      setJobs(data.jobs || [])
+      setMe(data.me || null)
+    } catch (e: any) {
+      setError(e?.message || 'โหลดคิวไม่สำเร็จ')
+      setJobs([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load(scope) }, [scope, load])
+
+  async function act(id: string, body: Record<string, unknown>) {
+    setBusy(id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/mix/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'บันทึกไม่สำเร็จ')
+      await load(scope)
+    } catch (e: any) {
+      setError(e?.message || 'บันทึกไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function remove(id: string, code: string) {
+    if (!confirm(`ลบคำขอ ${code}?`)) return
+    setBusy(id)
+    try {
+      const res = await fetch(`/api/mix/${id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'ลบไม่สำเร็จ')
+      await load(scope)
+    } catch (e: any) {
+      setError(e?.message || 'ลบไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const actor: MixActor | null = me
+    ? { email: me.email, isSound: me.isSound, canEditAll: me.canEditAll }
+    : null
+
+  const open = jobs.filter(j => j.status === 'QUEUED' || j.status === 'IN_PROGRESS')
+  const unclaimed = open.filter(j => !j.assigneeEmail).length
+  const overdue = jobs.filter(j => j.flag === 'OVERDUE').length
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6">
+      <header className="mb-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-xl font-medium text-gray-800">🎚 คิวงานมิกซ์เสียง</h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              ขอมิกซ์ที่นี่แทนการทักในแชท — ทีมเสียงจะเห็นคิวทั้งหมดในที่เดียว
+            </p>
+          </div>
+          <button
+            onClick={() => setShowForm(v => !v)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-md bg-gray-900 text-white hover:bg-gray-800"
+          >
+            {showForm ? <X size={15} /> : <Plus size={15} />}
+            {showForm ? 'ปิด' : 'ขอมิกซ์'}
+          </button>
+        </div>
+
+        {open.length > 0 && (
+          <div className="mt-3 flex gap-4 text-sm text-gray-600">
+            <span>กำลังอยู่ในคิว <b className="text-gray-900">{open.length}</b> งาน</span>
+            {unclaimed > 0 && <span>ยังไม่มีคนรับ <b className="text-slate-700">{unclaimed}</b></span>}
+            {overdue > 0 && <span className="text-red-600">เลยกำหนด <b>{overdue}</b></span>}
+          </div>
+        )}
+      </header>
+
+      {showForm && <RequestForm onDone={() => { setShowForm(false); load(scope) }} />}
+
+      <div className="flex gap-1 mb-3">
+        {SCOPES.map(s => (
+          <button
+            key={s.key}
+            onClick={() => setScope(s.key)}
+            className={`px-3 py-1.5 text-sm rounded-md ${
+              scope === s.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <div className="mb-3 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700 flex items-start gap-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="py-16 text-center text-gray-400">
+          <Loader2 className="animate-spin mx-auto mb-2" size={22} />
+          กำลังโหลดคิว…
+        </div>
+      ) : error ? (
+        /* โหลดไม่สำเร็จ = ไม่รู้ว่ามีอะไรอยู่ ไม่ใช่รู้ว่าไม่มีอะไร — ห้ามขึ้น empty
+         * state คู่กับ error เด็ดขาด เพราะคนอ่านจะสรุปว่าคิวว่างแล้วเดินจากไป
+         * (เคสจริง PP-26-039: งานมี 15 ตอน แต่หน้าขึ้นว่าไม่มี episode เพราะ
+         *  error ถูกกลืนเป็นลิสต์ว่าง) · เจอซ้ำตอนเปิดหน้านี้ครั้งแรกใน dev
+         * ที่ไม่มี DB: แบนเนอร์ error กับ "ยังไม่มีคำขอ" ขึ้นพร้อมกัน */
+        <div className="py-10 text-center text-sm text-gray-500">
+          ยังไม่รู้ว่าคิวมีอะไรบ้าง เพราะโหลดไม่สำเร็จ
+          <button onClick={() => load(scope)} className="gf-link ml-2">ลองใหม่</button>
+        </div>
+      ) : jobs.length === 0 ? (
+        <div className="py-16 text-center text-gray-400 text-sm">
+          {/* ข้อความต่างกันตาม scope — "ยังไม่มีใครขอ" กับ "คุณยังไม่มีงาน" คนละเรื่อง */}
+          {scope === 'mine' ? 'คุณยังไม่มีงานมิกซ์ในระบบ' : 'ยังไม่มีคำขอมิกซ์ในคิว'}
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {jobs.map(job => (
+            <li key={job.id} className="border border-gray-200 rounded-lg p-3 bg-white">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs text-gray-400">{job.code}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_STYLE[job.status] || ''}`}>
+                      {MIX_STATUS_LABEL[job.status as MixStatus] || job.status}
+                    </span>
+                    {job.flag && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded border ${FLAG_STYLE[job.flag]}`}>
+                        {MIX_FLAG_LABEL[job.flag]}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-sm font-medium text-gray-800 break-words">{job.title}</div>
+                  <div className="mt-1 text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {job.bookingCode && <span>งาน {job.bookingCode}</span>}
+                    {job.dueDate && (
+                      <span className="inline-flex items-center gap-1">
+                        <Clock size={11} /> ส่ง {job.dueDate.slice(0, 10)}
+                      </span>
+                    )}
+                    <span>ขอโดย {job.requesterEmail.split('@')[0]}</span>
+                    <span>
+                      {job.assigneeEmail ? `มิกซ์โดย ${job.assigneeEmail.split('@')[0]}` : 'ยังไม่มีคนรับ'}
+                    </span>
+                  </div>
+                  {job.sourceLink && (
+                    <a href={job.sourceLink} target="_blank" rel="noreferrer" className="gf-link text-xs mt-1 inline-block">
+                      ไฟล์ต้นทาง →
+                    </a>
+                  )}
+                  {job.notes && <p className="mt-1 text-xs text-gray-500 whitespace-pre-wrap">{job.notes}</p>}
+                </div>
+
+                {actor && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {busy === job.id && <Loader2 className="animate-spin text-gray-400" size={15} />}
+                    {canClaimMixJob(actor, job) && (
+                      <button
+                        onClick={() => act(job.id, { claim: true })}
+                        disabled={busy === job.id}
+                        className="px-2.5 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        รับงาน
+                      </button>
+                    )}
+                    {canSetMixStatus(actor, job, 'DONE') && job.status === 'IN_PROGRESS' && (
+                      <button
+                        onClick={() => act(job.id, { status: 'DONE' })}
+                        disabled={busy === job.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                      >
+                        <Check size={12} /> ส่งแล้ว
+                      </button>
+                    )}
+                    {canSetMixStatus(actor, job, 'CANCELLED') && (
+                      <button
+                        onClick={() => act(job.id, { status: 'CANCELLED' })}
+                        disabled={busy === job.id}
+                        className="px-2.5 py-1 text-xs rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+                      >
+                        ยกเลิก
+                      </button>
+                    )}
+                    {canEditMixJob(actor, job) && (
+                      <button
+                        onClick={() => remove(job.id, job.code)}
+                        disabled={busy === job.id}
+                        title="ลบคำขอ"
+                        className="p-1 text-gray-300 hover:text-red-500 disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** ฟอร์มตั้งคำขอ — สั้นที่สุดเท่าที่ยังบอกทีมเสียงได้ว่าไฟล์อยู่ไหน */
+function RequestForm({ onDone }: { onDone: () => void }) {
+  const [title, setTitle] = useState('')
+  const [bookingCode, setBookingCode] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [sourceLink, setSourceLink] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setErr(null)
+    try {
+      // หา booking จากรหัสที่พิมพ์ — ไม่บังคับ ปล่อยว่างได้ถ้าเป็นงานเดี่ยว
+      let bookingId: string | null = null
+      if (bookingCode.trim()) {
+        const r = await fetch(`/api/bookings?scope=all&q=${encodeURIComponent(bookingCode.trim())}&limit=5`)
+        if (r.ok) {
+          const d = await r.json()
+          const list = Array.isArray(d) ? d : (d.bookings || [])
+          const hit = list.find((b: any) => (b.bookingCode || '').toLowerCase() === bookingCode.trim().toLowerCase())
+          if (!hit) throw new Error(`ไม่พบใบจองรหัส ${bookingCode.trim()}`)
+          bookingId = hit.id
+        } else {
+          throw new Error('ค้นหาใบจองไม่สำเร็จ — ใส่ลิงก์ไฟล์แทนได้')
+        }
+      }
+      const res = await fetch('/api/mix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, bookingId, dueDate, sourceLink, notes }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'ตั้งคำขอไม่สำเร็จ')
+      onDone()
+    } catch (e: any) {
+      setErr(e?.message || 'ตั้งคำขอไม่สำเร็จ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mb-4 p-4 border border-gray-200 rounded-lg bg-gray-50 space-y-3">
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">งานที่จะมิกซ์ *</label>
+        <input
+          value={title} onChange={e => setTitle(e.target.value)} required maxLength={200}
+          placeholder="เช่น พอดแคสต์ EP.42 / มิกซ์เสียงสัมภาษณ์"
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+        />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">รหัสใบจอง (ถ้ามี)</label>
+          <input
+            value={bookingCode} onChange={e => setBookingCode(e.target.value)}
+            placeholder="AGN-260903-01"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md font-mono"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">อยากได้ภายใน</label>
+          <input
+            type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">ลิงก์ไฟล์ต้นทาง</label>
+        <input
+          value={sourceLink} onChange={e => setSourceLink(e.target.value)}
+          placeholder="https://drive.google.com/…"
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+        />
+        <p className="text-xs text-gray-400 mt-1">
+          ใส่รหัสใบจอง หรือลิงก์ อย่างน้อยหนึ่งอย่าง — ไม่งั้นทีมเสียงไม่รู้ว่าไฟล์อยู่ไหน
+        </p>
+      </div>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">โน้ตถึงทีมเสียง</label>
+        <textarea
+          value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+          placeholder="เช่น ตัดเสียงแอร์ออก, ต้องการไฟล์ WAV"
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+        />
+      </div>
+      {err && <p className="text-sm text-red-600">{err}</p>}
+      <button
+        type="submit" disabled={saving}
+        className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
+      >
+        {saving && <Loader2 className="animate-spin" size={14} />}
+        ส่งคำขอ
+      </button>
+    </form>
+  )
+}

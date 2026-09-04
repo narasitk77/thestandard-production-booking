@@ -61,11 +61,17 @@ export function tierHome(tier: Tier): string {
 // token-only and never trusts the session, /feedback scopes every query to the
 // session's own email server-side. Leaving them out bounced exactly the people
 // the feature exists for (crew tier) straight to /admin.
+// v1.215 — '/mix' เข้า ALWAYS ด้วยเหตุผลเดียวกัน แต่กว้างกว่า: คิวมิกซ์เปิดให้
+// ทุกคนที่ล็อกอิน 'ขอ' ได้ (คนขอคือโปรดิวเซอร์/คนตัด/ใครก็ได้ที่มีงาน) และทีมเสียง
+// เองส่วนใหญ่ก็อยู่ tier 'crew' ที่เปิดได้แค่ /upload — ไม่ใส่ตรงนี้ = คนที่หน้านี้
+// สร้างมาเพื่อเขาเข้าไม่ได้เลย · การกั้นตัวจริงคือปุ่มรับงาน (ทีมเสียงเท่านั้น)
+// ซึ่งบังคับใน src/lib/mix-jobs.ts + route ไม่ใช่ที่ระดับ tier
+//
 // v1.211 — '/switcher' เข้า ALWAYS ด้วยเหตุผลเดียวกับ '/ot': สวิตเชอร์อยู่ tier
 // 'crew' ซึ่งเปิดได้แค่ /upload ถ้าไม่ปล่อยตรงนี้ middleware จะเด้งคนที่ฟีเจอร์นี้
 // สร้างมาเพื่อเขาออกไปทุกครั้ง · การตัดสินตัวจริงอยู่ที่ src/app/switcher/layout.tsx
 // ซึ่งรู้จัก roster (แบบเดียวกับ /ot ที่ ot/layout.tsx เป็นคนตัดสิน)
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer', '/review', '/feedback', '/switcher']
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer', '/review', '/feedback', '/switcher', '/mix']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],

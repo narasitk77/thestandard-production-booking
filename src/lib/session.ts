@@ -248,6 +248,63 @@ export async function requireOTApprover() {
 // "เป็นสวิตเชอร์" อ่านจากสองแหล่งที่ระบบใช้จริงอยู่แล้ว: roster ที่ /admin/team
 // (TeamMember.role='switcher' — ตัวเดียวกับที่ assign งานถ่าย) หรือ position ที่
 // /admin/permissions ตั้งไว้ ทั้งคู่แก้ได้จากหน้าเว็บ ไม่ต้อง deploy เพิ่มคน
+// ─── v1.215 — สิทธิ์คิวงานมิกซ์เสียง (/mix) ────────────────────────────────────
+//
+// ต่างจาก getSwitcherAccess ตรงที่ **แยกสองฝั่ง** เพราะคิวนี้มีสองบทบาทจริง ๆ:
+//
+//   canOpen  — เห็นคิว + ตั้งคำขอได้ · เปิดกว้างให้ทุกคนที่ล็อกอิน เพราะคนขอมิกซ์
+//              คือโปรดิวเซอร์/คนตัด/ใครก็ได้ที่มีงาน ถ้ากั้นด้วย role ต้องมาไล่เพิ่ม
+//              คนทีละคน แล้วคนที่เพิ่มไม่ทันก็กลับไปทักในไลน์เหมือนเดิม = คิวว่าง
+//   isSound  — **รับงาน/เปลี่ยนสถานะได้** · เฉพาะทีมเสียงจริง ๆ ตัวเลขภาระงานถึงจะ
+//              เชื่อได้ ถ้าใครตั้งตัวเองเป็นคนมิกซ์ได้ รายงานก็ไม่มีความหมาย
+//
+// "เป็นทีมเสียง" อ่านจากสองแหล่งเดียวกับสวิตเชอร์ (roster ที่ /admin/team และ
+// position ที่ /admin/permissions) — แก้ได้จากหน้าเว็บ ไม่ต้อง deploy เพิ่มคน
+// ณ 2026-09-03 มี TeamMember.role='sound' 4 คน และ position ฝั่งเสียง 4 คน
+// (Senior Sound Engineer / Sound Engineer / Sound Recorder ×2)
+//
+// ⚠️ 'recorder' ก็นับเป็นทีมเสียงในที่นี้ ทั้งที่คนอัดในกองกับคนมิกซ์คนละงาน —
+// เพราะกั้นแคบกว่านี้แล้วผิดจะเจ็บกว่า (คนมิกซ์เปิดคิวตัวเองไม่ได้) ส่วนผิดทางนี้
+// แค่มีคนเห็นปุ่มรับงานที่เขาจะไม่กด · ถ้าวันหนึ่งอยากแยกจริง ให้เพิ่ม role
+// 'mixer' ใน roster แล้วแคบที่บรรทัดเดียวข้างล่าง
+export interface SoundAccess {
+  isSound: boolean
+  canOpen: boolean
+  canEditAll: boolean
+}
+
+export async function getSoundAccess(
+  email: string | null | undefined,
+  role?: string | null,
+): Promise<SoundAccess> {
+  const deny: SoundAccess = { isSound: false, canOpen: false, canEditAll: false }
+  if (!email) return deny
+  const lower = email.toLowerCase()
+  try {
+    const [user, member] = await Promise.all([
+      prisma.user.findUnique({ where: { email: lower }, select: { role: true, position: true, active: true } }),
+      prisma.teamMember.findUnique({ where: { email: lower }, select: { role: true, active: true } }),
+    ])
+    if (user && user.active === false) return deny
+    const effectiveRole = user?.role ?? role ?? null
+    const position = (user?.position || '').toLowerCase()
+    const isSound =
+      (!!member && member.active && member.role === 'sound') ||
+      position.includes('sound') || position.includes('audio') || position.includes('mix')
+    return {
+      isSound,
+      // ล็อกอินได้ = ตั้งคำขอได้ (ดูเหตุผลในคอมเมนต์ข้างบน)
+      canOpen: true,
+      canEditAll: effectiveRole === 'ADMIN' || effectiveRole === 'MANAGER',
+    }
+  } catch {
+    // DB ล่ม = ไม่เดาให้สิทธิ์ทีมเสียง แต่ยังเปิดหน้าให้ดูได้ และ ADMIN ที่รู้จาก
+    // โทเคนยังซ่อมข้อมูลได้ (เหตุผลเดียวกับ getSwitcherAccess)
+    const isAdmin = role === 'ADMIN'
+    return { isSound: isAdmin, canOpen: true, canEditAll: isAdmin }
+  }
+}
+
 export interface SwitcherAccess {
   isSwitcher: boolean
   canOpen: boolean
