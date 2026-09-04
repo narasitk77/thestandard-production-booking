@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   MIX_STATUSES, isMixStatus, formatMixNumber, canTransition,
   canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isAssignableTo,
+  canCloseMixJob, normalizeHttpLink,
   mixFlag, deliveredOnTime, validateMixJob, compareMixQueue,
   type MixActor,
 } from '../mix-jobs'
@@ -213,4 +214,29 @@ test('แจกได้เฉพาะคนที่อยู่ในที�
 test('การหยิบงานเองยังอยู่ — กันคิวค้างทั้งคิวตอน coordinator ลาหยุด', () => {
   assert.equal(canClaimMixJob(engineer, queued), true)
   assert.equal(canClaimMixJob(coordinator, queued), true)
+})
+
+
+/* ───────── v1.217 — ปิดงานไม่ได้ถ้ายังไม่บอกว่าไฟล์อยู่ไหน ───────── */
+
+test('ลิงก์ที่ยอมรับ: http/https เท่านั้น — javascript:/file: ต้องตก', () => {
+  assert.equal(normalizeHttpLink('https://drive.google.com/x'), 'https://drive.google.com/x')
+  assert.equal(normalizeHttpLink('  http://a.co/b  '), 'http://a.co/b', 'ช่องว่างหัวท้ายต้องถูกตัด')
+  for (const bad of ['javascript:alert(1)', 'file:///etc/passwd', 'drive.google.com/x', '', null, 42]) {
+    assert.equal(normalizeHttpLink(bad), null, `${String(bad)} ต้องไม่ผ่าน`)
+  }
+})
+
+test('ปิดงานได้เมื่อมีลิงก์ — จากที่ส่งมาใหม่ หรือที่เคยแปะไว้แล้ว', () => {
+  assert.equal(canCloseMixJob({}, 'https://drive.google.com/mixed'), true, 'ส่งลิงก์มาพร้อมกับการปิด')
+  assert.equal(canCloseMixJob({ deliveryLink: 'https://drive.google.com/mixed' }), true,
+    'แปะลิงก์ไว้ก่อนแล้วค่อยกดปิดทีหลังต้องได้ ไม่บังคับทำสองอย่างในคลิกเดียว')
+})
+
+test('ปิดงานไม่ได้เมื่อไม่มีลิงก์ หรือลิงก์ใช้ไม่ได้ — นี่คือจุดที่วงจรจะไม่ปิด', () => {
+  assert.equal(canCloseMixJob({}), false)
+  assert.equal(canCloseMixJob({ deliveryLink: null }, ''), false)
+  assert.equal(canCloseMixJob({ deliveryLink: 'ไม่ใช่ลิงก์' }), false,
+    'ค่าที่เคยเก็บไว้แต่ใช้ไม่ได้ ต้องไม่ถือว่าผ่าน')
+  assert.equal(canCloseMixJob({}, 'javascript:alert(1)'), false)
 })

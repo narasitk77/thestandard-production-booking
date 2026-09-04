@@ -57,6 +57,7 @@ export interface MixNotifyJob {
   dueDate: Date | string | null
   requesterEmail: string
   sourceLink: string | null
+  deliveryLink?: string | null
   notes: string | null
 }
 
@@ -137,6 +138,47 @@ export async function notifyMixAssigned(
     return { sent: true, to }
   } catch (e: any) {
     console.error('[mix-notify] assigned failed:', e?.message || e)
+    return { sent: false, to, reason: e?.message || 'ส่งไม่สำเร็จ' }
+  }
+}
+
+
+/**
+ * v1.217 — ส่งงานแล้ว → **คนขอ** (+ coordinator จะได้เห็นว่าคิวเดินจบ)
+ *
+ * นี่คือขาที่หายไปตั้งแต่ v1.215: คนขอไม่เคยรู้ว่างานเสร็จ ต้องกลับมาเปิดหน้าเอง
+ * หรือไปถามในแชท · เมลฉบับนี้มีลิงก์ไฟล์อยู่ในตัว จึงเป็นจุดที่วงจรปิดจริง —
+ * คนขอไม่ต้องถามใครอีก
+ */
+export async function notifyMixDelivered(
+  job: MixNotifyJob,
+  deliveryLink: string,
+  by: string,
+): Promise<MixNotifyResult> {
+  const to = dropSender(
+    [job.requesterEmail, ...soundCoordinatorEmails()],
+    process.env.SMTP_USER || process.env.EMAIL_FROM,
+  )
+  if (to.length === 0) return { sent: false, to: [], reason: 'ไม่มีผู้รับที่ส่งถึงได้' }
+  if (!isEmailConfigured()) return { sent: false, to, reason: 'ยังไม่ได้ตั้งค่าเมล' }
+  try {
+    await sendEmail({
+      to: to.join(','),
+      subject: `[คิวมิกซ์] ${formatMixNumber(job.number)} ส่งงานแล้ว — ${job.title}`,
+      text: [
+        `${by} มิกซ์เสร็จแล้ว`,
+        '',
+        `${formatMixNumber(job.number)} — ${job.title}`,
+        job.bookingCode ? `ใบจอง: ${job.bookingCode}` : null,
+        '',
+        `ไฟล์ที่มิกซ์แล้ว: ${deliveryLink}`,
+        '',
+        appUrl() ? `เปิดคิว: ${appUrl()}/mix` : null,
+      ].filter(Boolean).join('\n'),
+    })
+    return { sent: true, to }
+  } catch (e: any) {
+    console.error('[mix-notify] delivered failed:', e?.message || e)
     return { sent: false, to, reason: e?.message || 'ส่งไม่สำเร็จ' }
   }
 }

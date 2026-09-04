@@ -30,6 +30,7 @@ export function isMixStatus(v: unknown): v is MixStatus {
 
 export interface MixJobLike {
   status?: string | null
+  deliveryLink?: string | null
   requesterEmail?: string | null
   assigneeEmail?: string | null
   dueDate?: Date | string | null
@@ -141,6 +142,38 @@ export function isAssignableTo(email: string, soundRoster: readonly string[]): b
   const lower = email.trim().toLowerCase()
   if (!lower) return false
   return soundRoster.some(r => r.trim().toLowerCase() === lower)
+}
+
+/**
+ * v1.217 — ลิงก์ที่ยอมรับได้: http/https เท่านั้น
+ *
+ * แยกออกมาเพราะใช้ทั้งขาเข้า (sourceLink) และขาออก (deliveryLink) และการปล่อยให้
+ * `javascript:` หรือ `file://` ผ่านคือช่องที่คนคลิกจากในระบบแล้วเจอของที่ไม่คาดคิด
+ */
+export function normalizeHttpLink(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  const s = raw.trim()
+  try {
+    const u = new URL(s)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    return s
+  } catch {
+    return null
+  }
+}
+
+/**
+ * v1.217 — ปิดงานเป็น DONE ได้ก็ต่อเมื่อ **บอกแล้วว่าไฟล์อยู่ไหน**
+ *
+ * ไม่ใช่การขัดขวาง: คิวนี้มีไว้ให้คนขอเลิกเดินไปถามในแชท ถ้ากด "ส่งแล้ว" ได้โดย
+ * ไม่มีลิงก์ คนขอจะได้เมลว่าเสร็จแล้วแต่ไม่รู้ว่าไฟล์อยู่ไหน แล้วก็กลับไปถามอยู่ดี
+ * = วงจรไม่ปิด รูปเดียวกับกฎ "ต้องมีใบจองหรือ sourceLink อย่างน้อยหนึ่ง" ขาเข้า
+ *
+ * ราคาที่ต้องรู้: ถ้าคนไม่มีลิงก์จริง ๆ เขาอาจเลี่ยงด้วยการไม่กดปิดงานเลย ซึ่งแย่กว่า
+ * — ถ้าวันหนึ่งคิวเต็มไปด้วยงานที่ทำเสร็จแล้วแต่ค้างสถานะ ให้ผ่อนกฎนี้
+ */
+export function canCloseMixJob(job: MixJobLike, incomingLink?: unknown): boolean {
+  return !!(normalizeHttpLink(incomingLink) || normalizeHttpLink(job.deliveryLink))
 }
 
 /** เปลี่ยนสถานะได้ไหม — คนขอ "ยกเลิกงานตัวเอง" ได้ นอกนั้นเป็นเรื่องของทีมเสียง */

@@ -10,10 +10,11 @@ import { prisma } from '@/lib/db'
 import { getSession, getSoundAccess } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import {
-  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isMixStatus,
-  isAssignableTo, validateMixJob, formatMixNumber, type MixActor, type MixStatus,
+  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, canCloseMixJob,
+  isMixStatus, isAssignableTo, normalizeHttpLink, validateMixJob, formatMixNumber,
+  type MixActor, type MixStatus,
 } from '@/lib/mix-jobs'
-import { notifyMixAssigned } from '@/lib/mix-notify'
+import { notifyMixAssigned, notifyMixDelivered } from '@/lib/mix-notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -84,12 +85,37 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       changes.assignedTo = target
     }
 
+    // ── v1.217 ลิงก์ไฟล์ที่มิกซ์เสร็จ (ขาออก) ────────────────────────────────
+    // รับแยกจาก status เพื่อให้ "แปะลิงก์ไว้ก่อน ค่อยกดปิดทีหลัง" ทำได้ ไม่บังคับ
+    // ให้ทำสองอย่างพร้อมกันในคลิกเดียว
+    let deliveryLinkIn: string | null = null
+    if ('deliveryLink' in body) {
+      if (!canEditMixJob(actor, existing)) {
+        return NextResponse.json({ error: 'ใส่ลิงก์ได้เฉพาะคนที่รับงานนี้ไว้' }, { status: 403 })
+      }
+      const link = normalizeHttpLink(body.deliveryLink)
+      if (body.deliveryLink && !link) {
+        return NextResponse.json({ error: 'ลิงก์ไฟล์ต้องขึ้นต้นด้วย http:// หรือ https://' }, { status: 400 })
+      }
+      deliveryLinkIn = link
+      data.deliveryLink = link
+      changes.deliveryLink = !!link
+    }
+
     // ── เปลี่ยนสถานะ ────────────────────────────────────────────────────────
     if (typeof body.status === 'string' && body.status !== existing.status) {
       if (!isMixStatus(body.status)) return NextResponse.json({ error: 'สถานะไม่ถูกต้อง' }, { status: 400 })
       const next = body.status as MixStatus
       if (!canSetMixStatus(actor, existing, next)) {
         return NextResponse.json({ error: 'เปลี่ยนสถานะนี้ไม่ได้' }, { status: 403 })
+      }
+      // v1.217 — ปิดงานได้ต่อเมื่อบอกแล้วว่าไฟล์อยู่ไหน · ข้อความบอกตรง ๆ ว่าต้องทำ
+      // อะไร ไม่ใช่แค่ปฏิเสธ เพราะคนกดปุ่มนี้กำลังจะจบงาน ไม่ได้กำลังทำผิด
+      if (next === 'DONE' && !canCloseMixJob(existing, deliveryLinkIn)) {
+        return NextResponse.json(
+          { error: 'ใส่ลิงก์ไฟล์ที่มิกซ์เสร็จก่อนปิดงาน — คนขอจะได้รู้ว่าไปหยิบที่ไหน ไม่ต้องมาถามซ้ำ' },
+          { status: 400 },
+        )
       }
       data.status = next
       // deliveredAt ผูกกับ DONE เสมอ — ตั้งเองแยกไม่ได้ ไม่งั้นวันที่ส่งกับสถานะ
@@ -136,6 +162,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (assignedTo) {
       notified = await notifyMixAssigned(job, assignedTo, session.email)
       if (!notified.sent) console.warn(`[mix] แจ้งคนที่ถูกแจกไม่ออก: ${notified.reason}`)
+    }
+    // v1.217 — ขาที่หายไปตั้งแต่ v1.215: คนขอไม่เคยรู้ว่างานเสร็จ · เมลฉบับนี้มี
+    // ลิงก์ไฟล์อยู่ในตัว จึงเป็นจุดที่วงจรปิดจริง
+    if (data.status === 'DONE' && job.deliveryLink) {
+      notified = await notifyMixDelivered(job, job.deliveryLink, session.email)
+      if (!notified.sent) console.warn(`[mix] แจ้งส่งงานไม่ออก: ${notified.reason}`)
     }
 
     logAudit({

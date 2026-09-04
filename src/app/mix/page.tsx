@@ -42,6 +42,7 @@ interface Job {
   sourceLink: string | null
   notes: string | null
   assignedByEmail: string | null
+  deliveryLink: string | null
   flag: MixFlag
 }
 
@@ -118,6 +119,27 @@ export default function MixQueuePage() {
     } finally {
       setBusy(null)
     }
+  }
+
+  /**
+   * v1.217 — ปิดงานต้องมาพร้อมลิงก์ไฟล์เสมอ
+   *
+   * ถามที่นี่แทนที่จะปล่อยให้เซิร์ฟเวอร์ปฏิเสธแล้วค่อยบอก: คนกดปุ่มนี้กำลังจะจบงาน
+   * การเจอ error หลังกดคือการทำให้เขารู้สึกว่าทำผิด ทั้งที่แค่ยังไม่ได้บอกที่อยู่ไฟล์
+   * (เซิร์ฟเวอร์ยังบังคับซ้ำอยู่ — ที่นี่คือความสุภาพ ไม่ใช่ด่านความปลอดภัย)
+   */
+  async function finish(job: Job) {
+    const existing = job.deliveryLink || ''
+    const link = window.prompt(
+      'วางลิงก์ไฟล์ที่มิกซ์เสร็จ (โฟลเดอร์ไดรฟ์ก็ได้)\nคนขอจะได้เมลพร้อมลิงก์นี้ทันที',
+      existing,
+    )
+    if (link === null) return          // กด Cancel = ไม่ทำอะไร
+    if (!link.trim()) {
+      setError('ต้องมีลิงก์ไฟล์ก่อนปิดงาน — ไม่งั้นคนขอไม่รู้ว่าไปหยิบที่ไหน')
+      return
+    }
+    await act(job.id, { deliveryLink: link.trim(), status: 'DONE' })
   }
 
   async function remove(id: string, code: string) {
@@ -246,11 +268,18 @@ export default function MixQueuePage() {
                         : 'รอ coordinator แจกงาน'}
                     </span>
                   </div>
-                  {job.sourceLink && (
-                    <a href={job.sourceLink} target="_blank" rel="noreferrer" className="gf-link text-xs mt-1 inline-block">
-                      ไฟล์ต้นทาง →
-                    </a>
-                  )}
+                  <div className="flex gap-3 mt-1">
+                    {job.sourceLink && (
+                      <a href={job.sourceLink} target="_blank" rel="noreferrer" className="gf-link text-xs">
+                        ไฟล์ต้นทาง →
+                      </a>
+                    )}
+                    {job.deliveryLink && (
+                      <a href={job.deliveryLink} target="_blank" rel="noreferrer" className="gf-link text-xs font-medium text-green-700">
+                        ไฟล์ที่มิกซ์แล้ว →
+                      </a>
+                    )}
+                  </div>
                   {job.notes && <p className="mt-1 text-xs text-gray-500 whitespace-pre-wrap">{job.notes}</p>}
                 </div>
 
@@ -288,7 +317,7 @@ export default function MixQueuePage() {
                     )}
                     {canSetMixStatus(actor, job, 'DONE') && job.status === 'IN_PROGRESS' && (
                       <button
-                        onClick={() => act(job.id, { status: 'DONE' })}
+                        onClick={() => finish(job)}
                         disabled={busy === job.id}
                         className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
                       >
