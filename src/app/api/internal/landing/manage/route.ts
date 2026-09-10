@@ -4,6 +4,7 @@ import { manageLandingFolders, pruneLandingToToday, ensureLandingForBooking } fr
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 import { recordHeartbeat } from '@/lib/heartbeat'
+import { notifyChat } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -92,14 +93,60 @@ export async function GET(request: NextRequest) {
     const keepNames = url.searchParams.getAll('keep').map(s => s.trim()).filter(Boolean)
     try {
       const r = await pruneLandingToToday({ dryRun, keepNames })
-      if (!dryRun && (r.trashed > 0 || r.errors > 0)) {
+      const stale = [...r.keptWithFiles, ...r.keptManual]
+      if (!dryRun && (r.trashed > 0 || r.errors > 0 || stale.length > 0)) {
+        // v1.220 — also log a run that trashed NOTHING but is sitting on a
+        // backlog. The old condition (trashed || errors) wrote no row at all on
+        // exactly the days that needed explaining: on 2026-09-09 the drive held
+        // 10 folders neither pass is allowed to touch and there was no trace of
+        // it anywhere.
         logAudit({
           actorEmail: allowed.actor || 'landing-prune',
           action: 'drive.prune_landing_to_today',
           entityType: 'Drive', entityId: 'production-team',
-          changes: { trashed: r.trashed, keptToday: r.keptToday, keptWithFiles: r.keptWithFiles.length, keptManual: r.keptManual.length, keepNames, errors: r.errors },
+          changes: {
+            trashed: r.trashed, keptToday: r.keptToday,
+            keptWithFiles: r.keptWithFiles.length, keptManual: r.keptManual.length,
+            keptFuture: r.keptFuture.length, staleNames: stale.slice(0, 40),
+            keepNames, errors: r.errors,
+          },
         })
       }
+      // v1.220 — say the backlog out loud. keptWithFiles / keptManual are the
+      // two classes BOTH passes are forbidden to trash (footage still inside,
+      // or no Production ID to match), so they accumulate silently forever:
+      // their names only ever existed in this HTTP response body, the digest
+      // email printed them as a bare count, and no UI reads them. That is why
+      // 10 folders — the oldest 16 days — piled up with nobody told.
+      // 'footage' is the never-scope-filtered category, so this reaches Discord
+      // and rides the v1.209 dual-send to Lark.
+      if (!dryRun && allowed.isWorker && stale.length > 0) {
+        const show = stale.slice(0, 12).map(n => `• ${n}`)
+        if (stale.length > show.length) show.push(`• …อีก ${stale.length - show.length} รายการ`)
+        const text = [
+          `🗂️ โฟลเดอร์ค้างในไดรฟ์ Production Team — ${stale.length} รายการ (ระบบลบเองไม่ได้)`,
+          ...show,
+          '',
+          // NOT simply "go press merge". On 2026-09-09 all five of these had
+          // ALREADY merged: video-merge leaves a file in landing when the box
+          // holds a twin with the same name AND size (video-merge.ts mirrorMove
+          // → stats.dup++, "already in box — leave in landing"). The leftover
+          // makes the folder non-empty, which makes it immortal to both cleanup
+          // passes, forever. Pressing merge again is a no-op, so telling people
+          // to press it is what keeps the loop closed.
+          r.keptWithFiles.length ? `· ${r.keptWithFiles.length} โฟลเดอร์ยังมีไฟล์ = ยังไม่ได้ merge **หรือ** เป็นไฟล์ซ้ำที่ merge ไม่ยอมย้าย (เช็ค 🎬 dry-run ก่อน: ถ้า moved=0 dup>0 คือซ้ำ ลบตัวใน landing ได้)` : '',
+          r.keptManual.length ? `· ${r.keptManual.length} โฟลเดอร์ไม่มี Production ID = จับคู่กับใบจองไม่ได้ ต้องเปลี่ยนชื่อ/ย้ายด้วยมือ` : '',
+          `(วันนี้เก็บไว้ ${r.keptToday} · ลบว่างไป ${r.trashed})`,
+        ].filter(Boolean).join('\n')
+        try { await notifyChat(text, 'footage') }
+        catch (e: any) { console.error('[landing] stale-folder notify failed (non-fatal):', e?.message || e) }
+      }
+      // v1.220 — its OWN key, never 'landing'. The evening sweep and this noon
+      // prune are different jobs with different failure modes; ticking
+      // 'landing' here would let a healthy noon run hide a dead 19:00 worker,
+      // which is precisely what the v1.172 note warns against. A separate key
+      // gives the noon pass a dead-man of its own without that risk.
+      if (!dryRun && allowed.isWorker) await recordHeartbeat('landing-prune', r.today)
       return NextResponse.json(r)
     } catch (e: any) {
       console.error('GET /api/internal/landing/manage prune error:', e)

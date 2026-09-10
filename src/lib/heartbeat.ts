@@ -80,6 +80,11 @@ export function workerSpecs(): WorkerSpec[] {
       intervalMs: 24 * HOUR },
     { key: 'landing', label: 'Landing drop folders', enabled: enabledUnlessOff(process.env.LANDING_WORKER_ENABLED),
       intervalMs: 24 * HOUR },
+    // v1.220 — the noon prune, brought back in-container from the Hermes cron
+    // that ran on a laptop (and silently 401'd for 13 days after a secret
+    // rotation). Separate key from 'landing' on purpose: see the route comment.
+    { key: 'landing-prune', label: 'Landing prune (noon)', enabled: enabledUnlessOff(process.env.LANDING_PRUNE_ENABLED),
+      intervalMs: 24 * HOUR },
     { key: 'shoot-review', label: 'Post-shoot review invites', enabled: enabled(process.env.SHOOT_REVIEW_ENABLED),
       intervalMs: 24 * HOUR },
     // v1.212 — daily archive of the whole database to Lark. Declared here so the

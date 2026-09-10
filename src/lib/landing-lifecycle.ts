@@ -32,6 +32,7 @@ import {
 } from './outlet-folders'
 import { rememberDriveLinks } from './drive-links'
 import { computeTypeDroppedId } from './id-migration'
+import { landingMayBeTrashed } from './reconciler/guards'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
 const SHOOT_STUB_RE = /^_SHOOT\b.*\.txt$/i
@@ -231,6 +232,7 @@ export interface LandingPruneResult {
   keptWithFiles: string[]   // non-today shoot folders that HOLD footage — kept, reported
   keptManual: string[]      // folders with no Production ID in the name — kept, reported
   keptByName: string[]      // matched a keepNames entry
+  keptFuture: string[]      // shoot is in the FUTURE — tomorrow's drop zone, never trash
   errors: number
   actions: string[]
 }
@@ -250,7 +252,7 @@ export async function pruneLandingToToday(
   const today = bangkokDayRange(0)
   const base: LandingPruneResult = {
     skipped: false, dryRun, today: today.start.toISOString().slice(0, 10),
-    trashed: 0, keptToday: 0, keptWithFiles: [], keptManual: [], keptByName: [], errors: 0, actions: [],
+    trashed: 0, keptToday: 0, keptWithFiles: [], keptManual: [], keptByName: [], keptFuture: [], errors: 0, actions: [],
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
@@ -275,6 +277,21 @@ export async function pruneLandingToToday(
     try { empty = !(await hasRealFiles(f.id)) }
     catch (e: any) { base.errors++; base.actions.push(`ERROR check "${f.name}": ${e?.message || e}`); continue }
     if (!empty) { base.keptWithFiles.push(f.name); continue }
+    // v1.220 — PAST-ONLY, server-side. v1 asked only "is it today?", which
+    // answers YES for TOMORROW's folder — the one manageLandingFolders creates
+    // at 19:00 the night before. A prune running after 19:00 therefore deleted
+    // the drop zone the crew was about to use (this happened on 2026-08-18).
+    // The only guard was client-side, in the Hermes python script, which is
+    // exactly the dependency we are removing — so enforce it here instead,
+    // with the shared predicate that was already written and unit-tested but
+    // never imported (src/lib/reconciler/guards.ts).
+    //
+    // A folder with NO booking row is still trashed when empty: only
+    // manageLandingFolders creates these, and it creates them solely for
+    // bookings that exist, so an orphan can never be tomorrow's drop zone.
+    if (range && !landingMayBeTrashed({ lastShootDay: range.end, today: today.start, hasFiles: false })) {
+      base.keptFuture.push(f.name); continue
+    }
     base.actions.push(`trash "${f.name}" (${code}${shootDate ? ` · shoot ${shootDate.toISOString().slice(0, 10)}` : ' · no booking'})`)
     if (!dryRun) {
       try { await trashDriveItem(f.id) } catch (e: any) { base.errors++; base.actions.push(`  ERROR trash: ${e?.message || e}`); continue }

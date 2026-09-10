@@ -202,6 +202,12 @@ services:
       # docs/landing-folder-policy.md. Set LANDING_WORKER_ENABLED=0 to disable.
       LANDING_WORKER_ENABLED: ${LANDING_WORKER_ENABLED:-1}
       LANDING_WORKER_HOUR: ${LANDING_WORKER_HOUR:-19}
+      # v1.220 — the NOON prune (prune=today), moved in from a Hermes cron on a
+      # laptop. Clears empty orphan folders the 19:00 sweep refuses to touch
+      # (no matching Booking row / inside the grace window). Trashes EMPTY only,
+      # and past-only is enforced server-side. LANDING_PRUNE_ENABLED=0 to stop it.
+      LANDING_PRUNE_ENABLED: ${LANDING_PRUNE_ENABLED:-1}
+      LANDING_PRUNE_HOUR: ${LANDING_PRUNE_HOUR:-12}
       LANDING_KEEP_PAST_DAYS: ${LANDING_KEEP_PAST_DAYS:-3}
       LANDING_REPORT_EMAIL: ${LANDING_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
       # LANDING_MANAGE_URL: ${LANDING_MANAGE_URL:-}  # override only if app isn't on 127.0.0.1:3000
@@ -608,6 +614,8 @@ services:
       VIDEO_MERGE_WORKER_ENABLED: ${VIDEO_MERGE_WORKER_ENABLED:-1}
       FOLDER_INTEGRITY_WORKER_ENABLED: ${FOLDER_INTEGRITY_WORKER_ENABLED:-1}
       LANDING_WORKER_ENABLED: ${LANDING_WORKER_ENABLED:-1}
+      LANDING_PRUNE_ENABLED: ${LANDING_PRUNE_ENABLED:-1}
+      LANDING_PRUNE_HOUR: ${LANDING_PRUNE_HOUR:-12}
       SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
       FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
       FOOTAGE_WORKER_ENABLED: ${FOOTAGE_WORKER_ENABLED:-0}

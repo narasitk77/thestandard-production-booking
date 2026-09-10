@@ -28,6 +28,31 @@ folder never disappears out from under crew.
 - **Worker**: `scripts/landing-worker.js` (supervised, ON by default), nightly at
   `LANDING_WORKER_HOUR` (default 19:00 BKK). Emails a digest to
   `LANDING_REPORT_EMAIL` (default `FEEDBACK_EMAIL`) on any night it changes something.
+- **Noon prune** (v1.220, same worker, second timer): `LANDING_PRUNE_HOUR` (default
+  12:00 BKK) calls `?prune=today`. It clears empty folders the nightly sweep
+  refuses — ones whose Production ID no longer matches a Booking row, or whose
+  shoot is still inside the grace window. On 2026-09-09 that was 14 folders the
+  nightly had left behind, so it earns its slot. Both passes only ever trash
+  EMPTY folders, so they cannot fight. Own heartbeat key `landing-prune` — never
+  `landing`, so a healthy noon run cannot hide a dead evening sweep.
+  This used to be a Hermes cron job on a laptop; prod rotated `NEXTAUTH_SECRET`
+  on 2026-08-25, the laptop kept the old copy, and it 401'd for 13 runs before
+  anyone noticed. In-container it resolves the secret from the same process env
+  as the nightly, so it cannot drift.
+
+### What neither pass can ever clean
+
+A folder is **immortal** to both passes if it holds any real file, or if its name
+has no trailing `(CODE)`. That is deliberate — but it means a single leftover file
+pins a folder forever. The usual cause is not an unfinished upload: `video-merge`
+leaves a landing file in place when the box already holds a twin with the same
+name AND size (`mirrorMove` → `stats.dup++`, "already in box — leave in landing").
+The folder is then non-empty forever and pressing 🎬 merge again is a no-op.
+To tell the two apart: `GET /api/internal/video-merge/run?dryRun=1&code=<ID>` —
+`moved=0` with `dup>0` means the landing copy is redundant and a human may trash
+it; `moved>0` means there really is unmerged footage, so merge first.
+Since v1.220 the prune reports these by NAME to Discord/Lark via
+`notifyChat(…, 'footage')` instead of leaving them as a silent count.
 - **Logic**: `src/lib/landing-lifecycle.ts` → `manageLandingFolders()`.
 - **Endpoint**: `GET /api/internal/landing/manage` (ADMIN session or shared secret).
   - `?dryRun=1` (default) — plan only, no writes.
@@ -63,7 +88,9 @@ await fetch('/api/internal/landing/manage?dryRun=0&offset=2', { credentials: 'in
 |---|---|---|
 | `LANDING_WORKER_ENABLED` | `1` | on/off |
 | `LANDING_WORKER_HOUR` | `19` | nightly run hour, BKK |
-| `LANDING_KEEP_PAST_DAYS` | `3` | upload-grace days before an empty past folder is cleaned |
+| `LANDING_KEEP_PAST_DAYS` | `3` | upload-grace days before an empty past folder is cleaned — **prod runs `1`**; the `3` here is only the compose default, and a compose default is not the stack value |
+| `LANDING_PRUNE_ENABLED` | `1` | on/off for the noon prune (v1.220) |
+| `LANDING_PRUNE_HOUR` | `12` | noon prune hour, BKK |
 | `LANDING_REPORT_EMAIL` | `FEEDBACK_EMAIL` | nightly digest recipient |
 
 ## Related
