@@ -134,7 +134,18 @@ export async function GET(request: NextRequest) {
           // makes the folder non-empty, which makes it immortal to both cleanup
           // passes, forever. Pressing merge again is a no-op, so telling people
           // to press it is what keeps the loop closed.
-          r.keptWithFiles.length ? `· ${r.keptWithFiles.length} โฟลเดอร์ยังมีไฟล์ = ยังไม่ได้ merge **หรือ** เป็นไฟล์ซ้ำที่ merge ไม่ยอมย้าย (เช็ค 🎬 dry-run ก่อน: ถ้า moved=0 dup>0 คือซ้ำ ลบตัวใน landing ได้)` : '',
+          //
+          // v1.220.1 — and do NOT tell anyone that dup>0 means "safe to delete".
+          // v1.220 shipped exactly that sentence, and it is wrong in a way that
+          // destroys footage: dup is decided on name+size ONLY. In
+          // TSS-WYS-260824-01 all 585 files matched on name+size, yet
+          // DSC04216.ARW differed in CONTENT — the landing copy is the real Sony
+          // RAW (TIFF 49492A00) and the BOX copy is a JPEG-headed corrupt file,
+          // and that RAW's md5 exists nowhere else. `moved=0 dup=585` is exactly
+          // what that folder returns, so the old wording pointed a human
+          // straight at the only good copy. Name+size is not identity; only a
+          // checksum is. The app's service account does return md5Checksum.
+          r.keptWithFiles.length ? `· ${r.keptWithFiles.length} โฟลเดอร์ยังมีไฟล์ = ยังไม่ได้ merge **หรือ** เป็นไฟล์ซ้ำที่ merge ไม่ยอมย้าย · ⚠️ dup>0 ไม่ได้แปลว่าลบได้ (เทียบแค่ชื่อ+ขนาด) เคยเจอไฟล์ชื่อ/ขนาดตรงกันแต่ตัวใน box เสีย — ต้องเทียบ md5 ก่อนลบเสมอ` : '',
           r.keptManual.length ? `· ${r.keptManual.length} โฟลเดอร์ไม่มี Production ID = จับคู่กับใบจองไม่ได้ ต้องเปลี่ยนชื่อ/ย้ายด้วยมือ` : '',
           `(วันนี้เก็บไว้ ${r.keptToday} · ลบว่างไป ${r.trashed})`,
         ].filter(Boolean).join('\n')
