@@ -87,6 +87,10 @@ export function workerSpecs(): WorkerSpec[] {
       intervalMs: 24 * HOUR },
     { key: 'shoot-review', label: 'Post-shoot review invites', enabled: enabled(process.env.SHOOT_REVIEW_ENABLED),
       intervalMs: 24 * HOUR },
+    // v1.221 — "is the footage any good?" (0-byte / duplicate name / audio with
+    // no picture). Report-only; the other Drive workers all check placement.
+    { key: 'footage-integrity', label: 'Footage integrity', enabled: enabledUnlessOff(process.env.FOOTAGE_INTEGRITY_ENABLED),
+      intervalMs: 24 * HOUR },
     // v1.212 — daily archive of the whole database to Lark. Declared here so the
     // dead-man switch covers it from day one: an archive that silently stopped
     // is indistinguishable from one that never ran, and you only find out on the

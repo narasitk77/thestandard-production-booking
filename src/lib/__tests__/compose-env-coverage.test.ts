@@ -69,6 +69,7 @@ const ALLOWED_UNDECLARED: Record<string, string> = {
   PREP_FOLDERS_URL: 'worker endpoint override; use WORKER_APP_URL',
   FOLDER_INTEGRITY_URL: 'worker endpoint override; use WORKER_APP_URL',
   FOOTAGE_READY_URL: 'worker endpoint override; use WORKER_APP_URL',
+  FOOTAGE_INTEGRITY_URL: 'worker endpoint override; use WORKER_APP_URL',
   LARK_EXPORT_URL: 'worker endpoint override; use WORKER_APP_URL',
   ROOM_BOOKING_URL: 'worker endpoint override; use WORKER_APP_URL',
   SHOOT_REVIEW_URL: 'worker endpoint override; use WORKER_APP_URL',

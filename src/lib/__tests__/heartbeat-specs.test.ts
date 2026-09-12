@@ -81,6 +81,7 @@ const SCRIPT_TO_KEY: Record<string, string> = {
   'backup-worker.js': 'backup',
   'calendar-reconcile-worker.js': 'calendar-reconcile',
   'folder-integrity-worker.js': 'folder-integrity',
+  'footage-integrity-worker.js': 'footage-integrity',
   'footage-ready-worker.js': 'footage-ready',
   'footage-sheet-sync-worker.js': 'footage',
   'landing-worker.js': 'landing',

@@ -556,6 +556,21 @@ echo "==> Starting landing drop-folder lifecycle worker (supervised)..."
   done
 ) &
 
+# v1.221 — footage integrity scan. ON BY DEFAULT, report-only: it walks recent
+# project boxes once a day (FOOTAGE_INTEGRITY_HOUR, default 13:00 BKK) looking
+# for footage that is in the right place but unusable — 0-byte uploads, two
+# files sharing one name in one folder, an episode with sound but no picture.
+# Every other Drive worker checks PLACEMENT; a truncated upload passes them all.
+# Set FOOTAGE_INTEGRITY_ENABLED=0 to disable.
+echo "==> Starting footage integrity worker (supervised)..."
+(
+  while true; do
+    node scripts/footage-integrity-worker.js
+    echo "[footage-integrity] supervisor: worker exited, restarting in 5s"
+    sleep 5
+  done
+) &
+
 fi  # end RUN_WORKERS
 
 if [ "$APP_ROLE" = "worker" ]; then
