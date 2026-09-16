@@ -202,6 +202,12 @@ services:
       # docs/landing-folder-policy.md. Set LANDING_WORKER_ENABLED=0 to disable.
       LANDING_WORKER_ENABLED: ${LANDING_WORKER_ENABLED:-1}
       LANDING_WORKER_HOUR: ${LANDING_WORKER_HOUR:-19}
+      # v1.222 — LANDING_CREATE_DAYS = how many days AHEAD the sweep pre-creates
+      # drop folders for. Was effectively hard-wired to 1 ("tomorrow only"), so a
+      # booking approved 2+ days early had no folder until 19:00 the night before
+      # and the NAS looked empty all day. Prod runs 3. Creating further ahead is
+      # safe: cleanup only trashes EMPTY folders whose shoot day is already past.
+      LANDING_CREATE_DAYS: ${LANDING_CREATE_DAYS:-1}
       # v1.220 — the NOON prune (prune=today), moved in from a Hermes cron on a
       # laptop. Clears empty orphan folders the 19:00 sweep refuses to touch
       # (no matching Booking row / inside the grace window). Trashes EMPTY only,
