@@ -59,7 +59,9 @@ export interface LandingLifecycleResult {
   skipped: boolean
   reason?: string
   dryRun: boolean
-  targetDay: string           // the BKK date we created folders for (next day)
+  targetDay: string           // first BKK date we created folders for
+  targetDayEnd: string        // last BKK date in the create window (== targetDay when createDays=1)
+  createDays: number          // how many days ahead the window covers
   created: number
   createErrors: number
   removedPastEmpty: number
@@ -77,38 +79,75 @@ export interface LandingLifecycleResult {
  */
 export function shootIsImminentBkk(shootDate: Date, now: Date = new Date()): boolean {
   const today = bangkokDayRange(0, now)
-  const tomorrow = bangkokDayRange(1, now)
+  // v1.222 — must cover the SAME horizon the nightly sweep creates for, or the
+  // gap this function exists to close simply moves: with LANDING_CREATE_DAYS=3
+  // the sweep pre-creates today+1..today+3, so a booking approved for day +3
+  // has to get its folder at approve time too. Approving for a day the sweep
+  // will reach anyway is harmless — ensureLandingForBooking is idempotent.
+  const horizon = bangkokDayRange(landingCreateOffset() + landingCreateDays() - 1, now)
   const t = shootDate.getTime()
-  return t >= today.start.getTime() && t < tomorrow.end.getTime()
+  return t >= today.start.getTime() && t < horizon.end.getTime()
+}
+
+/** First day the nightly sweep creates for — tomorrow, i.e. "the evening before". */
+function landingCreateOffset(): number {
+  return 1
+}
+
+/**
+ * How many days ahead the sweep pre-creates drop folders for.
+ *
+ * v1.222 — was hard-wired to ONE day (tomorrow only). That left a hole nobody
+ * could see: a booking approved 2+ days before its shoot got no drop folder
+ * until 19:00 the evening before, so for most of every working day the NAS had
+ * nothing prepared for upcoming shoots and crew hit an empty share. Widening
+ * the window costs nothing — the cleanup half only ever trashes EMPTY folders
+ * whose shoot day is already PAST, so folders made further ahead are never
+ * touched, and ensureFlatShootFolders is idempotent, so re-running each night
+ * just finds what's already there.
+ *
+ * Default 1 keeps the historical behavior for anyone who doesn't set it;
+ * prod runs LANDING_CREATE_DAYS=3. Capped at 14 so a typo can't sweep the year.
+ */
+function landingCreateDays(): number {
+  const n = Number(process.env.LANDING_CREATE_DAYS)
+  return Math.min(14, Math.max(1, Number.isFinite(n) ? Math.floor(n) : 1))
 }
 
 export async function manageLandingFolders(
-  opts: { dryRun?: boolean; createOffsetDays?: number; keepPastDays?: number } = {},
+  opts: { dryRun?: boolean; createOffsetDays?: number; createDays?: number; keepPastDays?: number } = {},
 ): Promise<LandingLifecycleResult> {
   const dryRun = !!opts.dryRun
-  const createOffsetDays = opts.createOffsetDays ?? 1 // tomorrow
+  const createOffsetDays = opts.createOffsetDays ?? landingCreateOffset() // tomorrow
+  const createDays = Math.min(14, Math.max(1, opts.createDays ?? landingCreateDays()))
   const envKeep = Number(process.env.LANDING_KEEP_PAST_DAYS)
   const keepPastDays = Math.max(0, opts.keepPastDays ?? (Number.isFinite(envKeep) ? envKeep : 3))
-  const create = bangkokDayRange(createOffsetDays)
+  // v1.222 — a WINDOW, not a single day: [offset, offset+createDays-1] inclusive.
+  const create = {
+    start: bangkokDayRange(createOffsetDays).start,
+    end: bangkokDayRange(createOffsetDays + createDays - 1).end,
+  }
   const today = bangkokDayRange(0)
   const cutoff = new Date(today.start.getTime() - keepPastDays * 24 * 3_600_000) // remove empties for shoots strictly before this
   const targetDay = create.start.toISOString().slice(0, 10)
+  const targetDayEnd = new Date(create.end.getTime() - 1).toISOString().slice(0, 10)
 
   const base: LandingLifecycleResult = {
-    skipped: false, dryRun, targetDay, created: 0, createErrors: 0,
+    skipped: false, dryRun, targetDay, targetDayEnd, createDays, created: 0, createErrors: 0,
     removedPastEmpty: 0, keptRecent: 0, removeErrors: 0, keepPastDays, actions: [],
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
-  // ── CREATE: next day's shoots ────────────────────────────────────────────
+  // ── CREATE: every shoot inside the create window ─────────────────────────
   const nextDay = await prisma.booking.findMany({
     where: {
       shootDate: { gte: create.start, lt: create.end },
       status: { in: ['CONFIRMED', 'COMPLETED'] },
       deletedAt: null, bookingCode: { not: null },
     },
+    orderBy: { shootDate: 'asc' },
     select: {
-      id: true, bookingCode: true, cameraCount: true, micCount: true,
+      id: true, bookingCode: true, cameraCount: true, micCount: true, shootDate: true,
       projectName: true, outlet: { select: { code: true } },
       program: { select: { code: true, name: true } },
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
@@ -119,7 +158,9 @@ export async function manageLandingFolders(
     const cams = camerasToPreCreate(b.cameraCount, b.micCount)
     if (cams.length === 0) continue
     const name = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
-    base.actions.push(`create landing "${name}" (${targetDay})`)
+    // label with the booking's OWN shoot day — with a multi-day window the
+    // window's first day says nothing about which day this folder is for
+    base.actions.push(`create landing "${name}" (${b.shootDate.toISOString().slice(0, 10)})`)
     if (!dryRun) {
       try {
         const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: b.outlet.code === 'AGN' })) : undefined

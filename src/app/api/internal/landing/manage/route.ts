@@ -56,6 +56,9 @@ export async function GET(request: NextRequest) {
   const dryRunParam = url.searchParams.get('dryRun')
   const dryRun = !(dryRunParam === '0' || dryRunParam === 'false')
   const createOffsetDays = url.searchParams.get('offset') != null ? Math.max(0, Number(url.searchParams.get('offset'))) : undefined
+  // v1.222 — ?days=N widens the create window to N days ahead for this call
+  // only (the steady-state value is LANDING_CREATE_DAYS in the stack env).
+  const createDays = url.searchParams.get('days') != null ? Math.max(1, Number(url.searchParams.get('days'))) : undefined
   const keepPastDays = url.searchParams.get('keepDays') != null ? Math.max(0, Number(url.searchParams.get('keepDays'))) : undefined
   const forceReport = url.searchParams.get('report') === '1'
 
@@ -166,7 +169,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const r = await manageLandingFolders({ dryRun, createOffsetDays, keepPastDays })
+    const r = await manageLandingFolders({ dryRun, createOffsetDays, createDays, keepPastDays })
     const changed = r.created + r.removedPastEmpty
     if (!dryRun && (changed > 0 || r.createErrors > 0 || r.removeErrors > 0)) {
       logAudit({
@@ -174,7 +177,7 @@ export async function GET(request: NextRequest) {
         action: 'drive.landing_lifecycle',
         entityType: 'Drive',
         entityId: 'production-team',
-        changes: { targetDay: r.targetDay, created: r.created, removedPastEmpty: r.removedPastEmpty, keptRecent: r.keptRecent, createErrors: r.createErrors, removeErrors: r.removeErrors },
+        changes: { targetDay: r.targetDay, targetDayEnd: r.targetDayEnd, createDays: r.createDays, created: r.created, removedPastEmpty: r.removedPastEmpty, keptRecent: r.keptRecent, createErrors: r.createErrors, removeErrors: r.removeErrors },
       })
     }
     // Liveness tick for the nightly 19:00 landing worker — and only for it.
@@ -185,15 +188,15 @@ export async function GET(request: NextRequest) {
     const worth = changed > 0 || r.createErrors > 0 || r.removeErrors > 0
     if ((allowed.isWorker && worth) || forceReport) {
       const text = [
-        `Landing lifecycle — ${r.targetDay}`,
-        `สร้างโฟลเดอร์งานพรุ่งนี้ : ${r.created}${r.createErrors ? ` (error ${r.createErrors})` : ''}`,
+        `Landing lifecycle — ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''}`,
+        `สร้างโฟลเดอร์งานล่วงหน้า ${r.createDays} วัน : ${r.created}${r.createErrors ? ` (error ${r.createErrors})` : ''}`,
         `ลบโฟลเดอร์ว่างที่จบแล้ว  : ${r.removedPastEmpty}${r.removeErrors ? ` (error ${r.removeErrors})` : ''}`,
         `คงไว้ (ยังใหม่/มีไฟล์)    : ${r.keptRecent}`,
         `keepPastDays = ${r.keepPastDays}`,
         '',
         ...r.actions.slice(0, 60),
       ].join('\n')
-      try { await sendEmail({ to: reportEmail(), subject: `[Landing] ${r.targetDay} — สร้าง ${r.created} · ลบ ${r.removedPastEmpty}`, text, html: text.replace(/\n/g, '<br>') }) }
+      try { await sendEmail({ to: reportEmail(), subject: `[Landing] ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''} — สร้าง ${r.created} · ลบ ${r.removedPastEmpty}`, text, html: text.replace(/\n/g, '<br>') }) }
       catch (e: any) { console.error('[landing] report email failed (non-fatal):', e?.message || e) }
     }
     return NextResponse.json(r)
