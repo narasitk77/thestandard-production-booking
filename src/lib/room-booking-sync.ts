@@ -258,6 +258,80 @@ export async function cancelRoomBookingFor(bookingId: string): Promise<
 }
 
 /**
+ * ฟิลด์ที่ตัดสินว่า "ห้องไหน ช่วงเวลาไหน" — เปลี่ยนตัวใดตัวหนึ่งแปลว่าการจองห้อง
+ * ที่ยึดไว้อยู่ไม่ตรงกับตารางถ่ายอีกต่อไป
+ *
+ * v1.222 — ต้องอยู่ที่เดียว: เส้นทางแก้ใบจองมีหลายทาง (แอดมิน PATCH,
+ * producer-edit, ...) และถ้าแต่ละทางเขียนเงื่อนไขเอง มันจะหลุดจากกันแบบเดียว
+ * กับที่เคยเกิดกับกฎสิทธิ์และกฎ "ใครถูกแจ้ง"
+ */
+export interface RoomScheduleFields {
+  shootDate?: Date | string | null
+  shootEndDate?: Date | string | null
+  callTime?: string | null
+  estimatedWrap?: string | null
+  locationId?: string | null
+}
+
+/** รายชื่อฟิลด์ที่เปลี่ยนไปจริง — ว่าง = ตารางเท่าเดิม ห้องเดิมยังใช้ได้ */
+export function roomScheduleChanges(before: RoomScheduleFields, after: RoomScheduleFields): string[] {
+  const norm = (v: Date | string | null | undefined): string => {
+    if (v == null) return ''
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString()
+    // Date ที่ถูก serialize มาแล้วต้องเทียบกับ Date ได้ ไม่ใช่ต่างกันเพราะรูปแบบ
+    const t = Date.parse(v)
+    return /^\d{4}-\d{2}-\d{2}/.test(v) && !Number.isNaN(t) ? new Date(t).toISOString() : String(v)
+  }
+  const keys: (keyof RoomScheduleFields)[] = ['shootDate', 'shootEndDate', 'callTime', 'estimatedWrap', 'locationId']
+  return keys.filter(k => norm(before[k]) !== norm(after[k]))
+}
+
+/**
+ * ตารางถ่ายเปลี่ยน → คืนห้องเดิม แล้วจองใหม่ให้ตรงตารางใหม่ — fire-and-forget
+ *
+ * v1.222 — ก่อนหน้านี้ "การแก้" ไม่เคยแตะห้องเลย: PATCH/producer-edit แก้เวลา
+ * และสถานที่ได้ แล้ว re-sync ปฏิทิน + OT แต่ห้องถูกปล่อยค้างที่ช่วงเวลาเดิม
+ * ตลอดไป ส่วนช่วงเวลาใหม่ไม่มีห้อง และไม่มีใครรู้จนถึงวันถ่าย
+ *
+ * **ลำดับสำคัญ**: ต้องคืนห้องเดิมให้สำเร็จ *ก่อน* ถึงจะจองใหม่ ไม่งั้นใบเดียว
+ * จะยึดห้องสองช่วง — และถ้าคืนไม่สำเร็จ (ระบบเขาล่ม/ไม่มีสิทธิ์) ต้อง **ไม่จองใหม่**
+ * ปล่อยให้ตัวคืนสภาพรอบชั่วโมงมาเก็บ ซึ่งตอนนี้มันเทียบห้อง+เวลากับของจริงได้แล้ว
+ */
+export function resyncRoomForBooking(bookingId: string, reason: string): void {
+  void (async () => {
+    try {
+      const b = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        select: { roomBookingNo: true, bookingCode: true, status: true, deletedAt: true },
+      })
+      // ไม่เคยจองห้องไว้ → ไม่มีอะไรต้องคืน ปล่อยให้เส้นทางจองปกติทำงาน
+      if (!b?.roomBookingNo) return
+      if (b.deletedAt || b.status === 'CANCELLED') return  // เส้นทางยกเลิกดูแลอยู่แล้ว
+
+      const r = await cancelRoomBookingFor(bookingId)
+      if (r.status !== 'CANCELLED' && r.status !== 'NOT_FOUND') {
+        console.warn(`[room-booking] ตารางเปลี่ยนแต่คืนห้องไม่สำเร็จ ${b.bookingCode} (${reason}):`, r)
+        logAudit({
+          actorEmail: 'room-booking', action: 'booking.room_release_failed',
+          entityType: 'Booking', entityId: bookingId, bookingCode: b.bookingCode,
+          changes: { reason, ...r, note: 'ยังไม่จองใหม่ — รอตัวคืนสภาพ' },
+        })
+        return
+      }
+
+      const s = await syncRoomBooking(bookingId)
+      logAudit({
+        actorEmail: 'room-booking', action: 'booking.room_resynced',
+        entityType: 'Booking', entityId: bookingId, bookingCode: b.bookingCode,
+        changes: { reason, released: r.status, rebooked: s.status, ...('bookingNo' in s ? { bookingNo: s.bookingNo } : {}), ...('message' in s ? { message: s.message } : {}) },
+      })
+    } catch (e: any) {
+      console.error('[room-booking] resyncRoomForBooking error:', e?.message || e)
+    }
+  })()
+}
+
+/**
  * คืนห้องในระบบกลางเมื่อคิวถูกยกเลิก/ลบ — fire-and-forget
  *
  * v1.201 (operator 2026-08-25: *"เมื่อคิวยกเลิกจาก probook ห้องต้องยกเลิกด้วย"*)

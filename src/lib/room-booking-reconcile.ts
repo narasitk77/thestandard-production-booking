@@ -110,27 +110,33 @@ export async function reconcileRoomBookings(opts: {
    * เราจะเชื่อว่ายังมีห้องตลอดไป ทั้งที่ห้องว่างและกองไม่มีที่ถ่าย
    * ไม่มีอะไรจับได้เลยจนถึงวันถ่าย
    */
-  const monthCache = new Map<string, Set<string>>()
-  async function liveKeys(d: Date): Promise<Set<string> | null> {
+  type LiveRoom = { roomId: number | null; startAt: string | null; endAt: string | null }
+  const monthCache = new Map<string, Map<string, LiveRoom>>()
+  async function liveIndex(d: Date): Promise<Map<string, LiveRoom> | null> {
     const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1
     const key = `${y}-${m}`
     if (monthCache.has(key)) return monthCache.get(key)!
     try {
       const list = await listRoomBookings(y, m)
-      const set = new Set<string>()
+      const idx = new Map<string, LiveRoom>()
       for (const r of list) {
         // นับเฉพาะรายการที่ยังมีชีวิต — รายการที่ถูกยกเลิกแล้วต้องไม่ทำให้เราคิดว่าห้องยังอยู่
         if (!r.live) continue
-        if (r.bookingNo) set.add(`no:${r.bookingNo}`)
-        if (r.id !== null) set.add(`id:${r.id}`)
+        const v: LiveRoom = { roomId: r.roomId, startAt: r.startAt, endAt: r.endAt }
+        if (r.bookingNo) idx.set(`no:${r.bookingNo}`, v)
+        if (r.id !== null) idx.set(`id:${r.id}`, v)
       }
-      monthCache.set(key, set)
-      return set
+      monthCache.set(key, idx)
+      return idx
     } catch {
       // อ่านไม่ได้ = ตัดสินไม่ได้ → ห้ามสรุปว่าหาย (จะกลายเป็นจองซ้ำ)
       return null
     }
   }
+
+  /** เวลาสองค่าเท่ากันไหม — เทียบเป็นเวลาจริง ไม่ใช่เทียบตัวอักษร */
+  const sameInstant = (a: string | null, b: string | null) =>
+    a != null && b != null && Date.parse(a) === Date.parse(b)
 
   for (const b of rows as any[]) {
     if (writes >= max) break
@@ -140,11 +146,34 @@ export async function reconcileRoomBookings(opts: {
     // ── 1+2. มีห้องจองไว้ แต่ไม่ควรมี / ไม่ตรงกับที่ควรเป็น ─────────────────
     if (b.roomBookingNo) {
       const heldWrongly = want === null
-      const roomChanged = want !== null && roomIdForLocation(b.locationId) !== null
-        && want.roomId !== roomIdForLocation(b.locationId)
-      if (heldWrongly || roomChanged) {
+
+      // v1.222 — เทียบกับ **ของจริงในระบบเขา** ไม่ใช่เทียบของเรากับตัวเราเอง
+      //
+      // เดิม: roomChanged = want.roomId !== roomIdForLocation(b.locationId)
+      // ซึ่ง want.roomId ก็มาจาก roomIdForLocation(b.locationId) ตัวเดียวกัน
+      // → เป็นเท็จเสมอ ไม่เคยจับอะไรได้เลย และไม่มีบรรทัดไหนเทียบ "เวลา" ด้วย
+      // ผลคือ ย้ายห้อง/เลื่อนเวลาบนใบที่จองไปแล้ว = ห้องเดิมค้างที่ช่วงเวลาเดิม
+      // ตลอดไป ช่วงใหม่ไม่มีห้อง และ syncRoomBooking ก็ไม่จองใหม่เพราะเห็นว่า
+      // roomBookingNo มีค่าแล้ว (SKIPPED already-booked) — เงียบสนิททุกทาง
+      let mismatch: string | null = null
+      if (!heldWrongly) {
+        const idx = await liveIndex(b.shootDate)
+        // อ่านระบบเขาไม่ได้ = ตัดสินไม่ได้ → ข้ามใบนี้ไปเลย ห้ามเดาทั้งสองทาง
+        if (idx === null) continue
+        const actual = (b.roomBookingRef != null ? idx.get(`id:${b.roomBookingRef}`) : undefined)
+          ?? idx.get(`no:${b.roomBookingNo}`)
+        if (!actual) {
+          // ไม่อยู่ในระบบเขาแล้ว — เคส "ห้องหาย" จัดการในบล็อกถัดไป
+        } else if (actual.roomId !== null && actual.roomId !== want!.roomId) {
+          mismatch = `ย้ายห้อง (จองไว้ห้อง ${actual.roomId} ควรเป็น ${want!.roomId})`
+        } else if (!sameInstant(actual.startAt, want!.startAt) || !sameInstant(actual.endAt, want!.endAt)) {
+          mismatch = `เลื่อนเวลา (จองไว้ ${actual.startAt}–${actual.endAt} ควรเป็น ${want!.startAt}–${want!.endAt})`
+        }
+      }
+
+      if (heldWrongly || mismatch) {
         if (dryRun) {
-          out.staleStuck.push({ code, bookingNo: b.roomBookingNo, reason: heldWrongly ? 'คิวยกเลิก/ถูกลบแล้ว' : 'ย้ายห้อง' })
+          out.staleStuck.push({ code, bookingNo: b.roomBookingNo, reason: heldWrongly ? 'คิวยกเลิก/ถูกลบแล้ว' : mismatch! })
           continue
         }
         writes++
@@ -183,7 +212,7 @@ export async function reconcileRoomBookings(opts: {
           logAudit({
             actorEmail: 'room-reconcile', action: 'booking.room_cancelled',
             entityType: 'Booking', entityId: b.id, bookingCode: b.bookingCode,
-            changes: { bookingNo: found.bookingNo, reason: heldWrongly ? 'booking-cancelled' : 'room-changed' },
+            changes: { bookingNo: found.bookingNo, reason: heldWrongly ? 'booking-cancelled' : 'schedule-changed', detail: mismatch || undefined },
           })
         } else {
           out.staleStuck.push({ code, bookingNo: found.bookingNo, reason: res.kind === 'forbidden' ? 'คีย์ยังไม่มีสิทธิ์ยกเลิก' : ('message' in res ? res.message : res.kind) })
@@ -194,7 +223,7 @@ export async function reconcileRoomBookings(opts: {
 
     // ── 2.5 เราคิดว่าจองไว้ และควรมีจริง — แต่ยังอยู่ในระบบเขาไหม ──────────
     if (b.roomBookingNo && want !== null) {
-      const live = await liveKeys(b.shootDate)
+      const live = await liveIndex(b.shootDate)
       if (live !== null) {
         const stillThere = live.has(`no:${b.roomBookingNo}`)
           || (b.roomBookingRef != null && live.has(`id:${b.roomBookingRef}`))

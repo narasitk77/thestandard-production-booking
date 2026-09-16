@@ -30,6 +30,7 @@ import { isValidHHMM } from '@/lib/shoot-window'
 // v1.150.1 — post-approval location edits must flow to the calendar event and
 // the _SHOOT.txt marker (same recipe as the admin PATCH's live-edit path).
 import { updateCalendarEventDetails } from '@/lib/google-calendar'
+import { resyncRoomForBooking, roomScheduleChanges } from '@/lib/room-booking-sync'
 import { refreshShootMarker } from '@/lib/shoot-marker'
 import { hasDriveCredentials } from '@/lib/google-drive'
 
@@ -187,6 +188,14 @@ export async function PATCH(
         refreshShootMarker(booking).catch(e =>
           console.error('[producer-edit] marker refresh failed (non-fatal):', e?.message || e))
       }
+    }
+
+    // v1.222 — เจ้าของงานแก้เวลา/สถานที่ได้ที่นี่เหมือนกัน ห้องจึงต้องตามด้วย
+    // (กฎเดียวกับ PATCH ของแอดมิน — เงื่อนไขอยู่ที่ roomScheduleChanges ที่เดียว
+    //  ไม่ผูกกับ locationOnly เพราะเวลาเปลี่ยนก็ทำให้ห้องที่ยึดไว้ผิดช่วงเหมือนกัน)
+    {
+      const changed = roomScheduleChanges(existing, booking)
+      if (changed.length > 0) resyncRoomForBooking(params.id, `เจ้าของงานแก้: ${changed.join(', ')}`)
     }
 
     // v1.203 — เลข QU ที่ "เจ้าของงาน" กรอกเองต้องถึงชีทด้วย

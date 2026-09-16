@@ -416,16 +416,24 @@ export async function findExistingRoomBooking(
  */
 export async function listRoomBookings(year: number, month: number): Promise<{
   id: number | null; bookingNo: string; title: string; live: boolean
+  roomId: number | null; startAt: string | null; endAt: string | null
 }[]> {
   const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
   const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
   return rows.map(r => {
     const id = Number(r?.id)
+    const roomId = Number(r?.roomId)
     const status = String(r?.status || '').toLowerCase()
     return {
       id: Number.isFinite(id) ? id : null,
       bookingNo: String(r?.bookingNo || ''),
       title: String(r?.title || ''),
+      // v1.222 — ห้อง/ช่วงเวลา **ที่ถูกจองไว้จริง** ฝั่งเขา. ก่อนหน้านี้ตัดทิ้ง
+      // ตัวคืนสภาพจึงไม่มีอะไรให้เทียบว่า "ที่จองไว้ยังตรงกับตารางถ่ายไหม"
+      // และไปเทียบ roomIdForLocation กับตัวมันเอง ซึ่งเป็นจริงเสมอ = ไม่เคยจับได้
+      roomId: Number.isFinite(roomId) ? roomId : null,
+      startAt: r?.startAt ? String(r.startAt) : null,
+      endAt: r?.endAt ? String(r.endAt) : null,
       // v1.208 — feed มี `status` + `cancelledAt` ให้อยู่แล้ว ใช้ตัดสินตรง ๆ ดีกว่า
       // อาศัย "ไม่อยู่ในลิสต์ = ถูกยกเลิก" ซึ่งเป็นพฤติกรรมที่เขาไม่ได้รับปากไว้
       // (ตอนนี้เขากรองออกให้ แต่ถ้าวันหนึ่งเริ่มส่งรายการที่ยกเลิกมาด้วย

@@ -22,6 +22,7 @@ import { bookingDisplayName } from '@/lib/display'
 import { createBookingFromPayload } from '@/lib/create-booking'
 import { logAudit } from '@/lib/audit'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { clearBookingOT } from '@/lib/ot-sync'
 import { McpToolError, type McpRegistry } from './server'
 
@@ -341,6 +342,8 @@ export function buildMcpRegistry(): McpRegistry {
             console.warn(`[mcp cancel] calendar event delete failed: ${e?.message || e}`))
         }
         clearBookingOT(b.id).catch(() => {})
+        // v1.222 — ยกเลิกทางไหนก็ต้องคืนห้อง ไม่งั้นห้องค้างโดยไม่มีใครรู้
+        releaseRoomForBooking(b.id, 'mcp-cancel')
         logAudit({
           actorEmail: mcpActorEmail(),
           action: 'booking.delete',

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { resolveLocationId } from '@/lib/location-resolve'
-import { releaseRoomForBooking } from '@/lib/room-booking-sync'
+import { releaseRoomForBooking, resyncRoomForBooking, roomScheduleChanges } from '@/lib/room-booking-sync'
 import { getSession, requireConsole } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { canViewBooking } from '@/lib/booking-access'
@@ -365,6 +365,17 @@ export async function PATCH(
       )
     }
 
+    // v1.222 — ห้องในระบบกลางต้องตามการแก้ไขด้วย เหมือนที่ปฏิทินกับ OT ตามอยู่แล้ว
+    //
+    // เดิมเส้นนี้แก้ callTime / estimatedWrap / shootEndDate / locationId ได้
+    // แล้ว re-sync ปฏิทิน (บรรทัดบน) และ OT (ด้านล่าง) แต่ **ไม่แตะห้องเลย** —
+    // ห้องเดิมจึงค้างอยู่ที่ช่วงเวลาเดิมตลอดไป ช่วงเวลาใหม่ไม่มีห้อง และเงียบสนิท
+    // ไม่ขึ้นกับ calendarEventId เพราะใบที่ยังไม่มี event ก็จองห้องไว้ได้
+    if (status !== 'CANCELLED') {
+      const changed = roomScheduleChanges(existing, booking)
+      if (changed.length > 0) resyncRoomForBooking(params.id, `แก้ไข: ${changed.join(', ')}`)
+    }
+
     // Episode-title edits flow to the sheet's Episode Titles cell (col AH) —
     // col Q keeps only the IDs, so a renamed EP would otherwise go stale in
     // the Bookings tab forever. Same fire-and-forget shape as the cancel
@@ -542,6 +553,9 @@ export async function DELETE(
       }).catch(() => {})
     }
     clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
+    // v1.222 — DELETE ก็เป็นการยกเลิกที่สมบูรณ์เส้นหนึ่ง (ตั้ง CANCELLED + ลบ event
+    //  + ล้าง OT + เขียนชีท) แต่ไม่เคยคืนห้อง ทั้งที่ import ไว้อยู่หัวไฟล์เดียวกันแล้ว
+    releaseRoomForBooking(params.id, 'booking-deleted-via-DELETE')
 
     logAudit({
       actorEmail: session.email,

@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { cancelRoomBookingFor } from '@/lib/room-booking-sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +40,13 @@ export async function POST(
   // Clean up audit_logs, footage_log, and auto-OT rows that reference this
   // booking (no FK cascade on those tables). Manual OT entries have
   // bookingId = null and are untouched.
+  // v1.222 — คืนห้อง **ก่อน** ลบแถว: หลังจากนี้ไม่มี roomBookingNo/Ref เหลืออยู่
+  // ในระบบเลย ตัวคืนสภาพอ่านจากตาราง Booking จึงตามเก็บไม่ได้ตลอดกาล
+  // await จริง (ไม่ fire-and-forget) เพราะแข่งกับการลบแถวไม่ได้
+  try { await cancelRoomBookingFor(id) } catch (e: any) {
+    console.error('[admin delete] คืนห้องก่อนลบไม่สำเร็จ:', e?.message || e)
+  }
+
   await prisma.$transaction([
     prisma.auditLog.deleteMany({ where: { entityId: id } }),
     prisma.footageLog.deleteMany({ where: { bookingId: id } }),
