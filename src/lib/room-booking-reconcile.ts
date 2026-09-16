@@ -243,15 +243,28 @@ export async function reconcileRoomBookings(opts: {
         if (res.kind === 'ok') {
           await stampCleared(b.id, `ยกเลิกแล้ว (เดิม ${found.bookingNo})`)
           ;(heldWrongly ? out.staleCancelled : out.wrongRoomReleased).push(code)
+          // v1.222.1 — ปลดเพราะ "ห้อง/เวลาไม่ตรง" ต้องจองคืนใน**รอบเดียวกัน**
+          // ไม่ใช่ `continue` แล้วรออีกชั่วโมง ระหว่างนั้นกองไม่มีห้องเลย
+          // (เจอจริง: NWS-ENG-260917-01 ถูกปลดตอนกลางคืน กองถ่าย 10 โมงเช้า)
+          // ล้างค่าในหน่วยความจำแล้วปล่อยให้ไหลลงบล็อก 3 ซึ่งจองผ่าน
+          // syncRoomBooking ที่อ่านกลับก่อนยิงเสมอ จึงไม่มีทางจองซ้ำ
+          if (!heldWrongly) (b as any).roomBookingNo = null
           logAudit({
             actorEmail: 'room-reconcile', action: 'booking.room_cancelled',
             entityType: 'Booking', entityId: b.id, bookingCode: b.bookingCode,
             changes: { bookingNo: found.bookingNo, reason: heldWrongly ? 'booking-cancelled' : 'schedule-changed', detail: mismatch || undefined },
           })
+        } else if (res.kind === 'not-found') {
+          // ไม่มีอยู่แล้วฝั่งเขา — ล้างของเราให้ตรง ไม่งั้นวนลองทุกชั่วโมงตลอดไป
+          await stampCleared(b.id, 'ไม่พบการจองในระบบกลาง (อาจถูกยกเลิกไปแล้ว)')
+          out.staleCancelled.push(code)
+          if (!heldWrongly) (b as any).roomBookingNo = null
         } else {
-          out.staleStuck.push({ code, bookingNo: found.bookingNo, reason: res.kind === 'forbidden' ? 'คีย์ยังไม่มีสิทธิ์ยกเลิก' : ('message' in res ? res.message : res.kind) })
+          out.staleStuck.push({ code, bookingNo: found.bookingNo, reason: res.kind === 'forbidden' ? 'คีย์ยังไม่มีสิทธิ์ยกเลิก' : res.message })
+          continue
         }
-        continue
+        // ปลดสำเร็จ (หรือไม่มีให้ปลด) — ถ้าเป็นเคสห้อง/เวลาไม่ตรง ให้ไหลต่อไปจองคืน
+        if (heldWrongly) continue
       }
     }
 

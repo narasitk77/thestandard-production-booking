@@ -484,6 +484,12 @@ export async function cancelRoomBooking(
       return { kind: 'forbidden', message: message || `HTTP ${res.status} — คีย์อาจใช้กับ cancel ไม่ได้` }
     }
     if (res.status === 404) return { kind: 'not-found' }
+    // v1.222.1 — IT ระบุไว้ในสเปคว่า **400 = ไม่พบ / ยกเลิกไปแล้ว** (ไม่ใช่ 404)
+    // เดิมตกไปเป็น `unknown` ⇒ ตัวคืนสภาพไม่ล้าง roomBookingNo แล้ววนลองยกเลิก
+    // ใบเดิมทุกชั่วโมงไม่รู้จบ (เจอจริงกับ BK-0102 หลัง deploy)
+    // endpoint นี้ไม่มี body และรับแค่ id ที่ path — 400 จึงแปลว่า "ไม่มีให้ยกเลิก"
+    // ซึ่งผลลัพธ์ที่เราต้องการเหมือน not-found เป๊ะ: ล้างเลขของเราให้ตรงความจริง
+    if (res.status === 400) return { kind: 'not-found' }
     return { kind: 'unknown', message: message || `HTTP ${res.status}` }
   } catch (e: any) {
     return { kind: 'unknown', message: e?.name === 'AbortError' ? 'timeout' : (e?.message || String(e)) }
