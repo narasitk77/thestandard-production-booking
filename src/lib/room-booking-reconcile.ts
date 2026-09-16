@@ -31,10 +31,19 @@ import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './
  * syncRoomBooking ซึ่งอ่านกลับก่อนยิงเสมอ (ห้ามยิงตรง)
  */
 
+/**
+ * ใบที่ได้ CONFLICT ("ห้องไม่ว่าง") รอเท่านี้ก่อนลองใหม่
+ *
+ * v1.222 — ห้องเต็มไม่ใช่ error ชั่วคราว การยิงซ้ำทุกชั่วโมงจึงเป็นการเผาโควตา
+ * 20 req/5 นาที ที่ทั้งบริษัทใช้ร่วมกัน ทับใบที่จองได้จริง และเด้งเข้ากลุ่ม LINE
+ * ของแอดมิน IT ทุกรอบ. ยังลองใหม่อยู่ เผื่อคนที่จองทับไว้ยกเลิก — แค่ห่างขึ้น
+ */
+const CONFLICT_RETRY_MS = 6 * 60 * 60 * 1000
+
 export interface RoomReconcileResult {
   scanned: number
   staleCancelled: string[]     // ห้องค้างที่ยกเลิกสำเร็จ
-  staleStuck: { code: string; bookingNo: string; reason: string }[]  // ยกเลิกไม่ได้ ต้องมือ
+  staleStuck: { code: string; bookingNo: string | null; reason: string }[]  // ยกเลิกไม่ได้/ยังจองไม่ได้ ต้องมือ
   wrongRoomReleased: string[]  // ห้อง/เวลาไม่ตรง ปลดของเดิมแล้ว
   vanished: string[]           // เราคิดว่าจองไว้ แต่หายไปจากระบบเขาแล้ว
   booked: { code: string; bookingNo: string }[]
@@ -81,7 +90,8 @@ export async function reconcileRoomBookings(opts: {
     },
     select: {
       ...ROOM_BOOKING_SELECT,
-      roomBookingNo: true, roomBookingRef: true, roomBookingStatus: true, status: true, deletedAt: true,
+      roomBookingNo: true, roomBookingRef: true, roomBookingStatus: true, roomBookingAt: true,
+      status: true, deletedAt: true,
     },
     orderBy: { shootDate: 'asc' },
   })
@@ -139,12 +149,29 @@ export async function reconcileRoomBookings(opts: {
         }
         writes++
         // v1.206 — ใช้ id ที่เก็บไว้ตอนจองก่อน ประหยัด request และไม่พึ่ง marker ใน title
-        const found = b.roomBookingRef != null
-          ? { id: b.roomBookingRef as number, bookingNo: b.roomBookingNo as string }
-          : await findExistingRoomBooking(code, b.shootDate.getUTCFullYear(), b.shootDate.getUTCMonth() + 1)
-              .catch(() => null)
-        if (!found || found.id === null) {
-          // ไม่มีอยู่ในระบบเขาแล้ว — ล้างของเราให้ตรงความจริง
+        // v1.222 — "อ่านระบบเขาไม่ได้" ≠ "ไม่มีการจองอยู่"
+        //
+        // เดิม `.catch(() => null)` ยุบสองเรื่องนี้เป็นค่าเดียว แล้วบรรทัดล่าง
+        // ก็ล้าง roomBookingNo ทิ้งทั้งที่ห้องยังถูกยึดอยู่ฝั่งเขา ผลคือห้องค้าง
+        // ถาวรแบบไม่มีอะไรชี้กลับมาได้ และรอบถัดไปเราจะ "จองใหม่" ทับของเดิม
+        // = จองซ้ำ ในระบบที่ไม่มี idempotency. เช้าวันที่ 16 ก.ย. DB ของเขาล่ม
+        // จริง ๆ อยู่ ~10 นาที ซึ่งเป็นหน้าต่างที่บั๊กนี้ทำงานได้พอดี
+        // (ตรวจแล้วยังไม่เกิดความเสียหาย — 67 ใบ รหัสไม่ซ้ำ)
+        let found: { id: number; bookingNo: string } | null = null
+        if (b.roomBookingRef != null) {
+          found = { id: b.roomBookingRef as number, bookingNo: b.roomBookingNo as string }
+        } else {
+          try {
+            const hit = await findExistingRoomBooking(code, b.shootDate.getUTCFullYear(), b.shootDate.getUTCMonth() + 1)
+            found = hit && hit.id !== null ? { id: hit.id, bookingNo: hit.bookingNo } : null
+          } catch (e: any) {
+            // ตัดสินไม่ได้ → ไม่แตะอะไรเลย ปล่อยให้รอบหน้าตัดสิน
+            out.staleStuck.push({ code, bookingNo: b.roomBookingNo, reason: `อ่านระบบกลางไม่ได้: ${e?.message || e}` })
+            continue
+          }
+        }
+        if (!found) {
+          // อ่านได้จริง และไม่มีอยู่ในระบบเขาแล้ว — ล้างของเราให้ตรงความจริง
           await stampCleared(b.id, 'ไม่พบการจองในระบบกลาง')
           out.staleCancelled.push(code)
           continue
@@ -189,6 +216,16 @@ export async function reconcileRoomBookings(opts: {
     }
 
     // ── 3. ควรมีห้องแต่ยังไม่มี ────────────────────────────────────────────
+    // v1.222 — เว้นวรรคใบที่เพิ่งได้ CONFLICT มา. "ห้องเต็ม" ไม่ใช่ error ชั่วคราว
+    // การยิงซ้ำทุกชั่วโมงจึงไม่ได้ช่วยอะไร แต่กินโควตา 20 req/5 นาที ที่ใช้ร่วม
+    // กันทั้งบริษัท ทับใบอื่นที่จองได้จริง และเด้งเข้ากลุ่ม LINE แอดมินของ IT ทุกรอบ
+    // (ใบเดียวยิงได้ถึง ~1,000 ครั้งกว่าจะพ้นหน้าต่าง 45 วัน). ยังลองใหม่อยู่ —
+    // แค่ทุก 6 ชม. เผื่อคนที่จองทับไว้ยกเลิกไป
+    if (!b.roomBookingNo && b.roomBookingStatus === 'CONFLICT' && b.roomBookingAt
+        && Date.now() - new Date(b.roomBookingAt).getTime() < CONFLICT_RETRY_MS) {
+      out.staleStuck.push({ code, bookingNo: null, reason: 'ห้องไม่ว่าง — รอรอบถัดไป (6 ชม.)' })
+      continue
+    }
     if (!b.roomBookingNo && want !== null && roomBookingEnabled() && roomBookingAllowed(want.roomId)) {
       const built = buildPayloadForBooking(b)
       if ('skip' in built || 'error' in built) continue

@@ -52,6 +52,7 @@ export type RoomSkipReason =
   | 'external'           // นอกตึก
   | 'no-room-mapping'    // ห้องในตึกแต่ระบบกลางไม่มี (Lounge)
   | 'no-times'           // ไม่มี callTime/estimatedWrap
+  | 'bad-times'          // v1.222 — มีเวลา แต่ประกอบเป็นช่วงที่ใช้ไม่ได้ (จบก่อนเริ่ม ฯลฯ)
 
 export interface RoomTarget {
   roomId: number
@@ -84,14 +85,60 @@ export function roomTargetForBooking(input: {
   if (roomId === null) return { skip: 'no-room-mapping' }
   if (!input.callTime) return { skip: 'no-times' }
 
-  const endTime = input.estimatedWrap || addHours(input.callTime, 4)
-  const startAt = bangkokToUtcIso(input.shootDate, input.callTime)
-  // ถ่ายข้ามวัน: ถ้า wrap <= call แปลว่าเลิกวันถัดไป (กฎเดียวกับ ot-sync)
-  const endsNextDay = !input.shootEndDate && endTime <= input.callTime
-  const endDate = input.shootEndDate || (endsNextDay ? nextDay(input.shootDate) : input.shootDate)
-  const endAt = bangkokToUtcIso(endDate, endTime)
+  // v1.222 — กฎ "ช่วงเวลาของกองนี้คือช่วงไหน" ต้องมาจาก resolveShootWindow ที่เดียว
+  // เดิมที่นี่เขียนกฎของตัวเอง (call+4 ชม. และข้ามวันเมื่อ wrap <= call) ส่วน
+  // buildRoomBookingPayload เขียนอีกชุด (call+8 ชม. และ wrap < call) ผลคือ
+  // **เช็คแคบ จองกว้าง**: ตรวจว่าง 4 ชม.แล้วบอกว่าง แต่ไปยึดห้องจริง 8 ชม.
+  // ทับของคนอื่น — และเคส wrap == call ที่นี่ได้ช่วงเวลากลับหัว ทำให้ overlaps()
+  // คืน false เสมอ = "ว่าง 100%" ซึ่งเป็นการโกหกที่แย่ที่สุดของฟีเจอร์นี้
+  const w = resolveShootWindow(input)
+  if ('error' in w) return { skip: 'bad-times' }
+  const startAt = bangkokToUtcIso(w.window.startDate, w.window.startTime)
+  const endAt = bangkokToUtcIso(w.window.endDate, w.window.endTime)
   if (!startAt || !endAt) return { skip: 'no-times' }
   return { target: { roomId, startAt, endAt } }
+}
+
+/** ไม่กรอกเวลาเลิก = ถือว่ากองยาวเท่านี้ (ค่าที่ "จองจริง" ใช้มาตลอด) */
+const DEFAULT_SHOOT_HOURS = 8
+
+/**
+ * v1.222 — ที่เดียวที่ตอบว่า "กองนี้กินห้องช่วงไหน"
+ *
+ * ทั้งการ **ตรวจว่าง** และการ **จองจริง** ต้องเรียกตัวนี้ ห้ามเขียนกฎเองอีก:
+ * ตอนที่แยกกันอยู่ มันตอบไม่ตรงกันสองเรื่อง (ชั่วโมงปริยาย 4 vs 8 และเกณฑ์
+ * ข้ามคืน <= vs <) แปลว่าคำว่า "ว่าง" ที่ระบบตอบ ไม่ได้พูดถึงช่วงเวลาเดียว
+ * กับที่มันกำลังจะไปจอง
+ *
+ * ช่วงที่ประกอบไม่ได้ (จบก่อนเริ่ม / ยาวศูนย์ / เกิน 10 วัน) ต้องเป็น **error**
+ * ไม่ใช่ช่วงว่าง ๆ ที่เงียบ ๆ — ช่วงยาวศูนย์ทำให้ overlaps() ตอบ "ไม่ชนใคร" เสมอ
+ */
+export function resolveShootWindow(input: {
+  shootDate: string
+  shootEndDate?: string | null
+  callTime: string | null | undefined
+  estimatedWrap?: string | null
+}): { window: { startDate: string; startTime: string; endDate: string; endTime: string } } | { error: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.shootDate)) return { error: 'shootDate ไม่ใช่ YYYY-MM-DD' }
+  const callTime = input.callTime || ''
+  if (!/^\d{2}:\d{2}$/.test(callTime)) return { error: 'callTime ไม่ใช่ HH:mm' }
+
+  const wrap = (input.estimatedWrap || '').trim()
+  const endTime = /^\d{2}:\d{2}$/.test(wrap) ? wrap : addHours(callTime, DEFAULT_SHOOT_HOURS)
+  const sameDay = !input.shootEndDate || input.shootEndDate === input.shootDate
+  // ถ่ายข้ามคืน: wrap **น้อยกว่า** call แปลว่าเลิกวันถัดไป
+  // wrap เท่ากับ call เป๊ะ (09:00→09:00) ตกไปเป็น error โดยตั้งใจ — น่าจะกรอกผิด
+  // มากกว่างานยาว 24 ชม. และการเดาผิดข้างนี้แปลว่าไปล็อกห้องทั้งวันของคนอื่น
+  const overnight = sameDay && endTime < callTime
+  const endDate = input.shootEndDate || (overnight ? nextDay(input.shootDate) : input.shootDate)
+
+  const spanDays = Math.round((Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${input.shootDate}T00:00:00Z`)) / 86_400_000)
+  if (!Number.isFinite(spanDays)) return { error: 'วันที่ไม่ถูกต้อง' }
+  if (spanDays < 0) return { error: 'วันจบอยู่ก่อนวันเริ่ม' }
+  if (spanDays > 10) return { error: 'ช่วงจองเกิน 10 วัน (กติกาของระบบกลาง)' }
+  if (spanDays === 0 && endTime <= callTime) return { error: 'เวลาจบต้องหลังเวลาเริ่ม' }
+
+  return { window: { startDate: input.shootDate, startTime: callTime, endDate, endTime } }
 }
 
 export interface RoomConflict {
@@ -239,35 +286,22 @@ export function buildRoomBookingPayload(input: {
   department?: string | null
   notes?: string | null
 }): { payload: RoomBookingPayload } | { error: string } {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.shootDate)) return { error: 'shootDate ไม่ใช่ YYYY-MM-DD' }
-  if (!/^\d{2}:\d{2}$/.test(input.callTime)) return { error: 'callTime ไม่ใช่ HH:mm' }
   const email = (input.producerEmail || '').trim()
   // ระบบเขาปฏิเสธอีเมลนอกโดเมนพนักงาน (ตอบ 500) — กันไว้ก่อนยิงดีกว่าไปเจอปลายทาง
   if (!/^[^@\s]+@thestandard\.co$/i.test(email)) {
     return { error: `ต้องมีอีเมลโปรดิวเซอร์ @thestandard.co (ตอนนี้: ${email || 'ว่าง'})` }
   }
-  const wrap = (input.estimatedWrap || '').trim()
-  const endTime = /^\d{2}:\d{2}$/.test(wrap) ? wrap : addHours(input.callTime, 8)
-  const sameDay = !input.shootEndDate || input.shootEndDate === input.shootDate
-  // ถ่ายข้ามคืน: wrap **น้อยกว่า** call แปลว่าเลิกวันถัดไป
-  // ต่างจาก ot-sync ที่ใช้ <= โดยตั้งใจ — wrap เท่ากับ call เป๊ะ (09:00→09:00) ที่นี่
-  // จะกลายเป็นยึดห้องยาว 24 ชม. ซึ่งน่าจะเป็นการกรอกผิดมากกว่างานจริง จึงให้ตกไป
-  // เป็น error ให้คนมาดู ดีกว่าไปล็อกห้องทั้งวันของคนอื่น
-  const overnight = sameDay && endTime < input.callTime
-  const endDate = input.shootEndDate || (overnight ? nextDay(input.shootDate) : input.shootDate)
-
-  const spanDays = Math.round((Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${input.shootDate}T00:00:00Z`)) / 86_400_000)
-  if (spanDays < 0) return { error: 'วันจบอยู่ก่อนวันเริ่ม' }
-  if (spanDays > 10) return { error: 'ช่วงจองเกิน 10 วัน (กติกาของระบบกลาง)' }
-  if (spanDays === 0 && endTime <= input.callTime) return { error: 'เวลาจบต้องหลังเวลาเริ่ม' }
+  // v1.222 — กฎช่วงเวลาอยู่ที่ resolveShootWindow ที่เดียว (ดูเหตุผลที่นั่น)
+  const w = resolveShootWindow(input)
+  if ('error' in w) return { error: w.error }
 
   return {
     payload: {
       roomId: input.roomId,
-      startDate: input.shootDate,
-      startTime: input.callTime,
-      endDate,
-      endTime,
+      startDate: w.window.startDate,
+      startTime: w.window.startTime,
+      endDate: w.window.endDate,
+      endTime: w.window.endTime,
       title: buildRoomBookingTitle(input.bookingCode, input.showName),
       name: (input.producerName || '').trim() || email.split('@')[0],
       email,
@@ -291,6 +325,24 @@ export type RoomBookingOutcome =
  * แยก "ห้ามยิงซ้ำ" ออกจาก "ไม่รู้ผล" ให้ชัด เพราะระบบเขาไม่มี idempotency —
  * เดาผิดฝั่งไหนก็เจ็บ: เหมาว่าไม่รู้ผลแล้วยิงซ้ำ = จองซ้ำ, เหมาว่าสำเร็จ = ห้องไม่ถูกจอง
  */
+/**
+ * วลีที่แปลว่า "ห้องไม่ว่าง" ในคำตอบของระบบกลาง
+ *
+ * เขาตอบ 500 สำหรับเคสนี้ (ไม่ใช่ 409) จึงต้องอ่านข้อความ. ตั้งใจให้กว้างกว่า
+ * ประโยคเดียวแต่ยังแคบพอจะไม่กลืน error อื่น — เดาพลาดฝั่ง "ไม่ใช่ conflict"
+ * แปลว่าวนยิงซ้ำใส่ห้องที่เต็ม, เดาพลาดฝั่ง "เป็น conflict" แปลว่าหยุดจองทั้งที่
+ * จองได้ อย่างหลังคนเห็นเร็วกว่าและไม่ไปกวนระบบเขา จึงยอมเอนไปทางนั้น
+ */
+const CONFLICT_HINTS = [
+  'ถูกจองในช่วงเวลาดังกล่าวแล้ว',
+  'ถูกจองแล้ว',
+  'ไม่ว่าง',
+  'ซ้อนทับ',
+  'already booked',
+  'time slot',
+  'conflict',
+]
+
 export function classifyRoomBookingResponse(
   status: number,
   body: any,
@@ -302,8 +354,15 @@ export function classifyRoomBookingResponse(
   }
   if (status === 401) return { kind: 'invalid', message: message || 'service key ผิดหรือไม่ได้แนบ' }
   if (status === 400) return { kind: 'invalid', message: message || 'ข้อมูลไม่ผ่านการตรวจ' }
+  // ถ้าวันหนึ่งเขาเปลี่ยนมาตอบตามมาตรฐาน อันนี้จะรับไว้เองโดยไม่ต้องแก้โค้ด
+  if (status === 409) return { kind: 'conflict', message: message || 'ห้องถูกจองแล้ว' }
   // เขาใช้ 500 ทั้งกรณีห้องเต็มและอีเมลผิดโดเมน — ต้องอ่านข้อความ ไม่ใช่ดูแค่รหัส
-  if (message.includes('ถูกจองในช่วงเวลาดังกล่าวแล้ว')) return { kind: 'conflict', message }
+  //
+  // v1.222 — เดิมผูกกับประโยคเต็มประโยคเดียว ('ถูกจองในช่วงเวลาดังกล่าวแล้ว')
+  // เขาแก้คำเมื่อไหร่ "ห้องเต็ม" จะกลายเป็น unknown เงียบ ๆ แล้ว worker จะยิงซ้ำ
+  // ใส่ห้องที่เต็มทุกชั่วโมงไม่รู้จบ จึงเทียบด้วยวลีสั้นหลายแบบแทน (ต้องยังแคบพอ
+  // ที่จะไม่กลืน error อื่น — 'ถูกจอง' คำเดียวไม่พอ ต้องคู่กับบริบทเวลา/ห้อง)
+  if (CONFLICT_HINTS.some(h => message.includes(h))) return { kind: 'conflict', message }
   if (message.includes('อีเมลพนักงาน')) return { kind: 'invalid', message }
   if (status === 200) return { kind: 'unknown', message: 'ตอบ 200 แต่ไม่มี bookingNo' }
   return { kind: 'unknown', message: message || `HTTP ${status}` }

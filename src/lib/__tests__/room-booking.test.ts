@@ -42,9 +42,42 @@ test('งานปกติ → เป้าหมายการจองคร
   assert.deepEqual(r, { target: { roomId: 15, startAt: '2026-09-01T02:00:00.000Z', endAt: '2026-09-01T11:00:00.000Z' } })
 })
 
-test('ไม่มี wrap → บวก 4 ชั่วโมงเหมือน ot-sync', () => {
+// v1.222 — เดิมเทสนี้ล็อกไว้ที่ +4 ชม. ซึ่งเป็นการล็อก *บั๊ก* เอาไว้:
+// buildRoomBookingPayload (ตัวที่ยึดห้องจริง) ใช้ +8 ชม. มาตลอด ฉะนั้นการตรวจว่าง
+// จึงตอบเรื่องช่วงเวลาที่แคบกว่าที่กำลังจะไปจองจริง = "ว่าง" แล้วไปทับคนอื่น
+// ตอนนี้ทั้งสองทางอ่านจาก resolveShootWindow ตัวเดียวกัน
+test('ไม่มี wrap → บวก 8 ชั่วโมง เท่ากับตอนจองจริง', () => {
   const r = roomTargetForBooking({ locationId: 'tsd-studio-2', shootDate: '2026-09-01', callTime: '09:00' }) as any
-  assert.equal(r.target.endAt, '2026-09-01T06:00:00.000Z') // 13:00 BKK = 09:00 + 4 ชม.
+  assert.equal(r.target.endAt, '2026-09-01T10:00:00.000Z') // 17:00 BKK = 09:00 + 8 ชม.
+})
+
+test('เช็คว่าง กับ จองจริง ต้องได้ช่วงเวลาเดียวกันเสมอ', () => {
+  // กฎเดียวห้ามเขียนสองที่ — ถ้าวันหนึ่งมีคนแยกมันอีก เทสนี้ต้องแดง
+  const cases = [
+    { callTime: '09:00', estimatedWrap: null },          // ไม่กรอกเวลาเลิก
+    { callTime: '09:00', estimatedWrap: '18:00' },       // ปกติ
+    { callTime: '20:00', estimatedWrap: '02:00' },       // ข้ามคืน
+  ]
+  for (const c of cases) {
+    const t = roomTargetForBooking({ locationId: 'tsd-studio-1', shootDate: '2026-09-01', ...c }) as any
+    const p = buildRoomBookingPayload({
+      roomId: 15, bookingCode: 'X-1', showName: 'S', shootDate: '2026-09-01',
+      producerEmail: 'a@thestandard.co', ...c,
+    }) as any
+    assert.ok(t.target, `${c.callTime}/${c.estimatedWrap}: เช็คต้องได้ช่วงเวลา`)
+    assert.ok(p.payload, `${c.callTime}/${c.estimatedWrap}: จองจริงต้องได้ payload`)
+    assert.equal(t.target.startAt, bangkokToUtcIso(p.payload.startDate, p.payload.startTime))
+    assert.equal(t.target.endAt, bangkokToUtcIso(p.payload.endDate, p.payload.endTime))
+  }
+})
+
+test('wrap เท่ากับ call เป๊ะ → ตกไป ไม่ใช่ช่วงยาวศูนย์ที่อ่านว่า "ว่าง"', () => {
+  // ช่วงยาวศูนย์/กลับหัวทำให้ overlaps() คืน false เสมอ = โกหกว่าห้องว่าง
+  const r = roomTargetForBooking({
+    locationId: 'tsd-studio-1', shootDate: '2026-09-01', shootEndDate: '2026-09-01',
+    callTime: '09:00', estimatedWrap: '09:00',
+  })
+  assert.deepEqual(r, { skip: 'bad-times' })
 })
 
 test('ถ่ายข้ามคืน (wrap <= call) → จบวันถัดไป', () => {
