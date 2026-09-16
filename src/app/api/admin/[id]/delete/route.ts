@@ -7,6 +7,12 @@ import { cancelRoomBookingFor } from '@/lib/room-booking-sync'
 
 export const dynamic = 'force-dynamic'
 
+/** audit ของการจองห้อง — ห้ามลบทิ้งพร้อมใบจอง (ดูเหตุผลใน transaction ข้างล่าง) */
+const ROOM_AUDIT_ACTIONS = [
+  'booking.room_reserved', 'booking.room_cancelled',
+  'booking.room_release_failed', 'booking.room_vanished', 'booking.room_resynced',
+]
+
 /**
  * POST /api/admin/[id]/delete
  * Hard-deletes a booking and all related records. ADMIN only.
@@ -26,7 +32,10 @@ export async function POST(
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    select: { id: true, bookingCode: true, status: true, calendarEventId: true, outlet: { select: { name: true } }, program: { select: { name: true } } },
+    select: { id: true, bookingCode: true, status: true, calendarEventId: true,
+      // v1.222 — ต้องติดไปกับ audit หลังลบ เพราะหลังจากนี้ไม่เหลือที่ไหนให้ค้นอีก
+      roomBookingNo: true, roomBookingRef: true, roomBookingStatus: true, shootDate: true,
+      outlet: { select: { name: true } }, program: { select: { name: true } } },
   })
   if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -42,13 +51,36 @@ export async function POST(
   // bookingId = null and are untouched.
   // v1.222 — คืนห้อง **ก่อน** ลบแถว: หลังจากนี้ไม่มี roomBookingNo/Ref เหลืออยู่
   // ในระบบเลย ตัวคืนสภาพอ่านจากตาราง Booking จึงตามเก็บไม่ได้ตลอดกาล
-  // await จริง (ไม่ fire-and-forget) เพราะแข่งกับการลบแถวไม่ได้
-  try { await cancelRoomBookingFor(id) } catch (e: any) {
-    console.error('[admin delete] คืนห้องก่อนลบไม่สำเร็จ:', e?.message || e)
+  //
+  // review fix — `cancelRoomBookingFor` **ไม่ throw** เวลาคืนไม่สำเร็จ มันคืนค่า
+  // ปกติเป็น FORBIDDEN/UNKNOWN (timeout, 502, ระบบเขาล่ม) ⇒ try/catch เปล่า ๆ
+  // ไม่มีวันทำงาน แล้วโค้ดก็ไหลไปลบแถวทิ้งพร้อมเบาะแสทั้งหมด
+  // ⇒ fail-closed: คืนไม่สำเร็จ = **ไม่ลบ** ใบยังเป็น soft-deleted อยู่ ตัวคืนสภาพ
+  //   รายชั่วโมงจึงยังตามเก็บและเตือนต่อได้ ผู้ใช้กดลบซ้ำได้เมื่อระบบเขากลับมา
+  if (booking.roomBookingNo) {
+    let r: Awaited<ReturnType<typeof cancelRoomBookingFor>>
+    try {
+      r = await cancelRoomBookingFor(id)
+    } catch (e: any) {
+      r = { status: 'UNKNOWN', message: e?.message || String(e) }
+    }
+    if (r.status !== 'CANCELLED' && r.status !== 'NOT_FOUND') {
+      return NextResponse.json({
+        error: 'ยังลบไม่ได้ — คืนห้องในระบบกลางไม่สำเร็จ',
+        detail: r.message,
+        roomBookingNo: booking.roomBookingNo,
+        roomBookingRef: booking.roomBookingRef,
+        hint: `ลบแถวตอนนี้จะทำให้ห้อง ${booking.roomBookingNo} ถูกยึดค้างโดยไม่มีอะไรชี้กลับมาได้ — ลองใหม่เมื่อ service.thestandard.co กลับมา หรือไปยกเลิกด้วยมือก่อน`,
+      }, { status: 409 })
+    }
   }
 
   await prisma.$transaction([
-    prisma.auditLog.deleteMany({ where: { entityId: id } }),
+    // v1.222 — เก็บ audit ของ "ห้อง" ไว้เสมอ: ถ้ามีอะไรพลาดจนห้องค้างในระบบเขา
+    // แถวพวกนี้คือที่เดียวที่ยังบอกเลข BK-#### ได้ หลังแถว Booking หายไปแล้ว
+    prisma.auditLog.deleteMany({
+      where: { entityId: id, action: { notIn: ROOM_AUDIT_ACTIONS } },
+    }),
     prisma.footageLog.deleteMany({ where: { bookingId: id } }),
     prisma.oTRecord.deleteMany({ where: { bookingId: id } }),
     prisma.booking.delete({ where: { id } }), // cascades episodes + uploads

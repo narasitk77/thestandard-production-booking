@@ -297,6 +297,11 @@ export function roomScheduleChanges(before: RoomScheduleFields, after: RoomSched
  * จะยึดห้องสองช่วง — และถ้าคืนไม่สำเร็จ (ระบบเขาล่ม/ไม่มีสิทธิ์) ต้อง **ไม่จองใหม่**
  * ปล่อยให้ตัวคืนสภาพรอบชั่วโมงมาเก็บ ซึ่งตอนนี้มันเทียบห้อง+เวลากับของจริงได้แล้ว
  */
+/** สถานะชั่วคราวระหว่าง resync — ใช้เป็นตัวจองสิทธิ์ ไม่ใช่ผลลัพธ์จริง */
+const RESYNC_MARK = 'RESYNCING'
+/** ถือ mark ค้างได้นานสุดเท่านี้ก่อนให้คนอื่นแย่งไปทำต่อ (กัน process ตายคาที่) */
+const RESYNC_STALE_MS = 10 * 60 * 1000
+
 export function resyncRoomForBooking(bookingId: string, reason: string): void {
   void (async () => {
     try {
@@ -307,6 +312,32 @@ export function resyncRoomForBooking(bookingId: string, reason: string): void {
       // ไม่เคยจองห้องไว้ → ไม่มีอะไรต้องคืน ปล่อยให้เส้นทางจองปกติทำงาน
       if (!b?.roomBookingNo) return
       if (b.deletedAt || b.status === 'CANCELLED') return  // เส้นทางยกเลิกดูแลอยู่แล้ว
+
+      // review fix — กันซ้อนต่อใบจอง: คนกดบันทึกรัว ๆ หรือ resync ชนกับตัวคืนสภาพ
+      // รายชั่วโมง จะได้ "คืนห้องสองครั้ง จองใหม่สองครั้ง" ในระบบที่ไม่มี idempotency
+      //
+      // ใช้ UPDATE เดียวเป็นตัวจอง (atomic) ไม่ใช่ advisory lock — lock แบบ xact
+      // จะถูกปล่อยทันทีที่ transaction commit ซึ่งเกิดก่อนงาน HTTP จะเริ่มด้วยซ้ำ
+      // จึงกันอะไรไม่ได้จริง (และเรียก HTTP คาไว้ใน transaction ก็ไม่ควรทำ)
+      //
+      // เงื่อนไข `roomBookingStatus != RESYNCING` คือตัวกั้น ส่วน roomBookingAt
+      // ที่เก่าเกิน STALE คือทางออกเผื่อ process ตายคาระหว่างทาง — บทเรียนเดียวกับ
+      // v1.149 ที่ guard แบบ boolean เคยล็อกค้างจนงานรอบกลางคืนเงียบไปทั้งชุด
+      const claimed = await prisma.booking.updateMany({
+        where: {
+          id: bookingId,
+          roomBookingNo: b.roomBookingNo,
+          OR: [
+            { roomBookingStatus: { not: RESYNC_MARK } },
+            { roomBookingAt: { lt: new Date(Date.now() - RESYNC_STALE_MS) } },
+          ],
+        },
+        data: { roomBookingStatus: RESYNC_MARK, roomBookingAt: new Date() },
+      })
+      if (claimed.count === 0) {
+        console.warn(`[room-booking] resync ซ้อน ${b.bookingCode} — ข้ามรอบนี้ (${reason})`)
+        return
+      }
 
       const r = await cancelRoomBookingFor(bookingId)
       if (r.status !== 'CANCELLED' && r.status !== 'NOT_FOUND') {

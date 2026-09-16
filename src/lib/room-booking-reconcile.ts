@@ -51,9 +51,26 @@ export interface RoomReconcileResult {
   dryRun: boolean
 }
 
-/** ห้องที่ควรถูกยึดไว้ให้คิวนี้ตอนนี้ — null = ไม่ควรมีห้องเลย */
-function expectedTarget(b: any): { roomId: number; startAt: string; endAt: string } | null {
-  if (b.deletedAt || b.status === 'CANCELLED') return null
+/**
+ * ห้องที่ควรถูกยึดไว้ให้คิวนี้ตอนนี้ — **สามสถานะ ไม่ใช่สอง**
+ *
+ * v1.222 review fix — เดิมคืน null ก้อนเดียวสำหรับ skip ทุกเหตุผล แล้วผู้เรียก
+ * แปล null = "ไม่ควรมีห้อง" ⇒ **สั่งยกเลิกห้อง** ซึ่งเหมาเอา "บอกไม่ได้" ไปรวมกับ
+ * "ไม่ควรมีห้อง": ใบที่เวลาพัง (bad-times), ยังไม่กรอกเวลา, หรือแปลง locationId
+ * ไม่ได้ จะถูกปลดห้องทิ้งทั้งที่กองมีอยู่จริงและกำลังจะถ่าย
+ *
+ * แยกเป็น:
+ *   - `none`    ยกเลิก/ถูกลบ, ออกนอกตึก, ห้องที่ระบบกลางไม่มี → ปลดห้องได้ ถูกต้อง
+ *   - `unknown` ข้อมูลไม่พอจะตัดสิน → **ห้ามแตะห้อง** รายงานให้คนดูแทน
+ *   - `target`  รู้ชัดว่าควรเป็นห้องไหน ช่วงไหน
+ */
+type Expected =
+  | { kind: 'none' }
+  | { kind: 'unknown'; reason: string }
+  | { kind: 'target'; target: { roomId: number; startAt: string; endAt: string } }
+
+function expectedTarget(b: any): Expected {
+  if (b.deletedAt || b.status === 'CANCELLED') return { kind: 'none' }
   const ymd = (d: Date) => d.toISOString().slice(0, 10)
   const t = roomTargetForBooking({
     locationId: b.locationId,
@@ -62,7 +79,11 @@ function expectedTarget(b: any): { roomId: number; startAt: string; endAt: strin
     callTime: b.callTime,
     estimatedWrap: b.estimatedWrap,
   })
-  return 'skip' in t ? null : t.target
+  if (!('skip' in t)) return { kind: 'target', target: t.target }
+  // งานนอกตึก / ห้องที่ระบบกลางไม่มี = ไม่ควรมีห้องจริง ๆ ปลดได้
+  if (t.skip === 'external' || t.skip === 'no-room-mapping') return { kind: 'none' }
+  // ที่เหลือ (no-location / no-times / bad-times) = ข้อมูลไม่พอ ไม่ใช่คำตอบว่า "ไม่เอาห้อง"
+  return { kind: 'unknown', reason: t.skip }
 }
 
 export async function reconcileRoomBookings(opts: {
@@ -145,7 +166,12 @@ export async function reconcileRoomBookings(opts: {
 
     // ── 1+2. มีห้องจองไว้ แต่ไม่ควรมี / ไม่ตรงกับที่ควรเป็น ─────────────────
     if (b.roomBookingNo) {
-      const heldWrongly = want === null
+      // ข้อมูลไม่พอจะตัดสิน → ห้ามแตะห้องที่ยึดไว้ รายงานให้คนดูแทน
+      if (want.kind === 'unknown') {
+        out.staleStuck.push({ code, bookingNo: b.roomBookingNo, reason: `ตัดสินไม่ได้ (${want.reason}) — ไม่แตะห้อง` })
+        continue
+      }
+      const heldWrongly = want.kind === 'none'
 
       // v1.222 — เทียบกับ **ของจริงในระบบเขา** ไม่ใช่เทียบของเรากับตัวเราเอง
       //
@@ -164,10 +190,18 @@ export async function reconcileRoomBookings(opts: {
           ?? idx.get(`no:${b.roomBookingNo}`)
         if (!actual) {
           // ไม่อยู่ในระบบเขาแล้ว — เคส "ห้องหาย" จัดการในบล็อกถัดไป
-        } else if (actual.roomId !== null && actual.roomId !== want!.roomId) {
-          mismatch = `ย้ายห้อง (จองไว้ห้อง ${actual.roomId} ควรเป็น ${want!.roomId})`
-        } else if (!sameInstant(actual.startAt, want!.startAt) || !sameInstant(actual.endAt, want!.endAt)) {
-          mismatch = `เลื่อนเวลา (จองไว้ ${actual.startAt}–${actual.endAt} ควรเป็น ${want!.startAt}–${want!.endAt})`
+        } else if (actual.roomId !== null && actual.roomId !== want.target.roomId) {
+          mismatch = `ย้ายห้อง (จองไว้ห้อง ${actual.roomId} ควรเป็น ${want.target.roomId})`
+        } else if (actual.startAt == null || actual.endAt == null
+                   || Number.isNaN(Date.parse(actual.startAt)) || Number.isNaN(Date.parse(actual.endAt))) {
+          // v1.222 review fix — เวลาที่อ่านมาไม่ได้/อ่านไม่ออก = **ตัดสินไม่ได้**
+          // ไม่ใช่ "เวลาไม่ตรง". เดิม sameInstant คืน false เมื่อเจอ null ซึ่งไหลไป
+          // เป็น mismatch แล้วสั่งยกเลิกห้อง — ถ้าวันหนึ่งฟีดเขาหยุดส่ง startAt/endAt
+          // (หรือเปลี่ยนชื่อฟิลด์) เราจะปลดห้องทิ้งทั้งระบบในรอบเดียว
+          out.staleStuck.push({ code, bookingNo: b.roomBookingNo, reason: 'ระบบกลางไม่ได้ส่งเวลามา — ตัดสินไม่ได้ ไม่แตะห้อง' })
+          continue
+        } else if (!sameInstant(actual.startAt, want.target.startAt) || !sameInstant(actual.endAt, want.target.endAt)) {
+          mismatch = `เลื่อนเวลา (จองไว้ ${actual.startAt}–${actual.endAt} ควรเป็น ${want.target.startAt}–${want.target.endAt})`
         }
       }
 
@@ -222,7 +256,7 @@ export async function reconcileRoomBookings(opts: {
     }
 
     // ── 2.5 เราคิดว่าจองไว้ และควรมีจริง — แต่ยังอยู่ในระบบเขาไหม ──────────
-    if (b.roomBookingNo && want !== null) {
+    if (b.roomBookingNo && want.kind === 'target') {
       const live = await liveIndex(b.shootDate)
       if (live !== null) {
         const stillThere = live.has(`no:${b.roomBookingNo}`)
@@ -255,7 +289,7 @@ export async function reconcileRoomBookings(opts: {
       out.staleStuck.push({ code, bookingNo: null, reason: 'ห้องไม่ว่าง — รอรอบถัดไป (6 ชม.)' })
       continue
     }
-    if (!b.roomBookingNo && want !== null && roomBookingEnabled() && roomBookingAllowed(want.roomId)) {
+    if (!b.roomBookingNo && want.kind === 'target' && roomBookingEnabled() && roomBookingAllowed(want.target.roomId)) {
       const built = buildPayloadForBooking(b)
       if ('skip' in built || 'error' in built) continue
       if (dryRun) { out.booked.push({ code, bookingNo: '(จะจอง)' }); continue }
