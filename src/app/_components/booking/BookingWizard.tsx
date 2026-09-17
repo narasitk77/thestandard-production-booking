@@ -488,18 +488,27 @@ export default function BookingWizard() {
   // ต่างจาก camera-load ตรงการจัดการ error: ตัวนั้น `.catch(() => {})` เงียบ ๆ
   // ซึ่งทำให้ "ตรวจไม่ได้" หน้าตาเหมือน "ไม่มีอะไรต้องเตือน" — สำหรับห้องนั้น
   // อันตราย เพราะคนจะอ่านว่าห้องว่าง ที่นี่จึงแสดงว่า "ตรวจไม่ได้" ออกมาตรง ๆ
+  //
+  // v1.223.3 — dep เป็น **คีย์สตริงเดียว** ไม่ใช่ตัวแปร 6 ตัว
+  //
+  // ของเดิมใช้ deps = [locationId, shootDate, shootEndDate, callTime,
+  // estimatedWrap, offsite] แล้วค้างที่ "กำลังตรวจ" ตลอดกาลบนพรอด: มีบางตัวใน
+  // นั้นถูกเซ็ตใหม่ทุก render (ค่าเท่าเดิมแต่ React ถือว่าเปลี่ยน) → cleanup
+  // clearTimeout ทิ้ง timer 400ms ก่อนมันจะได้ยิงทุกครั้ง → fetch ไม่เคยเกิดขึ้น
+  // คีย์สตริงทำให้ "ค่าเท่าเดิม = คีย์เดิม = effect ไม่ re-run" ซึ่งกันปัญหานี้
+  // ทั้งคลาส ไม่ต้องไปไล่ว่าตัวไหนกระพริบ
+  const roomCheckKey = (!offsite && locationId && shootDate && callTime)
+    ? JSON.stringify({ locationId, shootDate, shootEndDate: shootEndDate || null, callTime, estimatedWrap: estimatedWrap || null })
+    : ''
   useEffect(() => {
-    if (offsite || !locationId || !shootDate || !callTime) { setRoomStatus(null); return }
+    if (!roomCheckKey) { setRoomStatus(null); return }
     let cancelled = false
     setRoomStatus({ state: 'checking' })
     const t = setTimeout(() => {
       fetch('/api/room-availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          locationId, shootDate, shootEndDate: shootEndDate || null,
-          callTime, estimatedWrap: estimatedWrap || null,
-        }),
+        body: roomCheckKey,
       })
         .then(async r => {
           const d = await r.json().catch(() => null)
@@ -510,7 +519,7 @@ export default function BookingWizard() {
         .catch(e => { if (!cancelled) setRoomStatus({ state: 'unknown', reason: `ตรวจไม่ได้ (${e?.message || 'เครือข่ายมีปัญหา'})` }) })
     }, 400)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [locationId, shootDate, shootEndDate, callTime, estimatedWrap, offsite])
+  }, [roomCheckKey])
 
   const resolvedLocationName = offsite
     ? (mapLocation.trim() || null)
