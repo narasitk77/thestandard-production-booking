@@ -1051,6 +1051,11 @@ export default function BookingWizard() {
       {/* v1.223 — สถานะห้อง ณ เวลาที่ตรวจ · เตือน ไม่ห้าม (ส่งใบจองได้เสมอ)
           จงใจไม่มีสถานะ "ว่าง ✅" — ระหว่างที่กรอกอยู่ คนอื่นกดส่งตัดหน้าได้
           สิ่งที่พูดได้จริงมีแค่ "ยังไม่มีใครจอง ณ เวลาที่ตรวจ" */}
+      {roomStatus && roomStatus.state === 'checking' && (
+        <div className="ops-card px-3 py-2 mb-3 text-xs text-slate-500 bg-slate-50 border-slate-200 border-l-4 border-l-slate-300">
+          กำลังตรวจว่ามีใครจองห้องนี้คาบเกี่ยวอยู่ไหม…
+        </div>
+      )}
       {roomStatus && roomStatus.state === 'busy' && (
         <div className="ops-card px-3 py-2 mb-3 text-sm text-amber-800 bg-amber-50 border-amber-200 border-l-4 border-l-amber-500 space-y-1">
           <div className="font-medium">⚠️ ห้องนี้มีคนจองคาบเกี่ยวกับ {roomStatus.window}</div>
