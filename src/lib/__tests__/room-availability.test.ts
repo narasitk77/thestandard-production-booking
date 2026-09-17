@@ -19,10 +19,12 @@ const findMany = mock.fn(async () => [] as any[])
 mock.module('../db', { namedExports: { prisma: { booking: { findMany } } } })
 
 let listRows: any[] | Error = []
+let monthsAsked: string[] = []
 mock.module('../room-booking', {
   namedExports: {
     roomIdForLocation: (id: string) => (id === 'tsd-studio-1' ? 15 : id === 'tsd-studio-2' ? 1 : null),
-    listRoomBookings: async () => {
+    listRoomBookings: async (y: number, m: number) => {
+      monthsAsked.push(`${y}-${m}`)
       if (listRows instanceof Error) throw listRows
       return listRows
     },
@@ -48,6 +50,7 @@ beforeEach(() => {
   findMany.mock.resetCalls()
   findMany.mock.mockImplementation(async () => [])
   listRows = []
+  monthsAsked = []
   __clearRoomAvailabilityCache()
 })
 
@@ -170,4 +173,54 @@ test('ห้องที่ระบบกลางไม่มี (Lounge) → 
   assert.equal(r.state, 'busy')
   assert.equal(r.externalChecked, false)
   assert.equal(r.externalError, undefined, 'ไม่ได้ตรวจ ≠ ตรวจแล้วล้ม')
+})
+
+
+// ── v1.223.4 ────────────────────────────────────────────────────────────────
+
+test('รับ locationName ได้ (ฟอร์มแก้ไขเก็บชื่อ ไม่ใช่ id) — แปลงที่ server ที่เดียว', async () => {
+  findMany.mock.mockImplementation(async () => [booking()])
+  const r = await checkRoomAvailability({
+    locationName: 'Studio 1 (TSD)', shootDate: '2026-09-17', callTime: '16:00', estimatedWrap: '18:00',
+  }) as any
+  assert.equal(r.state, 'busy')
+  const where = ((findMany.mock.calls as any[])[0].arguments[0] as any).where
+  assert.equal(where.locationId, 'tsd-studio-1', 'ต้องแปลงชื่อเป็น id ให้ถูกห้อง')
+})
+
+test('ชื่อไทยที่ RoutinePlanner เคยพิมพ์เองก็ต้องแปลงได้', async () => {
+  await checkRoomAvailability({ locationName: 'สตูดิโอ 1', shootDate: '2026-09-17', callTime: '16:00' })
+  const where = ((findMany.mock.calls as any[])[0].arguments[0] as any).where
+  assert.equal(where.locationId, 'tsd-studio-1')
+})
+
+test('ชื่อสถานที่นอกตึก → not-a-room ไม่ใช่ "ไม่มีใครจอง"', async () => {
+  // เคสอันตรายที่เคยมีจริง: "Studio 1 RCA" เป็นสตูดิโอนอกตึก ห้ามแมปเป็น tsd-studio-1
+  const r = await checkRoomAvailability({
+    locationName: 'Tiffany & Co. สาขาสยามพารากอน', shootDate: '2026-09-17', callTime: '16:00',
+  }) as any
+  assert.equal(r.state, 'not-a-room')
+  assert.equal(findMany.mock.calls.length, 0, 'ไม่ควรไปถาม DB เลย')
+})
+
+test('งานข้ามเดือนต้องดู snapshot ของทุกเดือนที่ช่วงถ่ายพาดผ่าน', async () => {
+  await checkRoomAvailability({
+    ...BASE, shootDate: '2026-09-30', shootEndDate: '2026-10-02',
+  })
+  assert.deepEqual(monthsAsked.sort(), ['2026-10', '2026-9'],
+    'เดิมดึงแค่เดือนของ shootDate → มองไม่เห็นการจองของแผนกอื่นในเดือนถัดไป')
+})
+
+test('งานวันเดียวยังยิงเดือนเดียว — ไม่เผลอเพิ่มภาระ rate limit', async () => {
+  await checkRoomAvailability(BASE)
+  assert.deepEqual(monthsAsked, ['2026-9'])
+})
+
+test('อ่านเดือนใดเดือนหนึ่งไม่ได้ = ถือว่าตรวจชั้นนอกไม่ครบ ไม่ใช่ตรวจผ่าน', async () => {
+  listRows = new Error('boom')
+  const r = await checkRoomAvailability({
+    ...BASE, shootDate: '2026-09-30', shootEndDate: '2026-10-02',
+  }) as any
+  assert.equal(r.externalChecked, false)
+  assert.ok(r.externalError)
 })
