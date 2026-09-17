@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/room-availability
- * { locationId, shootDate, shootEndDate?, callTime, estimatedWrap?, excludeBookingId? }
+ * { locationId | locationName, shootDate, shootEndDate?, callTime, estimatedWrap?, excludeBookingId? }
  *
  * v1.223 — "ห้องนี้มีใครจองคาบเกี่ยวอยู่ไหม" สำหรับฟอร์มจองคิว
  *
@@ -25,11 +25,11 @@ export async function POST(request: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await request.json().catch(() => ({}))
-    const { locationId, shootDate, shootEndDate, callTime, estimatedWrap, excludeBookingId } = body || {}
+    const { locationId, locationName, shootDate, shootEndDate, callTime, estimatedWrap, excludeBookingId } = body || {}
     if (!shootDate) return NextResponse.json({ error: 'shootDate required' }, { status: 400 })
 
     const result = await checkRoomAvailability({
-      locationId, shootDate, shootEndDate, callTime, estimatedWrap, excludeBookingId,
+      locationId, locationName, shootDate, shootEndDate, callTime, estimatedWrap, excludeBookingId,
     })
     return NextResponse.json(result)
   } catch (e: any) {

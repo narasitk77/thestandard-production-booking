@@ -53,6 +53,10 @@ interface BookingDetail {
   notes?: string
   /** v1.219 — API คืนมาอยู่แล้ว แค่ยังไม่เคยประกาศในไทป์ฝั่งนี้ */
   bookingCode?: string | null
+  /** v1.223.4 — ผลการจองห้องในระบบกลาง: เก็บมาตั้งแต่ v1.200 แต่ไม่เคยมีหน้าไหนแสดง */
+  roomBookingNo?: string | null
+  roomBookingStatus?: string | null
+  roomBookingError?: string | null
   outlet: { code: string; name: string }
   program: { code: string; name: string }
   episodes: Episode[]
@@ -239,6 +243,23 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               {' · '}{shootTypeLabel(booking.shootType)}
               {booking.locationName && ` @ ${booking.locationName}`}
             </p>
+            {/* v1.223.4 — สถานะห้องในระบบกลาง
+                `roomBookingStatus` ถูกเขียนลง DB ตั้งแต่ v1.200 แต่ `grep` ทั้งรีโป
+                แล้วไม่มี .tsx ไฟล์ไหนอ่านมันเลย — ผลของการจองห้องจึงไม่เคยถึงตาคน
+                ที่เป็นเจ้าของงาน ตรงกับกฎของทีมเป๊ะ: *บันทึกไว้ ≠ ส่งถึง*
+                แสดงเฉพาะเคสที่ "มีอะไรต้องรู้" — สำเร็จแล้วไม่ต้องรบกวน */}
+            {booking.roomBookingStatus === 'CONFLICT' && (
+              <p className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">
+                ⚠️ จองห้องในระบบส่วนกลางไม่ได้ — ห้องไม่ว่างในช่วงเวลานี้
+                {booking.roomBookingError ? ` (${booking.roomBookingError})` : ''}
+              </p>
+            )}
+            {(booking.roomBookingStatus === 'INVALID' || booking.roomBookingStatus === 'UNKNOWN') && (
+              <p className="mt-1 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1 inline-block">
+                ระบบยังจองห้องส่วนกลางให้ไม่สำเร็จ
+                {booking.roomBookingError ? ` — ${booking.roomBookingError}` : ''}
+              </p>
+            )}
           </div>
 
           {isStaff && (

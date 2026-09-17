@@ -43,6 +43,9 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  // v1.223.4 — เตือนห้องชนที่ฟอร์มแก้ไขด้วย ไม่ใช่เฉพาะตอนจองใหม่:
+  // การ *แก้เวลา / ย้ายห้อง* ทำให้ห้องชนกันได้พอ ๆ กับการจองใบใหม่
+  const [roomStatus, setRoomStatus] = useState<any | null>(null)
 
   const [form, setForm] = useState({
     callTime: '', estimatedWrap: '', shootType: '', locationName: '', producer: '',
@@ -103,6 +106,60 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
   const locationOnly = mode === 'location'
   const agencyRefOnly = mode === 'agencyRef'
   const isAdvertorial = !!booking && booking.category === 'ADVERTORIAL'
+
+  // คีย์เดียว = body ที่ส่งจริง (แบบเดียวกับ BookingWizard) — ค่าเท่าเดิมไม่ re-run
+  // `excludeBookingId` ขาดไม่ได้ ไม่งั้นทุกใบจะรายงานว่า "ชนกับตัวเอง"
+  const roomCheckKey = (booking && form.callTime && (form.locationName || '').trim())
+    ? JSON.stringify({
+        locationName: form.locationName,
+        shootDate: new Date(booking.shootDate).toISOString().slice(0, 10),
+        shootEndDate: booking.shootEndDate ? new Date(booking.shootEndDate).toISOString().slice(0, 10) : null,
+        callTime: form.callTime,
+        estimatedWrap: form.estimatedWrap || null,
+        excludeBookingId: booking.id,
+      })
+    : ''
+  useEffect(() => {
+    if (!roomCheckKey) { setRoomStatus(null); return }
+    let cancelled = false
+    setRoomStatus({ state: 'checking' })
+    const t = setTimeout(() => {
+      fetch('/api/room-availability', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: roomCheckKey,
+      })
+        .then(async r => {
+          const d = await r.json().catch(() => null)
+          if (cancelled) return
+          setRoomStatus(d || { state: 'unknown', reason: `ตรวจไม่ได้ (HTTP ${r.status})` })
+        })
+        .catch(e => { if (!cancelled) setRoomStatus({ state: 'unknown', reason: `ตรวจไม่ได้ (${e?.message || 'เครือข่ายมีปัญหา'})` }) })
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [roomCheckKey])
+
+  // เตือน ไม่ห้าม — บันทึกได้เสมอ (กฎเดียวกับ v1.177 และหน้าจองใหม่)
+  const roomWarning = !roomStatus ? null : roomStatus.state === 'busy' ? (
+    <div className="ops-card px-3 py-2 text-sm text-amber-800 bg-amber-50 border-amber-200 border-l-4 border-l-amber-500 space-y-1">
+      <div className="font-medium">⚠️ ห้องนี้มีคนจองคาบเกี่ยวกับ {roomStatus.window}</div>
+      {roomStatus.conflicts.map((c: any, i: number) => (
+        <div key={i} className="text-xs text-amber-700">• {c.time} — {c.label}{c.code ? ` (${c.code})` : ''}</div>
+      ))}
+      <div className="text-xs text-amber-700 pt-0.5">ยังบันทึกได้ แต่ควรเช็กกับทีมก่อน</div>
+    </div>
+  ) : roomStatus.state === 'checking' ? (
+    <div className="ops-card px-3 py-2 text-xs text-slate-500 bg-slate-50 border-slate-200 border-l-4 border-l-slate-300">
+      กำลังตรวจว่ามีใครจองห้องนี้คาบเกี่ยวอยู่ไหม…
+    </div>
+  ) : roomStatus.state === 'unknown' ? (
+    <div className="ops-card px-3 py-2 text-xs text-slate-600 bg-slate-50 border-slate-200 border-l-4 border-l-slate-400">
+      ตรวจห้องให้ไม่ได้ — {roomStatus.reason}
+    </div>
+  ) : roomStatus.state === 'no-conflict-known' ? (
+    <div className="ops-card px-3 py-2 text-xs text-slate-600 bg-slate-50 border-slate-200 border-l-4 border-l-slate-400">
+      ยังไม่มีใครจองห้องนี้ช่วง {roomStatus.window} ณ เวลาที่ตรวจ
+      {roomStatus.externalError ? ' · แต่ตรวจของแผนกอื่นไม่ได้รอบนี้' : ''}
+    </div>
+  ) : null
 
   const toggleSpecial = (item: string) =>
     setForm(f => ({ ...f, specialEquipment: f.specialEquipment.includes(item) ? f.specialEquipment.filter(x => x !== item) : [...f.specialEquipment, item] }))
@@ -213,6 +270,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
           </p>
         </div>
         <div className="ops-card ops-card-pad space-y-4">
+          {roomWarning}
           {saveError && <div className="ops-card px-3 py-2 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">{saveError}</div>}
           <div>
             <label className="text-xs text-gray-500 mb-1 block">สถานที่ / ลิงก์แผนที่ (Google Maps)</label>
@@ -280,6 +338,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
       </div>
 
       <div className="ops-card ops-card-pad space-y-4">
+        {roomWarning}
         {saveError && <div className="ops-card px-3 py-2 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">{saveError}</div>}
 
         <div className="grid grid-cols-2 gap-4">

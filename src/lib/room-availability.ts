@@ -32,6 +32,9 @@ import { roomIdForLocation, listRoomBookings } from './room-booking'
 // ชื่อใบจองมีกฎกลางอยู่แล้ว — เขียนเองได้ชื่อ *ประเภทเนื้อหา* ("Long-form · รายการ
 // · ซีรีส์ · สัมภาษณ์ยาว") เพราะ program ระดับใบจองเป็น bucket ชื่อจริงอยู่ที่ตอน
 import { bookingDisplayName } from './display'
+// ฟอร์มแก้ไขเก็บ "ชื่อสถานที่" ไม่ใช่ id — แปลงด้วยตัวเดียวกับที่ create/PATCH ใช้
+// ห้ามให้ฝั่งหน้าเว็บเดาเอง ไม่งั้นจะมีกฎแปลงชื่อ→ห้อง เกิดขึ้นเป็นตัวที่สอง
+import { resolveLocationId } from './location-resolve'
 
 /** สถานะของห้องที่ถามมา */
 export type RoomAvailability =
@@ -59,6 +62,8 @@ export interface RoomConflictRow {
 
 export interface RoomAvailabilityInput {
   locationId?: string | null
+  /** ใช้เมื่อผู้เรียกมีแต่ชื่อ (ฟอร์มแก้ไขของโปรดิวเซอร์) — แปลงที่ server */
+  locationName?: string | null
   shootDate: string            // YYYY-MM-DD (เวลาไทย)
   shootEndDate?: string | null
   callTime?: string | null     // HH:MM
@@ -109,8 +114,11 @@ const hhmm = (d: Date) => {
 }
 
 export async function checkRoomAvailability(input: RoomAvailabilityInput): Promise<RoomAvailability> {
-  const locationId = (input.locationId || '').trim()
-  if (!locationId) return { state: 'not-a-room', reason: 'ยังไม่ได้เลือกสถานที่' }
+  const locationId = (input.locationId || '').trim() || (resolveLocationId(input.locationName || '') || '')
+  if (!locationId) {
+    // มีชื่อแต่แปลงเป็นห้องไม่ได้ = นอกตึก หรือชื่อที่ระบบไม่รู้จัก — อย่างไรก็ตรวจให้ไม่ได้
+    return { state: 'not-a-room', reason: (input.locationName || '').trim() ? 'สถานที่นี้ไม่ใช่ห้องในตึก' : 'ยังไม่ได้เลือกสถานที่' }
+  }
 
   const loc = LOCATIONS.find(l => l.id === locationId)
   if (!loc || loc.group === 'EXTERNAL') return { state: 'not-a-room', reason: 'งานนอกตึก ไม่ต้องจองห้อง' }
@@ -185,8 +193,22 @@ export async function checkRoomAvailability(input: RoomAvailabilityInput): Promi
   let externalError: string | undefined
   const roomId = roomIdForLocation(locationId)
   if (roomId !== null) {
-    const [y, m] = input.shootDate.split('-').map(Number)
-    const ext = await externalMonth(y, m)
+    // v1.223.4 — งานที่ข้ามเดือน (เช่น 30 ก.ย.–2 ต.ค.) ต้องดู snapshot ของ
+    // **ทุกเดือนที่ช่วงถ่ายพาดผ่าน** เดิมดึงเฉพาะเดือนของ shootDate จึงมองไม่เห็น
+    // การจองของแผนกอื่นในเดือนถัดไปเลย แล้วรายงานว่า "ตรวจครบแล้ว"
+    const months = new Set<string>()
+    for (const d of [input.shootDate, input.shootEndDate || input.shootDate]) {
+      const [yy, mm] = d.split('-').map(Number)
+      if (Number.isFinite(yy) && Number.isFinite(mm)) months.add(`${yy}-${mm}`)
+    }
+    const entries = await Promise.all([...months].map(k => {
+      const [yy, mm] = k.split('-').map(Number)
+      return externalMonth(yy, mm)
+    }))
+    const ext = {
+      rows: entries.every(e => e.rows) ? entries.flatMap(e => e.rows!) : null,
+      error: entries.find(e => e.error)?.error,
+    }
     if (ext.rows) {
       externalChecked = true
       const dayStart = Date.parse(`${input.shootDate}T00:00:00+07:00`)
