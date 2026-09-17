@@ -29,6 +29,9 @@ import { prisma } from './db'
 import { LOCATIONS } from './locations'
 import { effectiveWrap, isValidHHMM, timeWindowsOverlap } from './shoot-window'
 import { roomIdForLocation, listRoomBookings } from './room-booking'
+// ชื่อใบจองมีกฎกลางอยู่แล้ว — เขียนเองได้ชื่อ *ประเภทเนื้อหา* ("Long-form · รายการ
+// · ซีรีส์ · สัมภาษณ์ยาว") เพราะ program ระดับใบจองเป็น bucket ชื่อจริงอยู่ที่ตอน
+import { bookingDisplayName } from './display'
 
 /** สถานะของห้องที่ถามมา */
 export type RoomAvailability =
@@ -149,6 +152,10 @@ export async function checkRoomAvailability(input: RoomAvailabilityInput): Promi
       shootDate: true, shootEndDate: true, projectName: true,
       program: { select: { name: true } },
       outlet: { select: { code: true } },
+      episodes: {
+        orderBy: { sequence: 'asc' as const },
+        select: { title: true, program: { select: { name: true } } },
+      },
     },
     orderBy: { callTime: 'asc' },
     take: 50,
@@ -166,7 +173,7 @@ export async function checkRoomAvailability(input: RoomAvailabilityInput): Promi
     conflicts.push({
       source: 'probook',
       time: multiDay ? 'ทั้งวัน (งานหลายวัน)' : `${r.callTime}–${theirs.end}${theirs.estimated ? ' (ประมาณ)' : ''}`,
-      label: [r.outlet?.code, r.projectName || r.program?.name].filter(Boolean).join(' · ') || 'งานถ่าย',
+      label: [r.outlet?.code, bookingDisplayName(r)].filter(Boolean).join(' · ') || 'งานถ่าย',
       code: r.bookingCode || undefined,
       estimated: theirs.estimated,
     })
