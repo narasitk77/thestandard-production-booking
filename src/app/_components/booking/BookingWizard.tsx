@@ -482,6 +482,36 @@ export default function BookingWizard() {
   // the office-room picker. Studio/Event = office: pick a room, no external
   // options, no van.
   const offsite = shootType === 'On Location' || (shootType === 'Event' && eventExternal)
+
+  // v1.223 — "ห้องนี้มีใครจองคาบเกี่ยวอยู่ไหม" · เตือน ไม่ห้าม (แบบเดียวกับ v1.177)
+  //
+  // ต่างจาก camera-load ตรงการจัดการ error: ตัวนั้น `.catch(() => {})` เงียบ ๆ
+  // ซึ่งทำให้ "ตรวจไม่ได้" หน้าตาเหมือน "ไม่มีอะไรต้องเตือน" — สำหรับห้องนั้น
+  // อันตราย เพราะคนจะอ่านว่าห้องว่าง ที่นี่จึงแสดงว่า "ตรวจไม่ได้" ออกมาตรง ๆ
+  useEffect(() => {
+    if (offsite || !locationId || !shootDate || !callTime) { setRoomStatus(null); return }
+    let cancelled = false
+    setRoomStatus({ state: 'checking' })
+    const t = setTimeout(() => {
+      fetch('/api/room-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          locationId, shootDate, shootEndDate: shootEndDate || null,
+          callTime, estimatedWrap: estimatedWrap || null,
+        }),
+      })
+        .then(async r => {
+          const d = await r.json().catch(() => null)
+          if (cancelled) return
+          if (!d) { setRoomStatus({ state: 'unknown', reason: `ตรวจไม่ได้ (HTTP ${r.status})` }); return }
+          setRoomStatus(d)
+        })
+        .catch(e => { if (!cancelled) setRoomStatus({ state: 'unknown', reason: `ตรวจไม่ได้ (${e?.message || 'เครือข่ายมีปัญหา'})` }) })
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [locationId, shootDate, shootEndDate, callTime, estimatedWrap, offsite])
+
   const resolvedLocationName = offsite
     ? (mapLocation.trim() || null)
     : !selectedLocation
@@ -636,6 +666,8 @@ export default function BookingWizard() {
   // v1.63.0 — live, NON-BLOCKING camera-overload warning (set by the effect below)
   // v1.177 — one line per over-capacity pool, plus the "admin จัดหาให้" footer.
   const [loadWarnings, setLoadWarnings] = useState<string[]>([])
+  // v1.223 — สถานะห้อง ณ เวลาที่ตรวจ · null = ยังไม่ได้ตรวจ/ไม่ต้องแสดง
+  const [roomStatus, setRoomStatus] = useState<any | null>(null)
 
   const toggleEpisode = (epId: string) =>
     setSelectedEpisodeIds(prev =>
@@ -1013,6 +1045,37 @@ export default function BookingWizard() {
           {loadWarnings.map((w, i) => (
             <div key={i} className={i === loadWarnings.length - 1 ? 'text-xs text-amber-700 pt-0.5' : ''}>{w}</div>
           ))}
+        </div>
+      )}
+
+      {/* v1.223 — สถานะห้อง ณ เวลาที่ตรวจ · เตือน ไม่ห้าม (ส่งใบจองได้เสมอ)
+          จงใจไม่มีสถานะ "ว่าง ✅" — ระหว่างที่กรอกอยู่ คนอื่นกดส่งตัดหน้าได้
+          สิ่งที่พูดได้จริงมีแค่ "ยังไม่มีใครจอง ณ เวลาที่ตรวจ" */}
+      {roomStatus && roomStatus.state === 'busy' && (
+        <div className="ops-card px-3 py-2 mb-3 text-sm text-amber-800 bg-amber-50 border-amber-200 border-l-4 border-l-amber-500 space-y-1">
+          <div className="font-medium">⚠️ ห้องนี้มีคนจองคาบเกี่ยวกับ {roomStatus.window}</div>
+          {roomStatus.conflicts.map((c: any, i: number) => (
+            <div key={i} className="text-xs text-amber-700">
+              • {c.time} — {c.label}{c.code ? ` (${c.code})` : ''}
+            </div>
+          ))}
+          <div className="text-xs text-amber-700 pt-0.5">
+            ยังส่งใบจองได้ แต่ควรเช็กกับทีมก่อนว่าจะใช้ห้องร่วมกันยังไง
+            {roomStatus.externalError ? ' · ตรวจของแผนกอื่นไม่ได้รอบนี้' : ''}
+          </div>
+        </div>
+      )}
+      {roomStatus && roomStatus.state === 'unknown' && (
+        <div className="ops-card px-3 py-2 mb-3 text-xs text-slate-600 bg-slate-50 border-slate-200 border-l-4 border-l-slate-400">
+          ตรวจห้องให้ไม่ได้ — {roomStatus.reason}
+        </div>
+      )}
+      {roomStatus && roomStatus.state === 'no-conflict-known' && (
+        <div className="ops-card px-3 py-2 mb-3 text-xs text-slate-600 bg-slate-50 border-slate-200 border-l-4 border-l-slate-400">
+          ยังไม่มีใครจองห้องนี้ช่วง {roomStatus.window} ณ เวลาที่ตรวจ
+          {roomStatus.externalError
+            ? ' · แต่ตรวจการจองของแผนกอื่นไม่ได้รอบนี้ (ระบบส่วนกลางไม่ตอบ)'
+            : roomStatus.externalChecked ? ' (รวมการจองของแผนกอื่นแล้ว)' : ''}
         </div>
       )}
 

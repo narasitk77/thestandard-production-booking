@@ -1,4 +1,7 @@
 import { LOCATIONS } from './locations'
+// v1.223 — กฎ "ไม่กรอกเวลาเลิก = กองยาวเท่าไร" เป็นของกลางทั้งแอป (client-safe)
+// เคยก๊อปมาไว้ที่นี่เป็นตัวที่สอง ซึ่งเป็นโรคเดียวกับที่ v1.222 เพิ่งรักษาไป
+import { DEFAULT_SHOOT_HOURS, effectiveWrap, isValidHHMM } from './shoot-window'
 
 /**
  * เชื่อมกับระบบจองห้องกลาง `service.thestandard.co/booking` — **เฉพาะฝั่งอ่าน**
@@ -99,9 +102,6 @@ export function roomTargetForBooking(input: {
   return { target: { roomId, startAt, endAt } }
 }
 
-/** ไม่กรอกเวลาเลิก = ถือว่ากองยาวเท่านี้ (ค่าที่ "จองจริง" ใช้มาตลอด) */
-const DEFAULT_SHOOT_HOURS = 8
-
 /**
  * v1.222 — ที่เดียวที่ตอบว่า "กองนี้กินห้องช่วงไหน"
  *
@@ -123,8 +123,10 @@ export function resolveShootWindow(input: {
   const callTime = input.callTime || ''
   if (!/^\d{2}:\d{2}$/.test(callTime)) return { error: 'callTime ไม่ใช่ HH:mm' }
 
+  // ใช้ effectiveWrap ของ shoot-window — ที่เดียวกับที่หน้าอื่นทั้งแอปใช้
+  // (กรองรูปแบบก่อน เพราะ effectiveWrap รับสตริงอะไรก็ได้ที่ไม่ว่าง)
   const wrap = (input.estimatedWrap || '').trim()
-  const endTime = /^\d{2}:\d{2}$/.test(wrap) ? wrap : addHours(callTime, DEFAULT_SHOOT_HOURS)
+  const endTime = effectiveWrap(callTime, isValidHHMM(wrap) ? wrap : null).end
   const sameDay = !input.shootEndDate || input.shootEndDate === input.shootDate
   // ถ่ายข้ามคืน: wrap **น้อยกว่า** call แปลว่าเลิกวันถัดไป
   // wrap เท่ากับ call เป๊ะ (09:00→09:00) ตกไปเป็น error โดยตั้งใจ — น่าจะกรอกผิด
@@ -417,6 +419,8 @@ export async function findExistingRoomBooking(
 export async function listRoomBookings(year: number, month: number): Promise<{
   id: number | null; bookingNo: string; title: string; live: boolean
   roomId: number | null; startAt: string | null; endAt: string | null
+  /** v1.223 — รายการนี้โปรบุ๊คเป็นคนจองเองไหม */
+  isProbook: boolean
 }[]> {
   const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
   const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
@@ -434,6 +438,10 @@ export async function listRoomBookings(year: number, month: number): Promise<{
       roomId: Number.isFinite(roomId) ? roomId : null,
       startAt: r?.startAt ? String(r.startAt) : null,
       endAt: r?.endAt ? String(r.endAt) : null,
+      // v1.223 — แยก "ใบของเราเอง" ด้วย lineUserId ที่ระบบเขาตีตราให้ตอนจองผ่าน
+      // service key **ไม่ใช่** marker `[PB-...]` ในชื่อ ซึ่งใครก็พิมพ์เลียนได้
+      // และหายไปถ้ามีคนแก้ชื่อการจอง
+      isProbook: String(r?.lineUserId || '') === 'service:probook',
       // v1.208 — feed มี `status` + `cancelledAt` ให้อยู่แล้ว ใช้ตัดสินตรง ๆ ดีกว่า
       // อาศัย "ไม่อยู่ในลิสต์ = ถูกยกเลิก" ซึ่งเป็นพฤติกรรมที่เขาไม่ได้รับปากไว้
       // (ตอนนี้เขากรองออกให้ แต่ถ้าวันหนึ่งเริ่มส่งรายการที่ยกเลิกมาด้วย
