@@ -129,7 +129,14 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     return { status: 'INVALID', message: built.error }
   }
   const roomId = built.payload.roomId
-  if (!roomBookingAllowed(roomId)) return { status: 'SKIPPED', reason: 'room-not-enabled' }
+  if (!roomBookingAllowed(roomId)) {
+    // v1.227 — **ข้ามแล้วต้องบอก** เดิม return เฉย ๆ ไม่เขียนสถานะลง DB เลย
+    // → roomBookingStatus เป็น null → ไม่มีป้ายบนการ์ด → คนที่จอง War Room
+    // เข้าใจว่าห้องถูกจองให้แล้วเหมือน Studio เพราะไม่มีอะไรบอกว่าต่างกัน
+    // (ตรวจ 2026-09-18: 4 ใบ CONFIRMED ที่ War Room ไม่มีห้องจองไว้เลย)
+    await stamp(b.id, 'SKIPPED', null, 'room-not-enabled')
+    return { status: 'SKIPPED', reason: 'room-not-enabled' }
+  }
 
   // ── ขั้นที่ 2: อ่านกลับก่อนยิงเสมอ ────────────────────────────────────────
   const d = b.shootDate

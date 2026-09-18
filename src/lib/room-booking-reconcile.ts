@@ -46,6 +46,8 @@ export interface RoomReconcileResult {
   staleStuck: { code: string; bookingNo: string | null; reason: string }[]  // ยกเลิกไม่ได้/ยังจองไม่ได้ ต้องมือ
   wrongRoomReleased: string[]  // ห้อง/เวลาไม่ตรง ปลดของเดิมแล้ว
   vanished: string[]           // เราคิดว่าจองไว้ แต่หายไปจากระบบเขาแล้ว
+  /** v1.227 — ห้องที่ระบบยังไม่จองให้อัตโนมัติ (ROOM_BOOKING_ROOMS) — ต้องจองเอง */
+  notEnabled: string[]
   booked: { code: string; bookingNo: string }[]
   failed: { code: string; status: string; message?: string }[]
   dryRun: boolean
@@ -86,6 +88,14 @@ function expectedTarget(b: any): Expected {
   return { kind: 'unknown', reason: t.skip }
 }
 
+/** เขียนสถานะ "ข้าม" ลง DB — ข้ามเงียบคือคลาสบั๊กที่เราไล่แก้มาทั้งชุด */
+async function stampSkipped(id: string, reason: string) {
+  await prisma.booking.update({
+    where: { id },
+    data: { roomBookingStatus: 'SKIPPED', roomBookingError: `skip: ${reason}`, roomBookingAt: new Date() },
+  })
+}
+
 export async function reconcileRoomBookings(opts: {
   dryRun?: boolean
   days?: number
@@ -112,6 +122,7 @@ export async function reconcileRoomBookings(opts: {
     select: {
       ...ROOM_BOOKING_SELECT,
       roomBookingNo: true, roomBookingRef: true, roomBookingStatus: true, roomBookingAt: true,
+      roomBookingError: true,
       status: true, deletedAt: true,
     },
     orderBy: { shootDate: 'asc' },
@@ -119,7 +130,7 @@ export async function reconcileRoomBookings(opts: {
 
   const out: RoomReconcileResult = {
     scanned: rows.length, staleCancelled: [], staleStuck: [],
-    wrongRoomReleased: [], vanished: [], booked: [], failed: [], dryRun,
+    wrongRoomReleased: [], vanished: [], notEnabled: [], booked: [], failed: [], dryRun,
   }
   let writes = 0
 
@@ -300,6 +311,19 @@ export async function reconcileRoomBookings(opts: {
     if (!b.roomBookingNo && b.roomBookingStatus === 'CONFLICT' && b.roomBookingAt
         && Date.now() - new Date(b.roomBookingAt).getTime() < CONFLICT_RETRY_MS) {
       out.staleStuck.push({ code, bookingNo: null, reason: 'ห้องไม่ว่าง — รอรอบถัดไป (6 ชม.)' })
+      continue
+    }
+    // v1.227 — ห้องที่ยังไม่เปิดให้จองอัตโนมัติ: ข้ามได้ แต่ **ต้องเขียนสถานะไว้**
+    // ไม่งั้นการ์ดใบจองเงียบสนิทและคนเข้าใจว่าห้องถูกจองให้แล้ว
+    // ไม่นับเป็น `writes` เพราะไม่ได้ยิงระบบเขาเลย (ไม่กินโควตา)
+    if (!b.roomBookingNo && want.kind === 'target' && roomBookingEnabled()
+        && !roomBookingAllowed(want.target.roomId)) {
+      // เขียนเฉพาะตอนค่าเปลี่ยนจริง — ไม่งั้น `roomBookingAt` ถูกดันใหม่ทุกชั่วโมง
+      // จนอ่านเหมือน "เพิ่งพยายามเมื่อกี้" ทั้งที่ไม่ได้ทำอะไรเลย
+      const already = b.roomBookingStatus === 'SKIPPED'
+        && b.roomBookingError === 'skip: room-not-enabled'
+      if (!dryRun && !already) await stampSkipped(b.id, 'room-not-enabled')
+      out.notEnabled.push(code)
       continue
     }
     if (!b.roomBookingNo && want.kind === 'target' && roomBookingEnabled() && roomBookingAllowed(want.target.roomId)) {

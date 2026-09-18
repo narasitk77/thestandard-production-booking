@@ -1,4 +1,5 @@
 import { statusLabel } from '@/lib/utils'
+import { roomBadge } from '@/lib/room-badge'
 
 type Status = 'REQUESTED' | 'ASSIGNED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | string
 
@@ -87,20 +88,18 @@ export function RoomBusyBadge({ status, error, className = '' }: {
   error?: string | null
   className?: string
 }) {
-  if (status !== 'CONFLICT' && status !== 'INVALID' && status !== 'UNKNOWN') return null
-  const busy = status === 'CONFLICT'
+  const b = roomBadge(status, error)
+  if (!b) return null
+  const tone =
+    b.tone === 'busy' ? 'border-rose-300 bg-rose-50 text-rose-700'
+    : b.tone === 'manual' ? 'border-sky-300 bg-sky-50 text-sky-700'
+    : 'border-slate-300 bg-slate-50 text-slate-600'
   return (
     <span
-      className={`inline-flex items-center gap-0.5 rounded-full border text-[9px] font-semibold px-1.5 py-0.5 whitespace-nowrap ${
-        busy
-          ? 'border-rose-300 bg-rose-50 text-rose-700'
-          : 'border-slate-300 bg-slate-50 text-slate-600'
-      } ${className}`}
-      title={busy
-        ? `จองห้องในระบบส่วนกลางไม่ได้ — ห้องไม่ว่างช่วงเวลานี้${error ? `\n${error}` : ''}`
-        : `ระบบยังจองห้องส่วนกลางให้ไม่สำเร็จ${error ? `\n${error}` : ''}`}
+      className={`inline-flex items-center gap-0.5 rounded-full border text-[9px] font-semibold px-1.5 py-0.5 whitespace-nowrap ${tone} ${className}`}
+      title={b.title}
     >
-      {busy ? '⚠ ห้องไม่ว่าง' : 'ห้องยังไม่ได้จอง'}
+      {b.label}
     </span>
   )
 }
