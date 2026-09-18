@@ -4,6 +4,7 @@ import { notifyChat } from './notify'
 import {
   findExistingRoomBooking, cancelRoomBooking, roomIdForLocation,
   roomTargetForBooking, roomBookingEnabled, roomBookingAllowed, listRoomBookings,
+  findManualHold, bangkokToUtcIso,
 } from './room-booking'
 import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './room-booking-sync'
 
@@ -128,6 +129,20 @@ export async function reconcileRoomBookings(opts: {
     orderBy: { shootDate: 'asc' },
   })
 
+  /** คนของงานนี้จองห้องเองไว้แล้วไหม — คืนชื่อคนจอง ถ้าใช่ (ใช้ข้อมูลเดือนที่อ่านมาแล้ว) */
+  async function manualHeld(bk: any, p: any): Promise<string | null> {
+    const key = `${bk.shootDate.getUTCFullYear()}-${bk.shootDate.getUTCMonth() + 1}`
+    if (!monthRows.has(key)) await liveIndex(bk.shootDate)
+    const rows = monthRows.get(key)
+    if (!rows) return null
+    const startAt = bangkokToUtcIso(p.startDate, p.startTime)
+    const endAt = bangkokToUtcIso(p.endDate, p.endTime)
+    if (!startAt || !endAt) return null
+    const hold = findManualHold(rows, { roomId: p.roomId, startAt, endAt },
+                                [bk.producerEmail, bk.createdByEmail])
+    return hold ? (hold.bookedBy || 'มีคน') : null
+  }
+
   const out: RoomReconcileResult = {
     scanned: rows.length, staleCancelled: [], staleStuck: [],
     wrongRoomReleased: [], vanished: [], notEnabled: [], booked: [], failed: [], dryRun,
@@ -144,12 +159,16 @@ export async function reconcileRoomBookings(opts: {
    */
   type LiveRoom = { roomId: number | null; startAt: string | null; endAt: string | null }
   const monthCache = new Map<string, Map<string, LiveRoom>>()
+  // v1.227 — แถวดิบของเดือนนั้น เก็บจากการอ่าน**ครั้งเดียวกัน** ไม่เพิ่มรอบอ่าน
+  // ใช้ให้ dry-run ตอบตรงกับของจริงได้ (ดูคอมเมนต์ที่ `manualHeld` ข้างล่าง)
+  const monthRows = new Map<string, Awaited<ReturnType<typeof listRoomBookings>>>()
   async function liveIndex(d: Date): Promise<Map<string, LiveRoom> | null> {
     const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1
     const key = `${y}-${m}`
     if (monthCache.has(key)) return monthCache.get(key)!
     try {
       const list = await listRoomBookings(y, m)
+      monthRows.set(key, list)
       const idx = new Map<string, LiveRoom>()
       for (const r of list) {
         // นับเฉพาะรายการที่ยังมีชีวิต — รายการที่ถูกยกเลิกแล้วต้องไม่ทำให้เราคิดว่าห้องยังอยู่
@@ -329,7 +348,17 @@ export async function reconcileRoomBookings(opts: {
     if (!b.roomBookingNo && want.kind === 'target' && roomBookingEnabled() && roomBookingAllowed(want.target.roomId)) {
       const built = buildPayloadForBooking(b)
       if ('skip' in built || 'error' in built) continue
-      if (dryRun) { out.booked.push({ code, bookingNo: '(จะจอง)' }); continue }
+      if (dryRun) {
+        // **preview ต้องไม่โกหก** — ของจริง `syncRoomBooking` จะเช็คก่อนว่าคนของงานนี้
+        // จองห้องเองไว้แล้วหรือยัง แล้วข้าม ถ้า dry-run ตัดจบตรงนี้เฉย ๆ มันจะรายงาน
+        // ว่า "จะจอง" ทั้งที่ของจริงไม่จอง — คนอ่าน preview เพื่อ**ตัดสินใจ** ฉะนั้น
+        // preview ที่ต่างจากของจริงคือ preview ที่ไม่ควรมี (บทเรียน v1.202.3)
+        const held = await manualHeld(b, built.payload)
+        out.booked.push(held
+          ? { code, bookingNo: `(ข้าม — ${held} จองห้องเองไว้แล้ว)` }
+          : { code, bookingNo: '(จะจอง)' })
+        continue
+      }
       writes++
       // ผ่าน syncRoomBooking เท่านั้น — มันอ่านกลับก่อนยิงเสมอ (กันจองซ้ำ)
       const r = await syncRoomBooking(b.id)
