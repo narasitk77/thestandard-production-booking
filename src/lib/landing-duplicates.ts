@@ -114,3 +114,63 @@ export async function verifyLandingDuplicates(
   }
   return { ...base, verdict: 'safe-to-delete', reason: 'ทุกไฟล์มี checksum ตรงกันในกล่อง' }
 }
+
+
+// ── "กล่องของงานนี้มีฟุตเทจจริงหรือยัง" (v1.225) ────────────────────────────
+
+export type BoxFootageState =
+  | { state: 'has-footage'; files: number }
+  /** กล่องไม่มีฟุตเทจกล้องเลย = **ยังไม่ได้ส่งงาน** ไม่ใช่ส่งเสร็จ */
+  | { state: 'no-footage'; reason: string }
+  /** อ่านไม่ได้ = ตัดสินไม่ได้ ห้ามตีความเป็นอย่างใดอย่างหนึ่ง */
+  | { state: 'unknown'; reason: string }
+
+/** ไฟล์ stub ที่ระบบสร้างเอง ไม่ใช่ฟุตเทจ */
+const SHOOT_STUB = /^_SHOOT\b.*\.txt$/i
+
+/**
+ * ฟุตเทจที่ "เดินผ่านโฟลเดอร์ drop" คือฟุตเทจ **กล้อง** เท่านั้น
+ *
+ * เสียงมาคนละทาง (_SOUND-STAGING → โฟลเดอร์ AUDIO ในกล่อง) จึงต้องไม่นับ —
+ * ไม่งั้นงานที่มีแต่ไฟล์เสียงจะดูเหมือน "ส่งงานแล้ว" ทั้งที่วิดีโอยังไม่เคยมาถึง
+ * ซึ่งคือเคส POP-7TG-260916-01 เป๊ะ ๆ (กล่องมี .wav 2 ไฟล์ + _SHOOT.txt
+ * ระบบจึงทิ้งโฟลเดอร์ drop ทิ้งไปทั้งที่ยังไม่มีวิดีโอสักไฟล์)
+ */
+function isCameraFootage(f: { name: string; folderPath?: string[] }): boolean {
+  if (SHOOT_STUB.test(f.name)) return false
+  return !(f.folderPath || []).some(seg => seg.trim().toUpperCase() === 'AUDIO')
+}
+
+/**
+ * กล่องของ Production ID นี้มีฟุตเทจกล้องแล้วหรือยัง
+ *
+ * ใช้ก่อนจะ "ทิ้งโฟลเดอร์ drop ที่ว่าง" — เพราะ **ว่าง ≠ ส่งงานแล้ว**:
+ * โฟลเดอร์ที่ฟุตเทจไม่เคยมาถึงก็ว่างเหมือนกันทุกประการ
+ */
+export async function boxFootageState(
+  code: string,
+  opts: { excludeFolderId?: string; maxFiles?: number } = {},
+): Promise<BoxFootageState> {
+  const maxFiles = opts.maxFiles ?? 2000
+  let folders
+  try {
+    folders = (await findFoldersByCode(code)).filter(f => f.id !== opts.excludeFolderId)
+  } catch (e: any) {
+    return { state: 'unknown', reason: `หาโฟลเดอร์ในกล่องไม่ได้: ${e?.message || e}` }
+  }
+  if (folders.length === 0) return { state: 'no-footage', reason: 'ไม่มีโฟลเดอร์ในกล่องเลย' }
+
+  let files = 0
+  for (const f of folders) {
+    try {
+      for (const file of await listFilesRecursive(f.id, { maxFiles })) {
+        if (isCameraFootage(file)) files++
+      }
+    } catch (e: any) {
+      return { state: 'unknown', reason: `อ่านกล่องไม่ครบ: ${e?.message || e}` }
+    }
+  }
+  return files > 0
+    ? { state: 'has-footage', files }
+    : { state: 'no-footage', reason: 'กล่องมีแต่ไฟล์เสียง/stub — ยังไม่มีฟุตเทจกล้อง' }
+}

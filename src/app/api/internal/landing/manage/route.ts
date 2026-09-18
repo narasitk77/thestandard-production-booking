@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
       // 10 folders — the oldest 16 days — piled up with nobody told.
       // 'footage' is the never-scope-filtered category, so this reaches Discord
       // and rides the v1.209 dual-send to Lark.
-      if (!dryRun && allowed.isWorker && stale.length > 0) {
+      if (!dryRun && allowed.isWorker && (stale.length > 0 || (r.keptNoFootage || []).length > 0)) {
         // เทียบ checksum เฉพาะโฟลเดอร์ที่ยังมีไฟล์ · จำกัดจำนวนเพราะแต่ละใบต้อง
         // เดิน Drive ทั้งต้นไม้ทั้งสองฝั่ง และ route นี้มีเพดาน 300 วิ
         // อ่านไม่สำเร็จ = ข้ามใบนั้นไป ไม่ทำให้รอบแจ้งเตือนล้ม
@@ -139,6 +139,14 @@ export async function GET(request: NextRequest) {
         const text = [
           `🗂️ โฟลเดอร์ค้างในไดรฟ์ Production Team — ${stale.length} รายการ (ระบบลบเองไม่ได้)`,
           ...show,
+          // v1.225 — เสียงดังที่สุดในข้อความนี้ เพราะมันแปลว่า "งานถ่ายไปแล้วแต่
+          // ฟุตเทจยังไม่เคยมาถึง" ซึ่งยิ่งรู้ช้ายิ่งกู้ยาก (การ์ดถูกฟอร์แมตทับ)
+          ...((r.keptNoFootage || []).length ? [
+            '',
+            `🚨 ${r.keptNoFootage.length} งานที่ถ่ายไปแล้วแต่ **ยังไม่มีฟุตเทจในกล่องเลย** — ไม่ทิ้งโฟลเดอร์ drop ไว้ให้`,
+            ...r.keptNoFootage.slice(0, 8).map(k => `   • ${k.code} — ${k.reason}`),
+            '   ตรวจที่ NAS/การ์ดกล้องก่อนฟอร์แมต',
+          ] : []),
           '',
           // NOT simply "go press merge". On 2026-09-09 all five of these had
           // ALREADY merged: video-merge leaves a file in landing when the box

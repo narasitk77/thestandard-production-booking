@@ -33,6 +33,7 @@ import {
 import { rememberDriveLinks } from './drive-links'
 import { computeTypeDroppedId } from './id-migration'
 import { landingMayBeTrashed } from './reconciler/guards'
+import { boxFootageState } from './landing-duplicates'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
 const SHOOT_STUB_RE = /^_SHOOT\b.*\.txt$/i
@@ -68,6 +69,11 @@ export interface LandingLifecycleResult {
   keptRecent: number          // past folders kept (still within grace / have files)
   removeErrors: number
   keepPastDays: number
+  /**
+   * v1.225 — โฟลเดอร์ drop ที่ว่างและเลยกรอบแล้ว แต่ **ไม่ทิ้ง** เพราะกล่องยังไม่มี
+   * ฟุตเทจ = งานนี้ยังไม่ได้ส่ง ไม่ใช่ส่งเสร็จ · ต้องมีคนเห็น ไม่ใช่หายเงียบ
+   */
+  keptNoFootage: Array<{ name: string; code: string; reason: string }>
   actions: string[]
 }
 
@@ -134,7 +140,7 @@ export async function manageLandingFolders(
 
   const base: LandingLifecycleResult = {
     skipped: false, dryRun, targetDay, targetDayEnd, createDays, created: 0, createErrors: 0,
-    removedPastEmpty: 0, keptRecent: 0, removeErrors: 0, keepPastDays, actions: [],
+    removedPastEmpty: 0, keptRecent: 0, removeErrors: 0, keepPastDays, keptNoFootage: [], actions: [],
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
@@ -195,7 +201,24 @@ export async function manageLandingFolders(
     try { empty = !(await hasRealFiles(f.id)) }
     catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR check "${f.name}": ${e?.message || e}`); continue }
     if (!empty) { base.keptRecent++; continue } // still holds footage — never trash
-    base.actions.push(`trash past-empty landing "${f.name}" (shoot ${shootDate.toISOString().slice(0, 10)} < ${cutoff.toISOString().slice(0, 10)})`)
+
+    // v1.225 — **ว่าง ≠ ส่งงานแล้ว**
+    //
+    // กฎเดิมอ่านว่า "ว่าง = ฟุตเทจถูกย้ายเข้ากล่องเรียบร้อย" แต่โฟลเดอร์ที่ฟุตเทจ
+    // *ไม่เคยมาถึง* ก็ว่างเหมือนกันทุกประการ — 2026-09-18 ระบบจึงทิ้งโฟลเดอร์ของ
+    // POP-7TG-260916-01 ไปตอนที่ NAS ถูกปิดและวิดีโอยังไม่เคยขึ้น Drive สักไฟล์
+    // (กล่องมีแต่ .wav 2 ไฟล์ที่มาทางสายเสียง จึงไม่ช่วยอะไร)
+    //
+    // ทิ้งได้เฉพาะเมื่อ **รู้แน่** ว่ากล่องมีฟุตเทจกล้องแล้วเท่านั้น
+    // อ่านกล่องไม่ได้ = ไม่ทิ้ง (โฟลเดอร์ว่างที่ค้างไว้เสียแค่ความรก
+    //  ส่วนการทิ้งผิดจังหวะทำให้ไม่มีปลายทางให้ไฟล์ลง)
+    const fs = await boxFootageState(code, { excludeFolderId: f.id })
+    if (fs.state !== 'has-footage') {
+      base.keptNoFootage.push({ name: f.name, code, reason: fs.reason })
+      base.actions.push(`KEEP "${f.name}" — ${fs.state === 'no-footage' ? 'ยังไม่มีฟุตเทจในกล่อง' : 'ตรวจกล่องไม่ได้'}: ${fs.reason}`)
+      continue
+    }
+    base.actions.push(`trash past-empty landing "${f.name}" (shoot ${shootDate.toISOString().slice(0, 10)} < ${cutoff.toISOString().slice(0, 10)} · กล่องมี ${fs.files} ไฟล์)`)
     if (!dryRun) {
       try { await trashDriveItem(f.id) } catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR trash: ${e?.message || e}`); continue }
     }
@@ -279,7 +302,9 @@ export interface LandingPruneResult {
   keptWithFilesDetail: Array<{ name: string; id: string; code: string | null }>
   keptManual: string[]      // folders with no Production ID in the name — kept, reported
   keptByName: string[]      // matched a keepNames entry
-  keptFuture: string[]      // shoot is in the FUTURE — tomorrow's drop zone, never trash
+  keptFuture: string[]
+  /** v1.225 — ว่างแล้วแต่กล่องยังไม่มีฟุตเทจ = ยังไม่ได้ส่งงาน ไม่ทิ้ง + ต้องแจ้ง */
+  keptNoFootage: Array<{ name: string; code: string; reason: string }>      // shoot is in the FUTURE — tomorrow's drop zone, never trash
   errors: number
   actions: string[]
 }
@@ -299,7 +324,7 @@ export async function pruneLandingToToday(
   const today = bangkokDayRange(0)
   const base: LandingPruneResult = {
     skipped: false, dryRun, today: today.start.toISOString().slice(0, 10),
-    trashed: 0, keptToday: 0, keptWithFiles: [], keptWithFilesDetail: [], keptManual: [], keptByName: [], keptFuture: [], errors: 0, actions: [],
+    trashed: 0, keptToday: 0, keptWithFiles: [], keptWithFilesDetail: [], keptManual: [], keptByName: [], keptFuture: [], keptNoFootage: [], errors: 0, actions: [],
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
@@ -338,6 +363,18 @@ export async function pruneLandingToToday(
     // bookings that exist, so an orphan can never be tomorrow's drop zone.
     if (range && !landingMayBeTrashed({ lastShootDay: range.end, today: today.start, hasFiles: false })) {
       base.keptFuture.push(f.name); continue
+    }
+
+    // v1.225 — กฎเดียวกับ sweep 19:00: **ว่าง ≠ ส่งงานแล้ว**
+    // ทิ้งได้เฉพาะเมื่อรู้แน่ว่ากล่องมีฟุตเทจกล้องแล้ว (ดูเหตุผลเต็มที่ manageLandingFolders)
+    // เฉพาะโฟลเดอร์ที่จับคู่กับใบจองได้ — orphan ที่ไม่มี booking ยังใช้กฎเดิม
+    if (range) {
+      const fs = await boxFootageState(code, { excludeFolderId: f.id })
+      if (fs.state !== 'has-footage') {
+        base.keptNoFootage.push({ name: f.name, code, reason: fs.reason })
+        base.actions.push(`KEEP "${f.name}" — ${fs.state === 'no-footage' ? 'ยังไม่มีฟุตเทจในกล่อง' : 'ตรวจกล่องไม่ได้'}: ${fs.reason}`)
+        continue
+      }
     }
     base.actions.push(`trash "${f.name}" (${code}${shootDate ? ` · shoot ${shootDate.toISOString().slice(0, 10)}` : ' · no booking'})`)
     if (!dryRun) {
