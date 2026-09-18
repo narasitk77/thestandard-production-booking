@@ -5,6 +5,7 @@ import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 import { recordHeartbeat } from '@/lib/heartbeat'
 import { notifyChat } from '@/lib/notify'
+import { verifyLandingDuplicates, verdictLine } from '@/lib/landing-duplicates'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -124,6 +125,15 @@ export async function GET(request: NextRequest) {
       // 'footage' is the never-scope-filtered category, so this reaches Discord
       // and rides the v1.209 dual-send to Lark.
       if (!dryRun && allowed.isWorker && stale.length > 0) {
+        // เทียบ checksum เฉพาะโฟลเดอร์ที่ยังมีไฟล์ · จำกัดจำนวนเพราะแต่ละใบต้อง
+        // เดิน Drive ทั้งต้นไม้ทั้งสองฝั่ง และ route นี้มีเพดาน 300 วิ
+        // อ่านไม่สำเร็จ = ข้ามใบนั้นไป ไม่ทำให้รอบแจ้งเตือนล้ม
+        const verdicts: string[] = []
+        for (const d of (r.keptWithFilesDetail || []).slice(0, 6)) {
+          if (!d.code) continue
+          try { verdicts.push(verdictLine(await verifyLandingDuplicates(d.code, d.id))) }
+          catch (e: any) { verdicts.push(`· ${d.code} — ตรวจ checksum ไม่สำเร็จ: ${e?.message || e}`) }
+        }
         const show = stale.slice(0, 12).map(n => `• ${n}`)
         if (stale.length > show.length) show.push(`• …อีก ${stale.length - show.length} รายการ`)
         const text = [
@@ -148,7 +158,12 @@ export async function GET(request: NextRequest) {
           // what that folder returns, so the old wording pointed a human
           // straight at the only good copy. Name+size is not identity; only a
           // checksum is. The app's service account does return md5Checksum.
-          r.keptWithFiles.length ? `· ${r.keptWithFiles.length} โฟลเดอร์ยังมีไฟล์ = ยังไม่ได้ merge **หรือ** เป็นไฟล์ซ้ำที่ merge ไม่ยอมย้าย · ⚠️ dup>0 ไม่ได้แปลว่าลบได้ (เทียบแค่ชื่อ+ขนาด) เคยเจอไฟล์ชื่อ/ขนาดตรงกันแต่ตัวใน box เสีย — ต้องเทียบ md5 ก่อนลบเสมอ` : '',
+          // v1.224 — เทียบ checksum ให้เลย แทนที่จะบอกว่า "ต้องไปเทียบ md5 เอง"
+          // ข้อความเดิมถูกต้องแต่ทำอะไรต่อไม่ได้: คนอ่านแล้วก็ยังไม่รู้ว่าโฟลเดอร์ไหน
+          // ลบได้ โฟลเดอร์ไหนห้ามแตะ — และการไปเทียบเองต้องเดิน Drive ทั้งต้นไม้
+          ...(verdicts.length ? ['', 'ผลเทียบ checksum กับกล่อง VIDEO:', ...verdicts] : []),
+          r.keptWithFiles.length && !verdicts.length
+            ? `· ${r.keptWithFiles.length} โฟลเดอร์ยังมีไฟล์ = ยังไม่ได้ merge **หรือ** เป็นไฟล์ซ้ำที่ merge ไม่ยอมย้าย · ⚠️ dup>0 ไม่ได้แปลว่าลบได้ (เทียบแค่ชื่อ+ขนาด)` : '',
           r.keptManual.length ? `· ${r.keptManual.length} โฟลเดอร์ไม่มี Production ID = จับคู่กับใบจองไม่ได้ ต้องเปลี่ยนชื่อ/ย้ายด้วยมือ` : '',
           `(วันนี้เก็บไว้ ${r.keptToday} · ลบว่างไป ${r.trashed})`,
         ].filter(Boolean).join('\n')

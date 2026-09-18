@@ -271,6 +271,12 @@ export interface LandingPruneResult {
   trashed: number
   keptToday: number
   keptWithFiles: string[]   // non-today shoot folders that HOLD footage — kept, reported
+  /**
+   * v1.224 — เหมือน keptWithFiles แต่พก id + code มาด้วย เพื่อให้ตัวแจ้งเตือน
+   * เดินเข้าไปเทียบ checksum ต่อได้ (ของเดิมมีแต่ชื่อ จึงบอกได้แค่ว่า "ยังมีไฟล์")
+   * เก็บ keptWithFiles ไว้เหมือนเดิม — ผู้อ่านเก่าไม่ต้องเปลี่ยน
+   */
+  keptWithFilesDetail: Array<{ name: string; id: string; code: string | null }>
   keptManual: string[]      // folders with no Production ID in the name — kept, reported
   keptByName: string[]      // matched a keepNames entry
   keptFuture: string[]      // shoot is in the FUTURE — tomorrow's drop zone, never trash
@@ -293,7 +299,7 @@ export async function pruneLandingToToday(
   const today = bangkokDayRange(0)
   const base: LandingPruneResult = {
     skipped: false, dryRun, today: today.start.toISOString().slice(0, 10),
-    trashed: 0, keptToday: 0, keptWithFiles: [], keptManual: [], keptByName: [], keptFuture: [], errors: 0, actions: [],
+    trashed: 0, keptToday: 0, keptWithFiles: [], keptWithFilesDetail: [], keptManual: [], keptByName: [], keptFuture: [], errors: 0, actions: [],
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
@@ -317,7 +323,7 @@ export async function pruneLandingToToday(
     let empty = false
     try { empty = !(await hasRealFiles(f.id)) }
     catch (e: any) { base.errors++; base.actions.push(`ERROR check "${f.name}": ${e?.message || e}`); continue }
-    if (!empty) { base.keptWithFiles.push(f.name); continue }
+    if (!empty) { base.keptWithFiles.push(f.name); base.keptWithFilesDetail.push({ name: f.name, id: f.id, code }); continue }
     // v1.220 — PAST-ONLY, server-side. v1 asked only "is it today?", which
     // answers YES for TOMORROW's folder — the one manageLandingFolders creates
     // at 19:00 the night before. A prune running after 19:00 therefore deleted

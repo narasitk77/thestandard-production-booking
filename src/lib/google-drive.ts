@@ -141,6 +141,15 @@ export interface DriveFile {
   createdTime: string | null
   modifiedTime: string | null
   /**
+   * v1.224 — checksum ของเนื้อไฟล์ (null สำหรับ Google-native เช่น Docs/Sheets)
+   *
+   * จำเป็นเพราะ "ชื่อ + ขนาด" **ไม่ใช่ตัวตนของไฟล์**: video-merge เคยตัดสินว่า
+   * ไฟล์ซ้ำจากชื่อ+ขนาด แล้วมีเคสจริงที่ตรงกันทั้งคู่แต่เนื้อในคนละไฟล์
+   * (ตัวในกล่องเป็นไฟล์เสีย ตัวใน landing เป็นต้นฉบับเพียงชุดเดียว)
+   * อะไรก็ตามที่จะ **ลบ** ของต้องตัดสินด้วยค่านี้เท่านั้น
+   */
+  md5: string | null
+  /**
    * Names of all ancestor folders from the scan root → immediate parent,
    * collected as we walk the tree. Root folder itself is NOT included
    * (its name is meaningless to the Production ID match — we only care
@@ -240,7 +249,7 @@ export async function listFilesRecursive(
 
       const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
         q,
-        fields: 'nextPageToken, files(id, name, mimeType, parents, webViewLink, size, createdTime, modifiedTime)',
+        fields: 'nextPageToken, files(id, name, mimeType, parents, webViewLink, size, createdTime, modifiedTime, md5Checksum)',
         pageSize: 1000,
         pageToken,
         supportsAllDrives: true,
@@ -269,6 +278,7 @@ export async function listFilesRecursive(
             mimeType: f.mimeType,
             parents: f.parents ?? [],
             webViewLink: f.webViewLink ?? null,
+            md5: f.md5Checksum ?? null,
             size: f.size ? Number(f.size) : null,
             createdTime: f.createdTime ?? null,
             modifiedTime: f.modifiedTime ?? null,
