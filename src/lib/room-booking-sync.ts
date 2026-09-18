@@ -7,6 +7,7 @@ import {
   roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload,
   createRoomBooking, findExistingRoomBooking, cancelRoomBooking,
   roomBookingEnabled, roomBookingAllowed, RoomSkipReason,
+  listRoomBookings, findMarkerBooking, findManualHold,
 } from './room-booking'
 
 /**
@@ -25,7 +26,7 @@ import {
  */
 export type RoomSyncResult =
   | { status: 'OK'; bookingNo: string; adopted?: boolean }
-  | { status: 'SKIPPED'; reason: RoomSkipReason | 'disabled' | 'room-not-enabled' | 'already-booked' }
+  | { status: 'SKIPPED'; reason: RoomSkipReason | 'disabled' | 'room-not-enabled' | 'already-booked' | 'manual-hold' }
   | { status: 'CONFLICT'; message: string }
   | { status: 'INVALID'; message: string }
   | { status: 'UNKNOWN'; message: string }
@@ -35,7 +36,7 @@ export type RoomSyncResult =
 export const ROOM_BOOKING_SELECT = {
   id: true, bookingCode: true, locationId: true, locationName: true,
   shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
-  producer: true, producerEmail: true,
+  producer: true, producerEmail: true, createdByEmail: true,
   // projectName + program ของ "แต่ละตอน" จำเป็นสำหรับ bookingDisplayName —
   // ชื่อรายการจริงอยู่ที่ตอน ส่วน program ระดับใบจองมักเป็นแค่ประเภทเนื้อหา
   // ("Long-form · รายการ · ซีรีส์ · สัมภาษณ์ยาว") ซึ่งเอาไปตั้งชื่อการจองห้องไม่ได้
@@ -141,7 +142,9 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
   // ── ขั้นที่ 2: อ่านกลับก่อนยิงเสมอ ────────────────────────────────────────
   const d = b.shootDate
   try {
-    const existing = await findExistingRoomBooking(code, d.getUTCFullYear(), d.getUTCMonth() + 1)
+    // อ่านเดือนครั้งเดียว ใช้ตอบสองคำถาม — โควตาร่วมทั้งบริษัทมีแค่ 20 req/5 นาที
+    const month = await listRoomBookings(d.getUTCFullYear(), d.getUTCMonth() + 1)
+    const existing = findMarkerBooking(month, code)
     if (existing) {
       await stamp(b.id, 'OK', null, undefined, existing.bookingNo, existing.id)
       logAudit({
@@ -150,6 +153,29 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
         changes: { bookingNo: existing.bookingNo, adopted: true, note: 'เจอการจองเดิมในระบบกลาง — ไม่ยิงซ้ำ' },
       })
       return { status: 'OK', bookingNo: existing.bookingNo, adopted: true }
+    }
+
+    // v1.227 — คนของงานนี้จองห้องเองไปแล้ว: ห้องได้แล้วจริง ๆ ยิงไปก็ได้แค่ CONFLICT
+    // + ป้าย "ห้องไม่ว่าง" บนงานที่ห้องถูกกันไว้ถูกต้อง = สัญญาณหลอก
+    // (เจอจริงตอนเปิด War Room: WLT-NGI 2 ใบ โปรดิวเซอร์จองมือไว้เวลาตรงเป๊ะ)
+    const p0 = built.payload
+    const wantStart = bangkokToUtcIso(p0.startDate, p0.startTime)
+    const wantEnd = bangkokToUtcIso(p0.endDate, p0.endTime)
+    if (wantStart && wantEnd) {
+      const hold = findManualHold(month, { roomId, startAt: wantStart, endAt: wantEnd },
+                                  [b.producerEmail, b.createdByEmail])
+      if (hold) {
+        await stamp(b.id, 'SKIPPED', null, 'manual-hold')
+        logAudit({
+          actorEmail: 'room-booking', action: 'booking.room_reserved', entityType: 'Booking',
+          entityId: b.id, bookingCode: b.bookingCode,
+          changes: {
+            bookingNo: hold.bookingNo, manualHold: true,
+            note: `คนของงานนี้จองห้องเองไว้แล้ว (${hold.bookedBy || '?'}) — ไม่ยิงซ้ำ`,
+          },
+        })
+        return { status: 'SKIPPED', reason: 'manual-hold' }
+      }
     }
   } catch (e: any) {
     // อ่านกลับไม่ได้ = ตัดสินไม่ได้ว่าเคยยิงไปแล้วหรือยัง → **ไม่ยิง** ปลอดภัยกว่า

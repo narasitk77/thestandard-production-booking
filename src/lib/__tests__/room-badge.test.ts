@@ -47,6 +47,13 @@ test('ห้องที่ระบบกลางไม่มีเลย (Lou
   assert.match(b.title, /ไม่มีในระบบจองส่วนกลาง/)
 })
 
+test('คนของงานจองห้องเองไว้แล้ว → ป้ายเขียว "ห้องจองเองไว้แล้ว" (ไม่ใช่เตือนภัย)', () => {
+  const b = roomBadge('SKIPPED', 'skip: manual-hold')!
+  assert.equal(b.tone, 'held')
+  assert.match(b.label, /ห้องจองเองไว้แล้ว/)
+  assert.doesNotMatch(b.label, /⚠/, 'ห้องได้แล้วจริง ห้ามทำหน้าตาเหมือนมีปัญหา')
+})
+
 test('งานนอกตึก / ยังไม่เลือกสถานที่ / ยังไม่กรอกเวลา → **ไม่ขึ้นป้าย**', () => {
   // ไม่ใช่สถานการณ์เรื่องห้อง — ขึ้นป้ายด้วยจะกลายเป็นเสียงรบกวน
   for (const r of ['external', 'no-location', 'no-times', 'bad-times', 'disabled', 'already-booked']) {

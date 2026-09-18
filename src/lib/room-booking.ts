@@ -424,6 +424,8 @@ export async function listRoomBookings(year: number, month: number): Promise<{
   /** v1.226 — ใครจอง / แผนกไหน (ใช้บอกว่าต้องไปคุยกับใคร) */
   bookedBy: string | null
   department: string | null
+  /** v1.227 — อีเมลคนจอง ใช้ตัดสินว่า "คนของงานนี้จองห้องเองไปแล้ว" */
+  email: string | null
 }[]> {
   const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
   const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
@@ -447,6 +449,7 @@ export async function listRoomBookings(year: number, month: number): Promise<{
       isProbook: String(r?.lineUserId || '') === 'service:probook',
       bookedBy: r?.displayName ? String(r.displayName) : null,
       department: r?.department ? String(r.department) : null,
+      email: r?.email ? String(r.email) : null,
       // v1.208 — feed มี `status` + `cancelledAt` ให้อยู่แล้ว ใช้ตัดสินตรง ๆ ดีกว่า
       // อาศัย "ไม่อยู่ในลิสต์ = ถูกยกเลิก" ซึ่งเป็นพฤติกรรมที่เขาไม่ได้รับปากไว้
       // (ตอนนี้เขากรองออกให้ แต่ถ้าวันหนึ่งเริ่มส่งรายการที่ยกเลิกมาด้วย
@@ -584,6 +587,60 @@ export function pickRoomClashes(
     bookingNo: r.bookingNo, startAt: r.startAt, endAt: r.endAt,
     isProbook: r.isProbook, bookedBy: r.bookedBy, department: r.department,
   }))
+}
+
+/**
+ * v1.227 — "คนของงานนี้จองห้องเองไปแล้ว"
+ *
+ * ตอนเปิด War Room ให้จองอัตโนมัติ (2026-09-18) พบว่าโปรดิวเซอร์เจ้าของงาน
+ * **จองห้องด้วยมือผ่านพอร์ทัลไปแล้ว 2 ใบ ด้วยช่วงเวลาตรงกันเป๊ะ** เพราะก่อนหน้านี้
+ * โปรบุ๊คไม่ได้จองให้ ถ้าปล่อยให้ยิงตามปกติ ผลคือ CONFLICT + ป้าย "⚠ ห้องไม่ว่าง"
+ * บนงานที่ **ห้องถูกจองไว้ถูกต้องแล้ว** — สัญญาณหลอกที่สอนให้คนเลิกเชื่อป้าย
+ *
+ * กฎที่เข้มพอจะไม่รับมั่ว:
+ * - ห้องเดียวกัน และ **ครอบคลุมช่วงถ่ายทั้งช่วง** (ครอบไม่หมด = ห้องไม่ได้ถูกกันไว้จริง
+ *   ต้องปล่อยให้เป็น CONFLICT ให้คนมาจัดการ)
+ * - อีเมลคนจองตรงกับคนของงานนี้ (โปรดิวเซอร์/คนเปิดใบ) — คนละคน = ชนของจริง
+ */
+export interface ManualHold {
+  bookingNo: string
+  startAt: string | null
+  endAt: string | null
+  bookedBy: string | null
+}
+
+export function findManualHold(
+  rows: Array<{ live: boolean; roomId: number | null; startAt: string | null; endAt: string | null
+                bookingNo: string; isProbook: boolean; bookedBy: string | null; email: string | null }>,
+  t: RoomTarget,
+  ownerEmails: Array<string | null | undefined>,
+): ManualHold | null {
+  const owners = new Set(
+    ownerEmails.filter(Boolean).map(e => String(e).trim().toLowerCase()).filter(e => e.includes('@')),
+  )
+  if (!owners.size) return null
+  const s = Date.parse(t.startAt), e = Date.parse(t.endAt)
+  if (!Number.isFinite(s) || !Number.isFinite(e)) return null
+  const hit = rows.find(r => {
+    if (!r.live || r.isProbook || r.roomId !== t.roomId) return false
+    if (!r.email || !owners.has(r.email.trim().toLowerCase())) return false
+    if (!r.startAt || !r.endAt) return false
+    const rs = Date.parse(r.startAt), re = Date.parse(r.endAt)
+    if (!Number.isFinite(rs) || !Number.isFinite(re)) return false
+    return rs <= s && e <= re   // ต้องครอบทั้งช่วง ไม่ใช่แค่ทับบางส่วน
+  })
+  return hit
+    ? { bookingNo: hit.bookingNo, startAt: hit.startAt, endAt: hit.endAt, bookedBy: hit.bookedBy }
+    : null
+}
+
+/** หาใบที่โปรบุ๊คเคยจองไว้เองจาก marker ในชื่อ — แยกออกมาเพื่อใช้ผลอ่านเดือนซ้ำได้ */
+export function findMarkerBooking(
+  rows: Array<{ id: number | null; bookingNo: string; title: string }>,
+  bookingCode: string,
+): { id: number | null; bookingNo: string; title: string } | null {
+  const marker = roomBookingMarker(bookingCode)
+  return rows.find(r => r.title.includes(marker)) ?? null
 }
 
 export async function describeRoomClash(t: RoomTarget): Promise<RoomClash[]> {

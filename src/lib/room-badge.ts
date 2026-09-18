@@ -16,7 +16,7 @@
  * ความจริงข้อนั้นมองเห็นได้ แทนที่จะต้องไปรู้จากเอกสาร
  */
 
-export type RoomBadgeTone = 'busy' | 'pending' | 'manual'
+export type RoomBadgeTone = 'busy' | 'pending' | 'manual' | 'held'
 
 export interface RoomBadge {
   tone: RoomBadgeTone
@@ -53,6 +53,17 @@ export function roomBadge(status?: string | null, error?: string | null): RoomBa
   }
   if (status === 'SKIPPED') {
     const reason = skipReasonOf(error)
+    // v1.227 — คนของงานนี้จองห้องเองไว้แล้ว: ห้องได้จริง ไม่ใช่ปัญหา
+    // ป้ายนี้จึงต้อง "สบายใจ" ไม่ใช่เตือนภัย — แต่ยังต้องมี เพราะไม่งั้น
+    // ไม่มีใครรู้ว่าห้องนี้ระบบไม่ได้จองให้ ถ้าคนนั้นไปยกเลิกเองก็ไม่มีใครรู้อีก
+    if (reason === 'manual-hold') {
+      return {
+        tone: 'held',
+        label: 'ห้องจองเองไว้แล้ว',
+        title: 'มีคนของงานนี้จองห้องไว้เองในระบบส่วนกลางแล้ว ครอบคลุมเวลาถ่ายทั้งช่วง'
+          + ' — โปรบุ๊คจึงไม่จองซ้ำ (ถ้ายกเลิกอันนั้น ระบบจะจองให้ใหม่เองรอบถัดไป)',
+      }
+    }
     if (reason && MANUAL_SKIPS.has(reason)) {
       return {
         tone: 'manual',
