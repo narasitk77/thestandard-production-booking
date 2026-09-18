@@ -111,7 +111,8 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     //  "OG EP.1 / OG EP.2" เพราะทางนี้ไม่ได้ดึง projectName + program ของตอน)
     select: {
       ...ROOM_BOOKING_SELECT,
-      roomBookingNo: true, roomBookingStatus: true, status: true, deletedAt: true,
+      roomBookingNo: true, roomBookingStatus: true, roomBookingError: true,
+      status: true, deletedAt: true,
     },
   })
   // งานที่ยกเลิก/ถูกลบไม่ต้องจองห้อง — ส่วนสถานะอื่น (รวม COMPLETED ตอนทดสอบย้อนหลัง)
@@ -165,15 +166,23 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
       const hold = findManualHold(month, { roomId, startAt: wantStart, endAt: wantEnd },
                                   [b.producerEmail, b.createdByEmail])
       if (hold) {
-        await stamp(b.id, 'SKIPPED', null, 'manual-hold')
-        logAudit({
-          actorEmail: 'room-booking', action: 'booking.room_reserved', entityType: 'Booking',
-          entityId: b.id, bookingCode: b.bookingCode,
-          changes: {
-            bookingNo: hold.bookingNo, manualHold: true,
-            note: `คนของงานนี้จองห้องเองไว้แล้ว (${hold.bookedBy || '?'}) — ไม่ยิงซ้ำ`,
-          },
-        })
+        // เขียน **เฉพาะตอนสถานะเปลี่ยนจริง** — worker เดินทุกชั่วโมงและสภาพนี้นิ่ง
+        // (คนจองห้องเองไว้แล้ว) ถ้าเขียนทุกรอบจะได้ audit ~48 แถว/วัน ต่อใบตลอดไป
+        // และ `roomBookingAt` ถูกดันใหม่ทุกชั่วโมงจนอ่านเหมือนเพิ่งลองเมื่อกี้
+        // (เจอจริงหลัง deploy v1.227: 14 แถวซ้ำใน 5 ชม. จาก 2 ใบ)
+        const already = b.roomBookingStatus === 'SKIPPED'
+          && b.roomBookingError === 'skip: manual-hold'
+        if (!already) {
+          await stamp(b.id, 'SKIPPED', null, 'manual-hold')
+          logAudit({
+            actorEmail: 'room-booking', action: 'booking.room_reserved', entityType: 'Booking',
+            entityId: b.id, bookingCode: b.bookingCode,
+            changes: {
+              bookingNo: hold.bookingNo, manualHold: true,
+              note: `คนของงานนี้จองห้องเองไว้แล้ว (${hold.bookedBy || '?'}) — ไม่ยิงซ้ำ`,
+            },
+          })
+        }
         return { status: 'SKIPPED', reason: 'manual-hold' }
       }
     }
