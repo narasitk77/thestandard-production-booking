@@ -53,8 +53,11 @@ test('รายการที่ยกเลิกแล้วไม่นั�
   assert.equal(findManualHold([row({ live: false })], T, [OWNER]), null)
 })
 
-test('ใบที่โปรบุ๊คจองเองไม่ใช่ "จองมือ" — ทางนั้นมี marker จัดการอยู่แล้ว', () => {
-  assert.equal(findManualHold([row({ isProbook: true })], T, [OWNER]), null)
+test('ใบที่โปรบุ๊คจองให้ **งานอื่นของคนเดียวกัน** นับเข้าผลรวมได้ (v1.227.3)', () => {
+  // พื้นที่จริงถูกกันไว้แล้ว ไม่ว่าใบไหนเป็นคนกัน — ใบของ *งานนี้เอง* ต่างหากที่ต้องไม่นับ
+  // (ดูเทส "ใบของงานตัวเองไม่นับ") ซึ่งทางนั้นมี marker จัดการอยู่ก่อนแล้ว
+  assert.ok(findManualHold([row({ isProbook: true, title: '[PB-OTHER-JOB-01] อีกกองหนึ่ง' })],
+                           T, [OWNER], '[PB-WLT-NGI-260922-01]'))
 })
 
 test('ไม่รู้อีเมลเจ้าของงาน → ไม่เดา ไม่รับ', () => {
@@ -70,6 +73,72 @@ test('คนเปิดใบ (ไม่ใช่โปรดิวเซอร
   const h = findManualHold([row({ email: 'aphisit.h@thestandard.co' })], T,
                            [OWNER, 'aphisit.h@thestandard.co'])
   assert.ok(h)
+})
+
+/**
+ * v1.227.3 — ต้องดู "ผลรวม" ของห้องที่คนกลุ่มเดียวกันกันไว้ ไม่ใช่ทีละใบ
+ *
+ * เคสจริง TSS-GEB-260929-01: แพรมีสองกองติดกันใน Studio 1 วันเดียว
+ * โปรบุ๊คจองกองแรกไว้ 09:00–13:00 เธอจองกองนี้เองไว้ 13:00–16:00
+ * ห้องจึงเป็นของเธอต่อเนื่อง 09:00–16:00 แต่ไม่มีใบไหนครอบ 12:30–16:00 ได้คนเดียว
+ * → เดิมตกเป็น CONFLICT → ป้ายแดงค้าง + retry ทุก 6 ชม. ตลอดกาลโดยไม่มีวันสำเร็จ
+ */
+const GEB = { roomId: 15, startAt: '2026-09-29T05:30:00.000Z', endAt: '2026-09-29T09:00:00.000Z' } // 12:30–16:00
+const PARE = 'ingtawan.s@thestandard.co'
+
+test('เคสจริงแพร: สองใบต่อกันครอบช่วงถ่ายได้ → นับว่าห้องถูกกันไว้แล้ว', () => {
+  const rows = [
+    // โปรบุ๊คจองให้กองแรก 09:00–13:00
+    row({ bookingNo: 'BK-0088', roomId: 15, isProbook: true, email: PARE, bookedBy: 'แพร',
+          title: '[PB-TSS-TSS-260929-01] TSS · The Secret Sauce',
+          startAt: '2026-09-29T02:00:00.000Z', endAt: '2026-09-29T06:00:00.000Z' }),
+    // แพรจองกองนี้เองไว้ 13:00–16:00
+    row({ bookingNo: 'BK-0145', roomId: 15, isProbook: false, email: PARE, bookedBy: 'Ingtawan Suwansupa',
+          startAt: '2026-09-29T06:00:00.000Z', endAt: '2026-09-29T09:00:00.000Z' }),
+  ]
+  const h = findManualHold(rows, GEB, [PARE], '[PB-TSS-GEB-260929-01]')!
+  assert.ok(h, 'ห้องเป็นของเธอต่อเนื่องทั้งวัน ต้องไม่ตกเป็น CONFLICT')
+  assert.equal(h.bookingNo, 'BK-0088', 'ป้ายชื่อใบที่ทับช่วงถ่ายและยาวที่สุด')
+})
+
+test('ต่อกันแต่ยังมีรู → ไม่รับ (ห้องไม่ได้ถูกกันไว้จริงทั้งช่วง)', () => {
+  const rows = [
+    row({ bookingNo: 'A', roomId: 15, email: PARE,
+          startAt: '2026-09-29T02:00:00.000Z', endAt: '2026-09-29T05:00:00.000Z' }),  // จบ 12:00
+    row({ bookingNo: 'B', roomId: 15, email: PARE,
+          startAt: '2026-09-29T06:00:00.000Z', endAt: '2026-09-29T09:00:00.000Z' }),  // เริ่ม 13:00
+  ]
+  // เหลือรู 12:00–13:00 คร่อมเวลาเรียก 12:30
+  assert.equal(findManualHold(rows, GEB, [PARE], null), null)
+})
+
+test('**ใบของงานตัวเองไม่นับเป็น "คนกันไว้ให้"**', () => {
+  const rows = [row({ bookingNo: 'SELF', roomId: 15, isProbook: true, email: PARE,
+                      title: '[PB-TSS-GEB-260929-01] TSS · Global Economic Background',
+                      startAt: '2026-09-29T05:00:00.000Z', endAt: '2026-09-29T10:00:00.000Z' })]
+  assert.equal(findManualHold(rows, GEB, [PARE], '[PB-TSS-GEB-260929-01]'), null)
+  // ถ้าไม่ใช่ใบของงานนี้ ก็นับได้ตามปกติ
+  assert.ok(findManualHold(rows, GEB, [PARE], '[PB-OTHER-01]'))
+})
+
+test('ผลรวมของคนอื่นไม่ช่วย — ต้องเป็นคนของงานนี้เท่านั้น', () => {
+  const rows = [
+    row({ bookingNo: 'X', roomId: 15, email: 'napas.l@thestandard.co',
+          startAt: '2026-09-29T02:00:00.000Z', endAt: '2026-09-29T06:00:00.000Z' }),
+    row({ bookingNo: 'Y', roomId: 15, email: 'napas.l@thestandard.co',
+          startAt: '2026-09-29T06:00:00.000Z', endAt: '2026-09-29T09:00:00.000Z' }),
+  ]
+  assert.equal(findManualHold(rows, GEB, [PARE], null), null)
+})
+
+test('ใบที่ยกเลิกแล้วไม่นับเข้าผลรวม', () => {
+  const rows = [
+    row({ bookingNo: 'A', roomId: 15, email: PARE, live: false,
+          startAt: '2026-09-29T02:00:00.000Z', endAt: '2026-09-29T06:00:00.000Z' }),
+    row({ bookingNo: 'B', roomId: 15, email: PARE,
+          startAt: '2026-09-29T06:00:00.000Z', endAt: '2026-09-29T09:00:00.000Z' }),
+  ]
+  assert.equal(findManualHold(rows, GEB, [PARE], null), null)
 })
 
 test('ข้อมูลเวลาพังไม่ทำให้ล่ม', () => {

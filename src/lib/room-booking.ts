@@ -601,6 +601,19 @@ export function pickRoomClashes(
  * - ห้องเดียวกัน และ **ครอบคลุมช่วงถ่ายทั้งช่วง** (ครอบไม่หมด = ห้องไม่ได้ถูกกันไว้จริง
  *   ต้องปล่อยให้เป็น CONFLICT ให้คนมาจัดการ)
  * - อีเมลคนจองตรงกับคนของงานนี้ (โปรดิวเซอร์/คนเปิดใบ) — คนละคน = ชนของจริง
+ *
+ * ## v1.227.3 — ต้องดู "ผลรวม" ไม่ใช่ทีละใบ
+ *
+ * เคสจริง `TSS-GEB-260929-01` (29 ก.ย. Studio 1 12:30–16:00 โปรดิวเซอร์แพร):
+ * แพรมีสองกองติดกันในห้องเดียว — โปรบุ๊คจองให้กองแรกไว้ 09:00–13:00 ส่วนกองนี้
+ * เธอจองมือเองไว้ 13:00–16:00 · ห้องจึงถูกกันไว้ต่อเนื่อง 09:00–16:00 **เป็นของเธอทั้งวัน**
+ * แต่เดิมเราดูทีละใบ ไม่มีใบไหนครอบ 12:30–16:00 ได้คนเดียว → ตกเป็น CONFLICT →
+ * ป้ายแดง "ห้องไม่ว่าง" ค้างบนงานที่ห้องเป็นของเธอ + retry ทุก 6 ชม. ไปตลอดกาล
+ * โดยไม่มีวันสำเร็จ (มันชนกับการจองของตัวเอง)
+ *
+ * จึงรวมช่วงเวลาของทุกใบที่เป็นของคนกลุ่มเดียวกันก่อน แล้วค่อยถามว่าครอบไหม
+ * และนับใบที่โปรบุ๊คจองให้งาน**อื่น**ของคนเดียวกันด้วย — พื้นที่จริงถูกกันไว้แล้ว
+ * ไม่ว่าใบไหนเป็นคนกัน (ถ้ากองแรกถูกยกเลิก รอบตรวจถัดไปจะเห็นเองแล้วกลับไปจอง)
  */
 export interface ManualHold {
   bookingNo: string
@@ -611,27 +624,48 @@ export interface ManualHold {
 
 export function findManualHold(
   rows: Array<{ live: boolean; roomId: number | null; startAt: string | null; endAt: string | null
-                bookingNo: string; isProbook: boolean; bookedBy: string | null; email: string | null }>,
+                bookingNo: string; title?: string; isProbook: boolean
+                bookedBy: string | null; email: string | null }>,
   t: RoomTarget,
   ownerEmails: Array<string | null | undefined>,
+  /** marker ของงานนี้เอง — ถ้ามีใบของตัวเองอยู่แล้วต้องไม่เอามานับเป็น "คนอื่นกันไว้ให้" */
+  selfMarker?: string | null,
 ): ManualHold | null {
   const owners = new Set(
     ownerEmails.filter(Boolean).map(e => String(e).trim().toLowerCase()).filter(e => e.includes('@')),
   )
   if (!owners.size) return null
   const s = Date.parse(t.startAt), e = Date.parse(t.endAt)
-  if (!Number.isFinite(s) || !Number.isFinite(e)) return null
-  const hit = rows.find(r => {
-    if (!r.live || r.isProbook || r.roomId !== t.roomId) return false
+  if (!Number.isFinite(s) || !Number.isFinite(e) || !(s < e)) return null
+
+  const mine = rows.filter(r => {
+    if (!r.live || r.roomId !== t.roomId) return false
     if (!r.email || !owners.has(r.email.trim().toLowerCase())) return false
     if (!r.startAt || !r.endAt) return false
+    if (selfMarker && (r.title || '').includes(selfMarker)) return false
     const rs = Date.parse(r.startAt), re = Date.parse(r.endAt)
-    if (!Number.isFinite(rs) || !Number.isFinite(re)) return false
-    return rs <= s && e <= re   // ต้องครอบทั้งช่วง ไม่ใช่แค่ทับบางส่วน
+    return Number.isFinite(rs) && Number.isFinite(re) && rs < re
   })
-  return hit
-    ? { bookingNo: hit.bookingNo, startAt: hit.startAt, endAt: hit.endAt, bookedBy: hit.bookedBy }
-    : null
+  if (!mine.length) return null
+
+  // รวมช่วงที่ต่อกัน (ติดขอบพอดีก็ถือว่าต่อเนื่อง — 13:00 จบ แล้ว 13:00 เริ่ม ไม่มีรู)
+  const iv = mine.map(r => [Date.parse(r.startAt!), Date.parse(r.endAt!)] as [number, number])
+                 .sort((a, b) => a[0] - b[0])
+  const merged: [number, number][] = []
+  for (const cur of iv) {
+    const last = merged[merged.length - 1]
+    if (last && cur[0] <= last[1]) last[1] = Math.max(last[1], cur[1])
+    else merged.push([cur[0], cur[1]])
+  }
+  if (!merged.some(([a, b]) => a <= s && e <= b)) return null
+
+  // ป้ายชื่อใคร: ใบที่ทับช่วงถ่ายจริงและยาวที่สุด (ใบที่คนอ่านน่าจะนึกถึง)
+  const overlapping = mine.filter(r => Date.parse(r.startAt!) < e && s < Date.parse(r.endAt!))
+  const pick = (overlapping.length ? overlapping : mine).reduce((best, r) => {
+    const span = (x: typeof r) => Date.parse(x.endAt!) - Date.parse(x.startAt!)
+    return span(r) > span(best) ? r : best
+  })
+  return { bookingNo: pick.bookingNo, startAt: pick.startAt, endAt: pick.endAt, bookedBy: pick.bookedBy }
 }
 
 /** หาใบที่โปรบุ๊คเคยจองไว้เองจาก marker ในชื่อ — แยกออกมาเพื่อใช้ผลอ่านเดือนซ้ำได้ */

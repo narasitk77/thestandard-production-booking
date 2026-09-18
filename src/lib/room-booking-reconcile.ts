@@ -4,7 +4,7 @@ import { notifyChat } from './notify'
 import {
   findExistingRoomBooking, cancelRoomBooking, roomIdForLocation,
   roomTargetForBooking, roomBookingEnabled, roomBookingAllowed, listRoomBookings,
-  findManualHold, bangkokToUtcIso,
+  findManualHold, bangkokToUtcIso, roomBookingMarker,
 } from './room-booking'
 import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './room-booking-sync'
 
@@ -139,7 +139,8 @@ export async function reconcileRoomBookings(opts: {
     const endAt = bangkokToUtcIso(p.endDate, p.endTime)
     if (!startAt || !endAt) return null
     const hold = findManualHold(rows, { roomId: p.roomId, startAt, endAt },
-                                [bk.producerEmail, bk.createdByEmail])
+                                [bk.producerEmail, bk.createdByEmail],
+                                roomBookingMarker(bk.bookingCode || bk.id))
     return hold ? (hold.bookedBy || 'มีคน') : null
   }
 

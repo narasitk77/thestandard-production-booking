@@ -7,7 +7,7 @@ import {
   roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload,
   createRoomBooking, findExistingRoomBooking, cancelRoomBooking,
   roomBookingEnabled, roomBookingAllowed, RoomSkipReason,
-  listRoomBookings, findMarkerBooking, findManualHold,
+  listRoomBookings, findMarkerBooking, findManualHold, roomBookingMarker,
 } from './room-booking'
 
 /**
@@ -164,7 +164,7 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     const wantEnd = bangkokToUtcIso(p0.endDate, p0.endTime)
     if (wantStart && wantEnd) {
       const hold = findManualHold(month, { roomId, startAt: wantStart, endAt: wantEnd },
-                                  [b.producerEmail, b.createdByEmail])
+                                  [b.producerEmail, b.createdByEmail], roomBookingMarker(code))
       if (hold) {
         // เขียน **เฉพาะตอนสถานะเปลี่ยนจริง** — worker เดินทุกชั่วโมงและสภาพนี้นิ่ง
         // (คนจองห้องเองไว้แล้ว) ถ้าเขียนทุกรอบจะได้ audit ~48 แถว/วัน ต่อใบตลอดไป
