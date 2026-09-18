@@ -11,7 +11,7 @@ import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
 import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
-import { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
+import { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -450,6 +450,7 @@ export default function AdminPage() {
                 <div className="flex-1 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <AdBadge category={b.category} />
+                    <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} />
                     {showingDeleted && (
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-800 text-white">
                         DELETED

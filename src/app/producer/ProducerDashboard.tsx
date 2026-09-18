@@ -4,7 +4,7 @@ import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useState, useCallback } from 'react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
-import { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
+import { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -215,6 +215,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
                     <span className="font-mono font-medium text-gray-800">{b.bookingCode || b.id}</span>
                     <span className="inline-flex items-center gap-1.5">
                       <AdBadge category={b.category} />
+                      <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} />
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || ''}`}>
                         {statusLabel(b.status)}
                       </span>

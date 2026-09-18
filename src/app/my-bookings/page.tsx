@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Loader2, Plus, Search, Inbox } from 'lucide-react'
 import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
 import { formatDisplayDate } from '@/lib/utils'
-import StatusPill, { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
+import StatusPill, { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
 import { isValidQuRef } from '@/lib/qu-ref'
 import { producerEditMode, isBookingOwner } from '@/lib/producer-edit-access'
 import CrewLine from '@/app/_components/CrewLine'
@@ -323,6 +323,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
         <div className="flex flex-col items-end gap-1">
           <StatusPill status={b.status} />
           <AdBadge category={b.category} />
+          <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} />
           <FootageBadge files={b.footageFiles} sent={b.footageSent} />
         </div>
       </Link>

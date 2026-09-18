@@ -421,6 +421,9 @@ export async function listRoomBookings(year: number, month: number): Promise<{
   roomId: number | null; startAt: string | null; endAt: string | null
   /** v1.223 — รายการนี้โปรบุ๊คเป็นคนจองเองไหม */
   isProbook: boolean
+  /** v1.226 — ใครจอง / แผนกไหน (ใช้บอกว่าต้องไปคุยกับใคร) */
+  bookedBy: string | null
+  department: string | null
 }[]> {
   const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
   const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
@@ -442,6 +445,8 @@ export async function listRoomBookings(year: number, month: number): Promise<{
       // service key **ไม่ใช่** marker `[PB-...]` ในชื่อ ซึ่งใครก็พิมพ์เลียนได้
       // และหายไปถ้ามีคนแก้ชื่อการจอง
       isProbook: String(r?.lineUserId || '') === 'service:probook',
+      bookedBy: r?.displayName ? String(r.displayName) : null,
+      department: r?.department ? String(r.department) : null,
       // v1.208 — feed มี `status` + `cancelledAt` ให้อยู่แล้ว ใช้ตัดสินตรง ๆ ดีกว่า
       // อาศัย "ไม่อยู่ในลิสต์ = ถูกยกเลิก" ซึ่งเป็นพฤติกรรมที่เขาไม่ได้รับปากไว้
       // (ตอนนี้เขากรองออกให้ แต่ถ้าวันหนึ่งเริ่มส่งรายการที่ยกเลิกมาด้วย
@@ -539,4 +544,56 @@ export async function createRoomBooking(
   } finally {
     clearTimeout(t)
   }
+}
+
+
+/**
+ * v1.226 — "ห้องไม่ว่างเพราะอะไร" — ไม่ใช่แค่ว่าไม่ว่าง
+ *
+ * ระบบกลางตอบแค่ "ถูกจองแล้ว" ซึ่งบอกไม่ได้ว่าต้องไปคุยกับใคร เคสที่เจอจริง
+ * (2026-09-18): `TSS-GEB-260929-01` จองห้องไม่ได้ เพราะมีคนจอง Studio 1
+ * ช่วงเดียวกัน **ด้วยมือผ่านพอร์ทัล** สำหรับงานเดียวกันนั่นเอง — ห้องไม่ได้หายไปไหน
+ * แต่โปรบุ๊คไม่มีทางรู้ และขึ้น CONFLICT ค้างไว้เงียบ ๆ
+ *
+ * **ไม่ส่งชื่อหัวข้อการจองของคนอื่นออกไป** (กฎเดียวกับ v1.223) — ชื่อคนจอง +
+ * แผนก + เวลา พอให้ไปคุยต่อได้แล้ว โดยไม่เปิดหัวข้อประชุมของแผนกอื่น
+ */
+export interface RoomClash {
+  bookingNo: string
+  startAt: string | null
+  endAt: string | null
+  isProbook: boolean
+  bookedBy: string | null
+  department: string | null
+}
+
+/**
+ * ส่วนที่เป็นตรรกะล้วน — แยกออกมาให้เทสได้โดยไม่ต้องแตะเน็ต
+ * และ **ไม่คัดลอก `title` ออกมาเลย** เพื่อให้หัวข้อการจองของแผนกอื่น
+ * ไม่มีทางรั่วไปกับข้อความแจ้งเตือน แม้ผู้เรียกจะเผลอ log ทั้งก้อน
+ */
+export function pickRoomClashes(
+  rows: Array<{ live: boolean; roomId: number | null; startAt: string | null; endAt: string | null
+                bookingNo: string; isProbook: boolean; bookedBy: string | null; department: string | null }>,
+  t: RoomTarget,
+): RoomClash[] {
+  return rows.filter(r =>
+    r.live && r.roomId === t.roomId && r.startAt && r.endAt &&
+    overlaps(t.startAt, t.endAt, r.startAt, r.endAt),
+  ).map(r => ({
+    bookingNo: r.bookingNo, startAt: r.startAt, endAt: r.endAt,
+    isProbook: r.isProbook, bookedBy: r.bookedBy, department: r.department,
+  }))
+}
+
+export async function describeRoomClash(t: RoomTarget): Promise<RoomClash[]> {
+  const d = new Date(t.startAt)
+  return pickRoomClashes(await listRoomBookings(d.getUTCFullYear(), d.getUTCMonth() + 1), t)
+}
+
+/** เวลาไทยอ่านง่ายจาก UTC ISO */
+export function bkkTime(iso: string | null): string {
+  if (!iso) return '?'
+  const d = new Date(Date.parse(iso) + 7 * 3_600_000)
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 }

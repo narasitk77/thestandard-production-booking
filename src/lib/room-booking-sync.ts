@@ -1,7 +1,9 @@
 import { prisma } from './db'
 import { logAudit } from './audit'
 import { bookingDisplayName } from './display'
+import { notifyChat } from './notify'
 import {
+  describeRoomClash, bkkTime, bangkokToUtcIso,
   roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload,
   createRoomBooking, findExistingRoomBooking, cancelRoomBooking,
   roomBookingEnabled, roomBookingAllowed, RoomSkipReason,
@@ -108,7 +110,7 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     //  "OG EP.1 / OG EP.2" เพราะทางนี้ไม่ได้ดึง projectName + program ของตอน)
     select: {
       ...ROOM_BOOKING_SELECT,
-      roomBookingNo: true, status: true, deletedAt: true,
+      roomBookingNo: true, roomBookingStatus: true, status: true, deletedAt: true,
     },
   })
   // งานที่ยกเลิก/ถูกลบไม่ต้องจองห้อง — ส่วนสถานะอื่น (รวม COMPLETED ตอนทดสอบย้อนหลัง)
@@ -171,7 +173,44 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
   })
 
   if (out.kind === 'ok') return { status: 'OK', bookingNo: out.bookingNo }
-  if (out.kind === 'conflict') return { status: 'CONFLICT', message: out.message }
+  if (out.kind === 'conflict') {
+    // v1.226 — "ห้องไม่ว่าง" ต้องเดินทางไปถึงคน และต้องบอกได้ว่าชนกับอะไร
+    //
+    // ระบบกลางตอบแค่ "ถูกจองแล้ว" ซึ่งทำอะไรต่อไม่ได้ · เคสจริง 29 ก.ย.:
+    // TSS-GEB-260929-01 จองไม่ได้เพราะมีคนจอง Studio 1 ช่วงเดียวกัน **ด้วยมือ
+    // ผ่านพอร์ทัล** ให้งานเดียวกันนั่นเอง — ห้องไม่ได้หายไปไหน แต่ไม่มีใครรู้
+    // และ CONFLICT ก็นอนอยู่ใน DB เงียบ ๆ
+    //
+    // แจ้ง **เฉพาะตอนที่เพิ่งเปลี่ยนเป็น CONFLICT** ไม่ใช่ทุกรอบที่เห็นว่า CONFLICT
+    // (worker เดินทุกชั่วโมง — แจ้งทุกรอบคือสแปมจนไม่มีใครอ่าน)
+    if (b.roomBookingStatus !== 'CONFLICT') {
+      void (async () => {
+        try {
+          // ช่วงเวลาที่เราขอไป = สิ่งที่ payload ส่งจริง (ไม่ประกอบใหม่ให้ต่างกัน)
+          const p = built.payload
+          const startAt = bangkokToUtcIso(p.startDate, p.startTime)
+          const endAt = bangkokToUtcIso(p.endDate, p.endTime)
+          if (!startAt || !endAt) return
+          const clashes = await describeRoomClash({ roomId, startAt, endAt })
+          const manual = clashes.filter(c => !c.isProbook)
+          const lines = [
+            `🚪 จองห้องให้ ${code} ไม่ได้ — ห้องไม่ว่าง`,
+            `   ${b.locationName || ''} · ${p.startDate} ${p.startTime}–${p.endTime}`,
+            ...(clashes.length ? ['   ชนกับ:'] : []),
+            // ไม่ส่งหัวข้อการจองของคนอื่นออกไป — ชื่อคนจอง + เวลา พอให้ไปคุยต่อได้
+            ...clashes.slice(0, 5).map(c =>
+              `   • ${bkkTime(c.startAt)}–${bkkTime(c.endAt)} ${c.bookingNo} ${c.isProbook ? '(โปรบุ๊คจองเอง)' : `· จองมือโดย ${c.bookedBy || 'ไม่ทราบชื่อ'}${c.department ? ` (${c.department})` : ''}`}`),
+            ...(manual.length ? ['   ⚠️ มีคนจองห้องนี้ด้วยมือในพอร์ทัล — ถ้าเป็นงานเดียวกัน ห้องได้แล้ว ไม่ต้องทำอะไร'] : []),
+            '   ระบบจะลองใหม่อีกครั้งใน 6 ชม.',
+          ]
+          await notifyChat(lines.join('\n'), 'footage')
+        } catch (e: any) {
+          console.error('[room-booking] conflict notify failed (non-fatal):', e?.message || e)
+        }
+      })()
+    }
+    return { status: 'CONFLICT', message: out.message }
+  }
   if (out.kind === 'invalid') return { status: 'INVALID', message: out.message }
   return { status: 'UNKNOWN', message: out.message }
 }

@@ -73,6 +73,38 @@ export function AdBadge({ category, className = '' }: { category?: string | null
   )
 }
 
+/**
+ * v1.226 — ป้าย "ห้องไม่ว่าง" บนการ์ดใบจอง
+ *
+ * `roomBookingStatus` ถูกเขียนลง DB ตั้งแต่ v1.200 แต่จนถึง v1.223 มีที่แสดงแค่
+ * ในหน้าใบจองใบเดียว — โปรดิวเซอร์ที่ไม่ได้เปิดใบนั้นจึงไม่มีทางรู้ว่าระบบจองห้อง
+ * ให้ไม่ได้ ป้ายนี้ทำให้มันโผล่ในที่ที่คนมองจริง (คิวงาน / งานของฉัน / Producer)
+ *
+ * แสดงเฉพาะสถานะที่ "มีอะไรต้องทำ" — จองสำเร็จไม่ต้องรบกวน
+ */
+export function RoomBusyBadge({ status, error, className = '' }: {
+  status?: string | null
+  error?: string | null
+  className?: string
+}) {
+  if (status !== 'CONFLICT' && status !== 'INVALID' && status !== 'UNKNOWN') return null
+  const busy = status === 'CONFLICT'
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded-full border text-[9px] font-semibold px-1.5 py-0.5 whitespace-nowrap ${
+        busy
+          ? 'border-rose-300 bg-rose-50 text-rose-700'
+          : 'border-slate-300 bg-slate-50 text-slate-600'
+      } ${className}`}
+      title={busy
+        ? `จองห้องในระบบส่วนกลางไม่ได้ — ห้องไม่ว่างช่วงเวลานี้${error ? `\n${error}` : ''}`
+        : `ระบบยังจองห้องส่วนกลางให้ไม่สำเร็จ${error ? `\n${error}` : ''}`}
+    >
+      {busy ? '⚠ ห้องไม่ว่าง' : 'ห้องยังไม่ได้จอง'}
+    </span>
+  )
+}
+
 export default function StatusPill({ status }: { status: Status }) {
   const s = STYLES[status] || STYLES.REQUESTED
   const label = statusLabel(status).replace(/[\[\]]/g, '')
