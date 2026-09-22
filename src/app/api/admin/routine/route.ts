@@ -25,9 +25,48 @@ export const dynamic = 'force-dynamic'
  * so episode-ID minting, audit, and validation match a hand-made booking.
  */
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
+
+  // v1.230 — ?groupId=<id> → ใบในชุดนั้นทีละใบ
+  //
+  // ก่อนหน้านี้หน้านี้บอกได้แค่ยอดรวม ("67 ใบ · REQUESTED 20, CANCELLED 3")
+  // พอมีใบล้มระหว่างอนุมัติทั้งชุดก็ไม่มีที่ไหนบอกว่าใบไหน ต้องไปไล่ในคิวงาน
+  // ที่ปนกับงานอื่นทั้งหมด — ชุดงานที่มองไม่เห็นสมาชิกตัวเองคือชุดที่จัดการไม่ได้
+  const groupId = request.nextUrl.searchParams.get('groupId')?.trim()
+  if (groupId) {
+    const items = await prisma.booking.findMany({
+      where: { routineGroupId: groupId, deletedAt: null },
+      select: {
+        id: true, bookingCode: true, shootDate: true, status: true,
+        callTime: true, estimatedWrap: true, locationName: true,
+        producer: true, producerEmail: true, assignedEmails: true,
+        calendarEventId: true, calendarSyncStatus: true,
+      },
+      orderBy: { shootDate: 'asc' },
+    })
+    if (items.length === 0) return NextResponse.json({ error: 'ไม่พบงานในชุดนี้' }, { status: 404 })
+    return NextResponse.json({
+      groupId,
+      items: items.map(b => ({
+        id: b.id,
+        code: b.bookingCode || b.id.slice(0, 8),
+        date: b.shootDate.toISOString().slice(0, 10),
+        status: b.status,
+        callTime: b.callTime,
+        estimatedWrap: b.estimatedWrap,
+        locationName: b.locationName,
+        producer: b.producer,
+        producerEmail: b.producerEmail,
+        assignedEmails: b.assignedEmails,
+        // ใบที่ CONFIRMED แต่ไม่มี event = รูที่ reconciler ปัจจุบันไม่เก็บให้
+        // (มันตามเฉพาะใบที่มี guest) โชว์ตรงนี้ให้คนเห็นแทนที่จะเงียบหาย
+        calendarOk: b.calendarEventId ? true : b.status === 'CONFIRMED' ? false : null,
+        calendarSyncStatus: b.calendarSyncStatus,
+      })),
+    })
+  }
 
   const rows = await prisma.booking.findMany({
     where: { routineGroupId: { not: null }, deletedAt: null },
