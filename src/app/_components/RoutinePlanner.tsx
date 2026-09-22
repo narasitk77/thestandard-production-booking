@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import BackButton from '@/app/_components/BackButton'
-import { Loader2, CalendarPlus, X, Trash2, Check, AlertTriangle } from 'lucide-react'
+import { Loader2, CalendarPlus, X, Trash2, Check, CheckCheck, AlertTriangle } from 'lucide-react'
 import { OUTLETS, OUTLET_MAP } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, findLocation } from '@/lib/locations'
 import { generateRoutineDates } from '@/lib/routine'
@@ -37,7 +37,20 @@ const CREW = ['Videographer', 'Sound', 'Photographer', 'Switcher', 'DIT', 'Light
 type Group = {
   routineGroupId: string; outlet: string; program: string
   count: number; from: string; to: string; statuses: Record<string, number>
+  approvableIds: string[]
 }
+
+/**
+ * v1.228 — หน่วงระหว่างใบตอนอนุมัติทั้งชุด
+ *
+ * อนุมัติ 1 ใบตอบกลับเร็วก็จริง แต่มันทิ้งงานเบื้องหลังไว้เพียบ (สร้างโฟลเดอร์
+ * Drive + _SHOOT.txt, โฟลเดอร์ staging เสียง, สร้าง event ปฏิทิน, เขียนแถวชีท,
+ * ซิงก์ OT) และรอบถัดไป worker จะไปจองห้องให้ด้วย — ซึ่งโควตาระบบกลางของ IT คือ
+ * 20 req/5 นาที **ใช้ร่วมกันทั้งบริษัท** ยิงรวดเดียว 60+ ใบ = ชีท 429 (เจอจริง
+ * 2026-09-22) และเบียดโควตาห้องของคนอื่น. ปล่อยทีละใบห่างกันหน่อยจึงไม่ใช่
+ * ความช้าโดยเปล่าประโยชน์ — มันคือสิ่งที่ทำให้ผลลัพธ์ครบ
+ */
+const BULK_APPROVE_GAP_MS = 1500
 
 export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   // form state
@@ -137,6 +150,54 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
     } finally {
       setGenerating(false)
     }
+  }
+
+  // v1.228 — ความคืบหน้าของการอนุมัติทั้งชุด (null = ไม่ได้กำลังอนุมัติอยู่)
+  const [approving, setApproving] = useState<{ groupId: string; done: number; total: number; failed: number } | null>(null)
+
+  /**
+   * อนุมัติทุกใบที่รออนุมัติในชุดนี้ — เรียก endpoint อนุมัติ "ใบเดียว" ตัวเดิม
+   * ทีละใบ ไม่เขียน endpoint อนุมัติแบบกลุ่มขึ้นมาใหม่
+   *
+   * ทำแบบนี้เพราะ /api/admin/[id]/approve มีของที่ต้องถูกต้องอยู่ 400 บรรทัด
+   * (กันอนุมัติซ้ำด้วย CAS ของ calendarEventId, กัน CANCELLED/deleted, กันสร้าง
+   * event ซ้ำ, เมลยืนยัน, Drive, ชีท, OT) การก๊อปมาทำใหม่เป็นเวอร์ชันกลุ่ม
+   * แปลว่าต้องดูแลสองทางให้ตรงกันตลอดไป และทางที่สองจะเป็นทางที่เพี้ยนก่อนเสมอ
+   */
+  const approveGroup = async (g: Group) => {
+    const ids = g.approvableIds || []
+    if (ids.length === 0) { alert('ชุดนี้ไม่มีใบที่รออนุมัติแล้ว'); return }
+    const mins = Math.max(1, Math.round((ids.length * BULK_APPROVE_GAP_MS) / 60000))
+    if (!confirm(
+      `อนุมัติ ${ids.length} ใบในชุดนี้?\n${g.outlet} · ${g.program} · ${g.from} – ${g.to}\n\n`
+      + `ทุกใบจะถูกสร้างโฟลเดอร์ Drive + event ปฏิทิน และรอบถัดไประบบจะจองห้องให้\n`
+      + `ปล่อยทีละใบห่างกัน ${BULK_APPROVE_GAP_MS / 1000} วิ กันชนโควตา — ใช้เวลาราว ${mins} นาที\n`
+      + `อย่าปิดแท็บนี้จนกว่าจะเสร็จ`
+    )) return
+
+    setApproving({ groupId: g.routineGroupId, done: 0, total: ids.length, failed: 0 })
+    const failures: string[] = []
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        const res = await fetch(`/api/admin/${ids[i]}/approve`, { method: 'POST' })
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}))
+          failures.push(`${ids[i].slice(0, 8)}: ${d.error || 'HTTP ' + res.status}`)
+        }
+      } catch (e: any) {
+        failures.push(`${ids[i].slice(0, 8)}: ${e?.message || e}`)
+      }
+      setApproving({ groupId: g.routineGroupId, done: i + 1, total: ids.length, failed: failures.length })
+      if (i < ids.length - 1) await new Promise(r => setTimeout(r, BULK_APPROVE_GAP_MS))
+    }
+    setApproving(null)
+    loadGroups()
+    // นับจากที่เกิดขึ้นจริง ไม่ใช่จากจำนวนที่ตั้งใจจะทำ — "อนุมัติแล้ว N ใบ"
+    // ที่ไม่ตรงกับของจริงคือรายงานที่หลอกคนอ่าน
+    alert(failures.length === 0
+      ? `อนุมัติครบ ${ids.length} ใบ`
+      : `อนุมัติสำเร็จ ${ids.length - failures.length}/${ids.length} ใบ\n\nไม่สำเร็จ ${failures.length} ใบ:\n${failures.slice(0, 10).join('\n')}`
+        + (failures.length > 10 ? `\n…และอีก ${failures.length - 10} ใบ` : ''))
   }
 
   const cancelGroup = async (g: Group) => {
@@ -382,10 +443,32 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
                         {Object.entries(g.statuses).map(([s, n]) => `${s} ${n}`).join(', ')}
                       </div>
                     </div>
-                    <button onClick={() => cancelGroup(g)}
-                      className="ops-btn ops-btn-sm text-red-600 border border-red-200 hover:bg-red-50 inline-flex items-center gap-1 flex-shrink-0">
-                      <Trash2 className="w-3.5 h-3.5" /> ลบทั้งชุด
-                    </button>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* v1.228 — อนุมัติทั้งชุด: ชุด routine 60+ ใบเคยต้องกดอนุมัติทีละใบ */}
+                      {g.approvableIds?.length > 0 && (
+                        <button
+                          onClick={() => approveGroup(g)}
+                          disabled={!!approving}
+                          className="ops-btn ops-btn-sm text-green-700 border border-green-200 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                          title={`อนุมัติ ${g.approvableIds.length} ใบที่รออนุมัติในชุดนี้`}
+                        >
+                          {approving?.groupId === g.routineGroupId ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              {approving.done}/{approving.total}
+                              {approving.failed > 0 && <span className="text-red-600">· ล้ม {approving.failed}</span>}
+                            </>
+                          ) : (
+                            <><CheckCheck className="w-3.5 h-3.5" /> อนุมัติทั้งชุด ({g.approvableIds.length})</>
+                          )}
+                        </button>
+                      )}
+                      <button onClick={() => cancelGroup(g)}
+                        disabled={!!approving}
+                        className="ops-btn ops-btn-sm text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1">
+                        <Trash2 className="w-3.5 h-3.5" /> ลบทั้งชุด
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

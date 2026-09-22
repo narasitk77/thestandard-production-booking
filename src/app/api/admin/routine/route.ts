@@ -31,16 +31,23 @@ export async function GET() {
   const rows = await prisma.booking.findMany({
     where: { routineGroupId: { not: null }, deletedAt: null },
     select: {
+      id: true,
       routineGroupId: true, shootDate: true, status: true,
       outlet: { select: { code: true } }, program: { select: { name: true } },
     },
     orderBy: { shootDate: 'asc' },
   })
 
+  // v1.228 — ids the "อนุมัติทั้งชุด" button may approve. Only the two statuses
+  // that mean "waiting for a human": COMPLETED is also approvable one-by-one
+  // (the sanctioned re-open path) but must never be swept up by a bulk click.
+  const BULK_APPROVABLE = new Set(['REQUESTED', 'ASSIGNED'])
+
   const map = new Map<string, {
     routineGroupId: string; outlet: string; program: string
     count: number; from: string; to: string
     statuses: Record<string, number>
+    approvableIds: string[]
   }>()
   for (const r of rows) {
     const id = r.routineGroupId as string
@@ -50,12 +57,14 @@ export async function GET() {
       map.set(id, {
         routineGroupId: id, outlet: r.outlet?.code || '', program: r.program?.name || '',
         count: 1, from: day, to: day, statuses: { [r.status]: 1 },
+        approvableIds: BULK_APPROVABLE.has(r.status) ? [r.id] : [],
       })
     } else {
       g.count++
       if (day < g.from) g.from = day
       if (day > g.to) g.to = day
       g.statuses[r.status] = (g.statuses[r.status] || 0) + 1
+      if (BULK_APPROVABLE.has(r.status)) g.approvableIds.push(r.id)
     }
   }
   return NextResponse.json({ groups: Array.from(map.values()).sort((a, b) => b.to.localeCompare(a.to)) })
