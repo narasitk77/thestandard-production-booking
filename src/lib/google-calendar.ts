@@ -390,6 +390,9 @@ export async function createCalendarEvent(booking: {
   coProducer?: string | null
   coProducerEmail?: string | null
   directorEmail?: string | null
+  /** v1.231 — ผู้กำกับคนที่ 2/3 (ไม่บังคับ) */
+  director2Email?: string | null
+  director3Email?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -463,6 +466,9 @@ export async function createCalendarEvent(booking: {
       producerEmail: booking.producerEmail,
       coProducerEmail: booking.coProducerEmail,
       directorEmail: booking.directorEmail,
+      // v1.231 — ผู้กำกับคนที่ 2/3 อยู่ใต้การ์ด AGN-only เดียวกันใน calendar-attendees
+      director2Email: booking.director2Email,
+      director3Email: booking.director3Email,
       outletCode: booking.outlet.code,
     })
     const attendees = canInvite ? attendeeEmails.map(email => ({ email })) : []

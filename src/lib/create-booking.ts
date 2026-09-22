@@ -54,6 +54,10 @@ export async function createBookingFromPayload(
     producerPhone,
     director,
     directorEmail,
+    director2,
+    director2Email,
+    director3,
+    director3Email,
     coProducer,
     coProducerEmail,
     creative,
@@ -392,6 +396,10 @@ export async function createBookingFromPayload(
       producerPhone: producerPhone || null,
       director: director || null,
       directorEmail: directorEmail || null,
+      director2: director2 || null,
+      director2Email: director2Email || null,
+      director3: director3 || null,
+      director3Email: director3Email || null,
       coProducer: coPro.coProducer,
       // v1.183 — coProducerEmail มีในสคีมาตั้งแต่ v1.59 แต่ไม่เคยถูกเขียนเลย
       // (ฟอร์มคำนวณค่าไว้แล้วไม่ส่งมา) → คิวเก็บได้แค่ชื่อเล่น ตามตัวคนไม่ได้

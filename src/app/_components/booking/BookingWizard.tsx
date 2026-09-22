@@ -181,6 +181,9 @@ export default function BookingWizard() {
   const [estimatedWrap, setEstimatedWrap] = useState('')
   const [producerEmail, setProducerEmail] = useState('')
   const [directorEmail, setDirectorEmail] = useState('')
+  // v1.231 — ผู้กำกับคนที่ 2/3 ไม่บังคับ · โผล่ทีละช่องเมื่อช่องก่อนหน้าถูกเลือกแล้ว
+  const [director2Email, setDirector2Email] = useState('')
+  const [director3Email, setDirector3Email] = useState('')
   const [producerName, setProducerName] = useState('')
   const [producerPhone, setProducerPhone] = useState('')
   const [producerEmailText, setProducerEmailText] = useState('')
@@ -534,7 +537,7 @@ export default function BookingWizard() {
   const draftSnapshot = () => ({
     outletCode, programCode, shootDate, shootEndDate, category, shootType,
     locationId, locationCustom, mapLocation, callTime, estimatedWrap,
-    producerEmail, directorEmail, producerName, producerPhone, producerEmailText,
+    producerEmail, directorEmail, director2Email, director3Email, producerName, producerPhone, producerEmailText,
     creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, virtualProduction, vanCount, eventExternal,
     specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, producerCustom,
     notes, epCount, epRows, step,
@@ -555,7 +558,7 @@ export default function BookingWizard() {
     }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, virtualProduction, vanCount, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
+  }, [draftDecided, outletCode, programCode, shootDate, shootEndDate, category, shootType, locationId, locationCustom, mapLocation, callTime, estimatedWrap, producerEmail, directorEmail, director2Email, director3Email, producerName, producerPhone, producerEmailText, creative, crew, videographerCount, switcherCount, cameraCount, micCount, isBlockShot, virtualProduction, vanCount, eventExternal, specialEquipment, agencyRef, projectId, selectedEpisodeIds, producerSel, coProducerSel, notes, epCount, epRows, step])
 
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
   const discardDraft = () => { clearDraft(); setDraftFound(false); setDraftDecided(true) }
@@ -577,6 +580,8 @@ export default function BookingWizard() {
       if (d.estimatedWrap != null) setEstimatedWrap(d.estimatedWrap)
       if (d.producerEmail != null) setProducerEmail(d.producerEmail)
       if (d.directorEmail != null) setDirectorEmail(d.directorEmail)
+      if (d.director2Email != null) setDirector2Email(d.director2Email)
+      if (d.director3Email != null) setDirector3Email(d.director3Email)
       if (d.producerName != null) setProducerName(d.producerName)
       if (d.producerPhone != null) setProducerPhone(d.producerPhone)
       if (d.producerEmailText != null) setProducerEmailText(d.producerEmailText)
@@ -647,7 +652,7 @@ export default function BookingWizard() {
 
     setFieldErrors(prev => {
       const next = { ...prev }
-      ;['outletCode','programCode','producerEmail','directorEmail','producerName','producerPhone','producerEmailText','projectId','selectedEpisodeIds']
+      ;['outletCode','programCode','producerEmail','directorEmail','director2Email','director3Email','producerName','producerPhone','producerEmailText','projectId','selectedEpisodeIds']
         .forEach(k => delete next[k])
       return next
     })
@@ -799,7 +804,7 @@ export default function BookingWizard() {
     outletCode, programCode, category,
     shootDate, shootEndDate, callTime, estimatedWrap,
     locationId, locationCustom, needsCustomText, shootType, mapLocation,
-    isContentAgency, producerEmail, directorEmail, projectId, selectedEpisodeIds,
+    isContentAgency, producerEmail, directorEmail, director2Email, director3Email, projectId, selectedEpisodeIds,
     producerName, producerPhone, producerEmailText, epRows, projectSelectable,
     useProducerDropdown, producerSel, coProducerSel, producerCustom,
   ])
@@ -894,6 +899,10 @@ export default function BookingWizard() {
             ? directors.find(d => d.email === directorEmail)?.nickname || ''
             : null,
           directorEmail: isContentAgency ? directorEmail : null,
+          director2: isContentAgency ? (directors.find(d => d.email === director2Email)?.nickname || '') : '',
+          director2Email: isContentAgency ? (director2Email || null) : null,
+          director3: isContentAgency ? (directors.find(d => d.email === director3Email)?.nickname || '') : '',
+          director3Email: isContentAgency ? (director3Email || null) : null,
           // v1.59 — Co-Producer (non-AGN dropdown only)
           coProducer: useProducerDropdown ? effCoProducer : null,
           // v1.183 — เคยคำนวณค่านี้ไว้แล้วลืมส่ง: คิวจึงเก็บได้แค่ชื่อเล่นของ
@@ -971,8 +980,15 @@ export default function BookingWizard() {
       ? selCoProd.nickname
       // ไม่ได้เลือก แต่ outlet นี้มี Co-Producer ประจำ → หน้าสรุปต้องบอกตามที่จะบันทึกจริง
       : (autoCoProducer && !coProducerSel ? `${autoCoProducer.nickname} (ระบบใส่ให้อัตโนมัติ)` : ''),
+    // v1.231 — รวมผู้กำกับทุกคนเป็นบรรทัดเดียว ขึ้นบรรทัดคั่น (สรุปมีช่อง Director ช่องเดียว)
     director: isContentAgency
-      ? (caDirector?.nickname ? `${caDirector.nickname} (${directorEmail})` : directorEmail)
+      ? [directorEmail, director2Email, director3Email]
+          .filter(Boolean)
+          .map(em => {
+            const d = directors.find(x => x.email === em)
+            return d?.nickname ? `${d.nickname} (${em})` : em
+          })
+          .join(' · ')
       : '',
     project: isContentAgency && selectedProject
       ? `${selectedProject.projectId} — ${selectedProject.projectName}`
@@ -1593,31 +1609,57 @@ export default function BookingWizard() {
                     Moved below Project so the producer→project filter chain
                     reads top-to-bottom: pick Producer, then Project (filtered),
                     then Episodes (depend on Project), then Director. */}
-                {isContentAgency && (
-                  <div>
-                    <Label htmlFor="directorEmail">Director <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></Label>
-                    <select
-                      id="directorEmail"
-                      className={`ops-input ${fieldErrors.directorEmail ? 'ops-input-invalid' : ''}`}
-                      value={directorEmail}
-                      onChange={e => setDirectorEmail(e.target.value)}
-                      disabled={peopleLoading}
-                      aria-invalid={!!fieldErrors.directorEmail}
-                    >
-                      <option value="">
-                        {peopleLoading
-                          ? 'Loading…'
-                          : directors.length === 0
-                            ? '— No directors loaded (sheet unreachable) —'
-                            : '— ไม่ระบุ / เลือก Director —'}
-                      </option>
-                      {directors.map(d => (
-                        <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
+                {isContentAgency && (() => {
+                  /* v1.231 — ผู้กำกับได้ถึง 3 คน คนที่ 2/3 ไม่บังคับและโผล่ทีละช่อง
+                     เมื่อช่องก่อนหน้าถูกเลือกแล้ว — ฟอร์มจองยาวพออยู่แล้ว ไม่ควร
+                     เพิ่มช่องว่างสองช่องให้ทุกงานทั้งที่ส่วนใหญ่มีผู้กำกับคนเดียว
+                     แต่ละช่องตัดคนที่ถูกเลือกไปแล้วออก กันเลือกคนเดิมซ้ำ */
+                  const slots: { id: string; label: string; value: string; set: (v: string) => void }[] = [
+                    { id: 'directorEmail', label: 'Director', value: directorEmail, set: setDirectorEmail },
+                  ]
+                  if (directorEmail) slots.push({ id: 'director2Email', label: 'Director คนที่ 2', value: director2Email, set: setDirector2Email })
+                  if (directorEmail && director2Email) slots.push({ id: 'director3Email', label: 'Director คนที่ 3', value: director3Email, set: setDirector3Email })
+                  const chosen = [directorEmail, director2Email, director3Email]
+                  return (
+                    <>
+                      {slots.map((slot, i) => (
+                        <div key={slot.id}>
+                          <Label htmlFor={slot.id}>{slot.label} <span className="text-gray-400 font-normal">(ไม่บังคับ)</span></Label>
+                          <select
+                            id={slot.id}
+                            className={`ops-input ${fieldErrors[slot.id] ? 'ops-input-invalid' : ''}`}
+                            value={slot.value}
+                            onChange={e => {
+                              slot.set(e.target.value)
+                              // ล้างช่องถัดไปเมื่อช่องนี้ถูกล้าง ไม่งั้นจะเหลือผู้กำกับคนที่ 3
+                              // ค้างอยู่โดยไม่มีคนที่ 2 แล้วช่องนั้นก็หายไปจากหน้าจอ = แก้ไม่ได้
+                              if (!e.target.value) {
+                                if (i === 0) { setDirector2Email(''); setDirector3Email('') }
+                                if (i === 1) setDirector3Email('')
+                              }
+                            }}
+                            disabled={peopleLoading}
+                            aria-invalid={!!fieldErrors[slot.id]}
+                          >
+                            <option value="">
+                              {peopleLoading
+                                ? 'Loading…'
+                                : directors.length === 0
+                                  ? '— No directors loaded (sheet unreachable) —'
+                                  : '— ไม่ระบุ / เลือก Director —'}
+                            </option>
+                            {directors
+                              .filter(d => d.email === slot.value || !chosen.includes(d.email))
+                              .map(d => (
+                                <option key={d.email} value={d.email}>{d.nickname} ({d.email})</option>
+                              ))}
+                          </select>
+                          <FieldError message={fieldErrors[slot.id]} />
+                        </div>
                       ))}
-                    </select>
-                    <FieldError message={fieldErrors.directorEmail} />
-                  </div>
-                )}
+                    </>
+                  )
+                })()}
 
                 {/* Episodes — non-CA. Each episode picks its own program (show)
                     and is tagged Original Content vs Advertorial (AD). */}

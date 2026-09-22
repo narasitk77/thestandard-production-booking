@@ -86,6 +86,8 @@ type BookingForReconcile = {
   producer: string
   producerEmail?: string | null
   directorEmail?: string | null
+  director2Email?: string | null
+  director3Email?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -138,6 +140,8 @@ async function createVerifiedCalendarEvent(booking: {
   producer: string
   producerEmail?: string | null
   directorEmail?: string | null
+  director2Email?: string | null
+  director3Email?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -178,6 +182,9 @@ async function createVerifiedCalendarEvent(booking: {
     producerEmail: booking.producerEmail,
     coProducerEmail: (booking as any).coProducerEmail,
     directorEmail: booking.directorEmail,
+    // v1.231 — ผู้กำกับคนที่ 2/3 อยู่ใต้การ์ด AGN-only เดียวกันใน calendar-attendees
+    director2Email: booking.director2Email,
+    director3Email: booking.director3Email,
     outletCode: booking.outlet.code,
   })
   const calendarEvent = await getCalendarEventAttendees(eventId)
@@ -213,6 +220,9 @@ async function processBooking(
     producerEmail: booking.producerEmail,
     coProducerEmail: (booking as any).coProducerEmail,
     directorEmail: booking.directorEmail,
+    // v1.231 — ผู้กำกับคนที่ 2/3 อยู่ใต้การ์ด AGN-only เดียวกันใน calendar-attendees
+    director2Email: booking.director2Email,
+    director3Email: booking.director3Email,
     outletCode: booking.outlet.code,
   }))
   const item: ReconcileItem = {
@@ -247,6 +257,8 @@ async function processBooking(
         producer: booking.producer,
         producerEmail: booking.producerEmail,
         directorEmail: booking.directorEmail,
+        director2Email: booking.director2Email,
+        director3Email: booking.director3Email,
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
         vanCount: booking.vanCount,
@@ -327,6 +339,8 @@ async function processBooking(
         producer: booking.producer,
         producerEmail: booking.producerEmail,
         directorEmail: booking.directorEmail,
+        director2Email: booking.director2Email,
+        director3Email: booking.director3Email,
         cameraCount: booking.cameraCount,
         micCount: booking.micCount,
         vanCount: booking.vanCount,
@@ -422,6 +436,8 @@ async function processBooking(
           producer: booking.producer,
           producerEmail: booking.producerEmail,
           directorEmail: booking.directorEmail,
+          director2Email: booking.director2Email,
+          director3Email: booking.director3Email,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           vanCount: booking.vanCount,

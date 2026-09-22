@@ -128,6 +128,9 @@ export async function POST(
       producerEmail: booking.producerEmail,
       coProducerEmail: (booking as any).coProducerEmail,
       directorEmail: booking.directorEmail,
+      // v1.231 — ผู้กำกับคนที่ 2/3 อยู่ใต้การ์ด AGN-only เดียวกันใน calendar-attendees
+      director2Email: booking.director2Email,
+      director3Email: booking.director3Email,
       outletCode: booking.outlet?.code,
     })
 
@@ -207,6 +210,8 @@ export async function POST(
           producer: booking.producer,
           producerEmail: booking.producerEmail,
           directorEmail: booking.directorEmail,
+          director2Email: booking.director2Email,
+          director3Email: booking.director3Email,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           vanCount: booking.vanCount,

@@ -250,6 +250,14 @@ model Booking {
   producerPhone    String?  // Producer phone — free-text outlets only (Content Agency uses _Users)
   director         String?  // Director nickname (Content Agency only — null for other outlets)
   directorEmail    String?  // Director email (canonical id)
+  // v1.231 — ผู้กำกับคนที่ 2 และ 3 (ไม่บังคับ) งาน Agency บางงานมีหลายคน
+  // เพิ่มเป็นคอลัมน์ใหม่ ไม่แปลง director/directorEmail เดิมเป็น array เพราะ
+  // คอนเทนเนอร์รัน `prisma db push --accept-data-loss` ทุก boot — เปลี่ยนชนิด
+  // คอลัมน์ที่มีข้อมูลอยู่คือ DROP ของจริงบนพรอด (ดู start.sh)
+  director2        String?  // Director #2 nickname (optional, AGN only)
+  director2Email   String?  // Director #2 email
+  director3        String?  // Director #3 nickname (optional, AGN only)
+  director3Email   String?  // Director #3 email
   // v1.59.0 — Co-Producer for non-Agency outlets, picked from the per-outlet
   // dropdown (same source as Producer). Null when none chosen.
   coProducer       String?

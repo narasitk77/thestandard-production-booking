@@ -246,6 +246,8 @@ export async function POST(
           producer: booking.producer,
           producerEmail: booking.producerEmail,
           directorEmail: booking.directorEmail,
+          director2Email: booking.director2Email,
+          director3Email: booking.director3Email,
           cameraCount: booking.cameraCount,
           micCount: booking.micCount,
           vanCount: booking.vanCount,
@@ -380,14 +382,29 @@ export async function POST(
     // AGN-only (ops decision); this notification email is part of the same
     // feature and must not fire for other outlets even if directorEmail
     // happens to be set on the row.
-    const directorEmailTrimmed = updated.outlet.code === 'AGN' ? (updated.directorEmail || '').trim() : ''
-    if (!isReapprove
-        && directorEmailTrimmed
-        && directorEmailTrimmed.toLowerCase() !== session.email.toLowerCase()
-        && directorEmailTrimmed.toLowerCase() !== bookerEmail.toLowerCase()) {
+    // v1.231 — ผู้กำกับได้ถึงสามคน แจ้งทุกคนที่ใส่ไว้ (dedupe ไม่สนตัวพิมพ์
+    // เผื่อคนเดิมถูกเลือกซ้ำสองช่อง) การ์ด AGN-only ยังเหมือนเดิมทั้งก้อน
+    const directorPairs = updated.outlet.code === 'AGN'
+      ? ([[updated.directorEmail, updated.director],
+          [updated.director2Email, updated.director2],
+          [updated.director3Email, updated.director3]] as const)
+      : []
+    const seenDirector = new Set<string>()
+    const directorsToNotify = directorPairs
+      .map(([email, name]) => ({ email: (email || '').trim(), name: name || '' }))
+      .filter(d => {
+        const key = d.email.toLowerCase()
+        if (!key) return false
+        if (key === session.email.toLowerCase()) return false
+        if (key === bookerEmail.toLowerCase()) return false
+        if (seenDirector.has(key)) return false
+        seenDirector.add(key)
+        return true
+      })
+    for (const d of (isReapprove ? [] : directorsToNotify)) {
       sendAssignmentEmail({
-        to: directorEmailTrimmed,
-        toName: updated.director || directorEmailTrimmed.split('@')[0],
+        to: d.email,
+        toName: d.name || d.email.split('@')[0],
         bookingId: updated.id,
         outletName: updated.outlet.name,
         programName: updated.program.name,

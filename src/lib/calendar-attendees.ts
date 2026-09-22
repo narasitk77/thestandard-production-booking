@@ -24,6 +24,9 @@ export interface CalendarAttendeeInput {
   coProducerEmail?: string | null
   /** ไดเรกเตอร์ที่เลือกตอนจอง — **AGN เท่านั้น** ตามกฏ ops */
   directorEmail?: string | null
+  /** v1.231 — ผู้กำกับคนที่ 2/3 (ไม่บังคับ) การ์ด AGN-only เดียวกันครอบทั้งสามคน */
+  director2Email?: string | null
+  director3Email?: string | null
   outletCode?: string | null
 }
 
@@ -47,7 +50,12 @@ export function bookingCalendarAttendees(input: CalendarAttendeeInput): string[]
   add(input.producerEmail)
   add(input.coProducerEmail)
   // AGN-only โดยเจตนา — ดูหัวไฟล์ ห้ามถอดการ์ดนี้ออกโดยไม่ถามฝ่าย ops
-  if ((input.outletCode || '').trim().toUpperCase() === 'AGN') add(input.directorEmail)
+  // v1.231 — ผู้กำกับคนที่ 2/3 อยู่ใต้การ์ดเดียวกัน: เพิ่มคนได้ แต่กฏ AGN-only ไม่ขยับ
+  if ((input.outletCode || '').trim().toUpperCase() === 'AGN') {
+    add(input.directorEmail)
+    add(input.director2Email)
+    add(input.director3Email)
+  }
 
   return out
 }

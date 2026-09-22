@@ -67,3 +67,49 @@ test('ไม่มีอะไรเลย = ลิสต์ว่าง ไม�
 test('เก็บตัวพิมพ์เดิมของอีเมลไว้ (Google เทียบไม่สนตัวพิมพ์ แต่คนอ่าน log สน)', () => {
   assert.deepEqual(bookingCalendarAttendees({ producerEmail: 'Some.One@thestandard.co' }), ['Some.One@thestandard.co'])
 })
+
+// ── v1.231 — ผู้กำกับคนที่ 2 และ 3 ────────────────────────────────────────────
+
+test('v1.231 ผู้กำกับคนที่ 2/3 เข้าลิสต์ด้วยเมื่อเป็น AGN', () => {
+  assert.deepEqual(
+    bookingCalendarAttendees({
+      outletCode: 'AGN',
+      directorEmail: 'dir1@thestandard.co',
+      director2Email: 'dir2@thestandard.co',
+      director3Email: 'dir3@thestandard.co',
+    }),
+    ['dir1@thestandard.co', 'dir2@thestandard.co', 'dir3@thestandard.co'],
+  )
+})
+
+test('v1.231 การ์ด AGN-only ครอบผู้กำกับทั้งสามคน ไม่ใช่แค่คนแรก', () => {
+  // ถ้าใครเผลอเอา director2/3 ออกมานอกบล็อก AGN เทสนี้จะจับได้ทันที
+  assert.deepEqual(
+    bookingCalendarAttendees({
+      outletCode: 'NWS',
+      directorEmail: 'dir1@thestandard.co',
+      director2Email: 'dir2@thestandard.co',
+      director3Email: 'dir3@thestandard.co',
+      producerEmail: 'pro@thestandard.co',
+    }),
+    ['pro@thestandard.co'],
+  )
+})
+
+test('v1.231 ใส่คนเดิมซ้ำสองช่อง ได้ invite ใบเดียว', () => {
+  assert.deepEqual(
+    bookingCalendarAttendees({
+      outletCode: 'AGN',
+      directorEmail: 'dir@thestandard.co',
+      director2Email: 'DIR@thestandard.co',
+    }),
+    ['dir@thestandard.co'],
+  )
+})
+
+test('v1.231 ใส่เฉพาะคนที่ 3 โดยไม่มีคนที่ 1/2 ก็ยังได้ invite (ไม่ผูกลำดับ)', () => {
+  assert.deepEqual(
+    bookingCalendarAttendees({ outletCode: 'AGN', director3Email: 'only3@thestandard.co' }),
+    ['only3@thestandard.co'],
+  )
+})

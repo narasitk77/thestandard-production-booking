@@ -33,6 +33,10 @@ export interface BookingInfoInput {
   producerEmail?: string | null
   director?: string | null
   directorEmail?: string | null
+  director2?: string | null
+  director2Email?: string | null
+  director3?: string | null
+  director3Email?: string | null
   mainVideographerEmail?: string | null
   assignedEmails?: string[]
   crewRequired?: string[]
@@ -65,6 +69,10 @@ export function bookingInfoInput(b: {
   producerEmail?: string | null
   director?: string | null
   directorEmail?: string | null
+  director2?: string | null
+  director2Email?: string | null
+  director3?: string | null
+  director3Email?: string | null
   mainVideographerEmail?: string | null
   assignedEmails?: string[]
   crewRequired?: string[]
@@ -81,6 +89,8 @@ export function bookingInfoInput(b: {
     callTime: b.callTime, estimatedWrap: b.estimatedWrap, locationName: b.locationName,
     producer: b.producer, producerEmail: b.producerEmail,
     director: b.director, directorEmail: b.directorEmail,
+    director2: b.director2, director2Email: b.director2Email,
+    director3: b.director3, director3Email: b.director3Email,
     mainVideographerEmail: b.mainVideographerEmail,
     assignedEmails: b.assignedEmails, crewRequired: b.crewRequired,
     agencyRef: b.agencyRef, notes: b.notes, episodes: b.episodes,
@@ -158,7 +168,10 @@ export function renderBookingInfo(b: BookingInfoInput): string {
   out.push(sub('ทีมงาน / Crew'))
   ;[
     line('Producer', [b.producer, b.producerEmail].filter(Boolean).join(' · ') || null),
+    // v1.231 — ผู้กำกับได้ถึงสามคน แสดงคนที่ 2/3 ต่อท้ายเมื่อมี
     line('Director', [b.director, b.directorEmail].filter(Boolean).join(' · ') || null),
+    line('Director 2', [b.director2, b.director2Email].filter(Boolean).join(' · ') || null),
+    line('Director 3', [b.director3, b.director3Email].filter(Boolean).join(' · ') || null),
     line('Main Videographer', b.mainVideographerEmail),
     line('Crew ที่ต้องใช้', (b.crewRequired && b.crewRequired.length) ? b.crewRequired.join(', ') : null),
     line('ทีมที่ assign', (b.assignedEmails && b.assignedEmails.length) ? b.assignedEmails.join(', ') : null),
