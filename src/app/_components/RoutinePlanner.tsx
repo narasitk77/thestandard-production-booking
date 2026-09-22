@@ -80,6 +80,16 @@ const BULK_APPROVE_RTT_MS = 800
  */
 const BULK_ASSIGN_GAP_MS = 2000
 
+/**
+ * v1.232 — AGN ไม่อยู่ในรายการ outlet ของ Routine Planner
+ *
+ * create-booking บังคับ `selectedEpisodeIds` + `projectId` สำหรับ Content Agency
+ * (create-booking.ts:122-127) ซึ่ง payload ของหน้านี้ไม่มีทั้งคู่ → ทุกวันจะ fail
+ * เลือก AGN ได้จึงเป็นกับดัก: กรอกครบทั้งฟอร์มแล้วได้ created 0 / failed N
+ * และตัวอย่างรหัสใต้ช่องก็จะโกหก (AGN มินต์ `AGN-YYMMDD-NN` ไม่มีช่องรายการ)
+ */
+const ROUTINE_OUTLETS = OUTLETS.filter(o => o.code !== 'AGN')
+
 type BulkItem = { id: string; code: string }
 type BulkOutcome = { ok: number; skipped: number; failures: string[]; stoppedEarly: boolean }
 
@@ -130,7 +140,7 @@ function bulkSummary(verb: string, o: BulkOutcome, tail?: string): string {
 
 export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   // form state
-  const [outletCode, setOutletCode] = useState('NWS')
+  const [outletCode, setOutletCode] = useState('NWS')  // AGN ไม่อยู่ในลิสต์ ดู ROUTINE_OUTLETS
   /**
    * v1.232 — สองค่านี้ต้องแยกกัน ห้ามใช้ช่องเดียว
    *
@@ -401,7 +411,7 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
               <div>
                 <label className="ops-label">Outlet</label>
                 <select className="ops-input" value={outletCode} onChange={e => setOutletCode(e.target.value)}>
-                  {OUTLETS.map(o => <option key={o.code} value={o.code}>{o.code} · {o.name}</option>)}
+                  {ROUTINE_OUTLETS.map(o => <option key={o.code} value={o.code}>{o.code} · {o.name}</option>)}
                 </select>
               </div>
               <div>

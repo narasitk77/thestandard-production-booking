@@ -17,6 +17,7 @@
  * IDs (PP-…), not app-minted, so reprogramming them here is meaningless.
  */
 import { prisma } from './db'
+import { progSegmentForId } from './episode-id'
 import { parseEpisodeId, generateEpisodeId, formatShootDateForId } from './episode-id'
 import { getProgram } from './data'
 import type { EpisodeIdChange } from './id-migration'
@@ -92,8 +93,7 @@ export async function planReprogram(
   for (const ep of booking.episodes) {
     if (!targetProgByEp.has(ep.id)) continue
     const code = targetProgByEp.get(ep.id)!
-    // progForId — identical rule to create-booking.ts.
-    const progForId = /^[A-Z0-9]{2,4}$/.test(code) && code !== bookingProgCode ? code : null
+    const progForId = progSegmentForId(code, bookingProgCode)
     const streamKey = progForId ?? ''
 
     let nextSeq = nextSeqByStream.get(streamKey)

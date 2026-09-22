@@ -110,3 +110,28 @@ export function formatShootDateForId(date: Date): string {
   const dd = String(date.getDate()).padStart(2, '0')
   return `${yy}${mm}${dd}`
 }
+
+
+/**
+ * ส่วน "ชื่อรายการ" กลาง Production ID — `[OUT]-[SHOW]-[YYMMDD]-[NN]`
+ * คืน null = ใช้รูปแบบสั้น `[OUT]-[YYMMDD]-[NN]`
+ *
+ * **นี่คือนิยามเดียวของกฎนี้** — create-booking, move-outlet และ
+ * reprogram-booking ต้อง import ตัวนี้ ห้ามเขียนนิพจน์ซ้ำอีก
+ *
+ * โมเดล: ใบจองเก็บ *ประเภทตอน* (L/S/A/T) · episode เก็บ *ชื่อรายการ* (TSN/MNW/…)
+ * สองค่าเท่ากัน = ผู้เรียกไม่ได้แยกมันออกจากกัน (สะท้อน Episode Type กลับมาเฉย ๆ)
+ * จึงไม่มีชื่อรายการจะใส่
+ *
+ * ⚠️ ค่าเท่ากันคือสัญญาณว่า **ผู้เรียกผิด** ไม่ใช่เคสปกติ: `/admin/routine` เคยมี
+ * dropdown ช่องเดียวแล้วส่งค่าเดียวกันไปทั้งสองที่ → Production ID ของ Morning
+ * Wealth ออกมาเป็น `WLT-260923-01` ไม่มี `MNW` (135 ใบ 2026-09-22 · แก้ที่ v1.232)
+ */
+export function progSegmentForId(
+  code: string | null | undefined,
+  bookingProgCode: string | null | undefined,
+): string | null {
+  const c = (code || '').trim().toUpperCase()
+  if (!/^[A-Z0-9]{2,4}$/.test(c)) return null
+  return c === (bookingProgCode || '').trim().toUpperCase() ? null : c
+}

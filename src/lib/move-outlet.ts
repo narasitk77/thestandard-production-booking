@@ -25,7 +25,7 @@
  */
 import { prisma } from './db'
 import { getOutlet, getProgram } from './data'
-import { parseEpisodeId, generateEpisodeId, formatShootDateForId } from './episode-id'
+import { parseEpisodeId, generateEpisodeId, formatShootDateForId, progSegmentForId } from './episode-id'
 import {
   outletDriveFolderName,
   shootFolderLayers,
@@ -41,16 +41,9 @@ export function moveOutletEnabled(): boolean {
 
 // ── pure core ────────────────────────────────────────────────────────────────
 
-/**
- * The program-segment rule, byte-identical to create-booking.ts and
- * reprogram-booking.ts:96 — a show code is included in the ID only when it is a
- * real 2–4 char code AND differs from the booking-level Episode Type. Extracted
- * so a test pins the three implementations together.
- */
-export function progSegmentForId(code: string, bookingProgCode: string): string | null {
-  const c = (code || '').trim().toUpperCase()
-  return /^[A-Z0-9]{2,4}$/.test(c) && c !== (bookingProgCode || '').trim().toUpperCase() ? c : null
-}
+/// v1.232 — กฎย้ายไปอยู่ episode-id.ts ที่เดียว (เคยมีสำเนา 3 ชุด แล้วผมเผลอทำเป็น 4)
+// re-export ไว้เพื่อไม่ให้ import เดิมของเทสและผู้เรียกอื่นพัง
+export { progSegmentForId }
 
 /**
  * The predicate `samePlace` should always have been: a booking box is in the

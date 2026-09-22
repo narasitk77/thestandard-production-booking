@@ -9,6 +9,7 @@ import { deleteCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { clearBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
+import { bookingShowName } from '@/lib/display'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,6 +75,11 @@ export async function GET(request: NextRequest) {
       id: true, bookingCode: true,
       routineGroupId: true, shootDate: true, status: true,
       outlet: { select: { code: true } }, program: { select: { name: true } },
+      // v1.232 — ชื่อรายการอยู่ที่ episode แล้ว (booking.program = ประเภทตอน)
+      // ถ้าอ่าน booking.program ตรง ๆ ทุกชุดใหม่จะขึ้นว่า "Long-form · …" เหมือนกันหมด
+      // รวมถึงในกล่องยืนยัน "ลบทั้งชุด" ซึ่งเป็นการกระทำที่ย้อนยาก
+      projectName: true,
+      episodes: { take: 1, select: { program: { select: { name: true } } } },
     },
     orderBy: { shootDate: 'asc' },
   })
@@ -103,7 +109,7 @@ export async function GET(request: NextRequest) {
     const g = map.get(id)
     if (!g) {
       map.set(id, {
-        routineGroupId: id, outlet: r.outlet?.code || '', program: r.program?.name || '',
+        routineGroupId: id, outlet: r.outlet?.code || '', program: bookingShowName(r),
         count: 1, from: day, to: day, statuses: { [r.status]: 1 },
         approvable: BULK_APPROVABLE.has(r.status) ? [entry] : [],
       })
@@ -194,7 +200,19 @@ export async function POST(request: NextRequest) {
   // เก็บ *ชื่อรายการ* (MNW/TSN/…) — หน้านี้เคยส่งค่าเดียวกันไปทั้งสองที่ ค่าจึงหักล้าง
   // ตัวเองแล้วได้รหัส `WLT-260923-01` ที่ไม่มีชื่อรายการ (เจอจริง 2026-09-22, 135 ใบ)
   //
-  // `episodeProgramCode` ว่าง = client รุ่นเก่า ย้อนกลับไปพฤติกรรมเดิมแทนที่จะพัง
+  // ฟอร์มรุ่นเก่า (แท็บที่เปิดค้างไว้ก่อน deploy) ส่ง programCode เป็นชื่อรายการมาช่องเดียว
+  // **ปฏิเสธ ไม่ใช่รองรับ** — "รองรับ" ในที่นี้แปลว่าปล่อยให้มันสร้างรหัสเสียแบบเดิมเงียบ ๆ
+  // แยกออกได้ชัดเพราะ client ที่ถูกต้องส่ง programCode เป็นประเภทตอน = ยาว 1 ตัวเสมอ
+  // และ RoutinePlanner เป็นผู้เรียกรายเดียวของ endpoint นี้ (grep ทั้งรีโปแล้ว)
+  //
+  // ใบที่เกิดจากบั๊กนี้ซ่อมไม่ได้ด้วย: reprogram-booking จะเห็นว่า code == bookingProgCode
+  // แล้วตอบ "ไม่มีอะไรเปลี่ยน" — รหัสที่ไม่มีชื่อรายการจะติดตัวใบนั้นถาวร
+  if (!episodeProgramCode && String(programCode || '').trim().length > 1) {
+    return NextResponse.json(
+      { error: 'ฟอร์มรุ่นเก่า — รีเฟรชหน้า /admin/routine ก่อนสร้าง (ไม่งั้นรหัสใบจองจะไม่มีชื่อรายการ)' },
+      { status: 400 },
+    )
+  }
   const showCode = String(episodeProgramCode || programCode || '').trim()
 
   // เช็คซ้ำต้องถามว่า "รายการนี้มีงานวันนี้อยู่แล้วไหม" ซึ่งอยู่ที่ episode
