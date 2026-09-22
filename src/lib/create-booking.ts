@@ -23,6 +23,31 @@ export type CreateBookingResult =
   | { ok: true; booking: any }
   | { ok: false; status: number; error: string }
 
+/**
+ * ส่วน "ชื่อรายการ" ที่จะไปอยู่กลาง Booking ID — `[OUT]-[PROG]-[YYMMDD]-[NN]`
+ * คืน null = ใช้รูปแบบสั้น `[OUT]-[YYMMDD]-[NN]`
+ *
+ * โมเดลคือ **ใบจองเก็บประเภทตอน** (L/S/A/T) ส่วน **episode เก็บชื่อรายการ**
+ * (TSN/MNW/EVT/…) ถ้าสองค่านี้เท่ากันแปลว่าผู้เรียกไม่ได้แยกมันออกจากกัน —
+ * สะท้อน Episode Type กลับมาเฉย ๆ — จึงไม่มีชื่อรายการจะใส่
+ *
+ * ⚠️ ค่าที่เท่ากันคือสัญญาณว่า **ผู้เรียกผิด** ไม่ใช่เคสปกติ: `/admin/routine`
+ * เคยมี dropdown ช่องเดียวแล้วส่งค่าเดียวกันไปทั้งสองที่ ผลคือ Production ID
+ * ของ Morning Wealth ออกมาเป็น `WLT-260923-01` ไม่มี `MNW` (135 ใบ, 2026-09-22)
+ * แก้ที่ v1.232 โดยแยก dropdown เป็น "รายการ" กับ "Episode Type"
+ */
+export function episodeProgramSegment(
+  episodeProgramCode: string | null | undefined,
+  bookingProgramCode: string | null | undefined,
+): string | null {
+  const ep = (episodeProgramCode || '').trim().toUpperCase()
+  const booking = (bookingProgramCode || '').trim().toUpperCase()
+  // 2–4 ตัวอักษร/ตัวเลข = รหัสรายการจริง (ประเภทตอนยาวตัวเดียว)
+  if (!/^[A-Z0-9]{2,4}$/.test(ep)) return null
+  if (ep === booking) return null
+  return ep
+}
+
 export async function createBookingFromPayload(
   body: any,
   actorEmail: string,
@@ -335,13 +360,7 @@ export async function createBookingFromPayload(
         const ep = episodeInputs[idx]
         const epProgramId = programIdByCode.get(ep.programCode)!
 
-        // Program segment only when it's a real show code (2–4 alnum chars,
-        // the strict-format constraint) and not just the Episode Type echoed
-        // back by a legacy client — those keep the legacy ID shape.
-        const epProgCode = ep.programCode.trim().toUpperCase()
-        const progForId = /^[A-Z0-9]{2,4}$/.test(epProgCode) && epProgCode !== programCode
-          ? epProgCode
-          : null
+        const progForId = episodeProgramSegment(ep.programCode, programCode)
         const streamKey = progForId ?? ''
         let nextSeq = nextSeqByProgram.get(streamKey)
         if (nextSeq === undefined) {

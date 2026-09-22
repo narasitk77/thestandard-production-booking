@@ -131,7 +131,18 @@ function bulkSummary(verb: string, o: BulkOutcome, tail?: string): string {
 export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   // form state
   const [outletCode, setOutletCode] = useState('NWS')
-  const [programCode, setProgramCode] = useState('TSN')
+  /**
+   * v1.232 — สองค่านี้ต้องแยกกัน ห้ามใช้ช่องเดียว
+   *
+   * create-booking ใส่ชื่อรายการลง Booking ID ก็ต่อเมื่อ programCode ของ episode
+   * **ต่างจาก** ของใบจอง: ใบจองเก็บ *ประเภทตอน* (L/S/A/T) ส่วน episode เก็บ
+   * *ชื่อรายการ* (TSN/MNW/…) หน้านี้เคยมีช่องเดียวแล้วส่งค่าเดียวกันไปทั้งสองที่
+   * ค่าจึงหักล้างตัวเอง ได้รหัส `WLT-260923-01` ที่ไม่มีชื่อรายการ (เจอจริง 135 ใบ)
+   *
+   * แยกตามกติกาเดียวกับ /new: code ยาว 1 ตัว = ประเภทตอน · ยาวกว่านั้น = ชื่อรายการ
+   */
+  const [programCode, setProgramCode] = useState('TSN')      // ชื่อรายการ (ไป episode)
+  const [episodeType, setEpisodeType] = useState('L')        // ประเภทตอน (ไปใบจอง)
   const [episodeTitle, setEpisodeTitle] = useState('THE STANDARD NOW')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -159,6 +170,8 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   const [groupsLoading, setGroupsLoading] = useState(true)
 
   const programs = OUTLET_MAP[outletCode]?.programs || []
+  const showPrograms = programs.filter(p => p.code.length > 1)
+  const typePrograms = programs.filter(p => p.code.length === 1)
 
   const loadGroups = () => {
     setGroupsLoading(true)
@@ -172,8 +185,11 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
 
   // when outlet changes, keep program valid
   useEffect(() => {
-    if (!programs.find(p => p.code === programCode)) {
-      setProgramCode(programs[0]?.code || '')
+    if (!showPrograms.find(p => p.code === programCode)) {
+      setProgramCode(showPrograms[0]?.code || '')
+    }
+    if (!typePrograms.find(p => p.code === episodeType)) {
+      setEpisodeType(typePrograms[0]?.code || 'L')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outletCode])
@@ -210,7 +226,10 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create',
-          outletCode, programCode, episodeTitle, category, shootType,
+          outletCode,
+          programCode: episodeType,        // ใบจอง = ประเภทตอน
+          episodeProgramCode: programCode, // episode = ชื่อรายการ (ตัวที่ไปอยู่ในรหัส)
+          episodeTitle, category, shootType,
           callTime, estimatedWrap, locationId,
           locationName: findLocation(locationId)?.fullName || null, producer,
           crewRequired, cameraCount, micCount, notes,
@@ -386,11 +405,21 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
                 </select>
               </div>
               <div>
-                <label className="ops-label">Program</label>
+                <label className="ops-label">รายการ</label>
                 <select className="ops-input" value={programCode} onChange={e => setProgramCode(e.target.value)}>
-                  {programs.map(p => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}
+                  {showPrograms.map(p => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}
                 </select>
               </div>
+            </div>
+            <div>
+              {/* v1.232 — ประเภทตอนแยกจากรายการ ตรงกับ /new · ตัวที่โผล่ในรหัสใบจองคือ "รายการ" */}
+              <label className="ops-label">Episode Type</label>
+              <select className="ops-input" value={episodeType} onChange={e => setEpisodeType(e.target.value)}>
+                {typePrograms.map(p => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">
+                รหัสใบจองจะเป็น <span className="font-mono">{outletCode}-{programCode}-YYMMDD-NN</span>
+              </p>
             </div>
             <div>
               <label className="ops-label">ชื่อตอน (Episode title)</label>

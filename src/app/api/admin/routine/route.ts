@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
 
   // ── create ──────────────────────────────────────────────────────────
   const {
-    outletCode, programCode, episodeTitle, category, videoType, shootType,
+    outletCode, programCode, episodeProgramCode, episodeTitle, category, videoType, shootType,
     callTime, estimatedWrap, locationName, locationId, producer, producerEmail,
     crewRequired, cameraCount, micCount, vanCount, videographerCount, switcherCount, notes,
     plan,
@@ -187,15 +187,24 @@ export async function POST(request: NextRequest) {
   if (gen.dates.length === 0) return NextResponse.json({ error: 'ไม่มีวันที่จะสร้างเลย (ทุกวันถูกข้าม)' }, { status: 400 })
   if (gen.dates.length > ROUTINE_MAX_DAYS) return NextResponse.json({ error: `เกิน ${ROUTINE_MAX_DAYS} วัน` }, { status: 400 })
 
-  // v1.56.1 — skip dates that already have a live booking for the same
-  // outlet+program, so re-running an overlapping range can't silently
-  // double-book a daily show. Reported back as duplicatesSkipped.
+  // v1.232 — รหัสใบจองประกอบจาก **ชื่อรายการที่อยู่บน episode** ไม่ใช่ program ของใบจอง
+  //
+  // create-booking.ts ใส่ชื่อรายการลง Booking ID ก็ต่อเมื่อ programCode ของ episode
+  // **ต่างจาก** ของใบจอง เพราะโมเดลคือ ใบจองเก็บ *ประเภทตอน* (L/S/A/T) ส่วน episode
+  // เก็บ *ชื่อรายการ* (MNW/TSN/…) — หน้านี้เคยส่งค่าเดียวกันไปทั้งสองที่ ค่าจึงหักล้าง
+  // ตัวเองแล้วได้รหัส `WLT-260923-01` ที่ไม่มีชื่อรายการ (เจอจริง 2026-09-22, 135 ใบ)
+  //
+  // `episodeProgramCode` ว่าง = client รุ่นเก่า ย้อนกลับไปพฤติกรรมเดิมแทนที่จะพัง
+  const showCode = String(episodeProgramCode || programCode || '').trim()
+
+  // เช็คซ้ำต้องถามว่า "รายการนี้มีงานวันนี้อยู่แล้วไหม" ซึ่งอยู่ที่ episode
+  // ถ้าถาม program ของใบจอง (= ประเภทตอน) จะกวาด Long-form ของทุกรายการทิ้งหมด
   const existing = await prisma.booking.findMany({
     where: {
       outlet: { code: String(outletCode) },
-      program: { code: String(programCode) },
       deletedAt: null,
       shootDate: { in: gen.dates.map(d => new Date(d)) },
+      episodes: { some: { program: { code: showCode } } },
     },
     select: { shootDate: true },
   })
@@ -213,7 +222,7 @@ export async function POST(request: NextRequest) {
     crewRequired, cameraCount, micCount, vanCount, videographerCount, switcherCount, notes,
     isRoutine: true,
     routineGroupId,
-    episodes: [{ programCode, title, contentType: category === 'ADVERTORIAL' ? 'ADVERTORIAL' : 'ORIGINAL_CONTENT' }],
+    episodes: [{ programCode: showCode, title, contentType: category === 'ADVERTORIAL' ? 'ADVERTORIAL' : 'ORIGINAL_CONTENT' }],
   }
 
   const created: string[] = []
@@ -230,7 +239,7 @@ export async function POST(request: NextRequest) {
     action: 'routine.create',
     entityType: 'Booking',
     entityId: routineGroupId,
-    changes: { routineGroupId, outletCode, programCode, created: created.length, failed: failed.length },
+    changes: { routineGroupId, outletCode, programCode, episodeProgramCode: showCode, created: created.length, failed: failed.length },
   })
 
   return NextResponse.json({
