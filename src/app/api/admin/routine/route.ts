@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { BookingStatus } from '@prisma/client'
 import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { prisma } from '@/lib/db'
 import { requireConsole, requireAdmin } from '@/lib/session'
@@ -31,40 +32,48 @@ export async function GET() {
   const rows = await prisma.booking.findMany({
     where: { routineGroupId: { not: null }, deletedAt: null },
     select: {
-      id: true,
+      id: true, bookingCode: true,
       routineGroupId: true, shootDate: true, status: true,
       outlet: { select: { code: true } }, program: { select: { name: true } },
     },
     orderBy: { shootDate: 'asc' },
   })
 
-  // v1.228 — ids the "อนุมัติทั้งชุด" button may approve. Only the two statuses
-  // that mean "waiting for a human": COMPLETED is also approvable one-by-one
-  // (the sanctioned re-open path) but must never be swept up by a bulk click.
-  const BULK_APPROVABLE = new Set(['REQUESTED', 'ASSIGNED'])
+  // v1.228 — rows the "อนุมัติทั้งชุด" button may approve. Only the two statuses
+  // that mean "waiting for a human": the single-approve endpoint ALSO accepts
+  // COMPLETED (the sanctioned re-open path) — a wider whitelist than this one —
+  // so a bulk click must never hand it a row that has since finished.
+  //
+  // Typed against the Prisma enum on purpose: an untyped Set<string> would keep
+  // compiling after an enum rename and every has() would quietly return false,
+  // emptying the list and making the button vanish with no error anywhere.
+  // This repo runs `db push` on every boot, so enum edits reach prod the same day.
+  const BULK_APPROVABLE = new Set<BookingStatus>(['REQUESTED', 'ASSIGNED'])
 
   const map = new Map<string, {
     routineGroupId: string; outlet: string; program: string
     count: number; from: string; to: string
     statuses: Record<string, number>
-    approvableIds: string[]
+    // id เอาไว้ยิง · code เอาไว้ให้คนอ่านออกตอนมีใบล้ม (cuid 8 ตัวแรกหาอะไรไม่เจอเลย)
+    approvable: { id: string; code: string }[]
   }>()
   for (const r of rows) {
     const id = r.routineGroupId as string
     const day = r.shootDate.toISOString().slice(0, 10)
+    const entry = { id: r.id, code: r.bookingCode || r.id.slice(0, 8) }
     const g = map.get(id)
     if (!g) {
       map.set(id, {
         routineGroupId: id, outlet: r.outlet?.code || '', program: r.program?.name || '',
         count: 1, from: day, to: day, statuses: { [r.status]: 1 },
-        approvableIds: BULK_APPROVABLE.has(r.status) ? [r.id] : [],
+        approvable: BULK_APPROVABLE.has(r.status) ? [entry] : [],
       })
     } else {
       g.count++
       if (day < g.from) g.from = day
       if (day > g.to) g.to = day
       g.statuses[r.status] = (g.statuses[r.status] || 0) + 1
-      if (BULK_APPROVABLE.has(r.status)) g.approvableIds.push(r.id)
+      if (BULK_APPROVABLE.has(r.status)) g.approvable.push(entry)
     }
   }
   return NextResponse.json({ groups: Array.from(map.values()).sort((a, b) => b.to.localeCompare(a.to)) })

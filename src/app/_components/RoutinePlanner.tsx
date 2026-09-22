@@ -37,20 +37,30 @@ const CREW = ['Videographer', 'Sound', 'Photographer', 'Switcher', 'DIT', 'Light
 type Group = {
   routineGroupId: string; outlet: string; program: string
   count: number; from: string; to: string; statuses: Record<string, number>
-  approvableIds: string[]
+  approvable: { id: string; code: string }[]
 }
 
 /**
  * v1.228 — หน่วงระหว่างใบตอนอนุมัติทั้งชุด
  *
- * อนุมัติ 1 ใบตอบกลับเร็วก็จริง แต่มันทิ้งงานเบื้องหลังไว้เพียบ (สร้างโฟลเดอร์
- * Drive + _SHOOT.txt, โฟลเดอร์ staging เสียง, สร้าง event ปฏิทิน, เขียนแถวชีท,
- * ซิงก์ OT) และรอบถัดไป worker จะไปจองห้องให้ด้วย — ซึ่งโควตาระบบกลางของ IT คือ
- * 20 req/5 นาที **ใช้ร่วมกันทั้งบริษัท** ยิงรวดเดียว 60+ ใบ = ชีท 429 (เจอจริง
- * 2026-09-22) และเบียดโควตาห้องของคนอื่น. ปล่อยทีละใบห่างกันหน่อยจึงไม่ใช่
- * ความช้าโดยเปล่าประโยชน์ — มันคือสิ่งที่ทำให้ผลลัพธ์ครบ
+ * ตัวคุมคือ **โควตา Google Sheets** ไม่ใช่โควตาห้อง (room-booking-reconcile
+ * หน่วงตัวเอง 1200ms/ใบ และ cap 20 ใบต่อรอบอยู่แล้ว — loop นี้ไม่เกี่ยวกับมัน)
+ *
+ * อนุมัติ 1 ใบเรียก updateBookingRow 2 ครั้ง (driveBoxId ครั้งหนึ่ง ·
+ * status+eventId อีกครั้ง) และแต่ละครั้งเสีย 2 request คือ values.get ทั้งคอลัมน์ A
+ * แล้ว values.batchUpdate = **4 request ต่อใบ** โควตา Sheets คือ 60 อ่าน + 60 เขียน
+ * ต่อนาทีต่อ user และ service account ตัวนี้ใช้ร่วมกับ worker ทุกตัว
+ * ที่ 1500ms → ~64/นาที เกินพอดี (ชีท 429 จริงเมื่อ 2026-09-22)
+ * ที่ 3000ms → ~32/นาที เหลือที่ให้ worker อื่นหายใจ
+ *
+ * google-sheets.ts ยังไม่มี retry เหมือน withDriveRetry ของ Drive — 429 หายเงียบ
+ * และ **ไม่มี reconciler ตัวไหนเขียน status/approvedAt/driveBoxId กลับลงชีท**
+ * (calendar-reconcile เติมให้แค่ calendarEventId) หลุดแล้วหลุดเลย
  */
-const BULK_APPROVE_GAP_MS = 1500
+const BULK_APPROVE_GAP_MS = 3000
+
+/** เดาเวลา round-trip ต่อใบ ใช้ประเมินเวลาในกล่องยืนยันให้ไม่ต่ำกว่าจริง */
+const BULK_APPROVE_RTT_MS = 800
 
 export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   // form state
@@ -165,39 +175,66 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
    * แปลว่าต้องดูแลสองทางให้ตรงกันตลอดไป และทางที่สองจะเป็นทางที่เพี้ยนก่อนเสมอ
    */
   const approveGroup = async (g: Group) => {
-    const ids = g.approvableIds || []
-    if (ids.length === 0) { alert('ชุดนี้ไม่มีใบที่รออนุมัติแล้ว'); return }
-    const mins = Math.max(1, Math.round((ids.length * BULK_APPROVE_GAP_MS) / 60000))
+    // อ่านรายการใหม่ก่อนเสมอ — ของที่ถืออยู่มาจากตอนเปิดหน้า ซึ่งอาจค้างมาหลายชั่วโมง
+    // สำคัญเพราะ endpoint อนุมัติรับ COMPLETED ด้วย (ทางเปิดงานใหม่) กว้างกว่าที่ปุ่มนี้ตั้งใจ
+    // งาน routine รายวันที่ถ่ายจบไปแล้วระหว่างวันจะกลายเป็น COMPLETED — ยิง id เก่าไป
+    // = เปิดงานที่จบแล้วขึ้นมาใหม่พร้อม event ปฏิทินใบใหม่ โดยไม่มีใครตั้งใจ
+    let ids: { id: string; code: string }[] = []
+    try {
+      const fresh = await fetch('/api/admin/routine', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+      const found = fresh?.groups?.find((x: Group) => x.routineGroupId === g.routineGroupId)
+      if (!found) { alert('ไม่พบชุดนี้แล้ว — รีเฟรชหน้า'); loadGroups(); return }
+      ids = found.approvable || []
+    } catch (e: any) {
+      alert('อ่านรายการล่าสุดไม่สำเร็จ ยังไม่อนุมัติอะไรทั้งนั้น: ' + (e?.message || e)); return
+    }
+    if (ids.length === 0) { alert('ชุดนี้ไม่มีใบที่รออนุมัติแล้ว'); loadGroups(); return }
+
+    const mins = Math.ceil(ids.length * (BULK_APPROVE_GAP_MS + BULK_APPROVE_RTT_MS) / 60000)
     if (!confirm(
       `อนุมัติ ${ids.length} ใบในชุดนี้?\n${g.outlet} · ${g.program} · ${g.from} – ${g.to}\n\n`
       + `ทุกใบจะถูกสร้างโฟลเดอร์ Drive + event ปฏิทิน และรอบถัดไประบบจะจองห้องให้\n`
-      + `ปล่อยทีละใบห่างกัน ${BULK_APPROVE_GAP_MS / 1000} วิ กันชนโควตา — ใช้เวลาราว ${mins} นาที\n`
+      + `ปล่อยทีละใบห่างกัน ${BULK_APPROVE_GAP_MS / 1000} วิ กันชนโควตา Google Sheets — ใช้เวลาราว ${mins} นาที\n`
       + `อย่าปิดแท็บนี้จนกว่าจะเสร็จ`
     )) return
 
     setApproving({ groupId: g.routineGroupId, done: 0, total: ids.length, failed: 0 })
     const failures: string[] = []
+    let skipped = 0
+    let stoppedEarly = false
     for (let i = 0; i < ids.length; i++) {
       try {
-        const res = await fetch(`/api/admin/${ids[i]}/approve`, { method: 'POST' })
-        if (!res.ok) {
+        const res = await fetch(`/api/admin/${ids[i].id}/approve`, { method: 'POST' })
+        // 409 = มีคนอนุมัติ/ยกเลิกไปแล้วระหว่างนี้ ไม่ใช่ความล้มเหลว นับแยก
+        // ไม่งั้นการเปิดสองแท็บทำให้ขึ้นว่า "ล้ม 5 ใบ" ทั้งที่ทุกใบเรียบร้อย
+        if (res.status === 409) skipped++
+        else if (!res.ok) {
           const d = await res.json().catch(() => ({}))
-          failures.push(`${ids[i].slice(0, 8)}: ${d.error || 'HTTP ' + res.status}`)
+          failures.push(`${ids[i].code}: ${d.error || 'HTTP ' + res.status}`)
         }
       } catch (e: any) {
-        failures.push(`${ids[i].slice(0, 8)}: ${e?.message || e}`)
+        failures.push(`${ids[i].code}: ${e?.message || e}`)
       }
       setApproving({ groupId: g.routineGroupId, done: i + 1, total: ids.length, failed: failures.length })
+      // ล้มรวด 5 ใบแรกโดยไม่มีใบไหนผ่านเลย = พังทั้งระบบ (Drive auth หลุด / ชีท 429)
+      // ยิงต่ออีก 54 ใบไม่ได้ช่วยอะไร นอกจากทำให้กองที่ต้องตามเก็บใหญ่ขึ้น
+      if (failures.length >= 5 && failures.length === i + 1) { stoppedEarly = true; break }
       if (i < ids.length - 1) await new Promise(r => setTimeout(r, BULK_APPROVE_GAP_MS))
     }
     setApproving(null)
     loadGroups()
-    // นับจากที่เกิดขึ้นจริง ไม่ใช่จากจำนวนที่ตั้งใจจะทำ — "อนุมัติแล้ว N ใบ"
-    // ที่ไม่ตรงกับของจริงคือรายงานที่หลอกคนอ่าน
-    alert(failures.length === 0
-      ? `อนุมัติครบ ${ids.length} ใบ`
-      : `อนุมัติสำเร็จ ${ids.length - failures.length}/${ids.length} ใบ\n\nไม่สำเร็จ ${failures.length} ใบ:\n${failures.slice(0, 10).join('\n')}`
-        + (failures.length > 10 ? `\n…และอีก ${failures.length - 10} ใบ` : ''))
+
+    // ระวังคำที่ใช้: endpoint ตอบ 200 ทันทีที่สถานะเป็น CONFIRMED แล้ว ส่วนโฟลเดอร์
+    // Drive · event ปฏิทิน · แถวชีท · เมล · OT วิ่งต่อเป็น background ที่อยู่นานกว่า
+    // response — ตรงนี้จึงรู้แค่ "สั่งไปแล้ว" ไม่รู้ว่า "เสร็จแล้ว" อย่าเขียนว่าครบ
+    const okCount = ids.length - failures.length - skipped
+    const parts = [`ตั้งเป็น CONFIRMED แล้ว ${okCount} ใบ`]
+    if (skipped) parts.push(`ข้าม ${skipped} ใบ (มีคนอนุมัติ/ยกเลิกไปก่อนแล้ว)`)
+    if (failures.length) parts.push(`ไม่สำเร็จ ${failures.length} ใบ:\n${failures.slice(0, 10).join('\n')}`
+      + (failures.length > 10 ? `\n…และอีก ${failures.length - 10} ใบ` : ''))
+    if (stoppedEarly) parts.push('หยุดกลางคันเพราะล้มติดกัน 5 ใบแรก — ตรวจ Drive/ชีท/ปฏิทินก่อนกดใหม่')
+    parts.push('ปฏิทิน โฟลเดอร์ และแถวชีทตามมาเป็นเบื้องหลัง ตรวจได้ที่ /admin')
+    alert(parts.join('\n\n'))
   }
 
   const cancelGroup = async (g: Group) => {
@@ -445,12 +482,12 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {/* v1.228 — อนุมัติทั้งชุด: ชุด routine 60+ ใบเคยต้องกดอนุมัติทีละใบ */}
-                      {g.approvableIds?.length > 0 && (
+                      {g.approvable?.length > 0 && (
                         <button
                           onClick={() => approveGroup(g)}
                           disabled={!!approving}
                           className="ops-btn ops-btn-sm text-green-700 border border-green-200 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
-                          title={`อนุมัติ ${g.approvableIds.length} ใบที่รออนุมัติในชุดนี้`}
+                          title={`อนุมัติ ${g.approvable.length} ใบที่รออนุมัติในชุดนี้`}
                         >
                           {approving?.groupId === g.routineGroupId ? (
                             <>
@@ -459,7 +496,7 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
                               {approving.failed > 0 && <span className="text-red-600">· ล้ม {approving.failed}</span>}
                             </>
                           ) : (
-                            <><CheckCheck className="w-3.5 h-3.5" /> อนุมัติทั้งชุด ({g.approvableIds.length})</>
+                            <><CheckCheck className="w-3.5 h-3.5" /> อนุมัติทั้งชุด ({g.approvable.length})</>
                           )}
                         </button>
                       )}
