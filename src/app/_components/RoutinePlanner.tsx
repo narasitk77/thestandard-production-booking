@@ -14,6 +14,7 @@ import { Loader2, CalendarPlus, X, Trash2, Check, CheckCheck, ChevronRight, User
 import { OUTLETS, OUTLET_MAP } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, findLocation } from '@/lib/locations'
 import { generateRoutineDates } from '@/lib/routine'
+import { uncoveredHolidayYears } from '@/lib/thai-holidays'
 import NumberStepper from './NumberStepper'
 
 const WEEKDAYS = [
@@ -208,6 +209,17 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
     if (!startDate || !endDate) return null
     return generateRoutineDates({ startDate, endDate, weekdays, skipHolidays, customSkip })
   }, [startDate, endDate, weekdays, skipHolidays, customSkip])
+
+  /**
+   * v1.234 — ปีที่ตารางวันหยุดยังไม่มีข้อมูล
+   *
+   * "ข้ามวันหยุดราชการไทย" ที่ติ๊กอยู่จะดูเหมือนทำงานเสมอ แม้ปีนั้นไม่มีข้อมูล
+   * สักวันเดียว เพราะ isThaiHoliday() คืน false ทั้งกับ "ไม่ใช่วันหยุด" และ
+   * "ไม่รู้จักปีนี้" — คนกดจะเชื่อว่าข้ามให้แล้ว (เจอตอนจะต่อ Now ถึง มี.ค. 2027)
+   */
+  const uncoveredYears = useMemo(
+    () => (skipHolidays && startDate && endDate ? uncoveredHolidayYears(startDate, endDate) : []),
+    [skipHolidays, startDate, endDate])
 
   const toggleWeekday = (n: number) =>
     setWeekdays(w => w.includes(n) ? w.filter(x => x !== n) : [...w, n].sort())
@@ -410,6 +422,13 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="ops-label">Outlet</label>
+            {uncoveredYears.length > 0 && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                ⚠️ ตารางวันหยุดยังไม่มีข้อมูลปี {uncoveredYears.join(', ')} — ช่วงนั้น
+                <b>จะไม่ถูกข้ามให้เลย</b> ใส่วันหยุดเองที่ช่อง "ข้ามวันที่กำหนดเอง"
+                หรือเติมลง <span className="font-mono">src/lib/thai-holidays.ts</span> ก่อน
+              </p>
+            )}
                 <select className="ops-input" value={outletCode} onChange={e => setOutletCode(e.target.value)}>
                   {ROUTINE_OUTLETS.map(o => <option key={o.code} value={o.code}>{o.code} · {o.name}</option>)}
                 </select>

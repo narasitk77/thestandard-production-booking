@@ -6,6 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateRoutineDates, ROUTINE_MAX_DAYS } from '../routine'
+import { holidayYearCovered, uncoveredHolidayYears } from '../thai-holidays'
 
 const MON_FRI = [1, 2, 3, 4, 5]
 
@@ -96,4 +97,37 @@ test('a full non-leap year (365 days, within the cap) is allowed', () => {
   const r = generateRoutineDates({ startDate: '2026-01-01', endDate: '2026-12-31', weekdays: [0, 1, 2, 3, 4, 5, 6], skipHolidays: false })
   assert.equal(r.error, undefined)
   assert.equal(r.dates.length, 365)
+})
+
+// ── v1.234 — ตารางวันหยุดครอบคลุมปีไหน ───────────────────────────────────────
+//
+// isThaiHoliday() คืน false ทั้งกับ "ไม่ใช่วันหยุด" และ "ไม่มีข้อมูลปีนั้น"
+// สองอย่างนี้หน้าตาเหมือนกันแต่ความหมายต่างกันสิ้นเชิง — ตัวที่สองทำให้
+// skipHolidays ดูเหมือนทำงานทั้งที่ไม่ได้ข้ามอะไรเลย
+
+test('v1.234 ปีที่มีข้อมูล = covered · ปีที่ไม่มี = ไม่ covered', () => {
+  assert.equal(holidayYearCovered(2026), true)
+  assert.equal(holidayYearCovered('2026'), true)
+  assert.equal(holidayYearCovered(2030), false)
+})
+
+test('v1.234 บอกปีที่ยังไม่มีข้อมูลในช่วงที่ให้มา', () => {
+  assert.deepEqual(uncoveredHolidayYears('2026-11-01', '2026-12-31'), [])
+  assert.deepEqual(uncoveredHolidayYears('2026-12-01', '2028-03-31'), ['2028'])
+  assert.deepEqual(uncoveredHolidayYears('2029-01-01', '2030-12-31'), ['2029', '2030'])
+})
+
+test('v1.234 ช่วงกลับหัว/วันที่พิการ = ลิสต์ว่าง ไม่ throw', () => {
+  assert.deepEqual(uncoveredHolidayYears('2030-01-01', '2026-01-01'), [])
+  assert.deepEqual(uncoveredHolidayYears('', ''), [])
+})
+
+test('v1.234 1 ม.ค. 2027 ถูกข้ามจริง (วันเดียวที่ยืนยันได้ของปีนั้น)', () => {
+  const gen = generateRoutineDates({
+    startDate: '2026-12-28', endDate: '2027-01-08',
+    weekdays: [1, 2, 3, 4, 5], skipHolidays: true, customSkip: [],
+  })
+  assert.ok(!gen.dates.includes('2027-01-01'), '1 ม.ค. 2027 ต้องไม่อยู่ในรายการ')
+  assert.ok(!gen.dates.includes('2026-12-31'), '31 ธ.ค. 2026 ต้องไม่อยู่ในรายการ')
+  assert.ok(gen.dates.includes('2027-01-04'), '4 ม.ค. 2027 (จันทร์) ต้องอยู่')
 })

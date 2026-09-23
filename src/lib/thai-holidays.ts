@@ -30,9 +30,46 @@ export const THAI_HOLIDAYS: Holiday[] = [
   { date: '2026-12-07', name: 'วันหยุดชดเชย วันเฉลิม ร.9',     nameEn: "Substitute King Bhumibol's Birthday", substitute: true },
   { date: '2026-12-10', name: 'วันรัฐธรรมนูญ',                   nameEn: 'Constitution Day' },
   { date: '2026-12-31', name: 'วันสิ้นปี',                        nameEn: "New Year's Eve" },
+
+  // ── 2027 — **ยังไม่ครบ** ครม. ยังไม่ประกาศปฏิทินวันหยุด 2027 (เช็ก 2026-09-23)
+  // ใส่เฉพาะวันที่แน่นอนโดยไม่ต้องรอประกาศ · วันจันทรคติ (มาฆบูชา วิสาขบูชา
+  // อาสาฬหบูชา เข้าพรรษา) และวันชดเชยทั้งหมด **ยังขาด** — ห้ามเดา
+  // พอ ครม. ประกาศแล้วเติมให้ครบ แล้วลบคอมเมนต์นี้
+  { date: '2027-01-01', name: 'วันขึ้นปีใหม่',                    nameEn: "New Year's Day" },
 ]
 
 const HOLIDAY_DATES = new Set(THAI_HOLIDAYS.map(h => h.date))
+
+/** ปีที่ตารางนี้ครอบคลุม — ใช้บอกว่า "ไม่ใช่วันหยุด" เป็นคำตอบที่เชื่อได้หรือเปล่า */
+const COVERED_YEARS = new Set(THAI_HOLIDAYS.map(h => h.date.slice(0, 4)))
+
+/**
+ * ตารางนี้ครอบคลุมปีนั้นหรือยัง
+ *
+ * WHY. `isThaiHoliday()` คืน false ทั้งกับ "วันนั้นไม่ใช่วันหยุด" และ "ไม่มีข้อมูล
+ * ปีนั้นเลย" — สองอย่างนี้ต่างกันสิ้นเชิงแต่หน้าตาเหมือนกัน ตอนสร้างงาน routine
+ * ข้ามปี `skipHolidays: true` จะดู "ทำงานอยู่" ทั้งที่ไม่ได้ข้ามอะไรเลยสักวัน
+ * (เจอ 2026-09-23 ตอนจะต่ออายุ Now ถึง มี.ค. 2027 — ตารางมีแต่ปี 2026)
+ *
+ * ผู้เรียกที่ตัดสินใจจากวันหยุด **ต้องเช็กตัวนี้ก่อน** แล้วบอกคนใช้ให้รู้
+ * ว่าช่วงไหนไม่มีข้อมูล — เงียบไว้แปลว่าคนกดจะเชื่อว่าข้ามให้แล้ว
+ */
+export function holidayYearCovered(year: number | string): boolean {
+  return COVERED_YEARS.has(String(year))
+}
+
+/** ปีที่ยังไม่มีข้อมูลในช่วงวันที่ให้มา (inclusive, YYYY-MM-DD) */
+export function uncoveredHolidayYears(startDate: string, endDate: string): string[] {
+  // ต้องเป็นปี 4 หลักจริง ๆ — Number('') คือ 0 ซึ่ง finite เลยหลุด isFinite ไปได้
+  // แล้วคืน ['0'] ออกมาเป็นคำเตือนที่อ่านไม่รู้เรื่อง (เทสจับได้ v1.234)
+  if (!/^\d{4}-/.test(startDate) || !/^\d{4}-/.test(endDate)) return []
+  const from = Number(startDate.slice(0, 4))
+  const to = Number(endDate.slice(0, 4))
+  if (to < from) return []
+  const out: string[] = []
+  for (let y = from; y <= to; y++) if (!COVERED_YEARS.has(String(y))) out.push(String(y))
+  return out
+}
 
 function dateKey(date: Date | string): string {
   if (typeof date === 'string') return date.slice(0, 10)
