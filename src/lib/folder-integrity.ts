@@ -545,7 +545,12 @@ export async function runFolderIntegrity(opts: {
   }
 
   if (bookings.length > 0 && !opts.onlyCode) {
-    scanCursor = (start + base.checked + base.deferred) % bookings.length
+    // v1.233 — เดิมบวก base.deferred เข้าไปด้วย ซึ่งทำให้ cursor **ไม่ขยับเลย**:
+    // ทุกแถวหลังชน limit จะ deferred++ ดังนั้น checked + deferred ≈ N ทั้งก้อน
+    // → (start + N) % N = start · พรอดยืนยัน: หน้าต่างมี 104 ใบ cap 60 และ audit
+    // 29 รอบใน 24 ชม. ขึ้น checked=60 เท่ากันทุกรอบ = 44 ใบท้ายไม่เคยถูกตรวจซ่อมเลย
+    // cursor ต้องเดินเท่าที่ "ตรวจไปจริง" เท่านั้น
+    scanCursor = (start + base.checked) % bookings.length
   }
 
   if (!dryRun) {

@@ -51,7 +51,7 @@ export type ReconcileResult = {
   truncated?: boolean
 }
 
-const DEFAULT_LIMIT = 50
+const DEFAULT_LIMIT = 200   // v1.233 — 65 ใบเข้าเงื่อนไขวันนี้ cap 50 = 15 ใบท้ายไม่เคยถูกแตะ
 
 function cleanEmails(emails: string[] | null | undefined): string[] {
   return Array.from(new Set(
@@ -88,6 +88,7 @@ type BookingForReconcile = {
   directorEmail?: string | null
   director2Email?: string | null
   director3Email?: string | null
+  calendarSyncStatus?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -142,6 +143,7 @@ async function createVerifiedCalendarEvent(booking: {
   directorEmail?: string | null
   director2Email?: string | null
   director3Email?: string | null
+  calendarSyncStatus?: string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -234,8 +236,22 @@ async function processBooking(
   }
 
   try {
-    if (assignedEmails.length === 0) {
+    // v1.233 — เดิมเช็ค assignedEmails (ครูอย่างเดียว) ทั้งที่บรรทัดบนเพิ่งประกอบ
+    // calendarAttendees = ครู + Producer + Co-Pro (+ Director ถ้า AGN) ซึ่งเป็น
+    // ลิสต์ที่ createCalendarEvent ใช้จริง · ใบ routine มี assignedEmails ว่างแต่
+    // มี producerEmail เสมอ → ลิสต์แขกไม่ว่าง แต่ถูก skip ทิ้งก่อนถึงทางสร้าง event
+    // ผลคือใบ CONFIRMED ที่ยังไม่มี event ไม่เคยถูกสร้างให้ และไม่มีใครรู้
+    if (calendarAttendees.length === 0) {
       item.action = 'skipped'
+      item.error = 'ไม่มีผู้เข้าร่วมให้เชิญ (ไม่มีทั้งครู Producer และ Co-Producer)'
+      // เขียนเวลาไว้ด้วย ไม่งั้นใบที่ค้าง PENDING + ไม่มีแขก จะเข้าเงื่อนไขสาขา 2
+      // ทุก ๆ 10 นาทีตลอดไป กินสล็อตใน cap โดยไม่มีวันเปลี่ยนอะไร
+      if (!options.dryRun && booking.calendarSyncStatus === 'PENDING') {
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: { calendarLastSyncedAt: new Date() },
+        }).catch(() => {})
+      }
       return item
     }
 
@@ -592,7 +608,10 @@ export async function reconcileCalendarGuests(options: {
       OR: [
         {
           status: 'CONFIRMED',
-          assignedEmails: { isEmpty: false },
+          // v1.233 — เดิมกรอง assignedEmails ไม่ว่าง ทำให้ใบไร้ครู (งาน routine
+          // ทุกใบ) ที่สร้าง event ไม่สำเร็จ ค้าง FAILED โดยไม่เข้าสาขาไหนเลย
+          // = CONFIRMED แต่ไม่มีปฏิทิน ตลอดไป แบบไม่มีใครเห็น
+          // processBooking กรองด้วยลิสต์แขกจริงอยู่แล้ว ตรงนี้จึงไม่ต้องกรองซ้ำ
           // v1.54.1 — skip rows whose approve background-create is still in
           // flight (fresh PENDING) so the reconciler can't double-create the
           // event in the seconds between approve commit and eventId save.

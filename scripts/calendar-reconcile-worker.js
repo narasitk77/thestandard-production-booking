@@ -28,7 +28,7 @@ async function runOnce() {
   if (running) return
   running = true
   try {
-    const url = `${baseUrl.replace(/\/$/, '')}/api/internal/calendar/reconcile?limit=50`
+    const url = `${baseUrl.replace(/\/$/, '')}/api/internal/calendar/reconcile?limit=200`
     const res = await httpRequest(url, {
       headers: secret ? { 'x-reconcile-secret': secret } : {},
     })
@@ -39,9 +39,17 @@ async function runOnce() {
     }
     const json = JSON.parse(body)
     const changed = (json.patched || 0) + (json.created || 0) + (json.failed || 0)
-    if (changed > 0) {
+    // v1.233 — ต้องพิมพ์เมื่อ truncated ด้วย ไม่ใช่เฉพาะตอนมีอะไรเปลี่ยน
+    //
+    // v1.185.2 เพิ่ม result.truncated ไว้กันเคส "งานท้ายคิวไม่เคยถูกแตะ" แต่
+    // **ไม่มีใครอ่านมันเลย** — worker พิมพ์เฉพาะตอน changed > 0 และ heartbeat
+    // ก็ไม่ได้พกค่านี้ไปด้วย ธงที่ไม่มีคนอ่านก็เท่ากับไม่มีธง (เคสเดียวกับที่
+    // เกิดซ้ำวันนี้: 65 ใบเข้าเงื่อนไข cap 50 → 15 ใบท้ายเงียบหายมาตลอด)
+    if (changed > 0 || json.truncated) {
       console.log(
-        `[calendar-reconcile] checked=${json.checked} ok=${json.ok} patched=${json.patched} created=${json.created} failed=${json.failed}`,
+        `[calendar-reconcile] checked=${json.checked} ok=${json.ok} patched=${json.patched}`
+        + ` created=${json.created} failed=${json.failed}`
+        + (json.truncated ? ` TRUNCATED — ยังมีใบที่ไม่ได้ตรวจในรอบนี้ (cap=${json.checked})` : ''),
       )
     }
   } catch (err) {

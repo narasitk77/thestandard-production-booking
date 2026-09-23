@@ -38,8 +38,14 @@ async function run(
   if (!item) {
     return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
   }
-  const ok = item.action !== 'failed'
-  return NextResponse.json({ ok, ...item }, { status: ok ? 200 : 500 })
+  // v1.233 — 'skipped' ไม่ใช่ความสำเร็จ · เดิมนับเป็น ok แล้วตอบ 200 + toast เขียว
+  // ทั้งที่ไม่ได้แตะอะไรเลย ปุ่มนี้คือทางกู้ด้วยมือทางเดียวของบั๊ก "ไม่มี event"
+  // ถ้ามันโกหกว่าสำเร็จ คนกดจะสรุปว่าปุ่มใช้ได้แล้วเลิกตาม
+  const ok = item.action !== 'failed' && item.action !== 'skipped'
+  return NextResponse.json(
+    { ok, ...item, ...(item.action === 'skipped' ? { error: item.error || 'ข้ามเพราะไม่มีผู้เข้าร่วมให้เชิญ (ไม่มีทั้งครู Producer และ Co-Producer)' } : {}) },
+    { status: ok ? 200 : 409 },
+  )
 }
 
 export async function POST(

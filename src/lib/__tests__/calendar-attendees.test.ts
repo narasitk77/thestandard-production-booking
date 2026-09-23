@@ -113,3 +113,28 @@ test('v1.231 ใส่เฉพาะคนที่ 3 โดยไม่มี�
     ['only3@thestandard.co'],
   )
 })
+
+// ── v1.233 — ใบ routine ต้องมีแขกเสมอ ────────────────────────────────────────
+//
+// reconciler เคยตัดสินว่าจะข้ามใบไหนด้วย assignedEmails (ครูอย่างเดียว) ทั้งที่
+// ลิสต์ที่ใช้เชิญจริงคือตัวนี้ · ใบ routine เกิดมาไม่มีครูแต่มี Producer เสมอ
+// ถ้าเทสนี้พัง แปลว่าใบ routine กลายเป็น "ไม่มีแขก" แล้ว reconciler จะข้ามมัน
+// ทิ้ง = ใบ CONFIRMED ที่ไม่มี event ตลอดไปโดยไม่มีใครเห็น
+
+test('v1.233 ใบ routine (ไม่มีครู แต่มี Producer) ต้องไม่ใช่ลิสต์ว่าง', () => {
+  assert.deepEqual(
+    bookingCalendarAttendees({
+      outletCode: 'NWS',
+      assignedEmails: [],
+      producerEmail: 'sarut.a@thestandard.co',
+    }),
+    ['sarut.a@thestandard.co'],
+  )
+})
+
+test('v1.233 ไม่มีทั้งครู Producer และ Co-Pro = ว่างจริง (เคสเดียวที่ควรข้าม)', () => {
+  assert.deepEqual(
+    bookingCalendarAttendees({ outletCode: 'NWS', assignedEmails: [], producerEmail: null }),
+    [],
+  )
+})
