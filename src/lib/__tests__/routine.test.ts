@@ -109,11 +109,14 @@ test('v1.234 ปีที่มีข้อมูล = covered · ปีที�
   assert.equal(holidayYearCovered(2026), true)
   assert.equal(holidayYearCovered('2026'), true)
   assert.equal(holidayYearCovered(2030), false)
+  // 2027 มีในตารางอยู่วันเดียว (1 ม.ค.) — ต้องยังนับว่า "ไม่ครอบคลุม"
+  // ไม่งั้นคำเตือนจะเงียบตอนสร้าง routine ข้ามไปปีที่ ครม. ยังไม่ประกาศ
+  assert.equal(holidayYearCovered(2027), false)
 })
 
 test('v1.234 บอกปีที่ยังไม่มีข้อมูลในช่วงที่ให้มา', () => {
   assert.deepEqual(uncoveredHolidayYears('2026-11-01', '2026-12-31'), [])
-  assert.deepEqual(uncoveredHolidayYears('2026-12-01', '2028-03-31'), ['2028'])
+  assert.deepEqual(uncoveredHolidayYears('2026-12-01', '2028-03-31'), ['2027', '2028'])
   assert.deepEqual(uncoveredHolidayYears('2029-01-01', '2030-12-31'), ['2029', '2030'])
 })
 
