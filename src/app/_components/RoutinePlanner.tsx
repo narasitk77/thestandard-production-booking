@@ -167,6 +167,7 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   const [estimatedWrap, setEstimatedWrap] = useState('')
   const [locationId, setLocationId] = useState('')
   const [producer, setProducer] = useState('')
+  const [producerEmail, setProducerEmail] = useState('')
   const [crewRequired, setCrewRequired] = useState<string[]>(['Videographer', 'Sound'])
   const [cameraCount, setCameraCount] = useState('')
   const [micCount, setMicCount] = useState('')
@@ -254,6 +255,9 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
           episodeTitle, category, shootType,
           callTime, estimatedWrap, locationId,
           locationName: findLocation(locationId)?.fullName || null, producer,
+          // v1.234.2 — ไม่ส่งอีเมล = producerEmail เป็น null (create-booking ไม่มี fallback)
+          // แล้วโปรดิวเซอร์จะมองไม่เห็นงานตัวเองใน "งานของฉัน" ซึ่ง scope ด้วย producerEmail
+          producerEmail: producerEmail.trim().toLowerCase() || null,
           crewRequired, cameraCount, micCount, notes,
           plan: { startDate, endDate, weekdays, skipHolidays, customSkip },
         }),
@@ -530,6 +534,12 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
             <div>
               <label className="ops-label">Producer <span className="ops-required">*</span></label>
               <input className="ops-input" value={producer} onChange={e => setProducer(e.target.value)} placeholder="ชื่อผู้รับผิดชอบรายการ" />
+            </div>
+            <div>
+              <label className="ops-label">Producer email</label>
+              <input type="email" className="ops-input" value={producerEmail}
+                onChange={e => setProducerEmail(e.target.value)} placeholder="name@thestandard.co" />
+              <p className="text-[11px] text-gray-400 mt-1">เว้นว่างได้ แต่เว้นแล้วโปรดิวเซอร์จะไม่เห็นชุดนี้ใน “งานของฉัน”</p>
             </div>
             <div>
               <label className="ops-label">Location</label>
