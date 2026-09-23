@@ -322,6 +322,38 @@ gate การ deploy บน **conclusion ของ CI** ไม่ใช่ข�
 
 ---
 
+## 16. `fire-and-forget hides the failure` — ผลลัพธ์บอกว่าสำเร็จ ทั้งที่ผลข้างเคียงหลุดไปครึ่ง
+
+**เกิดจริง (2026-09-23, ต่ออายุชุด Now ถึง มี.ค. 2027):** สร้าง 63 ใบผ่าน
+`POST /api/admin/routine` สามก้อนไล่กัน ทุกก้อนตอบ `200 {created: 20|20|23, failed: []}`
+แต่แถวที่ลงชีทจริงคือ **20 / 20 / 11** — มี.ค. หายไป 12 แถวและไม่มีอะไรฟ้องเลยสักที่
+
+ต้นเหตุคือ `create-booking.ts:474` ยิง `appendBookingRow(...)` แล้ว **ไม่ await**
+ปิดท้ายด้วย `.catch(() => {})` · โควตา Sheets คือ 60 เขียน/นาที ต่อ service account
+ที่ใช้ร่วมกับ worker ทุกตัว ⇒ ยิงรัวเกินโควตาได้ 429 → ถูกกลืน → `created` ยังนับเต็ม
+เพราะมันนับ **แถวใน DB** ไม่ใช่แถวในชีท · `google-sheets.ts` ไม่มี retry และ
+**ไม่มี reconciler เดินเก็บของที่หลุด** หลุดแล้วหลุดเลย
+
+รูปทรงของมัน: *ค่าที่ endpoint คืนกลับมาวัดสิ่งที่ await เท่านั้น* ผลข้างเคียงที่
+fire-and-forget อยู่นอกสายตาของทั้ง success และ error path พร้อมกัน
+
+**วิธีจับ:** อย่าอ่าน `created` — อ่านของจริงฝั่งปลายทาง
+```sql
+SELECT count(*) total, count("sheetRowIndex") on_sheet
+FROM bookings WHERE "routineGroupId"='…' AND "deletedAt" IS NULL;
+```
+ตัวเลขไม่ตรง = หลุด · ค้างนิ่งหลายนาที = ไม่ได้กำลังทยอย แต่ตายแล้ว
+
+**ทำแทน:** งานเป็นก้อนให้เว้นระยะ (≥60 วินาที/ก้อน) และ **เช็กปลายทางก่อนยิงก้อนถัดไป** ·
+กู้ด้วย `POST /api/admin/backfill-bookings-sheet {apply:true}` (dry-run ก่อนเสมอ —
+มันกวาดทุกใบที่ไม่มีแถว ไม่ใช่แค่ของก้อนล่าสุด) · และอย่า restart คอนเทนเนอร์
+ระหว่างที่ผลข้างเคียงยังทยอยวิ่ง — ที่ค้างอยู่ใน event loop หายพร้อม process
+
+**ดูโค้ด:** `src/lib/create-booking.ts:474` · `src/lib/google-sheets.ts` ·
+`src/app/api/admin/backfill-bookings-sheet/route.ts`
+
+---
+
 ## Checklist ก่อน merge
 
 ไล่เฉพาะข้อที่ diff ของคุณแตะ:
@@ -337,6 +369,7 @@ gate การ deploy บน **conclusion ของ CI** ไม่ใช่ข�
 9. **env ใหม่** — ประกาศใน compose แล้ว (เทส `compose-env-coverage` จับ) · empty string ถูกอ่านเป็น unset ไหม (8)
 10. **worker ใหม่** — มี heartbeat key, มีสเปก, และล้มแล้วมีเสียงไหม (11) · **หน้าใหม่** — อยู่ใน `TRACKED_PATHS` และมีเมนูพาไปไหม (13)
 11. **log/audit ใหม่ที่ผูกกับ booking** — ใครอ่านได้บ้าง? default ต้อง fail-closed (14)
+12. **ผลข้างเคียงที่ไม่ await** (`.then().catch(()=>{})`) — ค่าที่ตอบกลับนับมันด้วยไหม? ถ้าไม่ มีวิธีอ่านของจริงฝั่งปลายทางหรือยัง? (16)
 
 ## เจอคลาสใหม่
 
