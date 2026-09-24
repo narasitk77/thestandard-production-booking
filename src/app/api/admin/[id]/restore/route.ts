@@ -36,6 +36,10 @@ export async function POST(
         status: 'REQUESTED',
         calendarEventId: null, // old event was deleted on cancel
         approvedAt: null,
+        // v1.235 — ต้องล้างคู่กับ approvedAt เสมอ ไม่งั้นใบที่กลับไปเป็น REQUESTED
+        // จะยังค้างชื่อคนอนุมัติของรอบก่อน (OT reject กับ purchases reject ทำถูกอยู่แล้ว
+        // เส้นนี้หลุดเพราะตอนเขียนยังไม่มีคอลัมน์นี้)
+        approvedByEmail: null,
       },
       include: {
         outlet: true,

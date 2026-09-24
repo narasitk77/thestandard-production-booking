@@ -1,6 +1,6 @@
 {
   "name": "thestandard-production-booking",
-  "version": "1.234.2",
+  "version": "1.235.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

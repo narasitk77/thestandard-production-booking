@@ -74,6 +74,8 @@ export async function POST(
       data: {
         status: 'CONFIRMED',
         approvedAt,
+        // v1.235 — จดว่า "ใคร" ด้วย ไม่ใช่แค่ "เมื่อไหร่" (ดูคอมเมนต์ใน schema)
+        approvedByEmail: session.email,
         calendarSyncStatus: 'PENDING',
         calendarSyncError: null,
         calendarLastSyncedAt: new Date(),
@@ -96,6 +98,27 @@ export async function POST(
     if (!updated) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
+
+    // v1.235 — บันทึกการอนุมัติที่สำเร็จ
+    //
+    // WHY. เดิมเส้นนี้เขียน audit เฉพาะตอน **พัง** (`calendar.approve_failed`)
+    // ตอนสำเร็จไม่เขียนอะไรเลย · ตรวจจริง 2026-09-24: อนุมัติ 59 ใบรวดเดียวแล้ว
+    // `audit_logs` ในชั่วโมงนั้นไม่มีแถวไหนบอกว่าใครกด — มีแต่ผลพลอยได้จาก worker
+    // (`booking.room_reserved` ฯลฯ) ทั้งที่ approve คือคำสั่งที่แพงที่สุดในระบบ
+    //
+    // `changes` ต้องไม่มีอะไรที่อ่อนไหว: prefix `booking.` อยู่ใน
+    // PUBLIC_HISTORY_PREFIXES ⇒ แถวนี้ (รวม actorEmail และ changes) มองเห็นได้
+    // โดยผู้ใช้ที่ล็อกอินทุกคนบนไทม์ไลน์ของใบจอง ดู booking-history-visibility.ts
+    logAudit({
+      actorEmail: session.email,
+      action: 'booking.approve',
+      entityType: 'Booking',
+      entityId: updated.id,
+      bookingCode: updated.bookingCode,
+      fromStatus: booking.status,
+      toStatus: 'CONFIRMED',
+      changes: { reapprove: booking.status === 'COMPLETED' },
+    })
 
     // 1b) v1.70 (issue #5) — best-effort Drive pre-create: make the shoot folder
     //     + CAM-A..CAM-{cameraCount} (+ AUDIO if mics) + _SHOOT.txt so the crew

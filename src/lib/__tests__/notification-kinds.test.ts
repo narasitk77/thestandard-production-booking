@@ -56,13 +56,17 @@ test('สภาพค้างที่ไม่มีเวลาเกิด �
 })
 
 test('allowlist ของเจ้าของงานเป็น fail-closed', () => {
-  for (const ok of ['approve', 'reject', 'booking.update', 'booking.status_change', 'booking.delivered']) {
+  // v1.235 — เดิมลิสต์นี้มี 'approve' เฉย ๆ ซึ่งไม่เคยมีใครเขียน audit ชื่อนั้นเลย
+  // (approve route เพิ่งเริ่มเขียน audit ที่ v1.235 และใช้ชื่อ 'booking.approve')
+  // เทสจึงเคยยืนยันว่า allowlist ครอบชื่อที่ไม่มีอยู่จริง = กระดิ่งไม่เคยดัง
+  for (const ok of ['booking.approve', 'reject', 'booking.update', 'booking.status_change', 'booking.delivered']) {
     assert.equal(isOwnerVisibleAction(ok), true, ok)
   }
   // ของที่ต้องไม่หลุด: peer review (ตั้งใจไม่ระบุตัวตน), feedback ของคนอื่น, งานเบื้องหลัง
   for (const bad of [
     'review.submitted', 'review.invites_sent', 'feedback.reply', 'drive.folder_integrity',
     'calendar.approve_failed', 'booking.cancel_requested', 'audit.auto_email_sent', '', null, undefined,
+    'approve', // ชื่อเก่าที่ไม่มีใครเขียน — ต้องไม่กลับมาเป็นชื่อที่สองของเหตุการณ์เดียว
   ]) {
     assert.equal(isOwnerVisibleAction(bad as any), false, String(bad))
   }

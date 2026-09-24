@@ -18,16 +18,7 @@ import { syncBookingOT } from '@/lib/ot-sync'
 import { normalizeFreelancers, freelancerEmails } from '@/lib/freelancers'
 import { format } from 'date-fns'
 import { getToken } from 'next-auth/jwt'
-
-function cleanEmailList(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return Array.from(new Set(
-    value
-      .filter((email): email is string => typeof email === 'string')
-      .map(email => email.trim())
-      .filter(Boolean)
-  ))
-}
+import { resolveAssignPatch } from '@/lib/assign-patch'
 
 export async function POST(
   request: NextRequest,
@@ -41,25 +32,32 @@ export async function POST(
     const authToken = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET })
     const senderAccessToken = await getValidGoogleAccessToken(authToken)
     const accessTokenError = (authToken as any)?.accessTokenError as string | undefined
-    const { assignedEmails, adminNotes, mainVideographerEmail, freelancers, sendEmail } = await request.json()
+    const body = await request.json()
+    const { assignedEmails, adminNotes, mainVideographerEmail, freelancers, sendEmail } = body
     // v1.108.x — "Save" and "Send email" are separate actions now. The assignment
     // + calendar guest sync always persist; assignment emails go out only when the
     // admin explicitly asks (sendEmail !== false). "Save" passes sendEmail:false.
     const shouldSendEmail = sendEmail !== false
-    // v1.41.0 — freelancers arrive as a structured list (not appended text), so
-    // re-saving can't duplicate names. Their emails join the staff emails as
-    // calendar guests / mail recipients; names without an email still ride along
-    // on the event description.
-    const staffEmails = cleanEmailList(assignedEmails)
-    const freelancerList = normalizeFreelancers(freelancers)
-    const emailRecipients = Array.from(new Set([...staffEmails, ...freelancerEmails(freelancerList)]))
-    // Only persist a main videographer if they're actually in the assigned list.
-    const mainVdo = typeof mainVideographerEmail === 'string' && mainVideographerEmail.trim() && emailRecipients.includes(mainVideographerEmail.trim())
-      ? mainVideographerEmail.trim()
-      : null
 
     const existing = await prisma.booking.findUnique({ where: { id: params.id } })
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    // v1.235 — **คีย์ที่ไม่ได้ส่งมา = ไม่เปลี่ยน** ไม่ใช่ "ล้างทิ้ง"
+    //
+    // WHY. เดิมเส้นนี้เขียน `adminNotes: adminNotes || null`, `freelancers: […]`
+    // และ `mainVideographerEmail: mainVdo` **ทุกครั้ง** โดยอ่านจาก body ตรง ๆ
+    // ผู้เรียกแบบเต็มฟอร์มสองที่ (admin/[id] กับ BookingDrawer) ส่งครบทุกคีย์จึงไม่เป็นไร
+    // แต่ปุ่ม "เพิ่มทีมงานทั้งชุด" (RoutinePlanner v1.230) ส่งมาแค่
+    // `{assignedEmails, sendEmail}` ⇒ กดหนึ่งครั้ง = **ล้างโน้ตแอดมิน ฟรีแลนซ์ และ
+    // ช่างวิดีโอหลักของทุกใบในชุด** · ตรวจพรอด 2026-09-24: ใบ routine ที่ยังอยู่มี
+    // adminNotes 38 ใบ และ freelancers 27 ใบ ที่จะหายไปโดยไม่มีใครรู้
+    //
+    // ที่สำคัญกว่านั้น: emailRecipients ประกอบจาก freelancerEmails() ด้วย ถ้า
+    // freelancers ถูกตีเป็น [] ฟรีแลนซ์จะหลุดจากลิสต์แขกปฏิทินไปพร้อมกัน
+    // (patch แขกแทนที่ทั้งชุด — ใครหายจากลิสต์ได้ใบยกเลิก) จึงต้องถอยไปใช้ค่าเดิม
+    // ของใบนั้น ไม่ใช่ค่าว่าง
+    const { emailRecipients, freelancerList, mainVideographerEmail: mainVdo, adminNotes: nextAdminNotes } =
+      resolveAssignPatch(body, existing)
     // v1.51 — assigning a soft-deleted booking would re-create the calendar
     // event + OT rows the delete just removed; restore it first.
     if (existing.deletedAt) {
@@ -79,7 +77,7 @@ export async function POST(
       data: {
         assignedEmails: emailRecipients,
         mainVideographerEmail: mainVdo,
-        adminNotes: adminNotes || null,
+        adminNotes: nextAdminNotes,
         freelancers: freelancerList as unknown as Prisma.InputJsonValue,
         status: nextStatus,
       },

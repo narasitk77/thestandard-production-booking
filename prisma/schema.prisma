@@ -340,6 +340,13 @@ model Booking {
   calendarLastSyncedAt  DateTime?
   sheetRowIndex    Int?
   approvedAt       DateTime?
+  // v1.235 — ใครกดอนุมัติ. เดิมมีแต่ `approvedAt` และเส้นสำเร็จของ approve
+  // ไม่เขียน audit เลย (เขียนเฉพาะตอนพัง) ⇒ ระบบรู้ว่าอนุมัติกี่โมง แต่ไม่รู้ว่าใครกด
+  // ทั้งที่ approve เป็นคำสั่งที่สร้าง event ปฏิทิน ส่ง invite และปลุก worker ให้
+  // ยิงจองห้องเข้าระบบของทีมอื่น · audit row อย่างเดียวไม่พอเพราะ audit ถูกล้างที่
+  // 90 วัน (audit-retention.ts) ส่วนใบจองอยู่ล่วงหน้าได้ 3 เดือนขึ้นไป — แถวจะหาย
+  // ก่อนถึงวันถ่ายด้วยซ้ำ ค่านี้จึงต้องอยู่บนใบจอง
+  approvedByEmail  String?
   // v1.51.0 — soft delete for test/junk queues: row stays in the DB (episode
   // IDs keep their sequence slots, audit history survives) but every web
   // surface filters `deletedAt: null`. ADMIN-only; restorable from the

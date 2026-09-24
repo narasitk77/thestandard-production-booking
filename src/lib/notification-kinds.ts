@@ -57,7 +57,12 @@ export interface NotifItem {
  * ห้ามใส่ action ของฟีเจอร์ที่ตั้งใจให้ไม่ระบุตัวตน (peer review) เด็ดขาด
  */
 export const OWNER_OUTCOME_LABELS: Record<string, string> = {
-  approve: 'งานได้รับอนุมัติแล้ว',
+  // v1.235 — คีย์นี้เคยเป็น 'approve' เฉย ๆ ซึ่ง **ไม่เคยมีใครเขียน audit ชื่อนั้นเลย**
+  // (grep ทั้งรีโป: มีแต่ purchases ที่ใช้คำว่า approve เป็น request action คนละเรื่อง)
+  // ⇒ label นี้เขียนรอ event ที่ไม่มีอยู่จริง กระดิ่ง "งานได้รับอนุมัติแล้ว" จึงไม่เคยดัง
+  // พอ approve route เริ่มเขียน audit ที่ v1.235 ก็ตั้งชื่อให้ตรงกันเสียเลย
+  // (การแมตช์เป็นแบบตรงตัวด้วย hasOwnProperty ไม่ใช่ prefix — ดู isOwnerVisibleAction)
+  'booking.approve': 'งานได้รับอนุมัติแล้ว',
   reject: 'งานถูกปฏิเสธ',
   'booking.status_change': 'สถานะงานเปลี่ยน',
   'booking.force_status': 'แอดมินตั้งสถานะใหม่',

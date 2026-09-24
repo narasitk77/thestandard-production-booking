@@ -45,7 +45,11 @@ export async function POST(
 
     const updated = await prisma.booking.update({
       where: { id: params.id },
-      data: { status },
+      data: {
+        status,
+        // v1.235 — force ไป CONFIRMED ก็ต้องรู้ว่าใครสั่ง (ดูคอมเมนต์ใน schema)
+        ...(status === 'CONFIRMED' ? { approvedAt: new Date(), approvedByEmail: session.email } : {}),
+      },
       select: { id: true, status: true, bookingCode: true },
     })
 

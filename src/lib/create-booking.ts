@@ -10,6 +10,7 @@ import { generateEpisodeId, parseEpisodeId, formatShootDateForId, progSegmentFor
 import { normalizeBuddhistYear } from '@/lib/thai-date'
 import { getOutlet, getProgram } from '@/lib/data'
 import { appendBookingRow } from '@/lib/google-sheets'
+import { cleanEmailList } from '@/lib/email-list'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
 import { maybeAlertUrgentBooking } from '@/lib/urgent-booking'
@@ -33,7 +34,16 @@ export async function createBookingFromPayload(
   // MCP-created bookings. Callers now pass a VERIFIED createdByEmail
   // separately (defaults to actorEmail) and the raw requestedBy note goes
   // into the audit trail instead of the identity column.
-  opts: { createdByEmail?: string | null; requestedBy?: string | null } = {},
+  // v1.235 — `assignedEmails` อยู่ใน opts **ไม่ใช่ใน body** โดยตั้งใจ:
+  // `/api/bookings` (ฟอร์ม /new) เปิดให้ผู้ใช้ที่ล็อกอินทุกคนสร้างใบจอง ถ้ารับค่านี้
+  // จาก body ผู้ใช้ทั่วไปจะตั้งทีมงานได้เอง ทั้งที่การจัดทีมเป็นสิทธิ์ของคอนโซล
+  // (`/api/admin/[id]/assign` = requireConsole) ⇒ เป็นการขยายสิทธิ์เงียบ ๆ
+  // ผู้เรียกฝั่งเซิร์ฟเวอร์ที่ผ่านด่านสิทธิ์แล้วเท่านั้นที่ส่งค่านี้เข้ามาได้
+  opts: {
+    createdByEmail?: string | null
+    requestedBy?: string | null
+    assignedEmails?: readonly string[] | null
+  } = {},
 ): Promise<CreateBookingResult> {
   const fail = (status: number, error: string): CreateBookingResult => ({ ok: false, status, error })
 
@@ -80,6 +90,9 @@ export async function createBookingFromPayload(
     isRoutine,
     routineGroupId,
   } = body || {}
+
+  // v1.235 — ทีมงานที่ผู้เรียกส่งมา + VP assignee (ถ้าเป็นงาน VP) ตัดซ้ำไม่สนตัวพิมพ์
+  const requestedAssignees = cleanEmailList(opts.assignedEmails)
 
   // Validate outlet and program
   const outlet = getOutlet(outletCode)
@@ -158,6 +171,11 @@ export async function createBookingFromPayload(
   // Assawapol, per team-roster.ts). Shared helper so admin surfaces can look
   // through the seed when asking "did an admin assign crew yet?" (v1.156.1).
   const VP_ASSIGNEE = vpAssigneeEmail()
+  // v1.235 — VP assignee ต้องไม่หายไปเมื่อผู้เรียกส่งทีมงานมาเอง และต้องไม่ซ้ำ
+  // ถ้าเขาใส่อีเมลเดียวกันมาแล้ว (cleanEmailList ตัดซ้ำแบบไม่สนตัวพิมพ์)
+  const mergedAssignees = cleanEmailList(
+    isVirtualProduction && VP_ASSIGNEE ? [...requestedAssignees, VP_ASSIGNEE] : requestedAssignees,
+  )
   if (!blockShot) {
     const camNum = cameraCount === undefined || cameraCount === null || cameraCount === '' ? NaN : parseInt(cameraCount, 10)
     if (!Number.isInteger(camNum) || camNum < 0) return fail(400, 'cameraCount is required (use 0 for no camera) unless isBlockShot')
@@ -410,7 +428,12 @@ export async function createBookingFromPayload(
       // v1.156 — a VP shoot auto-puts the VP developer on the crew roster from
       // booking time (email is the canonical crew id). No calendar invite yet —
       // a REQUESTED booking has no event; approve/assign syncs him in later.
-      assignedEmails: isVirtualProduction && VP_ASSIGNEE ? [VP_ASSIGNEE] : [],
+      //
+      // v1.235 — ผู้เรียกใส่ทีมงานมาตั้งแต่ตอนสร้างได้แล้ว (ฟอร์ม routine ส่ง
+      // กล่องทีมประจำมา) เดิมค่านี้ฮาร์ดโค้ดเป็น `[]` ทุกใบที่ไม่ใช่ VP ⇒ ใบที่
+      // `/admin/routine` สร้างเกิดมาไม่มีทีมงาน แล้วแขกปฏิทินเหลือ producer คนเดียว
+      // เหมือน v1.156 ตรงที่ยังไม่มีใครได้ invite — ใบ REQUESTED ไม่มี event
+      assignedEmails: mergedAssignees,
       vanCount: Math.max(0, Math.min(20, parseInt(vanCount, 10) || 0)),
       specialEquipment: Array.isArray(specialEquipment) ? specialEquipment.filter((x: unknown) => typeof x === 'string' && x.trim() !== '') : [],
       agencyRef: agencyRefFinal,

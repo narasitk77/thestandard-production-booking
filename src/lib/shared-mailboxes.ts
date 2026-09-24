@@ -31,6 +31,38 @@ export function sharedMailboxes(): string[] {
   return list.length > 0 ? list : [...DEFAULT_SHARED_MAILBOXES]
 }
 
+/**
+ * v1.235 — กล่องทีมประจำที่ควรอยู่ในงานที่ต้องการ crew บทบาทนั้น
+ *
+ * WHY. ใบจองที่ `/admin/routine` สร้างเกิดมาโดย `assignedEmails` ว่างเปล่าเสมอ
+ * (create-booking เคยฮาร์ดโค้ดเป็น `[]`) ผลคือ `bookingCalendarAttendees()` คืน
+ * แค่ producer → **ทีมวิดีโอกับทีมเสียงไม่เห็นงานบนปฏิทินตัวเองเลย** จนกว่าจะมีคน
+ * นึกได้ว่าต้องกด "เพิ่มทีมงานทั้งชุด" · ตรวจจริง 2026-09-24: ใบ Now ของ ส.ค./ก.ย.
+ * (ซึ่ง migrate มา ไม่ได้เกิดจากฟอร์มนี้) มี video@ + Sound@ ครบทุกใบ ส่วน 59 ใบ
+ * ต.ค.–ธ.ค. ที่เกิดจากฟอร์มมีแขกคนเดียว
+ *
+ * แม็ปแบบ **เขียนชัดเจน ไม่เดา** และกรองด้วย `sharedMailboxes()` อีกชั้น เพื่อให้
+ * `SHARED_MAILBOXES` ที่ตั้งไว้เป็นคำตอบสุดท้ายเสมอ (ปิดกล่องไหนก็หายไปจากที่นี่ด้วย)
+ * บทบาทที่ไม่มีกล่องประจำ (Switcher / DIT / Lighting / VP / Art Director) คืนค่าว่าง
+ * — ตั้งใจ ไม่ใช่ลืม: ทีมพวกนี้ไม่มีกล่องกลางในรายชื่อ
+ */
+const CREW_ROLE_MAILBOX: Record<string, string> = {
+  Videographer: 'video@thestandard.co',
+  Sound: 'sound@thestandard.co',
+  Photographer: 'photo@thestandard.co',
+}
+
+export function teamMailboxesForCrew(crewRequired: readonly string[] | null | undefined): string[] {
+  const allowed = new Set(sharedMailboxes())
+  const out: string[] = []
+  for (const role of crewRequired || []) {
+    const box = CREW_ROLE_MAILBOX[(role || '').trim()]
+    if (!box || !allowed.has(box) || out.includes(box)) continue
+    out.push(box)
+  }
+  return out
+}
+
 /** อีเมลนี้เป็นกล่องกลางของทีม ไม่ใช่คน */
 export function isSharedMailbox(email: string | null | undefined): boolean {
   const e = (email || '').trim().toLowerCase()

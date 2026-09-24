@@ -4,6 +4,7 @@ import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { prisma } from '@/lib/db'
 import { requireConsole, requireAdmin } from '@/lib/session'
 import { createBookingFromPayload } from '@/lib/create-booking'
+import { teamMailboxesForCrew } from '@/lib/shared-mailboxes'
 import { generateRoutineDates, ROUTINE_MAX_DAYS } from '@/lib/routine'
 import { deleteCalendarEvent } from '@/lib/google-calendar'
 import { updateBookingRow } from '@/lib/google-sheets'
@@ -178,6 +179,7 @@ export async function POST(request: NextRequest) {
     outletCode, programCode, episodeProgramCode, episodeTitle, category, videoType, shootType,
     callTime, estimatedWrap, locationName, locationId, producer, producerEmail,
     crewRequired, cameraCount, micCount, vanCount, videographerCount, switcherCount, notes,
+    attachTeamMailboxes,
     plan,
   } = body || {}
 
@@ -232,6 +234,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'ทุกวันมี booking อยู่แล้ว (จองซ้ำ) — ไม่มีอะไรให้สร้าง', duplicatesSkipped: dupSet.size }, { status: 400 })
   }
 
+  // v1.235 — รายชื่อกล่องทีม **คำนวณฝั่งเซิร์ฟเวอร์** client ส่งมาแค่ boolean
+  //
+  // WHY. `teamMailboxesForCrew()` กรองด้วย `sharedMailboxes()` ซึ่งอ่าน
+  // `process.env.SHARED_MAILBOXES` — ตัวแปรนั้นไม่มีใน bundle ฝั่งเบราว์เซอร์
+  // ถ้าปล่อยให้ client ส่งลิสต์มา ตัวกรองจะไม่เคยทำงานจริงสักครั้ง (ปิดกล่องใน
+  // env แล้วก็ยังโผล่) และเซิร์ฟเวอร์จะรับอีเมลอะไรก็ได้ที่ client ใส่มา
+  // ให้ client ส่ง boolean แล้วฝั่งนี้ derive เองจาก crewRequired ที่มีอยู่ใน body แล้ว
+  const teamBoxes = attachTeamMailboxes === true
+    ? teamMailboxesForCrew(Array.isArray(crewRequired) ? crewRequired.map(String) : [])
+    : []
+
   const title = String(episodeTitle || '').trim() || 'Routine'
   const routineGroupId = crypto.randomUUID()
   const base = {
@@ -247,7 +260,8 @@ export async function POST(request: NextRequest) {
   const failed: { date: string; error: string }[] = []
   // Sequential: keeps episode-ID sequence minting collision-free and load light.
   for (const date of targetDates) {
-    const res = await createBookingFromPayload({ ...base, shootDate: date }, session.email)
+    const res = await createBookingFromPayload({ ...base, shootDate: date }, session.email,
+      { assignedEmails: teamBoxes })
     if (res.ok) created.push(res.booking.bookingCode || res.booking.id)
     else failed.push({ date, error: res.error })
   }

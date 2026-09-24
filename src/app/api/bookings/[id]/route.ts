@@ -229,7 +229,16 @@ export async function PATCH(
       if (statusChanging) {
         const guarded = await tx.booking.updateMany({
           where: { id: params.id, status: existing.status, deletedAt: null },
-          data: { status },
+          data: {
+            status,
+            // v1.235 — ใบที่มาเป็น CONFIRMED ทางนี้ (แอดมินเลื่อนสถานะในฟอร์มแก้ไข
+            // แทนการกดปุ่มอนุมัติ) ต้องมีคนรับผิดชอบเหมือนกัน · reconciler จะไป
+            // สร้าง event ปฏิทินให้ใน 10 นาทีเหมือนใบที่อนุมัติจริง ต่างกันแค่
+            // ไม่มีใครถูกจด ⇒ ช่องโหว่เดิมที่ v1.235 ตั้งใจปิด แค่คนละประตู
+            ...(status === 'CONFIRMED' && !existing.approvedAt
+              ? { approvedAt: new Date(), approvedByEmail: session.email }
+              : {}),
+          },
         })
         if (guarded.count === 0) throw new Error('STATUS_CONFLICT')
       }

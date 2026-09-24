@@ -13,6 +13,7 @@ import BackButton from '@/app/_components/BackButton'
 import { Loader2, CalendarPlus, X, Trash2, Check, CheckCheck, ChevronRight, UserPlus, AlertTriangle } from 'lucide-react'
 import { OUTLETS, OUTLET_MAP } from '@/lib/data'
 import { LOCATIONS, LOCATION_GROUPS, findLocation } from '@/lib/locations'
+import { teamMailboxesForCrew } from '@/lib/shared-mailboxes'
 import { generateRoutineDates } from '@/lib/routine'
 import { uncoveredHolidayYears } from '@/lib/thai-holidays'
 import NumberStepper from './NumberStepper'
@@ -168,6 +169,7 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
   const [locationId, setLocationId] = useState('')
   const [producer, setProducer] = useState('')
   const [producerEmail, setProducerEmail] = useState('')
+  const [attachTeamMailboxes, setAttachTeamMailboxes] = useState(true)
   const [crewRequired, setCrewRequired] = useState<string[]>(['Videographer', 'Sound'])
   const [cameraCount, setCameraCount] = useState('')
   const [micCount, setMicCount] = useState('')
@@ -218,6 +220,7 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
    * สักวันเดียว เพราะ isThaiHoliday() คืน false ทั้งกับ "ไม่ใช่วันหยุด" และ
    * "ไม่รู้จักปีนี้" — คนกดจะเชื่อว่าข้ามให้แล้ว (เจอตอนจะต่อ Now ถึง มี.ค. 2027)
    */
+  const teamBoxes = useMemo(() => teamMailboxesForCrew(crewRequired), [crewRequired])
   const uncoveredYears = useMemo(
     () => (skipHolidays && startDate && endDate ? uncoveredHolidayYears(startDate, endDate) : []),
     [skipHolidays, startDate, endDate])
@@ -259,6 +262,10 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
           // แล้วโปรดิวเซอร์จะมองไม่เห็นงานตัวเองใน "งานของฉัน" ซึ่ง scope ด้วย producerEmail
           producerEmail: producerEmail.trim().toLowerCase() || null,
           crewRequired, cameraCount, micCount, notes,
+          // v1.235 — ส่งแค่ธง เซิร์ฟเวอร์ derive รายชื่อเอง (ตัวกรอง SHARED_MAILBOXES
+          // อ่าน env ซึ่งไม่มีใน bundle ฝั่งนี้ — ดูคอมเมนต์ใน routine route)
+          // teamBoxes ข้างล่างใช้สำหรับ "พรีวิวให้คนกดเห็น" เท่านั้น
+          attachTeamMailboxes,
           plan: { startDate, endDate, weekdays, skipHolidays, customSkip },
         }),
       })
@@ -567,6 +574,24 @@ export default function RoutinePlanner({ backHref }: { backHref?: string }) {
                     }`}>{c}</button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={attachTeamMailboxes}
+                  onChange={ev => setAttachTeamMailboxes(ev.target.checked)} />
+                <span className="text-[12px] text-gray-600">
+                  แนบกล่องทีมประจำเข้าไปในทีมงานของทุกใบ
+                  {teamBoxes.length > 0
+                    ? <> — <span className="font-mono text-[11px]">{teamBoxes.join(' · ')}</span></>
+                    : <span className="text-gray-400"> — crew ที่เลือกไว้ไม่มีกล่องประจำ</span>}
+                </span>
+              </label>
+              {attachTeamMailboxes && teamBoxes.length === 0 && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                  ⚠️ ทุกใบจะเกิดมาโดย<b>ไม่มีทีมงาน</b> แขกในปฏิทินจะมีแค่ Producer
+                  — ทีมจะไม่เห็นงานบนปฏิทินตัวเองจนกว่าจะกด “เพิ่มทีมงานทั้งชุด”
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
