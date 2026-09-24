@@ -149,6 +149,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [removeEdit, setRemoveEdit] = useState(false)
   const [removePicks, setRemovePicks] = useState<Record<string, boolean>>({})
   const [removeSaving, setRemoveSaving] = useState(false)
+  // v1.236 — endpoint ลบตอนเป็น requireAdmin แต่หน้านี้เปิดให้ทุก console role
+  // (admin/layout.tsx ใช้ hasConsoleAccess = ADMIN/SUPPORT/MANAGER/COORDINATOR)
+  // ถ้าไม่เช็กตรงนี้ COORDINATOR จะเห็นปุ่มแล้วกดได้ 403 — "a permission is not
+  // an affordance" ที่เคยเจ็บมาแล้วที่ v1.193
+  const [isAdmin, setIsAdmin] = useState(false)
   const [progDrafts, setProgDrafts] = useState<Record<string, string>>({})
   const [progSaving, setProgSaving] = useState(false)
   // v1.95.0 — link EXISTING project episodes onto a (possibly confirmed) AGN
@@ -166,6 +171,13 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [producerCustom, setProducerCustom] = useState(false)
   // v1.61.0 — NON-BLOCKING camera-overload warning for this booking's slot
   const [cameraOverload, setCameraOverload] = useState<string[]>([]) // v1.177 — one chip per over-capacity pool
+  useEffect(() => {
+    fetch('/api/me', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setIsAdmin(d?.user?.role === 'ADMIN'))
+      .catch(() => setIsAdmin(false))
+  }, [])
+
   // v1.107 — which required crew roles still have nobody assigned (warn the assigner)
   const [crewGaps, setCrewGaps] = useState<{ missing: string[]; missingTh: string[]; freelancerCount: number } | null>(null)
   const [editForm, setEditForm] = useState({
@@ -992,7 +1004,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
               </button>
               {/* v1.236 — ลดจำนวนตอน. โผล่เมื่อมีมากกว่า 1 ตอนเท่านั้น เพราะ
                   ใบต้องเหลืออย่างน้อยหนึ่งตอนเสมอ (ยกเลิกทั้งใบใช้ปุ่มยกเลิกใบจอง) */}
-              {booking.episodes.length > 1 && (
+              {isAdmin && booking.episodes.length > 1 && (
                 <button onClick={startRemoveEdit}
                   className="text-[11px] px-2.5 py-1 border border-gray-300 rounded hover:bg-red-50 hover:border-red-300 hover:text-red-600 inline-flex items-center gap-1">
                   <Trash2 className="w-3 h-3" /> ลดจำนวนตอน
