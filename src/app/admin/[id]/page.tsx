@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { programsForOutlet, SPECIAL_EQUIPMENT_OPTIONS, OUTLETS } from '@/lib/data'
-import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus } from 'lucide-react'
+import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
 import { normalizeFreelancers, splitLegacyFreelancers, freelancerRoleLabel } from '@/lib/freelancers'
@@ -144,6 +144,11 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const [moveResult, setMoveResult] = useState<any>(null)
 
   const [progEdit, setProgEdit] = useState(false)
+  // v1.236 — ลดจำนวนตอน (ADMIN เท่านั้น). ID ที่ลบไปแล้วห้ามมินต์ซ้ำ จึงเป็น
+  // การกระทำที่ย้อนไม่ได้ — ต้องผ่าน dry-run ให้เห็นของที่ติดก่อนเสมอ
+  const [removeEdit, setRemoveEdit] = useState(false)
+  const [removePicks, setRemovePicks] = useState<Record<string, boolean>>({})
+  const [removeSaving, setRemoveSaving] = useState(false)
   const [progDrafts, setProgDrafts] = useState<Record<string, string>>({})
   const [progSaving, setProgSaving] = useState(false)
   // v1.95.0 — link EXISTING project episodes onto a (possibly confirmed) AGN
@@ -579,6 +584,54 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     setTitleDrafts(d)
     setTitleEdit(true)
   }
+  // v1.236 — ลดจำนวนตอน: dry-run ก่อนเสมอ แล้วให้คนกดเห็นว่าอะไรลบได้/ไม่ได้
+  // เส้น dry-run กับเส้นจริงเป็น endpoint เดียวกันต่างกันแค่ธง (ไม่ใช่โค้ดคนละชุด)
+  const startRemoveEdit = () => { setRemovePicks({}); setRemoveEdit(true) }
+  const handleRemoveEpisodes = async () => {
+    const picked = booking.episodes.filter(e => removePicks[e.id]).map(e => e.id)
+    if (picked.length === 0) { alert('ยังไม่ได้เลือกตอนที่จะลบ'); return }
+    setError('')
+    setRemoveSaving(true)
+    try {
+      const post = (dryRun: boolean) => fetch(`/api/admin/${id}/remove-episodes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ episodeRowIds: picked, dryRun }),
+      }).then(async r => ({ ok: r.ok, data: await r.json().catch(() => ({})) }))
+
+      const pre = await post(true)
+      if (!pre.ok) throw new Error(pre.data.error || 'ตรวจสอบไม่สำเร็จ')
+      const will: Array<{ episodeId: string; title: string }> = pre.data.willRemove || []
+      const blocked: Array<{ episodeId: string; reason: string }> = pre.data.blocked || []
+      if (will.length === 0) {
+        alert('ลบไม่ได้สักตอน:\n\n' + blocked.map(b => `· ${b.episodeId} — ${b.reason}`).join('\n'))
+        return
+      }
+      const lines = [
+        `ลบ ${will.length} ตอนออกจากใบนี้?`,
+        ...will.map(w => `  · ${w.episodeId}  ${w.title || ''}`.trimEnd()),
+        '',
+        'Production ID ที่ลบแล้ว **มินต์ซ้ำไม่ได้** และย้อนกลับไม่ได้',
+        `จะเหลือ ${(pre.data.remaining || []).length} ตอน`,
+      ]
+      if (blocked.length) lines.push('', 'ลบไม่ได้ (ข้ามให้):', ...blocked.map(b => `  · ${b.episodeId} — ${b.reason}`))
+      if (pre.data.folderNameWillChange) {
+        lines.push('', '⚠️ ชื่อรายการของใบจะเปลี่ยน — folder-integrity จะเปลี่ยนชื่อโฟลเดอร์ Drive ให้เองในรอบถัดไป (ลิงก์ไม่พัง ระบบผูกด้วย id)')
+      }
+      if (!confirm(lines.join('\n'))) return
+
+      const res = await post(false)
+      if (!res.ok) throw new Error(res.data.error || 'ลบไม่สำเร็จ')
+      setBooking(res.data.booking)
+      setRemoveEdit(false)
+      setRemovePicks({})
+      showSaved()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setRemoveSaving(false)
+    }
+  }
+
   const handleSaveTitles = async () => {
     setError('')
     setTitleSaving(true)
@@ -890,7 +943,16 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <Lock className="w-3 h-3 text-gray-400" />
           </div>
           {/* v1.92 — direct title edit (hidden while the full Booking Details edit is open) */}
-          {!editMode && (titleEdit ? (
+          {!editMode && (removeEdit ? (
+            <div className="flex gap-2">
+              <button onClick={() => { setRemoveEdit(false); setRemovePicks({}) }}
+                className="text-xs px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">ยกเลิก</button>
+              <button onClick={handleRemoveEpisodes} disabled={removeSaving}
+                className="text-xs px-2.5 py-1 border border-red-600 text-red-600 rounded hover:bg-red-600 hover:text-white inline-flex items-center gap-1 disabled:opacity-50">
+                {removeSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />} ลบที่เลือก
+              </button>
+            </div>
+          ) : titleEdit ? (
             <div className="flex gap-2">
               <button onClick={() => setTitleEdit(false)} disabled={titleSaving}
                 className="text-xs px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50">ยกเลิก</button>
@@ -928,12 +990,25 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 className="text-[11px] px-2.5 py-1 border border-gray-300 rounded hover:bg-gray-50 inline-flex items-center gap-1">
                 <Pencil className="w-3 h-3" /> แก้ชื่อตอน
               </button>
+              {/* v1.236 — ลดจำนวนตอน. โผล่เมื่อมีมากกว่า 1 ตอนเท่านั้น เพราะ
+                  ใบต้องเหลืออย่างน้อยหนึ่งตอนเสมอ (ยกเลิกทั้งใบใช้ปุ่มยกเลิกใบจอง) */}
+              {booking.episodes.length > 1 && (
+                <button onClick={startRemoveEdit}
+                  className="text-[11px] px-2.5 py-1 border border-gray-300 rounded hover:bg-red-50 hover:border-red-300 hover:text-red-600 inline-flex items-center gap-1">
+                  <Trash2 className="w-3 h-3" /> ลดจำนวนตอน
+                </button>
+              )}
             </div>
           ))}
         </div>
         {(editMode ? editForm.episodeTitles : booking.episodes).map((ep, i) => (
           <div key={ep.id} className="flex items-center gap-3 py-1.5">
-            <span className="episode-badge">{ep.episodeId}</span>
+            {removeEdit && (
+              <input type="checkbox" aria-label={`เลือกลบ ${ep.episodeId}`}
+                checked={!!removePicks[ep.id]}
+                onChange={e => setRemovePicks({ ...removePicks, [ep.id]: e.target.checked })} />
+            )}
+            <span className={`episode-badge${removeEdit && removePicks[ep.id] ? ' line-through opacity-50' : ''}`}>{ep.episodeId}</span>
             {editMode ? (
               <input className="gf-input flex-1" value={editForm.episodeTitles[i].title}
                 onChange={e => {
@@ -959,6 +1034,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
           </div>
         ))}
         <p className="text-[10px] text-gray-400 mt-1">ID ห้ามแก้ · ชื่อตอนแก้ได้ทุกสถานะ (รวมหลัง approve)</p>
+        {removeEdit && (
+          <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 mt-1">
+            เลือกตอนที่จะเอาออก แล้วกด “ลบที่เลือก” · <b>Production ID ที่ลบแล้วมินต์ซ้ำไม่ได้</b> ·
+            ตอนที่มีไฟล์อัปโหลดอยู่จะถูกกันไว้ไม่ให้ลบ · โฟลเดอร์ Drive ของตอนนั้นไม่ถูกลบ ปล่อยค้างไว้
+          </p>
+        )}
 
         {/* v1.95.0 — picker: link existing project episodes (Sheet) onto this booking */}
         {epPickerOpen && (
