@@ -20,6 +20,30 @@
 """
 import json, os, subprocess, sys, time, urllib.error, urllib.request
 
+# ── กันตัวเองตายกลางการเฝ้าผล ────────────────────────────────────────────────
+# `python3 deploy.py <sha> | head -12` ฆ่าสคริปต์นี้ด้วย SIGPIPE ตอนบรรทัดที่ 12
+# แล้ว pipeline คืน **exit 0** (โค้ดของ head) ซึ่งอ่านแล้วเหมือน deploy สำเร็จ
+# ทั้งที่การเฝ้าถูกตัดกลางคัน — PUT ยิงไปแล้วแต่ไม่มีใครรู้ผล (เกิดจริง 2026-09-24)
+# หน้าที่ของสคริปต์นี้คือ *ยืนยันผล* ปลายทางของ stdout หายไปต้องไม่ทำให้มันเลิกยืนยัน
+signal_mod = __import__('signal')
+if hasattr(signal_mod, 'SIGPIPE'):
+    signal_mod.signal(signal_mod.SIGPIPE, signal_mod.SIG_IGN)
+
+class _KeepGoingStdout:
+    """เขียนไม่ได้ก็ไม่เป็นไร — อย่าตาย"""
+    def write(self, text):
+        try:
+            sys.__stdout__.write(text); sys.__stdout__.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+    def flush(self):
+        try:
+            sys.__stdout__.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+
+sys.stdout = _KeepGoingStdout()
+
 STACK, EP = 125, 2
 APP = 'https://probook.xtec9.xyz'
 STATE = os.path.expanduser('~/.probook/deploy-state.json')
