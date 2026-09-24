@@ -55,6 +55,15 @@ export const maxDuration = 300
 // ⇒ CLAIM ชี้ไปแถวที่ไม่ใช่ตัวล่าสุด
 let backfillRunning = false
 
+/**
+ * v1.237 — ใบที่สร้างใหม่กว่านี้ ยังไม่นับว่า "ไม่มีแถวในชีท"
+ *
+ * create-booking ยิง appendBookingRow แบบไม่ await และคิวปล่อยทีละใบเว้น 1100ms
+ * ⇒ ชุดใหญ่ใช้เวลาเป็นนาทีกว่าจะลงชีทครบ · ถ้า backfill วิ่งคาบเกี่ยวช่วงนั้นแล้ว
+ * append ให้ จะได้สองแถวสำหรับ Production ID เดียวกัน
+ */
+const RECENT_CREATE_GRACE_MS = 5 * 60_000
+
 export async function POST(request: NextRequest) {
   let holdsLock = false
   try {
@@ -144,6 +153,8 @@ export async function POST(request: NextRequest) {
       patchExtras: [] as Array<{ code: string; fields: string[]; patched?: boolean }>,
       // v1.161.1 — คิวของ pass-4 apply (ยิงเป็น batch หลังจบ loop)
       skippedAgnOnly: 0,
+      /** ใบที่เพิ่งสร้างและอาจยังรอคิว append อยู่ — ข้ามไว้กันแถวซ้ำ */
+      skippedTooRecent: 0,
       /** Production ID ที่มีมากกว่าหนึ่งแถวในชีท → [เลขแถวทั้งหมด] */
       duplicateCodes: {} as Record<string, number[]>,
       errors: [] as string[],
@@ -157,6 +168,14 @@ export async function POST(request: NextRequest) {
       if (!inSheet) {
         if (agnOnly && booking.outlet.code !== 'AGN') {
           plan.skippedAgnOnly += 1
+          continue
+        }
+        // v1.237 — ใบที่เพิ่งสร้างอาจยังรออยู่ในคิว append (serial-queue.ts ปล่อย
+        // ทีละใบเว้น 1100ms ⇒ ชุด 60 ใบใช้เวลาเกินนาที) · "ยังไม่มีแถว" ตอนนี้จึงไม่ได้
+        // แปลว่า "จะไม่มีตลอดไป" ถ้า append ให้ตอนนี้จะได้ **แถวซ้ำ** ซึ่งแย่กว่า
+        // แถวขาดมาก เพราะ byCode เลือกแถวแรกแล้ว CLAIM จะชี้ผิดตัว
+        if (Date.now() - booking.createdAt.getTime() < RECENT_CREATE_GRACE_MS) {
+          plan.skippedTooRecent += 1
           continue
         }
         const entry = { code, outlet: booking.outlet.code, status: booking.status } as (typeof plan.append)[number]
@@ -294,6 +313,7 @@ export async function POST(request: NextRequest) {
         patchEventId: plan.patchEventId.length,
         patchExtras: plan.patchExtras.length,
         skippedAgnOnly: plan.skippedAgnOnly,
+        skippedTooRecent: plan.skippedTooRecent,
         errors: plan.errors.length,
       },
       ...plan,
