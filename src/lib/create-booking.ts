@@ -500,9 +500,17 @@ export async function createBookingFromPayload(
       createdAt: booking.createdAt,
     }).then(rowIndex => {
       if (rowIndex) {
-        prisma.booking.update({ where: { id: booking.id }, data: { sheetRowIndex: rowIndex } }).catch(() => {})
+        prisma.booking.update({ where: { id: booking.id }, data: { sheetRowIndex: rowIndex } })
+          .catch(e => console.error('[sheet-append] เขียน sheetRowIndex ไม่สำเร็จ', booking.bookingCode, e?.message || e))
+      } else {
+        // v1.237 — `null` แปลว่า append ไม่สำเร็จ (โควตา/creds/หมดเวลา) และเดิม
+        // เส้นนี้เงียบสนิท: ใบจองขึ้นในแอปครบ แต่ชีทไม่มีแถว ไม่มี error ที่ไหนเลย
+        // จนกว่าจะมีคนไปนั่งเทียบชีทกับ DB ด้วยมือ (เกิดจริง 2026-09-23 หาย 12 แถว)
+        // ยังไม่ await เหมือนเดิม — แค่ต้อง **ดัง** พอให้ log scan เจอ
+        console.error('[sheet-append] ไม่ได้แถวในชีท', booking.bookingCode || booking.id,
+          '— ใบจองอยู่ใน DB แต่ไม่มีแถวในชีท ซ่อมด้วย POST /api/admin/backfill-bookings-sheet')
       }
-    }).catch(() => {})
+    }).catch(e => console.error('[sheet-append] ล้ม', booking.bookingCode || booking.id, e?.message || e))
   }
 
   // v1.156 — urgent-booking alert: a rush job (shoot within a day or two of now)

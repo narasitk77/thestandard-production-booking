@@ -1,3 +1,4 @@
+import { makeSerialQueue } from './serial-queue'
 import { google } from 'googleapis'
 import { stagingBlocksSheets, stagingBlocksTarget } from './app-env'
 import { PRODUCTION_PRODUCER_DASHBOARD_SHEET_ID } from './google-config'
@@ -306,12 +307,53 @@ export function joinEpisodeTitles(
     .join(' | ')
 }
 
+/**
+ * v1.237 — ต่อคิว append ให้เหลือทีละใบ และเว้นจังหวะขั้นต่ำระหว่างใบ
+ *
+ * WHY. `values.append` ที่ยิง**พร้อมกัน**คืน `updates.updatedRange` ที่ไม่ตรงกับ
+ * แถวที่เขียนจริง — Google คิดตำแหน่งต่อท้ายแยกกันต่อ request แล้วบอกหลายตัวว่า
+ * ได้แถวเดียวกัน ทั้งที่ของจริงไปคนละแถว · ตรวจกับพรอด 2026-09-24: ใบ Now 2027
+ * 20 ใบถูกสร้างใน 7 วินาที ผลคือ **34 ใบเก็บ `sheetRowIndex` ผิด** (แถว 638 ถูกอ้าง
+ * โดย 12 ใบ) — ตัวชีทเองสะอาด ทุกใบมีแถวครบไม่ซ้ำ ผิดแค่ตัวชี้ใน DB
+ * (อีก 5 ใบที่ผิดมาจากคนแทรก/ลบแถวในชีทเอง ซึ่งคิวนี้กันไม่ได้ — ดู serial-queue.ts)
+ *
+ * จังหวะขั้นต่ำเป็นคนละเรื่องกับความถูกต้อง แต่อยู่ที่เดียวกันเพราะเป็นคอขวดเดียวกัน:
+ * โควตาคือ 60 เขียน/นาที ต่อ service account ที่ใช้ร่วมกับ worker ทุกตัว และ
+ * `create-booking` เรียกตัวนี้แบบ **ไม่ await + `.catch(() => {})`** ⇒ 429 หายเงียบ
+ * และไม่มี reconciler ตามเก็บ (เกิดจริง 2026-09-23: สร้าง 63 ใบ แถวหายไป 12)
+ * หลัง memoize หัวตารางแล้ว 1 append = 1 เขียน ⇒ ที่ 1100ms ได้ ~54 เขียน/นาที
+ * เหลือที่ให้ worker หายใจ (ก่อน memoize คือ 2 เขียน/append = ~108/นาที เกินโควตา)
+ *
+ * ครอบได้แค่ในโปรเซสเดียว — พอเพราะ append เกิดจาก create-booking กับ
+ * backfill-bookings-sheet ซึ่งอยู่ในคอนเทนเนอร์ web ตัวเดียวกันทั้งคู่
+ */
+const APPEND_MIN_GAP_MS = 1100
+const APPEND_JOB_TIMEOUT_MS = 30_000
+const appendQueue = makeSerialQueue(APPEND_MIN_GAP_MS, {
+  jobTimeoutMs: APPEND_JOB_TIMEOUT_MS,
+  label: 'sheets-append',
+})
+
+/**
+ * v1.237 — เช็ก/เขียนหัวตารางครั้งเดียวต่อโปรเซส
+ *
+ * WHY. `ensureSheetTab` ยิง `spreadsheets.get` (1 อ่าน) + `values.update` ที่ A1
+ * **ทุกครั้งแบบไม่มีเงื่อนไข** (คอมเมนต์ในตัวมันเขียนว่า "Always (re)write row 1")
+ * ⇒ การ append 1 แถวเสียโควตา 1 อ่าน + **2 เขียน** ไม่ใช่ 1 เขียนอย่างที่ APPEND_MIN_GAP_MS
+ * คิดไว้ · และเพราะ create-booking เรียก appendBookingRow แบบไม่ await การสร้าง
+ * 63 ใบจะทำให้ header write 63 ตัวยิงพร้อมกันทันที = 429 แบบเดียวกับที่ทำแถวหาย
+ * 12 แถวเมื่อ 2026-09-23 ซึ่งคิวที่ครอบแค่ `values.append` กันไม่ถึง
+ *
+ * เจตนาเดิมของการเขียนซ้ำคือ "หัวตารางตามคอลัมน์ใหม่หลัง deploy" — memoize
+ * ต่อโปรเซสรักษาเจตนานั้นไว้ครบ เพราะคอนเทนเนอร์ที่เพิ่ง boot จะเขียนหัวรอบแรกเสมอ
+ */
+let tabEnsured = false
+
 export async function appendBookingRow(booking: BookingRow): Promise<number | null> {
   if (!hasCredentials()) return null
   try {
     const spreadsheetId = getSheetId()
     const sheets = google.sheets({ version: 'v4', auth: getAuth() })
-    await ensureSheetTab(sheets, spreadsheetId)
 
     const now = fmtDateTime(new Date())
     const row = [
@@ -370,12 +412,20 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       booking.itinerary || '', // Itinerary
     ]
 
-    const appendRes = await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: `${SHEET_TAB}!A:${lastCol}`,
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: [row] },
+    // ทุก request ที่กินโควตาต้องอยู่ **ในคิว** รวมถึง ensureSheetTab
+    // (ถ้าปล่อยไว้นอกคิว การสร้างทีละหลายใบจะยิง header write พร้อมกันทั้งชุด)
+    const appendRes = await appendQueue.run(async () => {
+      if (!tabEnsured) {
+        await ensureSheetTab(sheets, spreadsheetId)
+        tabEnsured = true
+      }
+      return sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: `${SHEET_TAB}!A:${lastCol}`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [row] },
+      }, { timeout: APPEND_JOB_TIMEOUT_MS })
     })
     const updatedRange = appendRes.data.updates?.updatedRange || ''
     const match = updatedRange.match(/(\d+)$/)
