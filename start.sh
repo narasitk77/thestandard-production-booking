@@ -422,8 +422,12 @@ supervise() {
         delay=$(( delay * 2 ))
         [ "$delay" -gt 300 ] && delay=300
       fi
-      echo "[$label] supervisor: worker exited (code $code), restarting in ${delay}s"
-      sleep "$delay"
+      # `|| true` ด้วยเหตุผลเดียวกับบรรทัด node ข้างบน: ทั้งคู่เป็นคำสั่งเปล่าใต้
+      # `set -e` · `echo` ล้มได้ถ้า stdout ถูกปิด (EPIPE) และ `sleep` คืนค่าไม่เป็น
+      # ศูนย์เมื่อถูกสัญญาณขัด — ทั้งสองกรณีจะฆ่า supervisor เงียบ ๆ แบบเดียวกับบั๊ก
+      # ที่เพิ่งแก้ · พิสูจน์บน busybox ash แล้วว่าเกิดได้จริง
+      echo "[$label] supervisor: worker exited (code $code), restarting in ${delay}s" || true
+      sleep "$delay" || true
     done
   ) &
 }
@@ -547,8 +551,12 @@ if [ "$APP_ROLE" = "worker" ]; then
   # (ยังไม่เกิดบนพรอดเพราะไม่ได้ตั้ง APP_ROLE — แต่เป็นกับดักที่ v1.238 เพิ่งสร้างขึ้น)
   # อย่า `exit 0` ตรงนี้: คอนเทนเนอร์นี้ตั้ง restart policy ไว้ ⇒ ออกแล้วถูกปลุกใหม่
   # แล้วก็ออกอีก = วนบูตไม่รู้จบแบบเงียบ ๆ · ค้างไว้พร้อมข้อความ คนถึงจะเห็นว่าเกิดอะไร
-  echo "==> supervisor ทุกตัวจบแล้ว — worker ถูกปิดไว้หมดทุกตัว จะค้างไว้ไม่ให้วนบูต (ตั้ง env แล้ว redeploy)"
-  while true; do sleep 3600; done
+  # ย้ำทุกชั่วโมง ไม่ใช่พูดครั้งเดียวตอนบูต: คนที่มาดู log ทีหลังจะเปิดหน้าต่างแคบ ๆ
+  # แล้วเห็นคอนเทนเนอร์ "เงียบและมีชีวิต" ซึ่งอ่านว่าปกติ ทั้งที่ไม่มีงานเดินสักตัว
+  while true; do
+    echo "FATAL: APP_ROLE=worker แต่ supervised worker ถูกปิดไว้หมดทุกตัว — ไม่มีงานเดินเลย (ตั้ง env บน stack แล้ว redeploy)" || true
+    sleep 3600 || true
+  done
 fi
 
 echo "==> Starting Next.js..."

@@ -62,7 +62,20 @@ health-summary จับได้แค่ "heartbeat ค้าง" แต่จ
 step 2 จึงอ่าน log ของ container ย้อน 24 ชม. แล้วนับต่อ worker:
 
 - `run failed` / `no activity for NNNs` / `] 4xx:` / `] 5xx:` → นับเป็น error พร้อมยกตัวอย่างบรรทัด
-- บรรทัด `supervisor: worker exited` / `is off — exiting` / `WORKER_ENABLED=0` → ข้าม (ปิดเองถูกต้องแล้ว)
+- บรรทัดที่ **ข้าม** (ปิดเองถูกต้องแล้ว):
+  `supervisor: worker exited (code 0)` · `supervisor: worker exited, restarting` (รูปก่อน v1.238) ·
+  `supervisor: worker ปิดอยู่` · `ปิดอยู่ — ไม่สตาร์ต` · `is off — exiting` · `WORKER_ENABLED=0`
+- บรรทัดที่ **นับเป็นปัญหา**: `supervisor: worker exited (code N)` เมื่อ N ไม่ใช่ 0
+  = worker แครชแล้ว supervisor ปลุกใหม่ (ไต่ back-off ถึง 300 วินาที)
+
+  > v1.238 — ก่อนหน้านี้ลูป restart ใน `start.sh` ไม่เคยรอดการแครช (`set -e` ฆ่า subshell)
+  > บรรทัดนี้จึงมีแต่ตอน worker ที่ถูกปิด exit สะอาด = เสียงรบกวนล้วน และการข้ามมันถูกต้อง
+  > พอลูปรอดการแครชแล้ว บรรทัดเดียวกันกลายเป็นสัญญาณที่ดีที่สุดที่เรามี
+  > **ความหมายของ log เปลี่ยนได้เพราะโค้ดที่ผลิตมันเปลี่ยน — รื้อตัวกรองคู่กับโค้ดเสมอ**
+
+- ⚠️ ไฟล์ในโฟลเดอร์นี้กับตัวที่ cron รันจริงที่ `~/.hermes/scripts/` **เคยแยกกันเดินมาแล้วสองครั้ง**
+  แก้ที่นี่แล้วต้อง `cp` ไปทับตัวใน `~/.hermes/scripts/` และรันมือหนึ่งรอบยืนยัน
+  ก่อน `cp` ทับ ให้ดึงของจริงกลับเข้ารีโปก่อนเสมอ (`cp ~/.hermes/... .`) ไม่งั้นจะย้อนฟิกซ์ทิ้ง
 - worker ที่ health-summary บอกว่า `enabled` แต่ 24 ชม. ไม่มีร่องรอยใน log เลย → เตือน (supervisor อาจไม่ได้รันสคริปต์)
 - ตีความให้ด้วย: `no activity for` = endpoint ค้างจริง · `fetch failed` = deploy เก่ากว่า v1.172 · `401` = shared secret ไม่ตรง · `409` ทุกรอบ = pass เดินนานเกิน interval
 

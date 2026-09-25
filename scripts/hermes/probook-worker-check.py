@@ -73,9 +73,30 @@ LOG_HOURS = 24
 LOG_TAIL = 8000
 
 # บรรทัดที่ไม่ใช่ความผิดปกติ — supervisor ปิด worker ที่ตั้งใจปิด
-SKIP_RE = re.compile(r"supervisor: worker exited|is off — exiting|WORKER_ENABLED=0")
+# v1.238 — ความหมายของบรรทัด "supervisor: worker exited" **เปลี่ยนไปแล้ว**
+#
+# ก่อน v1.238 ลูป restart ใน start.sh ไม่เคยรอดการแครช (`set -e` ฆ่า subshell)
+# บรรทัดนี้จึงมีแต่ตอน worker ที่ถูกปิด exit สะอาด = เสียงรบกวนล้วน → skip ถูกต้อง
+# ตั้งแต่ v1.238 ลูปรอดการแครชจริง บรรทัดเดียวกันจึงแปลว่า "worker แครชแล้ววนใหม่"
+# ซึ่งเป็นสัญญาณที่ดีที่สุดที่เรามี ⇒ ต้องไม่ skip (ดู BAD_RE)
+#
+# แยกด้วยรหัสออก: (code 0) = จบเอง ไม่ใช่ปัญหา · (code ไม่ใช่ 0) = แครช
+# คงรูปแบบเก่า (ไม่มีวงเล็บ) ไว้ใน SKIP ด้วย ไม่งั้นหน้าต่าง log 24 ชม. แรก
+# หลัง deploy ที่คร่อมสองรูปแบบจะเด้งบรรทัดเก่าเป็น error ทั้งกอง
+SKIP_RE = re.compile(
+    r"supervisor: worker exited \(code 0\)"     # จบเอง ไม่ใช่แครช
+    r"|supervisor: worker exited, restarting"    # รูปเดิม ก่อน v1.238
+    r"|supervisor: worker ปิดอยู่"                # v1.238 supervisor หยุดปลุก
+    r"|ปิดอยู่ — ไม่สตาร์ต"                        # v1.238 worker บอกว่าถูกปิด
+    r"|is off — exiting"                          # รูปเดิม
+    r"|WORKER_ENABLED=0"                          # รูปเดิม
+)
 WORKER_RE = re.compile(r"\[([a-z][a-z-]+)\]")
-BAD_RE = re.compile(r"run failed|no activity for|route error|\] [45]\d\d:")
+BAD_RE = re.compile(
+    r"run failed|no activity for|route error|\] [45]\d\d:"
+    # v1.238 — worker แครชแล้ว supervisor ปลุกใหม่ · รหัสที่ไม่ใช่ 0 เท่านั้น
+    r"|supervisor: worker exited \(code (?!0\))"
+)
 
 
 def env_val(key):
