@@ -19,7 +19,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.SHOOT_MARKER_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('shoot-marker', 'SHOOT_MARKER_WORKER_ENABLED')
-  return
 }
 
 // Target hour of day in Asia/Bangkok to run the nightly pass (0–23; default 3am).

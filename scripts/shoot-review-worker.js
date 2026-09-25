@@ -25,7 +25,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.SHOOT_REVIEW_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('shoot-review', 'SHOOT_REVIEW_ENABLED')
-  return
 }
 
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.SHOOT_REVIEW_WORKER_HOUR, 10)))

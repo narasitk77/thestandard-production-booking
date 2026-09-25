@@ -12,7 +12,6 @@ const { httpRequest } = require('./lib/http')
 const flag = String(process.env.SOUND_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
   exitDisabled('sound-merge', 'SOUND_MERGE_WORKER_ENABLED')
-  return
 }
 
 const intervalMs = Math.max(

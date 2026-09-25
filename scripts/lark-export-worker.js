@@ -19,7 +19,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.LARK_EXPORT_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('lark-export', 'LARK_EXPORT_ENABLED')
-  return
 }
 
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.LARK_EXPORT_HOUR, 23)))

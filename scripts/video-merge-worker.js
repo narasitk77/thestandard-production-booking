@@ -28,7 +28,6 @@ const { httpRequest } = require('./lib/http')
 const flag = String(process.env.VIDEO_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
   exitDisabled('video-merge', 'VIDEO_MERGE_WORKER_ENABLED')
-  return
 }
 
 const baseUrl = appBaseUrl(process.env.VIDEO_MERGE_URL)

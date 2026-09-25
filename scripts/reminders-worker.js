@@ -15,7 +15,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.REMINDERS_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('reminders', 'REMINDERS_WORKER_ENABLED')
-  return
 }
 
 const intervalMs = Math.max(

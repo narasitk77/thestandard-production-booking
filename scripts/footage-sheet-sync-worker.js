@@ -17,7 +17,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.FOOTAGE_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('footage-sync', 'FOOTAGE_WORKER_ENABLED')
-  return
 }
 
 const intervalMs = Math.max(

@@ -21,7 +21,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.ROOM_BOOKING_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('room-booking', 'ROOM_BOOKING_WORKER_ENABLED')
-  return
 }
 
 const intervalMs = Math.max(

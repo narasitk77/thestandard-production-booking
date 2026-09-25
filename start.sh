@@ -391,7 +391,7 @@ else
 # การสร้างคอนเทนเนอร์ใหม่ ซึ่ง worker อ่านค่าใหม่ตอน launch แรกอยู่แล้ว
 # ถ้าวันหนึ่งพิสูจน์ได้ว่าเปลี่ยนได้จริง ให้แทน `break` ด้วย `sleep 3600` — บรรทัดเดียว
 #
-# รหัสอื่นทั้งหมด (รวมแครช) ยังปลุกใหม่ใน 5 วินาทีเหมือนเดิม
+# รหัสอื่นทั้งหมด (รวมแครช) ยังปลุกใหม่ — เริ่มที่ 5 วินาทีแล้วถอยเพิ่มถ้าแครชติดกัน
 supervise() {
   label="$1"
   script="$2"
@@ -437,34 +437,34 @@ echo "==> Starting calendar guest reconcile worker (supervised)..."
 supervise "calendar-reconcile" "scripts/calendar-reconcile-worker.js"
 
 # v1.34.2 — footage sheet sync worker. Stays dormant when
-# FOOTAGE_WORKER_ENABLED is unset/0; supervisor still re-launches so
-# flipping the env var live in Portainer is enough to turn it on.
+# FOOTAGE_WORKER_ENABLED is unset/0; supervisor หยุดปลุกเมื่อเจอ exit 78
+# (v1.238 — env ของคอนเทนเนอร์ที่รันอยู่แก้ไม่ได้ เปิดต้องตั้งค่าแล้ว redeploy).
 echo "==> Starting footage sheet sync worker (supervised)..."
 supervise "footage-sync" "scripts/footage-sheet-sync-worker.js"
 
 # v1.62.0 — reminder engine worker. Stays dormant when REMINDERS_WORKER_ENABLED
-# is unset/0; supervisor still re-launches so flipping the env var live in
-# Portainer is enough to turn it on. Daily scan → Discord + email digest.
+# is unset/0; supervisor หยุดปลุกเมื่อเจอ exit 78 (v1.238 —
+# env แก้ระหว่างรันไม่ได้ เปิดต้องตั้งค่าแล้ว redeploy). Daily scan → Discord + email digest.
 echo "==> Starting reminder worker (supervised)..."
 supervise "reminders" "scripts/reminders-worker.js"
 
 # v1.204 — room-booking reconcile worker. Stays dormant when
-# ROOM_BOOKING_WORKER_ENABLED is unset/0; supervisor still re-launches so
-# flipping the env var live in Portainer is enough. Keeps the central room
+# ROOM_BOOKING_WORKER_ENABLED is unset/0; supervisor หยุดปลุกเมื่อเจอ exit 78
+# (v1.238 — เปิดต้องตั้งค่าแล้ว redeploy). Keeps the central room
 # system (service.thestandard.co) in step with our queue: releases rooms held
 # for cancelled/moved shoots, books the ones still missing.
 echo "==> Starting room-booking reconcile worker (supervised)..."
 supervise "room-booking" "scripts/room-booking-worker.js"
 
 # v1.147 — footage-ready worker. Stays dormant when FOOTAGE_READY_WORKER_ENABLED
-# is unset/0; supervisor still re-launches so flipping the env var live in
-# Portainer is enough. Sweeps recent bookings and auto-notifies once footage is
+# is unset/0; supervisor หยุดปลุกเมื่อเจอ exit 78 (v1.238 — เปิดต้องตั้งค่าแล้ว
+# redeploy). Sweeps recent bookings and auto-notifies once footage is
 # complete + settled (src/lib/footage-ready.ts).
 echo "==> Starting footage-ready worker (supervised)..."
 supervise "footage-ready" "scripts/footage-ready-worker.js"
 
 # v1.77 — DB backup worker. Stays dormant when BACKUP_WORKER_ENABLED is unset/0;
-# supervisor still re-launches so flipping the env var live is enough. Daily
+# supervisor หยุดปลุกเมื่อเจอ exit 78 (v1.238 — เปิดต้องตั้งค่าแล้ว redeploy). Daily
 # pg_dump → gzip → Google Drive (BACKUP_DRIVE_FOLDER_ID).
 echo "==> Starting DB backup worker (supervised)..."
 supervise "backup" "scripts/backup-worker.js"
@@ -510,8 +510,8 @@ echo "==> Starting folder-integrity worker (supervised)..."
 supervise "folder-integrity" "scripts/folder-integrity-worker.js"
 
 # v1.135 — _SHOOT marker reconcile worker. Stays dormant when
-# SHOOT_MARKER_WORKER_ENABLED is unset/0; supervisor still re-launches so
-# flipping the env var live in Portainer is enough. Enforces one _SHOOT marker
+# SHOOT_MARKER_WORKER_ENABLED is unset/0; supervisor หยุดปลุกเมื่อเจอ exit 78
+# (v1.238 — เปิดต้องตั้งค่าแล้ว redeploy). Enforces one _SHOOT marker
 # per booking across AGN project boxes (trashes pre-migration box-level dupes so
 # the footage crawler stops filing two cards per shoot — Neo memo 2026-07-09).
 echo "==> Starting _SHOOT marker reconcile worker (supervised)..."
@@ -545,8 +545,10 @@ if [ "$APP_ROLE" = "worker" ]; then
   # ถ้า **ทุกตัว** ถูกปิด supervisor จะ break หมด แล้ว wait คืนทันทีทั้งที่ไม่มีสัญญาณ
   # ถ้าเรา exit 0 เงียบ ๆ ตรงนี้ คอนเทนเนอร์จะดับแบบ "สำเร็จ" และไม่มีใครรู้ว่าทำไม
   # (ยังไม่เกิดบนพรอดเพราะไม่ได้ตั้ง APP_ROLE — แต่เป็นกับดักที่ v1.238 เพิ่งสร้างขึ้น)
-  echo "==> supervisor ทุกตัวจบแล้ว — ถ้าไม่ได้มาจากสัญญาณหยุด แปลว่า worker ถูกปิดไว้หมดทุกตัว"
-  exit 0
+  # อย่า `exit 0` ตรงนี้: คอนเทนเนอร์นี้ตั้ง restart policy ไว้ ⇒ ออกแล้วถูกปลุกใหม่
+  # แล้วก็ออกอีก = วนบูตไม่รู้จบแบบเงียบ ๆ · ค้างไว้พร้อมข้อความ คนถึงจะเห็นว่าเกิดอะไร
+  echo "==> supervisor ทุกตัวจบแล้ว — worker ถูกปิดไว้หมดทุกตัว จะค้างไว้ไม่ให้วนบูต (ตั้ง env แล้ว redeploy)"
+  while true; do sleep 3600; done
 fi
 
 echo "==> Starting Next.js..."

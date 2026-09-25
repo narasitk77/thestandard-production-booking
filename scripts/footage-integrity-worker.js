@@ -16,7 +16,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.FOOTAGE_INTEGRITY_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
   exitDisabled('footage-integrity', 'FOOTAGE_INTEGRITY_ENABLED')
-  return
 }
 
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.FOOTAGE_INTEGRITY_HOUR, 13)))

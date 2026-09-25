@@ -14,7 +14,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.BACKUP_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('backup', 'BACKUP_WORKER_ENABLED')
-  return
 }
 
 const intervalMs = Math.max(

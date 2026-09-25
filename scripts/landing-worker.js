@@ -16,7 +16,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.LANDING_WORKER_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
   exitDisabled('landing', 'LANDING_WORKER_ENABLED')
-  return
 }
 
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.LANDING_WORKER_HOUR, 19)))

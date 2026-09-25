@@ -78,14 +78,22 @@ LOG_TAIL = 8000
 # "หยุดปลุก" (ไม่ใช่ปลุกใหม่ทุก 35 วินาทีเหมือนเดิม) จึงเหลือ 2 บรรทัดต่ออายุ
 # คอนเทนเนอร์แทนที่จะเป็นหลักพัน · เก็บรูปเดิมไว้ด้วยเพื่ออ่าน log ของ container เก่าได้
 SKIP_RE = re.compile(
-    r"supervisor: worker exited"          # ทั้งรูปเดิมและรูปใหม่ที่มี (code N)
-    r"|is off — exiting"                   # รูปเดิม (ก่อน v1.238)
+    # v1.238 — **ไม่** skip บรรทัด restart อีกต่อไป: ก่อนหน้านี้ลูป restart ไม่เคย
+    # รอดการแครชจริง (set -e ฆ่า subshell) บรรทัดนี้จึงมีแต่ตอน worker ที่ถูกปิด
+    # exit สะอาด = เสียงรบกวนล้วน · ตอนนี้มันแปลว่า "worker แครชแล้ววนใหม่จริง"
+    # ซึ่งต้องมีคนเห็น (ดู BAD_RE) · เก็บรูปเดิมไว้เพื่ออ่าน log คอนเทนเนอร์เก่า
+    r"is off — exiting"                    # รูปเดิม (ก่อน v1.238)
     r"|WORKER_ENABLED=0"                   # รูปเดิม
     r"|ปิดอยู่ — ไม่สตาร์ต"                  # v1.238: worker บอกว่าตัวเองถูกปิด
     r"|supervisor: worker ปิดอยู่"          # v1.238: supervisor หยุดปลุก
 )
 WORKER_RE = re.compile(r"\[([a-z][a-z-]+)\]")
-BAD_RE = re.compile(r"run failed|no activity for|route error|\] [45]\d\d:")
+BAD_RE = re.compile(
+    r"run failed|no activity for|route error|\] [45]\d\d:"
+    # v1.238 — worker แครชแล้ว supervisor ปลุกใหม่ · รูปแบบมี (code N) เสมอ
+    # แยกจากรูปเดิมที่ไม่มีวงเล็บ ซึ่งเป็นแค่ worker ที่ถูกปิด exit สะอาด
+    r"|supervisor: worker exited \(code"
+)
 
 
 def env_val(key):

@@ -13,7 +13,6 @@ const { httpRequest } = require('./lib/http')
 const flag = String(process.env.PREP_FOLDERS_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
   exitDisabled('prep-folders', 'PREP_FOLDERS_WORKER_ENABLED')
-  return
 }
 
 const intervalMs = Math.max(

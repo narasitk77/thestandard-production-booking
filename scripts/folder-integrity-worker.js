@@ -19,7 +19,6 @@ const { httpRequest } = require('./lib/http')
 const enabled = String(process.env.FOLDER_INTEGRITY_WORKER_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
   exitDisabled('folder-integrity', 'FOLDER_INTEGRITY_WORKER_ENABLED')
-  return
 }
 
 const intervalMs = parsePositiveInt(process.env.FOLDER_INTEGRITY_INTERVAL_MS, 60 * 60 * 1000)
