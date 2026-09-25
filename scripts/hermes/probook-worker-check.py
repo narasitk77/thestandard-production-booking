@@ -73,27 +73,9 @@ LOG_HOURS = 24
 LOG_TAIL = 8000
 
 # บรรทัดที่ไม่ใช่ความผิดปกติ — supervisor ปิด worker ที่ตั้งใจปิด
-#
-# v1.238 — ข้อความเปลี่ยนรูป: worker ที่ถูกปิดออกด้วย exit 78 แล้ว supervisor
-# "หยุดปลุก" (ไม่ใช่ปลุกใหม่ทุก 35 วินาทีเหมือนเดิม) จึงเหลือ 2 บรรทัดต่ออายุ
-# คอนเทนเนอร์แทนที่จะเป็นหลักพัน · เก็บรูปเดิมไว้ด้วยเพื่ออ่าน log ของ container เก่าได้
-SKIP_RE = re.compile(
-    # v1.238 — **ไม่** skip บรรทัด restart อีกต่อไป: ก่อนหน้านี้ลูป restart ไม่เคย
-    # รอดการแครชจริง (set -e ฆ่า subshell) บรรทัดนี้จึงมีแต่ตอน worker ที่ถูกปิด
-    # exit สะอาด = เสียงรบกวนล้วน · ตอนนี้มันแปลว่า "worker แครชแล้ววนใหม่จริง"
-    # ซึ่งต้องมีคนเห็น (ดู BAD_RE) · เก็บรูปเดิมไว้เพื่ออ่าน log คอนเทนเนอร์เก่า
-    r"is off — exiting"                    # รูปเดิม (ก่อน v1.238)
-    r"|WORKER_ENABLED=0"                   # รูปเดิม
-    r"|ปิดอยู่ — ไม่สตาร์ต"                  # v1.238: worker บอกว่าตัวเองถูกปิด
-    r"|supervisor: worker ปิดอยู่"          # v1.238: supervisor หยุดปลุก
-)
+SKIP_RE = re.compile(r"supervisor: worker exited|is off — exiting|WORKER_ENABLED=0")
 WORKER_RE = re.compile(r"\[([a-z][a-z-]+)\]")
-BAD_RE = re.compile(
-    r"run failed|no activity for|route error|\] [45]\d\d:"
-    # v1.238 — worker แครชแล้ว supervisor ปลุกใหม่ · รูปแบบมี (code N) เสมอ
-    # แยกจากรูปเดิมที่ไม่มีวงเล็บ ซึ่งเป็นแค่ worker ที่ถูกปิด exit สะอาด
-    r"|supervisor: worker exited \(code"
-)
+BAD_RE = re.compile(r"run failed|no activity for|route error|\] [45]\d\d:")
 
 
 def env_val(key):
@@ -360,6 +342,7 @@ def footage_ready_report():
                 break
         except urllib.error.HTTPError as e:
             if e.code == 401:
+                self_fail("footage-ready stats 401")
                 return ["⚠️ footage-ready stats: 401 — secret ใน probook.env ไม่ตรงกับ prod แล้ว"]
             if e.code == 404:
                 return []  # prod ยังไม่ได้ deploy endpoint นี้ — ไม่ใช่ความผิดปกติ
@@ -504,6 +487,26 @@ def remember_report(outbox, text):
     if text:
         _ob_write(outbox, {"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text})
 
+
+# ── SELF-FAILURE vs FINDING ───────────────────────────────────────────────────
+# 2026-09-10: ทั้งสามสคริปต์เคย `exit 0` ทุกกรณี แม้ตอนที่ตัวเองทำงานไม่สำเร็จ.
+# ผลคือ Hermes บันทึก last_status "ok" / failure_streak 0 ตลอด และกลไกเตือนซ้ำ
+# ของมันเอง (_failure_streak_nudge, threshold 3) ไม่เคยทำงาน — รอบเที่ยงของ
+# landing จึงตอบ 401 ติดกัน 13 วันโดยไม่มีใครลงมือ
+#
+# แยกให้ชัด: `self_fail()` = *เราเอง* ทำงานไม่สำเร็จ (401 / เน็ตล่ม / พังกลางคัน)
+# → exit 1 เพื่อให้ Hermes นับ streak. ส่วน "เจอปัญหาที่ prod" (worker ค้าง,
+# fallback พุ่ง) คือสคริปต์ทำงาน *สำเร็จ* → exit 0 ไม่งั้น streak จะเตือนผิดตัว
+#
+# ปลอดภัยกับรายงาน: scheduler.py:3660 เมื่อ returncode != 0 ยัง append
+# "stdout:\n<payload>" ไปกับข้อความ ดังนั้นคนอ่านยังได้เนื้อรายงานครบเหมือนเดิม
+_SELF_FAIL = []
+
+
+def self_fail(reason=""):
+    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — epilogue จะ exit 1"""
+    _SELF_FAIL.append(reason or "self-failure")
+
 OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-worker-check.json")
 JOB_NAME = "probook-worker-check"
 
@@ -548,6 +551,7 @@ def main():
     if status == 0:
         if net_down():
             # เครื่องนี้เน็ต/DNS ล่ม → เราไม่รู้อะไรเลยเรื่อง prod ห้ามตะโกนว่า prod ตาย
+            self_fail("net down")
             save_state(state)
             print("⚠️ เช็ก probook ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod)")
             print(f"   ({body[:100]}) รอบหน้าจะลองใหม่เอง")
@@ -655,7 +659,9 @@ def main():
 
     if payload:
         print(payload)
-        sys.exit(0)
+        # exit 1 เฉพาะตอนที่ "เราเอง" เช็กไม่สำเร็จ (401 / เน็ตล่ม) — ไม่ใช่ตอนที่
+        # เจอ worker ค้างที่ prod ซึ่งแปลว่าสคริปต์นี้ทำงานสำเร็จตามหน้าที่
+        sys.exit(1 if _SELF_FAIL else 0)
     # เงียบเมื่อปกติ (รอบค่ำ) — ไม่ print อะไรเลย = Hermes ไม่ส่งข้อความ
 
 
