@@ -6,13 +6,12 @@
 // ON BY DEFAULT (idempotent + safe). Set SOUND_MERGE_WORKER_ENABLED=0 / false / no
 // to disable. Mirrors scripts/prep-folders-worker.js.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const flag = String(process.env.SOUND_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
-  console.log('[sound-merge] SOUND_MERGE_WORKER_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('sound-merge', 'SOUND_MERGE_WORKER_ENABLED')
   return
 }
 

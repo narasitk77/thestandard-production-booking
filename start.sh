@@ -375,43 +375,78 @@ if [ "$RUN_WORKERS" != "1" ]; then
   echo "    (Expected when the workers run as their own service.)"
 else
 
+# ──────────────────────────────────────────────────────────────────────────────
+# supervise <label> <script> — ลูปปลุก worker ตัวเดียว (v1.238)
+#
+# เดิมบล็อกนี้ถูกคัดลอกไว้ 15 ชุดเหมือนกันทุกตัวอักษร · ยุบเหลือฟังก์ชันเดียว
+# แก้ที่เดียวได้ทุกตัว (bug class ข้อ 9 ของรีโป: กฎเดียวกันหลายที่แล้วค่อย ๆ เพี้ยน)
+#
+# **หยุดปลุกเมื่อ worker ออกด้วยรหัส 78 (EXIT_DISABLED)** — แปลว่า "ตัวนี้ถูกปิดไว้"
+# เดิม worker ที่ถูกปิดจะค้าง 30 วินาทีแล้ว exit 0 ส่วน supervisor sleep 5 แล้วปลุกใหม่
+# = วนทุก ~35 วินาทีตลอดอายุคอนเทนเนอร์ · วัดจริงบนพรอด 2026-09-25: worker ที่ปิด
+# อยู่ 2 ตัวผลิต 6,654 จาก 6,898 บรรทัด (96%) ใน 16 ชั่วโมง ทำให้ error จริงหาไม่เจอ
+#
+# เหตุผลเดิมของการปลุกซ้ำคือ "จะได้สลับ env ใน Portainer แล้วติดเลย" ซึ่งเป็นไปไม่ได้:
+# env ของคอนเทนเนอร์ที่รันอยู่แก้ไม่ได้ (Docker ไม่มี API ให้ทำ) การอัปเดต stack คือ
+# การสร้างคอนเทนเนอร์ใหม่ ซึ่ง worker อ่านค่าใหม่ตอน launch แรกอยู่แล้ว
+# ถ้าวันหนึ่งพิสูจน์ได้ว่าเปลี่ยนได้จริง ให้แทน `break` ด้วย `sleep 3600` — บรรทัดเดียว
+#
+# รหัสอื่นทั้งหมด (รวมแครช) ยังปลุกใหม่ใน 5 วินาทีเหมือนเดิม
+supervise() {
+  label="$1"
+  script="$2"
+  (
+    delay=5
+    while true; do
+      started=$(date +%s)
+      # `|| code=$?` ไม่ใช่สไตล์ — มันจำเป็น: สคริปต์นี้รันด้วย `set -e` และคำสั่ง
+      # เปล่า ๆ ในตัวลูปที่ออกไม่เป็นศูนย์จะทำให้เชลล์ (subshell นี้) ตายทันที
+      # ของเดิมเขียน `node ...` เปล่า ๆ ⇒ **ลูป restart รอดเฉพาะการ exit 0**
+      # worker ที่แครชจริงจะฆ่า supervisor ของตัวเองทิ้งเงียบ ๆ ไม่มี log สักบรรทัด
+      # และไม่กลับมาอีกเลยตลอดอายุคอนเทนเนอร์ (พิสูจน์ด้วยการรันจริง 2026-09-25)
+      # `||` ทำให้คำสั่งนี้อยู่ในข้อยกเว้นของ set -e ตามสเปก POSIX
+      code=0
+      node "$script" || code=$?
+      if [ "$code" -eq 78 ]; then
+        echo "[$label] supervisor: worker ปิดอยู่ (exit 78) — หยุดปลุก เปิดได้โดยตั้ง env แล้ว redeploy"
+        break
+      fi
+      # ถอยเพิ่มขึ้นเมื่อแครชติด ๆ กัน · รีเซ็ตเมื่อ worker อยู่ได้เกินหนึ่งนาที
+      #
+      # จำเป็นเพราะ v1.238 ทำให้ลูปนี้ "รอดการแครช" เป็นครั้งแรก — worker ที่พังซ้ำ
+      # จะ restart ทุก 5 วินาที = 12 บรรทัด/นาที ซึ่งคือปัญหา log ท่วมแบบเดิมในรูปใหม่
+      # เพดาน 300 วินาที ⇒ อย่างแย่สุดเหลือ 1 บรรทัด/5 นาที
+      if [ "$(( $(date +%s) - started ))" -ge 60 ]; then
+        delay=5
+      else
+        delay=$(( delay * 2 ))
+        [ "$delay" -gt 300 ] && delay=300
+      fi
+      echo "[$label] supervisor: worker exited (code $code), restarting in ${delay}s"
+      sleep "$delay"
+    done
+  ) &
+}
+
 echo "==> Starting calendar guest reconcile worker (supervised)..."
 # Wrap the worker in a tiny restart loop so a crash doesn't take it out for
 # the rest of the container's lifetime. 5s back-off prevents a hot loop if
 # the script throws immediately. Runs in the background so we can `exec npm
 # start` next; the supervisor + worker tree gets reaped when the container
 # stops (the worker also installs SIGTERM/SIGINT handlers for clean exit).
-(
-  while true; do
-    node scripts/calendar-reconcile-worker.js
-    echo "[calendar-reconcile] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "calendar-reconcile" "scripts/calendar-reconcile-worker.js"
 
 # v1.34.2 — footage sheet sync worker. Stays dormant when
 # FOOTAGE_WORKER_ENABLED is unset/0; supervisor still re-launches so
 # flipping the env var live in Portainer is enough to turn it on.
 echo "==> Starting footage sheet sync worker (supervised)..."
-(
-  while true; do
-    node scripts/footage-sheet-sync-worker.js
-    echo "[footage-sync] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "footage-sync" "scripts/footage-sheet-sync-worker.js"
 
 # v1.62.0 — reminder engine worker. Stays dormant when REMINDERS_WORKER_ENABLED
 # is unset/0; supervisor still re-launches so flipping the env var live in
 # Portainer is enough to turn it on. Daily scan → Discord + email digest.
 echo "==> Starting reminder worker (supervised)..."
-(
-  while true; do
-    node scripts/reminders-worker.js
-    echo "[reminders] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "reminders" "scripts/reminders-worker.js"
 
 # v1.204 — room-booking reconcile worker. Stays dormant when
 # ROOM_BOOKING_WORKER_ENABLED is unset/0; supervisor still re-launches so
@@ -419,73 +454,37 @@ echo "==> Starting reminder worker (supervised)..."
 # system (service.thestandard.co) in step with our queue: releases rooms held
 # for cancelled/moved shoots, books the ones still missing.
 echo "==> Starting room-booking reconcile worker (supervised)..."
-(
-  while true; do
-    node scripts/room-booking-worker.js
-    echo "[room-booking] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "room-booking" "scripts/room-booking-worker.js"
 
 # v1.147 — footage-ready worker. Stays dormant when FOOTAGE_READY_WORKER_ENABLED
 # is unset/0; supervisor still re-launches so flipping the env var live in
 # Portainer is enough. Sweeps recent bookings and auto-notifies once footage is
 # complete + settled (src/lib/footage-ready.ts).
 echo "==> Starting footage-ready worker (supervised)..."
-(
-  while true; do
-    node scripts/footage-ready-worker.js
-    echo "[footage-ready] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "footage-ready" "scripts/footage-ready-worker.js"
 
 # v1.77 — DB backup worker. Stays dormant when BACKUP_WORKER_ENABLED is unset/0;
 # supervisor still re-launches so flipping the env var live is enough. Daily
 # pg_dump → gzip → Google Drive (BACKUP_DRIVE_FOLDER_ID).
 echo "==> Starting DB backup worker (supervised)..."
-(
-  while true; do
-    node scripts/backup-worker.js
-    echo "[backup] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "backup" "scripts/backup-worker.js"
 
 # v1.86 — prep-folders worker. ON BY DEFAULT (safe + idempotent: pre-creates the
 # Drive boxes for today's shoots). Set PREP_FOLDERS_WORKER_ENABLED=0 to disable.
 echo "==> Starting prep-folders worker (supervised)..."
-(
-  while true; do
-    node scripts/prep-folders-worker.js
-    echo "[prep-folders] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "prep-folders" "scripts/prep-folders-worker.js"
 
 # v1.108 — sound-merge worker. ON BY DEFAULT (idempotent + copy-only: folds staged
 # audio into each booking's video box AUDIO). Set SOUND_MERGE_WORKER_ENABLED=0 to disable.
 echo "==> Starting sound-merge worker (supervised)..."
-(
-  while true; do
-    node scripts/sound-merge-worker.js
-    echo "[sound-merge] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "sound-merge" "scripts/sound-merge-worker.js"
 
 # v1.166 — post-shoot peer review sender. DORMANT until SHOOT_REVIEW_ENABLED=1
 # (both the worker and the endpoint check it). Sends the rating form to everyone
 # who worked a shoot that ended SHOOT_REVIEW_DELAY_DAYS ago; invites are unique
 # per person per booking so a restart can never double-mail anyone.
 echo "==> Starting shoot-review worker (supervised)..."
-(
-  while true; do
-    node scripts/shoot-review-worker.js
-    echo "[shoot-review] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "shoot-review" "scripts/shoot-review-worker.js"
 
 # v1.212 — daily export to Lark (23:00 BKK). DORMANT until LARK_EXPORT_ENABLED=1.
 # Archives the whole database as one immutable gzipped JSON per day into a Lark
@@ -493,26 +492,14 @@ echo "==> Starting shoot-review worker (supervised)..."
 # row that disappeared since the previous run. Complements the pg_dump backup,
 # which prunes itself at 30 days — this one is never pruned.
 echo "==> Starting Lark export worker (supervised)..."
-(
-  while true; do
-    node scripts/lark-export-worker.js
-    echo "[lark-export] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "lark-export" "scripts/lark-export-worker.js"
 
 # v1.127 — video-merge worker. ON BY DEFAULT (idempotent MOVE; re-runs only handle
 # the remainder). With NAS_DSM_URL/USER/PASS set it fires the merge the moment the
 # NAS Cloud Sync turns green (uptodate); without them it falls back to a plain
 # hourly interval. Set VIDEO_MERGE_WORKER_ENABLED=0 to disable.
 echo "==> Starting video-merge worker (supervised)..."
-(
-  while true; do
-    node scripts/video-merge-worker.js
-    echo "[video-merge] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "video-merge" "scripts/video-merge-worker.js"
 
 # v1.151 — folder-integrity worker. ON BY DEFAULT: hourly it re-checks every
 # active booking's Drive tree against the DB and repairs it (create missing
@@ -520,13 +507,7 @@ echo "==> Starting video-merge worker (supervised)..."
 # drop zone). Create + rename ONLY — never moves or trashes; ambiguous cases are
 # emailed for a human. Set FOLDER_INTEGRITY_WORKER_ENABLED=0 to disable.
 echo "==> Starting folder-integrity worker (supervised)..."
-(
-  while true; do
-    node scripts/folder-integrity-worker.js
-    echo "[folder-integrity] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "folder-integrity" "scripts/folder-integrity-worker.js"
 
 # v1.135 — _SHOOT marker reconcile worker. Stays dormant when
 # SHOOT_MARKER_WORKER_ENABLED is unset/0; supervisor still re-launches so
@@ -534,13 +515,7 @@ echo "==> Starting folder-integrity worker (supervised)..."
 # per booking across AGN project boxes (trashes pre-migration box-level dupes so
 # the footage crawler stops filing two cards per shoot — Neo memo 2026-07-09).
 echo "==> Starting _SHOOT marker reconcile worker (supervised)..."
-(
-  while true; do
-    node scripts/shoot-marker-worker.js
-    echo "[shoot-marker] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "shoot-marker" "scripts/shoot-marker-worker.js"
 
 # v1.139 — landing drop-folder lifecycle worker. ON BY DEFAULT. Nightly (evening,
 # LANDING_WORKER_HOUR default 19:00 BKK) it creates the NEXT day's shoot folders
@@ -548,13 +523,7 @@ echo "==> Starting _SHOOT marker reconcile worker (supervised)..."
 # lean (only upcoming + in-flight shoots). Policy: docs/landing-folder-policy.md.
 # Set LANDING_WORKER_ENABLED=0 to disable.
 echo "==> Starting landing drop-folder lifecycle worker (supervised)..."
-(
-  while true; do
-    node scripts/landing-worker.js
-    echo "[landing] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "landing" "scripts/landing-worker.js"
 
 # v1.221 — footage integrity scan. ON BY DEFAULT, report-only: it walks recent
 # project boxes once a day (FOOTAGE_INTEGRITY_HOUR, default 13:00 BKK) looking
@@ -563,13 +532,7 @@ echo "==> Starting landing drop-folder lifecycle worker (supervised)..."
 # Every other Drive worker checks PLACEMENT; a truncated upload passes them all.
 # Set FOOTAGE_INTEGRITY_ENABLED=0 to disable.
 echo "==> Starting footage integrity worker (supervised)..."
-(
-  while true; do
-    node scripts/footage-integrity-worker.js
-    echo "[footage-integrity] supervisor: worker exited, restarting in 5s"
-    sleep 5
-  done
-) &
+supervise "footage-integrity" "scripts/footage-integrity-worker.js"
 
 fi  # end RUN_WORKERS
 
@@ -578,6 +541,11 @@ if [ "$APP_ROLE" = "worker" ]; then
   # Keep PID 1 alive so the container stays up and the supervisors keep running.
   # `wait` returns when a signal arrives, which is exactly when we should exit.
   wait
+  # v1.238 — `wait` ยังคืนได้อีกทางหนึ่งตั้งแต่ supervise() หยุดปลุก worker ที่ถูกปิด:
+  # ถ้า **ทุกตัว** ถูกปิด supervisor จะ break หมด แล้ว wait คืนทันทีทั้งที่ไม่มีสัญญาณ
+  # ถ้าเรา exit 0 เงียบ ๆ ตรงนี้ คอนเทนเนอร์จะดับแบบ "สำเร็จ" และไม่มีใครรู้ว่าทำไม
+  # (ยังไม่เกิดบนพรอดเพราะไม่ได้ตั้ง APP_ROLE — แต่เป็นกับดักที่ v1.238 เพิ่งสร้างขึ้น)
+  echo "==> supervisor ทุกตัวจบแล้ว — ถ้าไม่ได้มาจากสัญญาณหยุด แปลว่า worker ถูกปิดไว้หมดทุกตัว"
   exit 0
 fi
 

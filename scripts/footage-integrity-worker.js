@@ -10,13 +10,12 @@
 //
 // ON by default. FOOTAGE_INTEGRITY_ENABLED=0 turns it off.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.FOOTAGE_INTEGRITY_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
-  console.log('[footage-integrity] FOOTAGE_INTEGRITY_ENABLED=0 — disabled, exiting (supervisor re-launches in 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('footage-integrity', 'FOOTAGE_INTEGRITY_ENABLED')
   return
 }
 

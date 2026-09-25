@@ -22,13 +22,12 @@
 // accepted by default (NAS_DSM_INSECURE_TLS=0 to require a valid cert).
 
 const https = require('https')
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const flag = String(process.env.VIDEO_MERGE_WORKER_ENABLED ?? '').toLowerCase()
 if (flag === '0' || flag === 'false' || flag === 'no') {
-  console.log('[video-merge] VIDEO_MERGE_WORKER_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('video-merge', 'VIDEO_MERGE_WORKER_ENABLED')
   return
 }
 

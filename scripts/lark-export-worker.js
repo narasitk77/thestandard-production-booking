@@ -13,13 +13,12 @@
 // Stays dormant when LARK_EXPORT_ENABLED is unset / '0' / 'false'. The endpoint
 // re-checks the same flag, so a stray curl cannot ship data to Lark either.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.LARK_EXPORT_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
-  console.log('[lark-export] LARK_EXPORT_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('lark-export', 'LARK_EXPORT_ENABLED')
   return
 }
 

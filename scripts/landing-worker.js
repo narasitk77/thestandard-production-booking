@@ -10,13 +10,12 @@
 // (nightly scheduler, secret resolution, SIGTERM handling). Mutating (dryRun=0);
 // idempotent, only trashes EMPTY regenerable folders to recoverable Drive trash.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.LANDING_WORKER_ENABLED ?? '1').toLowerCase()
 if (enabled === '0' || enabled === 'false' || enabled === 'no') {
-  console.log('[landing] LANDING_WORKER_ENABLED=0 — disabled, exiting (supervisor re-launches in 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('landing', 'LANDING_WORKER_ENABLED')
   return
 }
 

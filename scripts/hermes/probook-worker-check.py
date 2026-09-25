@@ -73,7 +73,17 @@ LOG_HOURS = 24
 LOG_TAIL = 8000
 
 # บรรทัดที่ไม่ใช่ความผิดปกติ — supervisor ปิด worker ที่ตั้งใจปิด
-SKIP_RE = re.compile(r"supervisor: worker exited|is off — exiting|WORKER_ENABLED=0")
+#
+# v1.238 — ข้อความเปลี่ยนรูป: worker ที่ถูกปิดออกด้วย exit 78 แล้ว supervisor
+# "หยุดปลุก" (ไม่ใช่ปลุกใหม่ทุก 35 วินาทีเหมือนเดิม) จึงเหลือ 2 บรรทัดต่ออายุ
+# คอนเทนเนอร์แทนที่จะเป็นหลักพัน · เก็บรูปเดิมไว้ด้วยเพื่ออ่าน log ของ container เก่าได้
+SKIP_RE = re.compile(
+    r"supervisor: worker exited"          # ทั้งรูปเดิมและรูปใหม่ที่มี (code N)
+    r"|is off — exiting"                   # รูปเดิม (ก่อน v1.238)
+    r"|WORKER_ENABLED=0"                   # รูปเดิม
+    r"|ปิดอยู่ — ไม่สตาร์ต"                  # v1.238: worker บอกว่าตัวเองถูกปิด
+    r"|supervisor: worker ปิดอยู่"          # v1.238: supervisor หยุดปลุก
+)
 WORKER_RE = re.compile(r"\[([a-z][a-z-]+)\]")
 BAD_RE = re.compile(r"run failed|no activity for|route error|\] [45]\d\d:")
 

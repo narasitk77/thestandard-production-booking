@@ -15,13 +15,12 @@
 // Stays dormant when ROOM_BOOKING_WORKER_ENABLED is unset / '0' / 'false'.
 // Mirrors scripts/reminders-worker.js (interval, secret resolution, SIGTERM).
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.ROOM_BOOKING_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
-  console.log('[room-booking] ROOM_BOOKING_WORKER_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('room-booking', 'ROOM_BOOKING_WORKER_ENABLED')
   return
 }
 

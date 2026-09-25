@@ -13,13 +13,12 @@
 // small regenerable _SHOOT stubs to Shared-Drive trash (recoverable ~30 days);
 // footage folders are never touched. The endpoint sends the report email.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.SHOOT_MARKER_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
-  console.log('[shoot-marker] SHOOT_MARKER_WORKER_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('shoot-marker', 'SHOOT_MARKER_WORKER_ENABLED')
   return
 }
 

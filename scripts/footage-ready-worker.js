@@ -9,13 +9,12 @@
 // change. Mirrors scripts/reminders-worker.js (interval, secret resolution,
 // SIGTERM handling) so anyone who's debugged that one knows the shape of this.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.FOOTAGE_READY_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
-  console.log('[footage-ready] FOOTAGE_READY_WORKER_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('footage-ready', 'FOOTAGE_READY_WORKER_ENABLED')
   return
 }
 

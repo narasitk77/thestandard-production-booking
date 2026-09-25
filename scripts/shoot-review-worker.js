@@ -19,13 +19,12 @@
 // Runs with dryRun=0 (sends for real). Every invite is unique per (booking,
 // person), so a restart or a double run cannot invite anybody twice.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.SHOOT_REVIEW_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
-  console.log('[shoot-review] SHOOT_REVIEW_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('shoot-review', 'SHOOT_REVIEW_ENABLED')
   return
 }
 

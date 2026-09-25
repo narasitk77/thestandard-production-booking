@@ -11,15 +11,12 @@
 // SIGTERM handling) so anyone who's debugged that one already knows the
 // shape of this one.
 
-const { parsePositiveInt, appBaseUrl } = require('./lib/env')
+const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
 const enabled = String(process.env.FOOTAGE_WORKER_ENABLED || '').toLowerCase()
 if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
-  console.log('[footage-sync] FOOTAGE_WORKER_ENABLED is off — exiting (supervisor will re-launch after 5s, harmless).')
-  // Stay alive a few seconds so the supervisor loop's 5s back-off
-  // doesn't hammer this script's startup logging line.
-  setTimeout(() => process.exit(0), 30_000)
+  exitDisabled('footage-sync', 'FOOTAGE_WORKER_ENABLED')
   return
 }
 
