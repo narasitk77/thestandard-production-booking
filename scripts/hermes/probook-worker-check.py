@@ -576,14 +576,15 @@ def main():
             save_state(state)
             print("⚠️ เช็ก probook ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod)")
             print(f"   ({body[:100]}) รอบหน้าจะลองใหม่เอง")
-            return
+            sys.exit(1 if _SELF_FAIL else 0)
+        self_fail("prod not responding")
         state["neverTicked"] = {}
         state["appDownStreak"] = int(state.get("appDownStreak", 0)) + 1
         save_state(state)
         print("⚠️ probook ตอบไม่ได้เลย — /api/health-summary ไม่มีการตอบกลับ (เน็ตเครื่องนี้ปกติ)")
         print(f"   ({body[:120]}) ครั้งที่ {state['appDownStreak']} ติดกัน")
         print("   ดูต่อ: Portainer stack 125 → container production-booking-app (ผมรีสตาร์ทให้ไม่ได้)")
-        return
+        sys.exit(1 if _SELF_FAIL else 0)
     state["appDownStreak"] = 0
 
     try:
