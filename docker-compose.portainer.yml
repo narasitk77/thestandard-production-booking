@@ -620,7 +620,17 @@ services:
       NAS_MANIFEST_SECRET: ${NAS_MANIFEST_SECRET:-}
       # Which workers are on. Mirror these with the app's values so flipping one
       # place does not leave the other running the same job.
-      CALENDAR_RECONCILE_WORKER_ENABLED: ${CALENDAR_RECONCILE_WORKER_ENABLED:-1}
+      # v1.239 — calendar-reconcile **ไม่มีสวิตช์ปิด และต้องไม่มี**
+      #
+      # มันเป็นตัวเดียวที่เรียก maybeAlertStaleWorkers() (dead-man check ของ worker
+      # ทั้ง 16 ตัว) ใน src/app/api/internal/calendar/reconcile/route.ts ⇒ สวิตช์ปิด
+      # ของมันจะกลายเป็น env ตัวเดียวที่ดับการเฝ้าระวังทั้งระบบแบบเงียบ ๆ ซึ่งเป็น
+      # ความล้มเหลวที่ heartbeat.ts เขียนไว้เองว่า "the failure this whole file exists
+      # to prevent" · heartbeat.ts จึงฮาร์ดโค้ด enabled: true ให้ตัวนี้ตัวเดียว
+      # ส่วนอีก 15 ตัวอ่าน env ของตัวเอง
+      #
+      # เดิมบรรทัดนี้ส่ง CALENDAR_RECONCILE_WORKER_ENABLED เข้าไปโดยไม่มีโค้ดไหนอ่าน
+      # = สัญญาว่ามีสวิตช์ที่ไม่มีอยู่จริง ถอดออกเพื่อให้ compose พูดตรงกับโค้ด
       PREP_FOLDERS_WORKER_ENABLED: ${PREP_FOLDERS_WORKER_ENABLED:-1}
       SOUND_MERGE_WORKER_ENABLED: ${SOUND_MERGE_WORKER_ENABLED:-1}
       VIDEO_MERGE_WORKER_ENABLED: ${VIDEO_MERGE_WORKER_ENABLED:-1}
