@@ -16,7 +16,7 @@ import {
   shootFolderLayers,
   buildBookingFolderName,
   landingBookingFolderName,
-  buildEpisodeFolderName,
+  buildEpisodeFolderName, episodeLeadUsesId,
   camerasToPreCreate,
   hasOutletFolderMapping,
   isPhotoAlbumBooking,
@@ -206,7 +206,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       const isAgency = b.outlet.code === 'AGN'
       // v1.93 — one folder per episode (<…>/<EP>/<camera>/). v1.94 — AGN keys EP
       // folders by project EP ID; empty for bookings with no episodes.
-      const episodeFolderNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined
+      const episodeFolderNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })) : undefined
       // v1.94 — AGN groups by Project (no per-booking folder); others by show + ID.
       const layers = shootFolderLayers({
         outletCode: b.outlet.code,

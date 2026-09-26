@@ -32,7 +32,7 @@ import {
   isFolderEmpty, trashDriveItem,
 } from './google-drive'
 import {
-  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode,
+  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode,
 } from './outlet-folders'
 import { bookingShowName } from './display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
@@ -239,7 +239,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
           bookingCode: code, // v1.113.6 — last-resort box match by Production ID (sanitized names drift)
           bookingSubfolderName: layers.bookingSubfolderName,
           bookingSubfolderCode: code,
-          episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
+          episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })),
         })
         if (!resolved.bookingFolderId) { base.results.push({ bookingCode: code, skipped: 'box not found (not prepped yet)' }); continue }
 
@@ -339,7 +339,7 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
       bookingCode: code, // v1.113.6 — last-resort box match by Production ID
       bookingSubfolderName: layers.bookingSubfolderName,
       bookingSubfolderCode: code,
-      episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
+      episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })),
     })
     if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง Video 2026 (ยังไม่ถูก prep?)', ...zero }
 

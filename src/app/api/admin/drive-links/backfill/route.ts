@@ -8,7 +8,7 @@ import {
 } from '@/lib/google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildBookingFolderName, legacyBookingFolderName,
-  buildEpisodeFolderName, folderNameMatchesCode, isPhotoAlbumBooking,
+  buildEpisodeFolderName, episodeLeadUsesId, folderNameMatchesCode, isPhotoAlbumBooking,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
           bookingCode: code,
           bookingSubfolderName: layers.bookingSubfolderName,
           bookingSubfolderCode: code,
-          episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
+          episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })),
         })
         // AGN without its per-booking layer yet: the resolved id is the SHARED
         // project box — storing that as "box" would make merges dump siblings'

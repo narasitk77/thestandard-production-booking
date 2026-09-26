@@ -7,7 +7,7 @@
  */
 import { prisma } from '@/lib/db'
 import { listFolderFiles, getDriveParentFolderId, type DriveFolderFile } from '@/lib/google-drive'
-import { buildEpisodeFolderName } from '@/lib/outlet-folders'
+import { buildEpisodeFolderName, episodeLeadUsesId } from '@/lib/outlet-folders'
 
 export interface CameraReport {
   camera: string
@@ -27,9 +27,9 @@ export interface FootageReport {
 export async function buildFootageReport(bookingId: string): Promise<FootageReport> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    select: { bookingCode: true, deliveredAt: true, deliveredBy: true, outlet: { select: { code: true } } },
+    select: { bookingCode: true, deliveredAt: true, deliveredBy: true, outlet: { select: { code: true } }, episodes: { select: { sequence: true } } },
   })
-  const isAgency = booking?.outlet.code === 'AGN' // v1.94 — AGN EP labels use project EP ID
+  const useIdLead = episodeLeadUsesId(booking?.outlet.code, booking?.episodes ?? [])
   const uploads = await prisma.upload.findMany({
     where: { bookingId, status: 'COMPLETE', driveFileId: { not: null } },
     orderBy: { completedAt: 'desc' },
@@ -42,7 +42,7 @@ export async function buildFootageReport(bookingId: string): Promise<FootageRepo
   for (const u of uploads) {
     const key = `${u.episodeId ?? ''}|${u.camera}`
     if (!byGroup.has(key)) {
-      byGroup.set(key, { label: u.episode ? `${buildEpisodeFolderName(u.episode, { useEpisodeId: isAgency })} / ${u.camera}` : u.camera, fileId: u.driveFileId! })
+      byGroup.set(key, { label: u.episode ? `${buildEpisodeFolderName(u.episode, { useEpisodeId: useIdLead })} / ${u.camera}` : u.camera, fileId: u.driveFileId! })
     }
   }
 

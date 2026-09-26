@@ -43,7 +43,7 @@ import {
   findFoldersByCode, isFolderAlive, classifyFootageTreeFolder, listFilesRecursive, getDriveParentFolderId,
 } from './google-drive'
 import {
-  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, folderNameMatchesCode,
+  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, folderNameMatchesCode,
   legacyBookingFolderName, landingBookingFolderName, camerasToPreCreate,
   isPhotoAlbumBooking, hasOutletFolderMapping,
 } from './outlet-folders'
@@ -106,6 +106,27 @@ export function groupEpisodeFoldersByLead(
     out.set(lead, arr)
   }
   return out
+}
+
+/**
+ * v1.240 — app-shaped EP folders ("EP01 · …") that no episode claims any more.
+ * Two ways they appear: an episode was removed (v1.236 never trashes folders —
+ * one may hold footage), or the booking switched to ID-led names (multi-program
+ * shoot; see episodeLeadUsesId). Footage can still land in them, so the digest
+ * must name them. Report-only — this worker never moves or trashes.
+ */
+export function strayEpisodeFolders(
+  kids: Array<{ id: string; name: string }>,
+  epNames: string[],
+  claimedIds: Iterable<string>,
+): Array<{ id: string; name: string }> {
+  const claimed = new Set(claimedIds)
+  const wanted = new Set(epNames.map(n => n.split(` ${MIDDLE_DOT} `)[0]?.trim()).filter(Boolean))
+  return kids.filter(k => {
+    if (claimed.has(k.id)) return false
+    const lead = k.name.split(` ${MIDDLE_DOT} `)[0]?.trim()
+    return !!lead && /^EP\d{2,}$/.test(lead) && !wanted.has(lead)
+  })
 }
 
 export function isAppShapedName(name: string, code: string): boolean {
@@ -260,7 +281,7 @@ export async function runFolderIntegrity(opts: {
         outletCode: b.outlet.code, showName, category: b.category,
         projectId: b.projectId, projectName: b.projectName, bookingCode: code, jobName,
       })
-      const epNames = b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency }))
+      const epNames = b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) }))
       const cams = camerasToPreCreate(b.cameraCount, b.micCount)
 
       // ── resolve the box, id-first ────────────────────────────────────────
@@ -440,6 +461,9 @@ export async function runFolderIntegrity(opts: {
               base.fixed.epRenamed++
             }
           }
+        }
+        for (const stray of strayEpisodeFolders(boxKids, epNames, epParents)) {
+          base.warnings.push(`${code}: โฟลเดอร์ "${stray.name}" ไม่ตรงกับตอนไหนของใบนี้แล้ว — ถ้าว่างให้ลบ ถ้ามีไฟล์ให้ย้ายเอง (https://drive.google.com/drive/folders/${stray.id})`)
         }
       }
 

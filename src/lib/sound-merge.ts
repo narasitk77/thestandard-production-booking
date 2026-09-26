@@ -17,7 +17,7 @@ import {
   ensureFolderPath, hasDriveCredentials, SOUND_STAGING_DIR, listSoundStagingBookingFolders,
 } from '@/lib/google-drive'
 import {
-  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode, bookingNeedsSound,
+  outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode, bookingNeedsSound,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
@@ -162,7 +162,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
           bookingCode: code, // v1.113.6 — last-resort box match by Production ID
           bookingSubfolderName: layers.bookingSubfolderName,
           bookingSubfolderCode: code,
-          episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
+          episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })),
         })
         if (!resolved.bookingFolderId) { base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, skipped: 'box not found (video not landed yet)' }); continue }
         boxTargetId = resolved.bookingFolderId
@@ -273,7 +273,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
       bookingCode: code, // v1.113.6 — last-resort box match by Production ID
       bookingSubfolderName: layers.bookingSubfolderName,
       bookingSubfolderCode: code,
-      episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })),
+      episodeFolderNames: b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })),
     })
     if (!resolved.bookingFolderId) return { skipped: true, reason: 'ยังไม่พบกล่อง (วิดีโอยังไม่ลง?)', staged: stagingFiles.length, copied: 0, err: 0 }
     boxTargetId = resolved.bookingFolderId

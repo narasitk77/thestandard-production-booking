@@ -27,7 +27,7 @@ import {
   findFoldersByCode, isFootageTreeFolder,
 } from './google-drive'
 import {
-  landingBookingFolderName, buildEpisodeFolderName, camerasToPreCreate,
+  landingBookingFolderName, buildEpisodeFolderName, episodeLeadUsesId, camerasToPreCreate,
   hasOutletFolderMapping, isPhotoAlbumBooking,
 } from './outlet-folders'
 import { rememberDriveLinks } from './drive-links'
@@ -169,7 +169,7 @@ export async function manageLandingFolders(
     base.actions.push(`create landing "${name}" (${b.shootDate.toISOString().slice(0, 10)})`)
     if (!dryRun) {
       try {
-        const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: b.outlet.code === 'AGN' })) : undefined
+        const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })) : undefined
         const lid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
         await rememberDriveLinks(b.id, { landing: lid })
       } catch (e: any) { base.createErrors++; base.actions.push(`  ERROR create: ${e?.message || e}`); continue }
@@ -280,7 +280,7 @@ export async function ensureLandingForBooking(
 
   const name = landingBookingFolderName({ bookingCode: b.bookingCode, projectName: b.projectName, program: b.program, episodes: b.episodes })
   if (dryRun) return { ok: true, dryRun, bookingCode: code, created: name }
-  const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: b.outlet.code === 'AGN' })) : undefined
+  const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })) : undefined
   const fid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
   await rememberDriveLinks(b.id, { landing: fid })
   return { ok: true, dryRun, bookingCode: code, created: name, folderId: fid, url: fid ? `https://drive.google.com/drive/folders/${fid}` : null }

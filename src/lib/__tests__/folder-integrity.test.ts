@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isAppShapedName, landingWindow, groupEpisodeFoldersByLead, buildDailyDigest } from '../folder-integrity'
+import { isAppShapedName, landingWindow, groupEpisodeFoldersByLead, buildDailyDigest, strayEpisodeFolders } from '../folder-integrity'
 
 // The rename guard: only names the APP generates may be re-derived. Anything a
 // human authored keeps its name (a rename of a folder holding footage is not
@@ -114,4 +114,23 @@ test('buildDailyDigest: no audit rows at all (worker idle) still renders', () =>
   const { text, totalFixed } = buildDailyDigest([])
   assert.equal(totalFixed, 0)
   assert.match(text, /ตรวจ 0 รอบ/)
+})
+
+// v1.240 — an EP folder we once wrote that no episode claims any more must be
+// named in the digest (it may hold footage), never silently left behind.
+test('strayEpisodeFolders: unclaimed EPxx folders only; ID-led and crew folders untouched', () => {
+  const kids = [
+    { id: 'a', name: 'EP01 · Decoding The World' },        // leftover after switch to ID-led names
+    { id: 'b', name: 'WLT-MNW-261013-01 · Morning Wealth' }, // wanted + claimed
+    { id: 'c', name: 'CAM-A' },
+    { id: 'd', name: 'EP03 · ตอนที่ถูกลบไปแล้ว' },            // removed episode → stray
+    { id: 'e', name: 'EP02 · ยังอยู่' },                       // wanted + claimed
+    { id: 'f', name: 'Cam A · backup ของพี่ต้น' },
+  ]
+  const epNames = ['WLT-MNW-261013-01 · Morning Wealth', 'EP02 · ยังอยู่']
+  assert.deepEqual(strayEpisodeFolders(kids, epNames, ['b', 'e']).map(k => k.id), ['a', 'd'])
+  // a wanted EP lead that merely hasn't been matched yet is not a stray
+  // …and then EP02 is unclaimed too — whatever the booking no longer names is a stray
+  assert.deepEqual(strayEpisodeFolders(kids, ['EP01 · Decoding The World'], []).map(k => k.id), ['d', 'e'])
+  assert.deepEqual(strayEpisodeFolders([], epNames, []), [])
 })

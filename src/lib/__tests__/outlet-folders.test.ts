@@ -12,7 +12,7 @@ import {
   shootFolderLayers,
   camerasToPreCreate,
   cameraUploadOptions,
-} from '../outlet-folders'
+ episodeLeadUsesId, } from '../outlet-folders'
 
 const DOT = '·' // U+00B7 MIDDLE DOT — the exact separator PMC's Drive uses
 
@@ -201,4 +201,25 @@ test('cameraUploadOptions: never empty (min CAM-A) + AUDIO if mics + always the 
   // it must stay selectable in the upload dropdown for mic bookings.
   assert.deepEqual(cameraUploadOptions(2, 1), ['CAM-A', 'CAM-B', 'AUDIO', 'DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'])
   assert.deepEqual(cameraUploadOptions(0, 1), ['CAM-A', 'AUDIO', 'DRONE', 'SWITCHER', 'PHOTO', 'SCREEN'])
+})
+
+// v1.240 — EP folder lead must be unique INSIDE a booking. Sequence is the
+// per-program ID suffix, so a multi-program shoot day has several "1"s.
+test('episodeLeadUsesId: AGN always; others only when EP<seq> would collide', () => {
+  assert.equal(episodeLeadUsesId('AGN', [{ sequence: 1 }]), true)
+  assert.equal(episodeLeadUsesId('WLT', [{ sequence: 1 }, { sequence: 2 }]), false)
+  assert.equal(episodeLeadUsesId('WLT', [{ sequence: 2 }]), false) // EP02-only booking stays EP02
+  // WLT-MNW-261013-01: Morning Wealth + Interview + Decoding, each program's first
+  assert.equal(episodeLeadUsesId('WLT', [{ sequence: 1 }, { sequence: 1 }, { sequence: 1 }]), true)
+  // EVT-EVT-260805-01: video+photo pairs → (1,1,2,2)
+  assert.equal(episodeLeadUsesId('EVT', [{ sequence: 1 }, { sequence: 1 }, { sequence: 2 }, { sequence: 2 }]), true)
+  assert.equal(episodeLeadUsesId(null, []), false)
+  // and the names it drives are then distinct
+  const eps = [
+    { sequence: 1, episodeId: 'WLT-MNW-261013-01', title: 'Morning Wealth' },
+    { sequence: 1, episodeId: 'WLT-ITV-261013-01', title: 'สัมภาษณ์' },
+  ]
+  const names = eps.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId('WLT', eps) }))
+  assert.equal(new Set(names.map(n => n.split(' · ')[0])).size, 2)
+  assert.deepEqual(names, ['WLT-MNW-261013-01 · Morning Wealth', 'WLT-ITV-261013-01 · สัมภาษณ์'])
 })

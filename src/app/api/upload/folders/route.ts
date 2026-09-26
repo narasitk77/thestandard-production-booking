@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession, canUploadToBooking } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { getDriveParentFolderId } from '@/lib/google-drive'
-import { buildEpisodeFolderName } from '@/lib/outlet-folders'
+import { buildEpisodeFolderName, episodeLeadUsesId } from '@/lib/outlet-folders'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,8 +33,8 @@ export async function GET(request: NextRequest) {
     }
 
     // v1.94 — AGN labels EP folders by project EP ID (matches the Drive folder).
-    const bk = await prisma.booking.findUnique({ where: { id: bookingId }, select: { outlet: { select: { code: true } } } })
-    const isAgency = bk?.outlet.code === 'AGN'
+    const bk = await prisma.booking.findUnique({ where: { id: bookingId }, select: { outlet: { select: { code: true } }, episodes: { select: { sequence: true } } } })
+    const useIdLead = episodeLeadUsesId(bk?.outlet.code, bk?.episodes ?? [])
 
     const rows = await prisma.upload.findMany({
       where: { bookingId, status: 'COMPLETE', driveFileId: { not: null } },
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     // no-episode bookings).
     const byGroup = new Map<string, { label: string; fileId: string; count: number }>()
     for (const r of rows) {
-      const label = r.episode ? `${buildEpisodeFolderName(r.episode, { useEpisodeId: isAgency })} / ${r.camera}` : r.camera
+      const label = r.episode ? `${buildEpisodeFolderName(r.episode, { useEpisodeId: useIdLead })} / ${r.camera}` : r.camera
       const key = `${r.episodeId ?? ''}|${r.camera}`
       const e = byGroup.get(key)
       if (e) e.count++

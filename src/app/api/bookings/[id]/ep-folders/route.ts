@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls } from '@/lib/google-drive'
 
@@ -54,7 +54,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       bookingCode: booking.bookingCode,
       jobName,
     })
-    const epNames = booking.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency }))
+    const epNames = booking.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(booking.outlet.code, booking.episodes) }))
 
     const resolved = await findEpisodeFolderUrls({
       rootFolderId: root,

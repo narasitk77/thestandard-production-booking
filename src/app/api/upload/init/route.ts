@@ -5,7 +5,7 @@ import {
   hasOutletFolderMapping,
   outletDriveFolderName,
   shootFolderLayers,
-  buildEpisodeFolderName,
+  buildEpisodeFolderName, episodeLeadUsesId,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import {
@@ -206,7 +206,7 @@ export async function POST(request: NextRequest) {
     }
     // v1.94 — Content Agency files EP folders by project EP ID; others by EP01.
     const isAgency = booking.outlet.code === 'AGN'
-    const episodeFolderName = selectedEp ? buildEpisodeFolderName(selectedEp, { useEpisodeId: isAgency }) : undefined
+    const episodeFolderName = selectedEp ? buildEpisodeFolderName(selectedEp, { useEpisodeId: episodeLeadUsesId(booking.outlet.code, booking.episodes) }) : undefined
 
     // 4. Compute Drive path.
     //   AGN → <outlet>/<Project ID · name>/<job (AGN-…)>/<EP ID · title>/<camera>/;

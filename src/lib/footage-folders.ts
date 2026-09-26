@@ -1,4 +1,4 @@
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, legacyBookingFolderName, bookingNeedsSound } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName, bookingNeedsSound } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls, findFoldersByCode, listFilesRecursive, findChildFolder, findSoundStagingFolderByCode, SOUND_STAGING_DIR, type DriveFile } from '@/lib/google-drive'
 import { prisma } from '@/lib/db'
@@ -51,7 +51,7 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     jobName,
   })
   const programFolderName = layers.programFolderName
-  const epNames = booking.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency }))
+  const epNames = booking.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(booking.outlet.code, booking.episodes) }))
 
   // v1.111 — for AGN, PREFER the per-booking box named by the AGN booking code
   // (so a booking's footage is found by its own booking ID), and fall back to the

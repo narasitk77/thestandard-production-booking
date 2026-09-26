@@ -299,6 +299,25 @@ export function buildEpisodeFolderName(
   return title ? `${lead} ${MIDDLE_DOT} ${title}` : lead
 }
 
+/**
+ * v1.240 — should this booking's EP folders lead with the episode ID instead of
+ * "EP<seq>"? Always for AGN (project EP ids — unique across the project box).
+ * Otherwise only when "EP<seq>" would NOT be unique inside this booking: a
+ * multi-program shoot day gets sequence 1 for EACH program (sequence is the
+ * per-program ID suffix — 22 single-episode bookings are EP02+ by design), so
+ * three episodes all want "EP01". Seen live: folder-integrity renamed the one
+ * EP01 folder between three titles every hour (WLT-MNW-261013-01), and
+ * EVT-EVT-260805-01's four episodes were filed into two folders. Uniqueness
+ * has to come from the name, not the number.
+ */
+export function episodeLeadUsesId(
+  outletCode: string | null | undefined,
+  episodes: Array<{ sequence: number }>,
+): boolean {
+  if (outletCode === 'AGN') return true
+  return new Set(episodes.map(e => e.sequence)).size < episodes.length
+}
+
 /** Episode Type code for a Photo Album shoot (the "A" picker option). */
 export const PHOTO_ALBUM_EPISODE_CODE = 'A'
 

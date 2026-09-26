@@ -11,7 +11,7 @@ import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { getToken } from 'next-auth/jwt'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
 import { ensureShootCameraFolders, ensurePhotoAlbumFolder, ensureSoundStagingFolder, upsertTextFile, hasDriveCredentials } from '@/lib/google-drive'
-import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, buildBookingFolderName, landingBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound, soundStagingCategoryName } from '@/lib/outlet-folders'
+import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, landingBookingFolderName, camerasToPreCreate, isPhotoAlbumBooking, bookingNeedsSound, soundStagingCategoryName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 // v1.114 — id-first Drive linkage: remember created folder IDs on the booking.
@@ -168,7 +168,7 @@ export async function POST(
           // merge: pr-15 was written against the 1-arg era.
           cameras: camerasToPreCreate(updated.cameraCount, updated.micCount),
           // v1.93 — one folder per episode; empty for no-episode bookings.
-          episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: isAgency })) : undefined,
+          episodeFolderNames: updated.episodes.length ? updated.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(updated.outlet.code, updated.episodes) })) : undefined,
         })
         await rememberDriveLinks(updated.id, { box: bookingFolderId })
         // Drive Box ID → Bookings tab col AI (id-first spine for PMDC's

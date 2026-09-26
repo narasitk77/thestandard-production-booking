@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
 import { uploadToDrive as driveUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
-import { cameraUploadOptions } from '@/lib/outlet-folders'
+import { cameraUploadOptions, buildEpisodeFolderName, episodeLeadUsesId } from '@/lib/outlet-folders'
 
 interface BookingContext {
   id: string
@@ -137,13 +137,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   // shown as a picker when the shoot records more than one EP.
   const episodes = booking.episodes ?? []
   const [episodeRowId, setEpisodeRowId] = useState(episodes[0]?.id ?? '')
-  // v1.94 — Content Agency labels EPs by their project EP ID (matches the Drive
-  // folder, e.g. "PP-26-008-L04"); every other outlet uses the running EP01.
-  const isAgency = booking.outlet.code === 'AGN'
-  const epLabel = (ep: { episodeId: string; title: string; sequence: number }) => {
-    const lead = isAgency && ep.episodeId ? ep.episodeId : `EP${String(ep.sequence).padStart(2, '0')}`
-    return ep.title ? `${lead} · ${ep.title}` : lead
-  }
+  // v1.240 — the label IS the Drive folder name: one rule, shared with the
+  // server. (A hand copy here drifted the moment the rule grew a second case.)
+  const useIdLead = episodeLeadUsesId(booking.outlet.code, episodes)
+  const isAgency = booking.outlet.code === 'AGN' // still drives the AGN path-shape preview below
+  const epLabel = (ep: { episodeId: string; title: string; sequence: number }) =>
+    buildEpisodeFolderName(ep, { useEpisodeId: useIdLead })
   // (no top-level error banner — per-queue-item errors render inline below)
   const [history, setHistory] = useState<UploadItem[]>([])
   // v1.126 — the history table used to render every row ("ยาวเป็นพรืด" on a
