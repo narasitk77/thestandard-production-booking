@@ -117,6 +117,43 @@ supervisor หยุดปลุก เหลือ 2 บรรทัดต่�
 `supervisor: worker exited` เคยเป็นขยะล้วน (SKIP ถูกต้อง) พอลูปรอดการแครชแล้วมัน
 กลายเป็นสัญญาณสำคัญ · ตัวกรองที่เคยถูกจึงกลายเป็นตัวปิดหูได้ ต้องรื้อคู่กับโค้ดเสมอ
 
+### 2.0.3 ✅ แก้แล้วที่ v1.238 รอบสอง (`b33c816`, `e3db0f4`) — hermes watchdog: ไฟล์ในรีโปกับตัวที่ cron รันจริงเคยแยกกันเดิน
+
+รีโปเก็บเวอร์ชัน 2026-08-20 ของ `scripts/hermes/probook-worker-check.py` ส่วนตัวที่ cron รันจริงที่
+`~/.hermes/scripts/` เป็น 2026-09-10 ต่างกัน 38 บรรทัด — ของที่หายไปจากรีโปคือ `self_fail()` /
+`_SELF_FAIL` ซึ่งเป็นฟิกซ์ของเคส "รอบเที่ยงตอบ 401 ติดกัน 13 วันโดยไม่มีใครรู้" (สคริปต์ exit 0
+เสมอ Hermes จึงนับ failure_streak = 0 ตลอด) **commit ก่อนหน้าที่แก้ `SKIP_RE` ในไฟล์รีโปจึงไม่มีผล
+อะไรเลย เพราะ cron ไม่ได้รันไฟล์นั้น** — `b33c816` ดึงของจริงเข้ารีโปก่อน แล้ว `e3db0f4` แก้ทับ:
+
+- เติม `(code N)` กลับเข้า `SKIP_RE`/`BAD_RE`
+- `echo`/`sleep` ใน `supervise()` (`start.sh`) ที่เป็นคำสั่งเปล่าใต้ `set -e` — คลาสเดียวกับที่ฆ่า
+  supervisor เงียบ ๆ ได้ (พิสูจน์บน busybox ash) → กันด้วย `|| true`
+- `APP_ROLE=worker` ที่ปิด worker หมด: จากพิมพ์ครั้งเดียวตอนบูตแล้วเงียบ → ย้ำ **FATAL ทุกชั่วโมง**
+- `scripts/hermes/README.md`: เพิ่มกฎอ่าน log ชุดใหม่ + คำเตือนว่าไฟล์รีโปกับของจริงเคยแยกกันเดิน
+  มาแล้วสองครั้ง ต้องดึงของจริงเข้ามาก่อนแก้ทับเสมอ
+
+ติดตั้งกลับ `~/.hermes` แล้วรันมือหนึ่งรอบตอน `e3db0f4` (`worker-check.json` เขียนจริง
+`appDownStreak=0` `neverTicked={}`) เทส 943/943 · ดูข้อ 4.3 สำหรับตำแหน่งสคริปต์จริง
+
+### 2.0.4 ✅ แก้แล้วที่ `02163d8` (26 ก.ย. 2026) — `self_fail()` เป็นโค้ดตายจริง 2 ใน 3 เคส
+
+`b33c816` เพิ่ม `self_fail()` เพื่อให้ Hermes นับ failure streak เมื่อ "เราเองเช็กไม่สำเร็จ" แต่
+`main()` มี bare `return` 2 จุดที่ตัดจบก่อนถึง `sys.exit(1 if _SELF_FAIL else 0)` ท้ายฟังก์ชัน:
+
+- path `net_down()`: เรียก `self_fail()` แล้ว `return` → exit 0 เสมอ (โค้ดตาย)
+- path prod ไม่ตอบเลย (เคสร้ายแรงสุด): **ไม่เรียก `self_fail()` เลยด้วยซ้ำ** แล้ว `return` → exit 0 เสมอ
+
+ผลคือฟีเจอร์ทำงานจริงแค่เคส 401 footage-ready stats (1 ใน 3) — house bug class
+"ทางลัดที่โกหก" ตรงตัว (ดูข้อ 6.3/6.4) แก้เป็น `sys.exit(1 if _SELF_FAIL else 0)` ทั้งสองจุด
++ เพิ่ม `self_fail("prod not responding")` ให้เคส prod-ไม่ตอบ
+
+ตรวจ 3 ชั้นก่อน commit: mock-test ทั้ง 2 path → exit 1 จริง · regression 3 path เดิม (healthy
+เงียบ, 401 footage-ready, worker ค้างแบบไม่ใช่ self_fail) ไม่กระทบ · `npm test` 943/943
+(`npm run build` fail เป็น pre-existing — ไม่มี local Postgres ในเครื่องที่ตรวจ ไม่เกี่ยวกับ diff นี้
+พิสูจน์ด้วยการ stash diff เทียบ 2 รอบอิสระ) ติดตั้งเข้า `~/.hermes/scripts/` แล้ว
+**26 ก.ย. 2026 21:52** (md5 ตรงกับ repo ก่อนทับ) รันมือหนึ่งรอบจริง → exit 0, state เขียนจริง
+`appDownStreak=0`
+
 ### 2.1 🔴 `footage-sheet-sync` ปิดอยู่มา 83 วัน
 
 ```
