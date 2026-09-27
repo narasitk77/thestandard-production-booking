@@ -106,3 +106,14 @@ test('ไม่มีใบใกล้ถ่าย = หัวเรื่อ�
   const { subject } = buildQuReminderEmail([row({ shootDate: day(30) })], NOW, 'https://x')
   assert.ok(!subject.includes('ด่วน'), subject)
 })
+
+// v1.241 — คำสัญญาไม่ใช่เลข: ค่าที่ไม่มีตัวเลขเลยต้องนับว่ายังไม่มี QU (พรอดมี 8 ใบแบบนี้ที่ไม่เคยถูกเตือน)
+test('needsRealQuRef: free-text placeholders without any digit are still "no QU"', () => {
+  for (const v of ['รอ AE แจ้งค่ะ', 'รอ AE แจ้งอีกทีค่า', 'รอ PM', 'รอเออี', '-', 'TBC']) {
+    assert.equal(needsRealQuRef(v), true, v)
+  }
+  // real numbers in every shape the DB actually holds stay accepted
+  for (const v of ['QU-4641/1', 'QU-4308-V3', 'QU-4345, QU-4406', '\tQU-4169-V6', 'QU4609']) {
+    assert.equal(needsRealQuRef(v), false, v)
+  }
+})

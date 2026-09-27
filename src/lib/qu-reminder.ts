@@ -17,6 +17,11 @@ const DAY = 86_400_000
 export function needsRealQuRef(agencyRef: string | null | undefined): boolean {
   const v = (agencyRef || '').trim()
   if (v === '') return true
+  // v1.241 — ข้อความที่ไม่มีตัวเลขเลยคือคำสัญญา ไม่ใช่เลข: พรอดมี "รอ AE แจ้งค่ะ" ×5,
+  // "รอ AE แจ้งอีกทีค่า", "รอ PM", "รอเออี" (8 ใบ ADVERTORIAL ถ่ายจบแล้วทั้งหมด) ที่ผ่าน
+  // ตัวตรวจนี้มาได้เพราะไม่ใช่ค่าว่าง/1234/TBC จึงไม่เคยถูกเตือนสักครั้ง
+  // เลขจริงทุกรูปแบบในระบบ (QU-4641/1, QU-4308-V3, "QU-4345, QU-4406") มีตัวเลขเสมอ
+  if (!/\d/.test(v)) return true
   return isQuPending(v)
 }
 
