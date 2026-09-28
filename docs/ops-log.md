@@ -5,6 +5,22 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-09-28 · v1.245 — คิวมิกซ์ขึ้นปฏิทิน Google **แยก** (ปฏิทินทดสอบ)
+
+นัทสั่ง "ยิง google calendar เป็นอันแยก ไม่ปนกับ probook เดิม · ทดสอบก่อน"
+
+1. สร้างปฏิทิน "Probook · คิวมิกซ์เสียง (ทดสอบ)" ด้วย service account (DWD เป็น narasit.k@) ·
+   **ยังไม่แชร์ใคร** · เทียบแล้วไม่ใช่ id ของปฏิทินคิวถ่าย
+2. deploy `sha-9ea5ac0` ด้วย `deploy.py --set MIX_CALENDAR_ID=<ปฏิทินทดสอบ>` (ค่าเดิม = ไม่มี จดใน
+   deploy-state.json) · backup ก่อน deploy ขึ้นไดรฟ์แล้ว · env ถึง container แล้ว
+3. `/api/internal/mix-calendar/sync` dry-run → preflight อ่านชื่อปฏิทินได้ · แผน create 2
+4. รันจริง → MIX-001, MIX-002 ขึ้นในปฏิทินมิกซ์ (งานทั้งวัน · ไม่มีแขก · transparent) ·
+   **ปฏิทินคิวถ่ายไม่มี event MIX เลย** (ค้น `MIX-` -90..+200 วัน = 0)
+5. ทดสอบกันซ้ำ: รันซ้ำ = update 2 · ล้าง `calendarEventId` ของ MIX-001 (แถวทดสอบ) แล้วรัน →
+   แผน create → Google 409 → patch ตัวเดิม · ยังมี 2 event · แถว DB ได้ id เดิมกลับมา
+
+ย้อน: ล้าง `MIX_CALENDAR_ID` บน stack = ปิด (event ที่มีอยู่ค้างในปฏิทินทดสอบ ลบทั้งปฏิทินได้)
+
 ## 2026-09-28 · v1.242 — แก้ว (TSS Co-Producer) ออกจากทีม · มี runbook + เครื่องมือ offboarding แล้ว
 
 นัทแจ้งว่าแก้วออก และสั่งให้ "กำหนดวิธีจัดการเมื่อมีคนออกไว้" · ตัดสินให้แพรดูแล TSS
