@@ -292,9 +292,23 @@ export async function createBookingFromPayload(
     agencyRefFinal = normalizeQuRef(ref)
   }
 
-  // v1.183 — Co-Producer ประจำ outlet (คำสั่ง operator 2026-08-20: งาน TSS ทุกใบ
-  // ต้องมีแก้วเป็น Co-Producer ในคิว). เติมให้เฉพาะตอนช่องว่างจริง — ถ้าคนจอง
-  // เลือกไว้แล้ว ระบบไม่แตะ. ปิดสวิตช์: AUTO_COPRODUCER=0
+  // v1.183 — Co-Producer ประจำ outlet (เดิม: งาน TSS ทุกใบต้องมีแก้ว — ถอดออก v1.242
+  // เมื่อเธอออกจากทีม ดู docs/runbook-offboarding.md). เติมให้เฉพาะตอนช่องว่างจริง —
+  // ถ้าคนจองเลือกไว้แล้ว ระบบไม่แตะ. ปิดสวิตช์: AUTO_COPRODUCER=0
+  // v1.243 — บัญชีที่ปิดแล้ว (ออกจากทีม) ต้องไม่กลับเข้าใบใหม่: BookingWizard เก็บ
+  // coProducerSel ไว้ในร่างบน localStorage แล้วส่งค่าดิบขึ้นมา ร่างที่ค้างของคนอื่นจึง
+  // ยัดอีเมลคนที่ออกแล้วกลับมาได้ → ปฏิทินเชิญคนที่ไม่อยู่ตอนอนุมัติ · ล้มดัง ๆ ให้เลือกใหม่
+  // ไม่ใช่เงียบ ๆ ทิ้งค่า (docs/runbook-offboarding.md)
+  const peopleOnForm = [producerEmail, coProducerEmail]
+    .filter((e): e is string => typeof e === 'string' && e.includes('@'))
+    .map(e => e.trim().toLowerCase())
+  if (peopleOnForm.length) {
+    const gone = await prisma.user.findMany({ where: { email: { in: peopleOnForm }, active: false }, select: { email: true } })
+    if (gone.length) {
+      return fail(400, `${gone.map(u => u.email).join(', ')} ไม่ได้อยู่ในทีมแล้ว — เลือก Producer/Co-Producer ใหม่จากรายชื่อ (ถ้าฟอร์มดึงร่างเก่าขึ้นมา ให้ล้างร่างแล้วกรอกใหม่)`)
+    }
+  }
+
   const coPro = applyDefaultCoProducer({
     outletCode,
     coProducer,

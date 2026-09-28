@@ -28,6 +28,11 @@ DB_CONTAINER = 'production-booking-db'
 ENV_PATH = '/Users/narasit/.hermes/scripts/probook.env'
 FUTURE = ('"deletedAt" IS NULL AND status::text NOT IN (\'CANCELLED\',\'COMPLETED\') '
           'AND "shootDate" >= (now() AT TIME ZONE \'Asia/Bangkok\')::date')
+# Producer กว้างกว่า Co-Producer: footage-ready (ถ่ายไม่เกิน 3 วัน) และคำเชิญรีวิวหลังถ่าย
+# (หน้าต่าง [วันนี้-8, วันนี้-1]) ยังอ่าน producerEmail ของใบ COMPLETED ที่เพิ่งถ่าย — ใบพวกนั้น
+# ยังไม่ใช่ "ประวัติ" งานยังส่งไม่จบ · ใช้หน้าต่างกว้างสุด = 8 วัน
+PRODUCER_SCOPE = (f'(({FUTURE}) OR ("deletedAt" IS NULL AND status::text = \'COMPLETED\' '
+                  f'AND "shootDate" >= (now() AT TIME ZONE \'Asia/Bangkok\')::date - 8))')
 
 # ── Portainer exec (ท่าเดียวกับ deploy.py — คัดลอกมา ไม่ import เพราะ deploy.py รัน side effect ตอน import) ──
 def env_file(path=ENV_PATH):
@@ -63,27 +68,39 @@ WITH e AS (SELECT lower(:'leaver')::text AS v),
  fut AS (SELECT * FROM bookings WHERE {FUTURE})
 SELECT 'users.active' k, count(*)::text n FROM users, e WHERE lower(email)=e.v AND active
 UNION ALL SELECT 'team_members.active', count(*)::text FROM team_members, e WHERE lower(email)=e.v AND active
-UNION ALL SELECT 'future.producerEmail', count(*)::text FROM fut, e WHERE lower("producerEmail")=e.v
+UNION ALL SELECT 'future.producerEmail', count(*)::text FROM bookings, e WHERE {PRODUCER_SCOPE} AND lower("producerEmail")=e.v
 UNION ALL SELECT 'future.coProducerEmail', count(*)::text FROM fut, e WHERE lower("coProducerEmail")=e.v
 UNION ALL SELECT 'future.coProducerEmail.withEvent', count(*)::text FROM fut, e WHERE lower("coProducerEmail")=e.v AND "calendarEventId" IS NOT NULL
 UNION ALL SELECT 'future.crewOrDirector', count(*)::text FROM fut, e WHERE e.v = ANY("assignedEmails") OR e.v IN (lower("directorEmail"),lower("director2Email"),lower("director3Email"),lower("mainVideographerEmail"))
 UNION ALL SELECT 'history.createdByEmail', count(*)::text FROM bookings, e WHERE lower("createdByEmail")=e.v
 UNION ALL SELECT 'history.pastBookings', count(*)::text FROM bookings, e WHERE "deletedAt" IS NULL AND NOT ({FUTURE.replace('"deletedAt" IS NULL AND ', '')}) AND e.v IN (lower("producerEmail"),lower("coProducerEmail"))
-UNION ALL SELECT 'ot_records', count(*)::text FROM ot_records, e WHERE e.v IN (lower("userEmail"),lower(coalesce("approvedByEmail",'')))
+UNION ALL SELECT 'ot.open', count(*)::text FROM ot_records, e WHERE lower("userEmail")=e.v AND "approvalStatus"::text IN ('DRAFT','SUBMITTED','REJECTED')
 UNION ALL SELECT 'shoot_review_invites.open', count(*)::text FROM shoot_review_invites, e WHERE lower(email)=e.v AND "submittedAt" IS NULL
 UNION ALL SELECT 'feedback_tickets.open', count(*)::text FROM feedback_tickets, e WHERE lower("reporterEmail")=e.v AND status::text<>'RESOLVED'
 UNION ALL SELECT 'mix_jobs', count(*)::text FROM mix_jobs, e WHERE e.v IN (lower(coalesce("assigneeEmail",'')),lower(coalesce("requesterEmail",'')))
 UNION ALL SELECT 'switcher_jobs', count(*)::text FROM switcher_jobs, e WHERE e.v IN (lower(coalesce("switcherEmail",'')),lower(coalesce("requestedBy",'')))
-UNION ALL SELECT 'purchase_batches', count(*)::text FROM purchase_batches, e WHERE lower(coalesce("ownerEmail",''))=e.v
-UNION ALL SELECT 'equipment_loans', count(*)::text FROM equipment_loans, e WHERE lower(coalesce(email,''))=e.v;
+UNION ALL SELECT 'purchase.open', count(*)::text FROM purchase_batches, e WHERE lower(coalesce("ownerEmail",''))=e.v AND status::text IN ('DRAFT','SUBMITTED','REJECTED')
+UNION ALL SELECT 'loans.open', count(*)::text FROM equipment_loans, e WHERE lower(coalesce(email,''))=e.v AND status::text <> 'RETURNED'
+UNION ALL SELECT 'footageReady.willEmail', count(*)::text FROM bookings, e WHERE "deletedAt" IS NULL AND status::text IN ('CONFIRMED','COMPLETED') AND "readyNotifiedAt" IS NULL
+        AND "shootDate" >= (now() AT TIME ZONE 'Asia/Bangkok')::date - 3 AND (lower("createdByEmail")=e.v OR lower("producerEmail")=e.v OR e.v = ANY("assignedEmails"));
 """
 
 FUTURE_LIST_SQL = f"""
-SELECT b."bookingCode", b.status::text, b."shootDate"::text,
-       CASE WHEN lower(b."producerEmail")=lower(:'leaver') THEN 'producer' ELSE 'coProducer' END AS role,
+SELECT b."bookingCode", b.status::text, b."shootDate"::text, 'coProducer' AS role,
        coalesce(b.producer,''), coalesce(b."coProducer",''), (b."calendarEventId" IS NOT NULL)::text
-FROM bookings b WHERE {FUTURE} AND lower(:'leaver') IN (lower(b."producerEmail"), lower(b."coProducerEmail"))
-ORDER BY b."shootDate";
+FROM bookings b WHERE {FUTURE} AND lower(b."coProducerEmail")=lower(:'leaver')
+UNION ALL
+SELECT b."bookingCode", b.status::text, b."shootDate"::text, 'producer',
+       coalesce(b.producer,''), coalesce(b."coProducer",''), (b."calendarEventId" IS NOT NULL)::text
+FROM bookings b WHERE {PRODUCER_SCOPE} AND lower(b."producerEmail")=lower(:'leaver')
+ORDER BY 3;
+"""
+
+FOOTAGE_LIST_SQL = f"""
+SELECT "bookingCode" FROM bookings WHERE "deletedAt" IS NULL AND status::text IN ('CONFIRMED','COMPLETED') AND "readyNotifiedAt" IS NULL
+  AND "shootDate" >= (now() AT TIME ZONE 'Asia/Bangkok')::date - 3
+  AND (lower("createdByEmail")=lower(:'leaver') OR lower("producerEmail")=lower(:'leaver') OR lower(:'leaver') = ANY("assignedEmails"))
+ORDER BY "shootDate";
 """
 
 TO_INFO_SQL = """
@@ -94,7 +111,7 @@ UNION ALL SELECT 'nick.coProducer', d.c, '', '' FROM (SELECT DISTINCT "coProduce
 
 OUTLETS_OF_FUTURE_SQL = f"""
 SELECT DISTINCT o.code FROM bookings b JOIN outlets o ON o.id=b."outletId"
-WHERE {FUTURE} AND lower(:'leaver') IN (lower(b."producerEmail"), lower(b."coProducerEmail"));
+WHERE (({FUTURE}) AND lower(b."coProducerEmail")=lower(:'leaver')) OR (({PRODUCER_SCOPE}) AND lower(b."producerEmail")=lower(:'leaver'));
 """
 
 def build_transaction(mode: str, transfer_producer: bool) -> str:
@@ -122,7 +139,7 @@ FROM tgt RETURNING 'coProducer→' || coalesce(nullif(:'to',''),'NULL') AS what,
         parts.append(f"""
 WITH tgt AS (
   SELECT id, "bookingCode", producer, "producerEmail", "adminNotes" FROM bookings
-  WHERE {FUTURE} AND lower("producerEmail")=lower(:'leaver') FOR UPDATE),
+  WHERE {PRODUCER_SCOPE} AND lower("producerEmail")=lower(:'leaver') FOR UPDATE),
 upd AS (
   UPDATE bookings b SET producer=:'nick', "producerEmail"=:'to',
          "adminNotes"=concat_ws(E'\\n', b."adminNotes", :'note'), "updatedAt"=now()
@@ -149,11 +166,23 @@ FROM upd RETURNING '{table}.active→false' AS what, "entityId";""")
 
 POSTCHECK_SQL = f"""
 SELECT 'future.leaver.coProducer', count(*)::text FROM bookings WHERE {FUTURE} AND lower("coProducerEmail")=lower(:'leaver')
-UNION ALL SELECT 'future.leaver.producer', count(*)::text FROM bookings WHERE {FUTURE} AND lower("producerEmail")=lower(:'leaver')
+UNION ALL SELECT 'future.leaver.producer', count(*)::text FROM bookings WHERE {PRODUCER_SCOPE} AND lower("producerEmail")=lower(:'leaver')
 UNION ALL SELECT 'audit.run', count(*)::text FROM audit_logs WHERE changes->>'offboardRun' = :'run_id'
 UNION ALL SELECT 'users.active', count(*)::text FROM users WHERE lower(email)=lower(:'leaver') AND active
 UNION ALL SELECT 'team_members.active', count(*)::text FROM team_members WHERE lower(email)=lower(:'leaver') AND active;
 """
+
+VERIFY_SQL = f"""
+SELECT 'users.active' k, count(*)::text n FROM users WHERE lower(email)=lower(:'leaver') AND active
+UNION ALL SELECT 'team_members.active', count(*)::text FROM team_members WHERE lower(email)=lower(:'leaver') AND active
+UNION ALL SELECT 'future.coProducer', count(*)::text FROM bookings WHERE {FUTURE} AND lower("coProducerEmail")=lower(:'leaver')
+UNION ALL SELECT 'recent.producer', count(*)::text FROM bookings WHERE {PRODUCER_SCOPE} AND lower("producerEmail")=lower(:'leaver')
+UNION ALL SELECT 'future.crewOrDirector', count(*)::text FROM bookings WHERE {FUTURE} AND (lower(:'leaver') = ANY("assignedEmails") OR lower(:'leaver') IN (lower("directorEmail"),lower("director2Email"),lower("director3Email"),lower("mainVideographerEmail")))
+UNION ALL SELECT 'ot.open', count(*)::text FROM ot_records WHERE lower("userEmail")=lower(:'leaver') AND "approvalStatus"::text IN ('DRAFT','SUBMITTED','REJECTED')
+UNION ALL SELECT 'loans.open', count(*)::text FROM equipment_loans WHERE lower(coalesce(email,''))=lower(:'leaver') AND status::text <> 'RETURNED'
+UNION ALL SELECT 'qu.pending.asProducer (ประวัติ — ต้องมีคนตามแทน)', count(*)::text FROM bookings WHERE "deletedAt" IS NULL AND status::text <> 'CANCELLED' AND category::text='ADVERTORIAL' AND lower("producerEmail")=lower(:'leaver') AND (coalesce("agencyRef",'') = '' OR "agencyRef" !~ '[0-9]' OR upper("agencyRef") ~ 'TBC' OR "agencyRef" IN ('1234','QU1234'));
+"""
+VERIFY_MUST_BE_ZERO = {'users.active', 'team_members.active', 'future.coProducer', 'recent.producer', 'future.crewOrDirector', 'ot.open', 'loans.open'}
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 def rows(output: str):
@@ -182,6 +211,7 @@ def selftest():
         assert '@' not in s and 'แก้ว' not in s, 'ค่าคนต้องเข้าทาง -v เท่านั้น ห้ามฝังใน SQL'
         assert s.count("gen_random_uuid()::text") >= 3 and "'booking.update'" in s and "'user.deactivate'" in s
     assert 'producerEmail"=:' in build_transaction('apply', True) and 'producerEmail"=:' not in build_transaction('apply', False)
+    assert "::date - 8" in build_transaction('apply', True), 'Producer scope must cover the 8-day post-shoot window (review invites)'
     # guard logic
     assert guard_reason(to=None, nick=None, fp={'future.producerEmail': '1'}, to_info=None, future_outlets=[]) is not None, 'ไม่มี --to แต่มีใบที่เป็น Producer → ต้องปฏิเสธ'
     assert guard_reason(to=None, nick=None, fp={'future.producerEmail': '0'}, to_info=None, future_outlets=[]) is None
@@ -213,10 +243,19 @@ def main():
     ap.add_argument('--leaver'); ap.add_argument('--to'); ap.add_argument('--nick')
     ap.add_argument('--note'); ap.add_argument('--actor'); ap.add_argument('--apply', action='store_true')
     ap.add_argument('--selftest', action='store_true')
+    ap.add_argument('--verify', action='store_true', help='ตรวจว่าครบสำหรับ --leaver (อ่านอย่างเดียว ไม่ต้องมี --actor)')
     a = ap.parse_args()
     if a.selftest: selftest()
     if not a.leaver: ap.error('--leaver จำเป็น')
     env = env_file()
+    if a.verify:
+        leaver = a.leaver.strip().lower()
+        code, out = psql(env, VERIFY_SQL, {'leaver': leaver})
+        if code != 0: fail(f'verify SQL ล้ม:\n{out}', 1)
+        pc = kv(out); bad = [k for k, v in pc.items() if k in VERIFY_MUST_BE_ZERO and v != '0']
+        print(f'verify {leaver}:'); [print(f'  {k:34s} {v}') for k, v in pc.items()]
+        if bad: fail(f'ยังไม่ครบ: {", ".join(bad)} — ดู docs/runbook-offboarding.md', 1)
+        print('\n✅ ไม่มีอะไรค้างในบทบาทที่โอน (ปฏิทิน/แชตอยู่นอก DB — ตรวจตามขั้น 3 ของ runbook)'); sys.exit(0)
     actor = a.actor or env.get('OPERATOR_EMAIL') or fail('ไม่รู้ว่าใครสั่ง — ใส่ --actor EMAIL (ลง audit ทุกแถว)')
     leaver = a.leaver.strip().lower()
     to = a.to.strip().lower() if a.to else None
@@ -253,6 +292,7 @@ def main():
         print('\nไม่มีอะไรให้ทำ — ไม่มีใบอนาคตและบัญชีปิดอยู่แล้ว'); sys.exit(0)
 
     # 3. transaction (ชุดเดียวกันทั้งสองโหมด)
+    started_utc = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
     sql = build_transaction(mode, transfer_producer=bool(to))
     variables = {'leaver': leaver, 'to': to or '', 'nick': nick or '', 'note': note, 'actor': actor, 'run_id': run_id}
     code, out = psql(env, sql, variables)
@@ -275,18 +315,28 @@ def main():
         print('\n✅ เขียนครบและอ่านกลับตรง')
     else:
         print('\n(dry-run) ทุกอย่างถูก ROLLBACK · รันซ้ำด้วย --apply ถ้าตัวเลขข้างบนถูก')
+        print('  หมายเหตุ: ใบที่ถ่ายวันนี้อาจพลิกเป็น COMPLETED ระหว่าง dry-run กับ apply (auto-complete) — จำนวนแถวต่างกันได้ 1–2 ใบ')
 
     # 5. checklist สิ่งที่คนต้องทำต่อ (ตัวเลขจากรอยเท้าจริง)
     print('\nต้องทำต่อเอง:')
     n_ev = int(fp.get('future.coProducerEmail.withEvent', '0'))
-    if n_ev or to: print(f'  [ปฏิทิน] reconciler รอบ 10 นาทีจะถอด/เพิ่มแขกให้ {n_ev} event เอง · ห้ามแก้แขกมือ · คำบรรยาย "Producer/Co-Producer:" ใน event ไม่ตาม (เขียนใหม่เมื่อมีคนแก้ใบ หรือ /api/admin/calendar-refresh)')
+    if n_ev or to:
+        print(f'  [ปฏิทิน] reconciler รอบถัดไป (<=10 นาที) จะถอด/เพิ่มแขกให้ {n_ev} event เอง · ห้ามแก้แขกมือ')
+        print('           รอบที่กำลังวิ่งตอน apply จะประทับ calendarSyncStatus=OK ด้วยลิสต์แขกเก่า — อย่าใช้คอลัมน์นั้นตัดสิน ตรวจด้วย:')
+        print(f"           SELECT count(*) FROM audit_logs WHERE action='calendar.reconcile_patched' AND at > '{started_utc}' AND changes::text LIKE '%{leaver}%';   -- ต้องได้ {n_ev}")
+        print('           คำบรรยาย "Producer/Co-Producer:" ใน event ไม่ตาม (calendar-refresh เขียนใหม่เฉพาะ event ที่ชื่อเรื่องเปลี่ยน) — ค้างจนกว่ามีคน PATCH ใบ')
+    n_fr = int(fp.get('footageReady.willEmail', '0'))
+    if n_fr:
+        _, out_fr = psql(env, FOOTAGE_LIST_SQL, {'leaver': leaver})
+        codes = [r[0] for r in rows(out_fr) if r and r[0] != 'bookingCode']
+        print(f'  [footage-ready] จะยิงเมล "ฟุตเทจพร้อม" หาเขา {n_fr} ใบ (createdBy/producer/ทีม ที่ถ่ายไม่เกิน 3 วันและยังไม่แจ้ง) แล้วตีกลับ — ยอมรับได้: {", ".join(codes)}')
     if int(fp.get('future.crewOrDirector', '0')): print(f'  [UI] ใบอนาคตที่เขาอยู่ในทีม/ผู้กำกับ {fp["future.crewOrDirector"]} ใบ → แก้ที่ /admin/<id> (route นั้น patch แขกปฏิทินให้ในคำขอเดียว)')
     if to: print(f'  [ชีท] Producer Dashboard › Bookings คอลัมน์ PD / PD Email ของใบที่โอน Producer — แอปไม่ซิงก์ช่องนี้ (updateBookingRow ไม่มีฟิลด์)')
     print('  [ชีท] Producer Dashboard › _Users — ถ้ามีแถวของเขา ให้ลบ (dropdown ฟอร์ม AGN อ่านแท็บนี้ ไม่มีช่อง active)')
     print(f'  [โค้ด] grep -rn "{leaver.split("@")[0]}" src scripts docs — ถ้าอยู่ใน BUILT_IN_DEFAULT_COPRODUCERS / vp-assign / shared-mailboxes ต้องถอด + deploy (users.active ไม่หยุดกฎเหล่านั้น)')
     print('  [นอกแอป] HR/IT ระงับบัญชี Workspace · ถ้าเขาคือ impersonate subject → docs/runbook-impersonate-swap.md ก่อน · บันทึก docs/ops-log.md')
-    if int(fp.get('ot_records', '0')) or int(fp.get('purchase_batches', '0')) or int(fp.get('equipment_loans', '0')):
-        print(f'  [ค้าง] OT {fp.get("ot_records")} · purchase {fp.get("purchase_batches")} · ยืมของ {fp.get("equipment_loans")} — ตรวจว่ามีเงิน/ของค้างไหมก่อนบัญชีถูกลบ')
+    if int(fp.get('ot.open', '0')) or int(fp.get('purchase.open', '0')) or int(fp.get('loans.open', '0')):
+        print(f'  [ค้าง] OT ยังไม่อนุมัติ {fp.get("ot.open")} · purchase ยังไม่ปิด {fp.get("purchase.open")} · ยืมของยังไม่คืน {fp.get("loans.open")} — หลังปิดบัญชี รายการพวกนี้หายจากมุมมองปกติ (/ot/admin ต้องติ๊กแสดง disabled) จัดการก่อนบัญชี Workspace ถูกลบ')
 
 if __name__ == '__main__':
     main()

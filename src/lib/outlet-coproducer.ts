@@ -2,7 +2,8 @@
  * v1.183 — Co-Producer ประจำ outlet ที่ระบบเติมให้เอง
  *
  * v1.242 (28 ก.ย. 2569) — แก้วออกจากทีม operator ให้แพรดูแล TSS คนเดียว ตารางค่าตั้งต้น
- * จึงว่าง กลไกยังอยู่ครบ (เปิดผ่าน env AUTO_COPRODUCER_<CODE> หรือเติมตาราง) — ดู
+ * จึงว่าง กลไกยังอยู่ครบ — บนพรอดเปิดกลับได้ทางเดียวคือเติมตารางนี้แล้ว deploy (compose ส่งแค่
+ * สวิตช์รวม AUTO_COPRODUCER ไม่ส่ง AUTO_COPRODUCER_<CODE> → ค่านั้นไม่ถึง container) — ดู
  * docs/runbook-offboarding.md ว่าทำไมคนที่ออกต้องถูกถอดจาก "กฎ" ที่นี่ ไม่ใช่แค่ปิด active
  *
  * คำสั่ง operator (2026-08-20): "งานของ TSS ทุกงานหลังจากนี้ ให้ยิงแก้ว co-po TSS
@@ -18,7 +19,8 @@
  * ให้ จะกลายเป็นว่าจองงาน TSS โดยไม่มี Producer เลยก็ผ่าน
  *
  * Kill switch: AUTO_COPRODUCER=0 ปิดได้ทันทีจาก stack env (ไม่ต้อง deploy)
- * Override รายเจ้า: AUTO_COPRODUCER_TSS="email" หรือ "email|ชื่อเล่น"
+ * Override รายเจ้า: AUTO_COPRODUCER_TSS="email" หรือ "email|ชื่อเล่น" (ถึง container เฉพาะเมื่อ
+ * compose ประกาศ key นั้น — docker-compose.portainer.yml ยังไม่ประกาศ ใช้ได้แค่เทส/dev)
  *
  * หมายเหตุแบบเดียวกับ vp-assign: env ที่ไม่ใช่ NEXT_PUBLIC_ ถูก compile ทิ้งใน
  * client bundle — ฝั่งเบราว์เซอร์จะเห็นค่า default เสมอ ที่นี่ใช้แค่ข้อความ hint

@@ -13,6 +13,7 @@
 | เจ้าของงาน | `bookings.producerEmail` / `coProducerEmail` ของใบที่ยังไม่ถ่าย | ปฏิทิน (`src/lib/calendar-attendees.ts`) และอีเมลทุกเส้น (footage-ready, qu-reminder, review invite) **เลือกผู้รับจากช่องนี้** ไม่ได้ดู `users.active` |
 | ทีมงาน/ผู้กำกับ | `assignedEmails`, `directorEmail`/`2`/`3`, `mainVideographerEmail` ของใบอนาคต | เหมือนกัน |
 | กฎอัตโนมัติที่ฝังชื่อเขา | `src/lib/outlet-coproducer.ts` (`BUILT_IN_DEFAULT_COPRODUCERS`), `src/lib/vp-assign.ts`, `src/lib/shared-mailboxes.ts`, ค่าตั้งต้นใน `review-access.ts` / `shoot-review.ts` | กฎพวกนี้อ่านจากโค้ด — ปิด active แล้วมันยังเติมชื่อเขาลงใบใหม่ต่อไป (แก้ว: +2 ใบระหว่างรู้ว่าออกจนถึง deploy) |
+| ร่างฟอร์มจองที่ค้างในเบราว์เซอร์ของคนอื่น (`localStorage` `booking-draft-v1`) | `BookingWizard.tsx` เก็บ `coProducerSel` ในร่างและคืนค่าตอน resume | ใบใหม่จะพก `coProducerEmail` ของคนที่ออกขึ้นมาได้ — ตั้งแต่ v1.243 server ปฏิเสธ (400) ถ้า Producer/Co-Producer เป็นบัญชีที่ `active=false` ผู้ใช้ต้องเลือกใหม่ |
 | บัญชีที่ระบบ impersonate | `GOOGLE_IMPERSONATE_SUBJECT` | ทำ `docs/runbook-impersonate-swap.md` **ก่อน** หน้านี้ |
 
 ไม่ใช่เคสนี้: Google เด้ง `unauthorized_client` เป็นครั้ง ๆ = Google ล่มชั่วคราว ไม่ใช่คนออก
@@ -72,13 +73,16 @@ python3 scripts/ops/offboard.py --leaver <email> --to <email> --nick <ชื่�
 | ที่เขียน | ค่า | ทำไม |
 |---|---|---|
 | `bookings.coProducer` + `coProducerEmail` | ผู้รับโอน หรือ NULL | ปฏิทินและ "งานของฉัน" อ่านช่องนี้ · **แอปไม่มี API แก้ช่องนี้** (PATCH รับ `producerEmail` แต่ไม่รับ `coProducer`) จึงต้อง SQL |
-| `bookings.producer` + `producerEmail` | ผู้รับโอน (ต้องมี `--to`) | ความเป็นเจ้าของ |
+| `bookings.producer` + `producerEmail` | ผู้รับโอน (ต้องมี `--to`) — ขอบเขตกว้างกว่า Co-Producer: รวมใบ COMPLETED ที่ถ่ายไม่เกิน **8 วัน** | ความเป็นเจ้าของ · footage-ready (3 วัน) และคำเชิญรีวิวหลังถ่าย (หน้าต่าง วันนี้-8 ถึง วันนี้-1) ยังอ่าน `producerEmail` ของใบที่เพิ่งถ่าย — ใบพวกนั้นยังไม่ใช่ประวัติ |
 | `bookings.adminNotes` | ต่อท้ายบรรทัดโอน | เห็นที่ `/admin/[id]`, calendar drawer, workspace (ไม่โผล่ `/dashboard/[id]`) |
 | `audit_logs` 1 แถว/ใบ | `booking.update` · `changes={field:{from,to}, offboardRun}` | รูปเดียวกับ PATCH ของแอป — ประวัติใบมีร่องรอย และ `from` ครบพอย้อนได้ |
 | `users.active=false` (+ `team_members.active=false` ถ้ามีแถว) | ปิด ไม่ลบ | ปิดล็อกอิน · หายจาก dropdown Producer (`/api/producers` กรอง active) · หายจากตัวจับคู่ backfill |
 | `audit_logs` 1 แถว/ตาราง | `user.deactivate` · entityType `User`/`TeamMember` · entityId = อีเมล | รูปเดียวกับเคสซัง · ปุ่ม Disable บน `/admin/permissions` และ `/admin/team` **ไม่เขียน audit** — ถ้าปิดผ่าน UI ต้อง INSERT เอง |
 
 dry-run กับ apply ต่างกันแค่ token สุดท้าย (`ROLLBACK`/`COMMIT`) — จำนวนแถวที่ dry-run พิมพ์คือจำนวนที่ apply จะเขียนจริง · apply แล้วเครื่องมืออ่านปลายทางซ้ำ (post-check) ไม่เชื่อว่า "รันจบ = สำเร็จ"
+
+- ใบที่ถ่าย**วันที่ทำ offboarding** อาจพลิกเป็น COMPLETED ระหว่าง dry-run กับ apply (auto-complete) → จำนวนแถวต่างกันได้ 1–2 ใบ ใบนั้นคงชื่อไว้ตามกฎประวัติ และ event ของมันยังมีเขาเป็นแขก (reconciler ไม่แตะ COMPLETED) — ยอมรับ (เคสแก้ว: TSS-ITV-260928-01)
+- **ถ้ามีผู้รับโอน แจ้งเขาก่อน apply** — เขาจะได้คำเชิญปฏิทิน 1 ฉบับ/event ภายใน 10 นาทีหลัง apply (reconciler ใช้ `sendUpdates:'all'` ตายตัว ลดไม่ได้) อย่าให้คำเชิญเป็นข่าวแรกที่เขาได้ยิน
 
 **เครื่องมือตั้งใจไม่แตะ** (พิมพ์เป็น checklist):
 - `assignedEmails` / `directorEmail` / `mainVideographerEmail` ใบอนาคต → แก้ที่ `/admin/<id>` มอบหมายทีม เพราะ route นั้น patch แขกปฏิทินในคำขอเดียวกัน
@@ -88,9 +92,14 @@ dry-run กับ apply ต่างกันแค่ token สุดท้า�
 ### ขั้น 3 — ปฏิทิน Google [ตามเอง ≤10 นาที]
 
 - worker `calendar-reconcile` ทุก 10 นาที (`limit=200`) ประกอบแขกใหม่จากช่องบนใบ แล้ว patch เฉพาะใบ **CONFIRMED** → คนเก่าถูกถอด (ได้ใบยกเลิก 1 ฉบับ/event) คนใหม่ได้ invite · ใบ REQUESTED ไม่มี event อยู่แล้ว
+- **รอบที่กำลังวิ่งตอน apply จะประทับ `calendarSyncStatus=OK` ด้วยลิสต์แขกเก่าในหน่วยความจำโดยไม่ patch** (พิสูจน์แล้ว 28 ก.ย.: 23 ใบขึ้น OK ที่ 08:50–08:52 UTC ทั้งที่ยังมีแก้ว; รอบถัดไป 09:02 ถึงถอดจริง) → **อย่าใช้ `calendarSyncStatus` หรือ heartbeat ตัดสิน** ตรวจด้วย audit ของการ patch จริง:
+  ```sql
+  SELECT count(*) FROM audit_logs WHERE action='calendar.reconcile_patched' AND at > '<เวลา apply UTC>' AND changes::text LIKE '%<leaver>%';
+  -- ต้องเท่ากับจำนวนใบ CONFIRMED ที่มี event ที่โอน (เครื่องมือพิมพ์ทั้งเลขและ SQL ให้)
+  ```
+  หรืออ่านแขกจาก Google ตรง ๆ: `/api/admin/<id>/calendar-resync?dryRun=1` กับใบตัวอย่าง ต้องได้ `action:"ok"` และไม่มีอีเมลเขาใน attendees
 - **ห้ามแก้แขกในปฏิทินมือ ๆ** — รอบถัดไป reconciler ถอดกลับตามค่าบนใบ
-- คำบรรยายใน event (`Producer: … / Co-Producer: …`) **ไม่ตาม** — reconciler patch แขกอย่างเดียว · จะถูกเขียนใหม่เมื่อมีคนแก้ใบ หรือกด `POST /api/admin/calendar-refresh` จากหน้าแอดมิน (ต้อง session แอดมิน · `sendUpdates:'none'` ไม่สแปมแขก) — ทางเลือก ไม่บังคับ
-- ตรวจของจริง (ไม่เชื่อ audit): `/api/admin/<id>/calendar-resync?dryRun=1` กับใบตัวอย่าง 2–3 ใบ ต้องได้ `action:"ok"`
+- คำบรรยายใน event (`Producer: … / Co-Producer: …`) **ไม่ตาม** — reconciler patch แขกอย่างเดียว · `POST /api/admin/calendar-refresh` ก็ไม่ช่วย (เขียนใหม่เฉพาะ event ที่ชื่อเรื่องเปลี่ยน) → ค้างจนกว่ามีคน PATCH ใบผ่าน `/admin/<id>` · เคสแก้วใช้สคริปต์ operator ลบบรรทัด `Co-Producer:` แบบ `sendUpdates:'none'` (มีแค่ 2 event)
 
 ### ขั้น 4 — ชีท [มือ · 2 นาที]
 
@@ -111,8 +120,8 @@ dry-run กับ apply ต่างกันแค่ token สุดท้า�
 ## สิ่งที่ห้ามทำ และทำไม
 
 1. **ห้ามแก้ `createdByEmail`** — ประวัติว่าใครกดสร้าง แก้แล้วประวัติโกหก (เคสซังตั้งใจปล่อยไว้)
-2. **ห้ามลบแถว `users` / `team_members`** — `prisma/seed.ts` (ตอนบูต) และ `import-producers` สร้างคืนเป็น `active:true` ถ้าแถวหาย · OT/ประวัติผูกอีเมลนี้อยู่ · ปิด `active` พอ
-3. **ห้ามเชื่อว่า `active=false` หยุดอีเมล/ปฏิทิน** — ทุกเส้นเลือกผู้รับจากช่องบนใบ ไม่ join `users.active` → หยุดได้เมื่อ**ช่องบนใบ**เปลี่ยน (ขั้น 2) เท่านั้น
+2. **ห้ามลบแถว `users` / `team_members`** — 3 ทางที่สร้างคืน: `prisma/seed.ts` ตอนบูต (คนใน `team-profiles.ts`), `POST /api/admin/import-producers` (คนใน `outlet-producers.ts`) และ **sign-in ครั้งแรกผ่าน Google** (`src/lib/auth.ts` สร้าง user ใหม่ถ้าไม่มีแถว — ใช้ได้ตราบที่ IT ยังไม่ระงับ Workspace) · แถว `active=false` คือตัวบล็อกทางที่ 3 (`/login?error=disabled`) · OT/ประวัติผูกอีเมลนี้อยู่
+3. **ห้ามเชื่อว่า `active=false` หยุดอีเมล/ปฏิทิน** — ทุกเส้นเลือกผู้รับจากช่องบนใบ ไม่ join `users.active` → หยุดได้เมื่อ**ช่องบนใบ**เปลี่ยน (ขั้น 2) เท่านั้น · ยกเว้นตั้งแต่ v1.243: เมลเตือนเลข QU ข้าม Producer ที่ `active=false` แล้วรายงานในแชต ops ว่าต้องมีคนตามแทน (ใบ ADVERTORIAL ที่ COMPLETED และยังไม่มีเลขจะไม่มีวันถูกโอน จึงต้องกันที่ตัวส่ง)
 4. **ห้ามเชื่อว่า `active=false` หยุดกฎในโค้ด** — `BUILT_IN_DEFAULT_COPRODUCERS` และเพื่อน ๆ อ่านจากโค้ด (ขั้น 1)
 5. **ห้ามแตะใบอดีต (COMPLETED/CANCELLED)** — เก็บเป็นประวัติ ("ข้อมูลเก่าเก็บไว้" — คำสั่ง operator เคสซัง)
 6. **ห้ามเดาชื่อเล่น / ห้ามใส่คนที่ยังไม่ถูกแท็ก outlet** — ใส่ผิดคน = invite ผิดคน แย่กว่าปล่อยว่าง
@@ -122,7 +131,7 @@ dry-run กับ apply ต่างกันแค่ token สุดท้า�
 
 ## วิธีตรวจว่าครบ
 
-เครื่องมือทำ post-check ให้ตอน `--apply` แล้ว · ตรวจซ้ำมือได้ด้วย:
+เครื่องมือทำ post-check ให้ตอน `--apply` แล้ว · ตรวจซ้ำได้ทุกเมื่อด้วย `python3 scripts/ops/offboard.py --leaver <email> --verify` (อ่านอย่างเดียว · exit 1 ถ้ามีบทบาทที่โอนแล้วยังค้าง · บรรทัด `qu.pending.asProducer` เป็นประวัติที่ต้องมี**คน**ตามแทน ไม่ใช่ตัวเลขที่ต้องเป็น 0) · หรือ SQL มือ:
 
 ```sql
 WITH e AS (SELECT '<leaver>'::text AS v),
@@ -135,15 +144,17 @@ UNION ALL SELECT 'future coProducerEmail', count(*) FROM fut, e WHERE lower("coP
 UNION ALL SELECT 'future crew/director', count(*) FROM fut, e WHERE e.v = ANY("assignedEmails")
         OR e.v IN (lower("directorEmail"),lower("director2Email"),lower("director3Email"),lower("mainVideographerEmail"))
 UNION ALL SELECT 'audit ของรอบนี้', count(*) FROM audit_logs WHERE changes->>'offboardRun' = '<run_id>'
-UNION ALL SELECT 'ปฏิทินยังไม่ OK ในใบที่โอน', count(*) FROM fut WHERE "calendarSyncStatus"::text <> 'OK'
-        AND "adminNotes" LIKE '%'||(SELECT v FROM e)||'%';
+UNION ALL SELECT 'ปฏิทิน patch จริงหลัง apply (ต้อง = ใบ CONFIRMED ที่มี event)', count(*) FROM audit_logs
+        WHERE action='calendar.reconcile_patched' AND at > '<เวลา apply UTC>' AND changes::text LIKE '%'||(SELECT v FROM e)||'%'
+UNION ALL SELECT 'OT ยังไม่อนุมัติ', count(*) FROM ot_records, e WHERE lower("userEmail")=e.v AND "approvalStatus"::text IN ('DRAFT','SUBMITTED','REJECTED')
+UNION ALL SELECT 'ยืมของยังไม่คืน', count(*) FROM equipment_loans, e WHERE lower(coalesce(email,''))=e.v AND status::text <> 'RETURNED';
 ```
-ทุกบรรทัดต้อง 0 ยกเว้น `audit ของรอบนี้` (= จำนวนใบที่โอน + บัญชีที่ปิด) · `grep -rn '<ชื่อ>' src` เหลือแค่ seed + fixture ในเทส · ฟอร์มจอง outlet นั้นไม่มีชื่อเขาใน dropdown และไม่มีข้อความ "ระบบใส่…ให้อัตโนมัติ"
+ทุกบรรทัดต้อง 0 ยกเว้น `audit ของรอบนี้` (= จำนวนใบที่โอน + บัญชีที่ปิด) และ `ปฏิทิน patch จริง` (= จำนวนใบ CONFIRMED ที่มี event) · **`calendarSyncStatus` ใช้ตัดสินไม่ได้** (ดูขั้น 3) · `grep -rn '<ชื่อ>' src` เหลือแค่ seed + fixture ในเทส · ฟอร์มจอง outlet นั้นไม่มีชื่อเขาใน dropdown และไม่มีข้อความ "ระบบใส่…ให้อัตโนมัติ"
 
 ## ผลข้างเคียงที่ยอมรับ
 
 - ชื่อค้างในใบอดีตและ `createdByEmail` — ตั้งใจ
-- ใบที่เขา**สร้าง**แต่ยังไม่ถ่าย: ถ้า `FOOTAGE_READY_AUDIENCE` รวมคนสร้าง เมลฟุตเทจพร้อมจะยิงหา `createdByEmail` แล้วตีกลับ — ไม่มีใครเสียหาย
+- พรอดตั้ง `FOOTAGE_READY_AUDIENCE=team` → ใบที่เขาสร้าง (`createdByEmail`) / เป็น Producer / อยู่ในทีม ที่ถ่ายไม่เกิน 3 วันและยังไม่แจ้งฟุตเทจ จะยิงเมล "ฟุตเทจพร้อม" หาเขา 1 ฉบับ/ใบ แล้วตีกลับ — เครื่องมือพิมพ์รายการรหัสใบให้ ไม่มีใครเสียหาย
 - คนเก่าได้ใบยกเลิกจากปฏิทิน 1 ฉบับต่อ event (ถ้าบัญชีถูกระงับแล้วก็ตีกลับเงียบ ๆ)
 - คำบรรยาย event ยังมีชื่อคนเก่าจนกว่าจะมีคนแก้ใบหรือสั่ง calendar-refresh
 - "ผีในกอง": ชื่อค้างใน `assignedEmails` ใบเก่าถอดจากหน้า admin ไม่ได้ · OT `/ot/admin` ต้องติ๊ก "แสดงคนที่ disabled"
@@ -159,4 +170,4 @@ UNION ALL SELECT 'ปฏิทินยังไม่ OK ในใบที่�
 | วันที่ | ใคร | ทำอะไร |
 |---|---|---|
 | 6 ก.ย. 2569 | ซัง → หวาน | โอน Producer 2 ใบ ก.ย. ด้วย SQL + audit มือ · ปิด users/team_members · บทเรียน: `active=false` ไม่หยุดเมล, ชีท/_SHOOT ไม่ตาม, `_Users` ไม่มีช่อง active |
-| 28 ก.ย. 2569 | แก้ว (TSS Co-Producer) → ว่าง (แพรดูแลคนเดียว) | v1.242 ถอด `BUILT_IN_DEFAULT_COPRODUCERS.TSS` · `offboard.py` ถอด Co-Producer 27 ใบอนาคต + ปิด users · `_Users` ไม่มีเธอ · ดู `docs/ops-log.md` |
+| 28 ก.ย. 2569 | แก้ว (TSS Co-Producer) → ว่าง (แพรดูแลคนเดียว) | v1.242 ถอด `BUILT_IN_DEFAULT_COPRODUCERS.TSS` · `offboard.py` ถอด Co-Producer **26 ใบอนาคต** (23 CONFIRMED + 3 REQUESTED; TSS-ITV-260928-01 พลิกเป็น COMPLETED ก่อน apply) + ปิด users · reconciler รอบ 09:02 UTC ถอดเธอจากแขก 23/23 event · `_Users` ไม่มีเธอ · v1.243 ปิดช่องโหว่ 3 ข้อที่ผู้ตรวจเจอ · ดู `docs/ops-log.md` |

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  needsRealQuRef, quUrgency, quReminderDue, groupByProducer, producerDue,
+  needsRealQuRef, quUrgency, quReminderDue, groupByProducer, producerDue, splitInactiveProducers,
   buildQuReminderEmail, type QuPendingBooking,
 } from '../qu-reminder'
 
@@ -116,4 +116,17 @@ test('needsRealQuRef: free-text placeholders without any digit are still "no QU"
   for (const v of ['QU-4641/1', 'QU-4308-V3', 'QU-4345, QU-4406', '\tQU-4169-V6', 'QU4609']) {
     assert.equal(needsRealQuRef(v), false, v)
   }
+})
+
+// v1.243 — Producer ที่ปิดบัญชีแล้วต้องไม่ได้รับเมล แต่ต้องถูกรายงาน ไม่ใช่หายเงียบ
+test('splitInactiveProducers: แยกคนที่ active=false ออกจากรอบส่ง โดยไม่ทำใบหาย', () => {
+  const by = new Map<string, string[]>([
+    ['a@thestandard.co', ['X-1']],
+    ['gone@thestandard.co', ['X-2', 'X-3']],
+  ])
+  const { active, inactive } = splitInactiveProducers(by, ['GONE@thestandard.co '])
+  assert.deepEqual(Array.from(active.keys()), ['a@thestandard.co'])
+  assert.deepEqual(Array.from(inactive.entries()), [['gone@thestandard.co', ['X-2', 'X-3']]])
+  // ไม่มีใครปิด → ทุกคนยังอยู่ในรอบส่ง
+  assert.equal(splitInactiveProducers(by, []).active.size, 2)
 })

@@ -1215,7 +1215,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             <div><div className="text-xs text-gray-400 mb-0.5">Location</div><div className="text-gray-800">{booking.locationName || '—'}</div></div>
             <div><div className="text-xs text-gray-400 mb-0.5">Producer</div><div className="text-gray-800">{booking.producer}</div></div>
             {/* v1.183 — Co-Producer เคยเก็บลง DB แต่ไม่เคยแสดงที่ไหนเลย; งาน TSS
-                ที่ระบบเติมแก้วให้อัตโนมัติจะมองไม่เห็นถ้าไม่โชว์ตรงนี้ */}
+                ที่เคยถูกเติม Co-Producer อัตโนมัติ (ถึง v1.241) จะมองไม่เห็นถ้าไม่โชว์ตรงนี้ */}
             {(booking.coProducer || booking.coProducerEmail) && (
               <div><div className="text-xs text-gray-400 mb-0.5">Co-Producer</div><div className="text-gray-800">{booking.coProducer || booking.coProducerEmail}</div></div>
             )}

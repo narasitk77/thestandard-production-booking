@@ -7,11 +7,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed — ช่องโหว่ 3 ข้อของ offboarding ที่ผู้ตรวจเจอหลังรันเคสแก้วจริง (v1.243)
+
+- **เมลเตือนเลข QU ส่งหา Producer ที่ออกไปแล้วตลอดไป** — ใบ ADVERTORIAL ที่ COMPLETED และยังไม่มีเลขจริงไม่มีวันถูกโอน (กฎประวัติ) แต่ `runQuReminderSweep` ยังส่งหา `producerEmail` เดิม SMTP รับไว้แล้วค่อยตีกลับ ใบจึงถูกประทับว่าเตือนแล้วโดยไม่มีคนที่ยังอยู่ถูกตาม → ข้าม Producer ที่ `users.active=false` (`splitInactiveProducers`) และรายงานในแชต ops + ผลลัพธ์ `producerInactive` ว่าต้องมีคนตามแทน
+- **ตัวตรวจปฏิทินใน runbook ขึ้นเขียวทั้งที่ยังไม่ได้ถอดแขก** — reconciler รอบที่เริ่มก่อน COMMIT ประทับ `calendarSyncStatus=OK` ด้วยลิสต์แขกเก่า (พิสูจน์แล้ว 28 ก.ย.) → runbook + `offboard.py` ตรวจด้วย audit `calendar.reconcile_patched` หลังเวลา apply แทน และพิมพ์ SQL พร้อมเวลาให้
+- **ขอบเขตโอน Producer หลุดหน้าต่างหลังถ่าย** — footage-ready และคำเชิญรีวิวยังอ่าน `producerEmail` ของใบที่ถ่ายไม่เกิน 3 วันและยังไม่แจ้งฟุตเทจ → `offboard.py` โอน Producer ครอบใบ COMPLETED ในหน้าต่างนั้นด้วย (`PRODUCER_SCOPE`) · ตัวนับ OT/purchase/ยืมของนับเฉพาะที่ยังเปิด · พิมพ์รายการใบที่ footage-ready จะยิงหาคนที่ออก
+- **ร่างฟอร์มที่ค้างในเบราว์เซอร์ยัดอีเมลคนที่ออกกลับเข้าใบใหม่ได้** — BookingWizard เก็บ `coProducerSel` ใน localStorage แล้วส่งค่าดิบ server ไม่เคยเช็กกับ `users` → `createBookingFromPayload` ปฏิเสธ 400 ถ้า Producer/Co-Producer เป็นบัญชี `active=false` (ล้มดัง ให้เลือกใหม่ ไม่ทิ้งค่าเงียบ ๆ)
+- `offboard.py --verify` — ตรวจว่าครบสำหรับอีเมลใด ๆ (อ่านอย่างเดียว exit 1 ถ้าค้าง) · ขอบเขต Producer เป็น 8 วันหลังถ่ายตามหน้าต่างคำเชิญรีวิว
+- คอมเมนต์ 4 จุดที่ยังบอกว่า "TSS → แก้ว" เป็นปัจจุบัน แก้เป็นอดีต · ข้ออ้างว่าเปิดกฎกลับได้ผ่าน env `AUTO_COPRODUCER_<CODE>` แก้ให้ตรงความจริง (compose ไม่ส่ง key นั้น)
+
 ### Changed — คนออกจากทีมมีขั้นตอน + เครื่องมือ · แก้ว (TSS Co-Producer) ออก (v1.242)
 
 แก้วออกจากทีม 28 ก.ย. 2569 · operator ให้แพรดูแล TSS คนเดียว ไม่มีคนแทน
 
-- `src/lib/outlet-coproducer.ts` — `BUILT_IN_DEFAULT_COPRODUCERS` ว่าง (เดิม TSS = แก้ว) · กลไกเติม Co-Producer อัตโนมัติยังอยู่ครบ เปิดได้ผ่าน env `AUTO_COPRODUCER_<CODE>` หรือเติมตาราง · เทสเขียนใหม่ให้ทดสอบกลไกผ่าน env แทนการ pin ชื่อคน
+- `src/lib/outlet-coproducer.ts` — `BUILT_IN_DEFAULT_COPRODUCERS` ว่าง (เดิม TSS = แก้ว) · กลไกเติม Co-Producer อัตโนมัติยังอยู่ครบ เปิดกลับได้โดยเติมตารางแล้ว deploy (env `AUTO_COPRODUCER_<CODE>` ถึง container เฉพาะเมื่อ compose ประกาศ key — พรอดยังไม่ประกาศ) · เทสเขียนใหม่ให้ทดสอบกลไกผ่าน env แทนการ pin ชื่อคน
 - **ทำไมต้องถอดที่โค้ด ไม่ใช่แค่ปิด active:** กฎนี้อ่านจากตารางในโค้ด ไม่ได้ join `users.active` — ตั้งแต่รู้ว่าออกจนถึง deploy นี้ ระบบยังเติมชื่อเธอให้ใบ TSS ใหม่อีก 2 ใบ
 - `scripts/ops/offboard.py` (ใหม่) — โอนใบอนาคต (Co-Producer → คนใหม่หรือ NULL, Producer → คนใหม่) + ปิด `users`/`team_members` ใน transaction เดียว พร้อม audit `booking.update`/`user.deactivate` รูปเดียวกับที่แอปเขียน · dry-run รัน SQL ชุดเดียวกับของจริงแล้ว ROLLBACK · post-check อ่านปลายทางซ้ำ · guard: Producer ต้องมีคนรับ, ชื่อเล่นห้ามเดา, ผู้รับต้องถูกแท็ก outlet · พิมพ์ checklist สิ่งที่ตั้งใจไม่ทำ (ปฏิทิน/ชีท/โค้ด/นอกแอป)
 - `docs/runbook-offboarding.md` (ใหม่) — ขั้นตอนทั้งหมด สิ่งที่ห้ามทำ SQL ตรวจว่าครบ ถอยกลับ · สรุปจากเคสซัง→หวาน (6 ก.ย.) และเคสแก้ว

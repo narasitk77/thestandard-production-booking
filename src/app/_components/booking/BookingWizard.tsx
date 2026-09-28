@@ -458,7 +458,7 @@ export default function BookingWizard() {
   }, [isContentAgency, producers, outletProducers])
   const selProd = outletProducers.find(p => p.email === producerSel)
   const selCoProd = outletCoProducers.find(p => p.email === coProducerSel)
-  // v1.183 — Co-Producer ที่ระบบจะเติมให้เองถ้าไม่เลือก (ตอนนี้: TSS → แก้ว).
+  // v1.183 — Co-Producer ที่ระบบจะเติมให้เองถ้าไม่เลือก (v1.242: ตารางว่าง — TSS→แก้ว ถึง v1.241, ดู docs/runbook-offboarding.md).
   // ใช้แค่บอกผู้ใช้ในฟอร์ม/หน้าสรุป — ตัวที่เขียนลง DB จริงคือฝั่ง server
   // (create-booking) เพราะถ้า preselect ใน dropdown จะไปทำให้ validation
   // "เลือก Producer หรือ Co-Producer อย่างน้อย 1 คน" ผ่านเองโดยไม่มี Producer

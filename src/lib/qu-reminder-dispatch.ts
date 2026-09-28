@@ -14,13 +14,15 @@ import { sendEmail, isEmailConfigured } from './email'
 import { logAudit } from './audit'
 import { notifyChat } from './notify'
 import {
-  needsRealQuRef, groupByProducer, producerDue, buildQuReminderEmail,
+  needsRealQuRef, groupByProducer, producerDue, buildQuReminderEmail, splitInactiveProducers,
   type QuPendingBooking,
 } from './qu-reminder'
 
 export interface QuReminderResult {
   pending: number            // ใบที่ยังไม่มีเลข QU จริง (ทั้งหมด)
   noProducerEmail: string[]  // ใบที่เตือนไม่ได้เพราะไม่มีอีเมล — ต้องมีคนตามเอง
+  /** v1.243 — Producer ที่ปิดบัญชีแล้ว (ออกจากทีม): ไม่ส่งเมล ต้องมีคนตามแทน */
+  producerInactive: Array<{ producerEmail: string; bookingCodes: (string | null)[] }>
   producersDue: number
   emailed: number            // จำนวน Producer ที่เมลส่งผ่านจริง
   failed: number
@@ -57,7 +59,7 @@ export async function findBookingsMissingQuRef(): Promise<QuPendingBooking[]> {
 }
 
 export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promise<QuReminderResult> {
-  const empty: QuReminderResult = { pending: 0, noProducerEmail: [], producersDue: 0, emailed: 0, failed: 0, skipped: true }
+  const empty: QuReminderResult = { pending: 0, noProducerEmail: [], producerInactive: [], producersDue: 0, emailed: 0, failed: 0, skipped: true }
   if (!quReminderEnabled()) return empty
 
   const rows = await findBookingsMissingQuRef()
@@ -71,7 +73,12 @@ export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promi
 
   const now = new Date()
   const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
-  const byProducer = groupByProducer(rows)
+  // v1.243 — Producer ที่ออกแล้ว (users.active=false) ไม่ได้รับเมล: แยกไปรายงานให้คนตามแทน
+  const inactiveUsers = await prisma.user.findMany({ where: { active: false }, select: { email: true } })
+  const { active: byProducer, inactive: byInactive } = splitInactiveProducers(groupByProducer(rows), inactiveUsers.map(u => u.email))
+  const producerInactive = Array.from(byInactive.entries()).map(([producerEmail, list]) => ({
+    producerEmail, bookingCodes: list.map((r: QuPendingBooking) => r.bookingCode),
+  }))
 
   let producersDue = 0
   let emailed = 0
@@ -128,13 +135,14 @@ export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promi
       `📮 เตือนเลข QU: ส่งถึง Producer ${emailed} คน` +
       (failed ? ` · ส่งไม่ผ่าน ${failed}` : '') +
       ` · ค้างทั้งหมด ${rows.length} ใบ` +
-      (noProducerEmail.length ? ` · ไม่มีอีเมล ${noProducerEmail.length} ใบ (${noProducerEmail.join(', ')})` : ''),
+      (noProducerEmail.length ? ` · ไม่มีอีเมล ${noProducerEmail.length} ใบ (${noProducerEmail.join(', ')})` : '') +
+      (producerInactive.length ? ` · Producer ออกจากทีมแล้ว ${producerInactive.length} คน — ต้องมีคนตามแทน: ${producerInactive.map(x => `${x.producerEmail.split('@')[0]} (${x.bookingCodes.join(', ')})`).join(' · ')}` : ''),
       'ops',
     )
   }
 
   return {
-    pending: rows.length, noProducerEmail, producersDue, emailed, failed, skipped: false,
+    pending: rows.length, noProducerEmail, producerInactive, producersDue, emailed, failed, skipped: false,
     ...(opts.dryRun ? { preview } : {}),
   }
 }

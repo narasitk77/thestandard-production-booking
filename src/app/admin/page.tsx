@@ -486,7 +486,7 @@ export default function AdminPage() {
                   </div>
                   <div className="text-xs sm:text-sm text-gray-500 mt-0.5">
                     Producer: {b.producerNick || b.producer}
-                    {/* v1.183 — Co-Producer โผล่ในคิว (งาน TSS ระบบเติม "แก้ว" ให้เอง) */}
+                    {/* v1.183 — Co-Producer โผล่ในคิว (เคยเติมอัตโนมัติให้งาน TSS ถึง v1.241) */}
                     {b.coProducer ? <> · Co-Pro: {b.coProducer}</> : null}
                     <CrewLine crew={b.assignedCrew} className="mt-0.5 text-[12px] text-blue-700" />
                     <div className="mt-1"><FootageBadge files={b.footageFiles} sent={b.footageSent} /></div>

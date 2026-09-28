@@ -97,6 +97,22 @@ export function groupByProducer(rows: QuPendingBooking[]): Map<string, QuPending
 }
 
 /**
+ * v1.243 — Producer ที่ปิดบัญชีแล้ว (users.active=false) ต้องไม่ได้รับเมลอีก: SMTP รับเมล
+ * ไว้ก่อนแล้วค่อยตีกลับ ใบจึงถูกประทับว่า "เตือนแล้ว" ตลอดไปโดยไม่มีคนที่ยังอยู่ถูกตาม
+ * (ช่องโหว่ที่เจอตอนเขียน docs/runbook-offboarding.md) · แยกออกมาให้ผู้เรียกรายงาน ไม่ทิ้งเงียบ
+ */
+export function splitInactiveProducers<T>(
+  byProducer: Map<string, T[]>,
+  inactiveEmails: Iterable<string>,
+): { active: Map<string, T[]>; inactive: Map<string, T[]> } {
+  const gone = new Set(Array.from(inactiveEmails, e => e.trim().toLowerCase()))
+  const active = new Map<string, T[]>()
+  const inactive = new Map<string, T[]>()
+  for (const [email, list] of Array.from(byProducer.entries())) (gone.has(email) ? inactive : active).set(email, list)
+  return { active, inactive }
+}
+
+/**
  * Producer คนนี้ควรได้เมลรอบนี้ไหม — ใบไหนใบหนึ่งถึงกำหนดก็ส่ง แล้วใส่ทุกใบที่ค้าง
  * ลงในฉบับเดียว (ไม่งั้นคนเดียวได้หลายฉบับกระจายคนละวัน)
  */
