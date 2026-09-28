@@ -5,6 +5,44 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-09-28 · v1.242 — แก้ว (TSS Co-Producer) ออกจากทีม · มี runbook + เครื่องมือ offboarding แล้ว
+
+นัทแจ้งว่าแก้วออก และสั่งให้ "กำหนดวิธีจัดการเมื่อมีคนออกไว้" · ตัดสินให้แพรดูแล TSS
+คนเดียว ไม่มีคนแทน
+
+**รอยเท้าตอนเริ่ม:** users 1 (active) · coProducerEmail 70 ใบ (อนาคต 25 → 27 ใน 1 วัน
+เพราะกฎเติมอัตโนมัติยังทำงาน) · createdByEmail 15 (ประวัติ) · ไม่มีใน team_members / OT /
+review / ตั๋ว / env ของ stack / ~/.hermes · ฝังในโค้ด: `BUILT_IN_DEFAULT_COPRODUCERS.TSS`
+และ seed `outlet-producers.ts`
+
+**ลำดับที่ทำ (ตรงกับ runbook):**
+1. โค้ด — ถอด TSS ออกจากตารางค่าตั้งต้น (`outlet-coproducer.ts`) เทสเขียนใหม่ให้ทดสอบ
+   กลไกผ่าน env · **เก็บแถว seed ไว้** (`import-producers` ไม่แตะ active ของแถวเดิม) →
+   deploy `sha-5f06bcf` 15:50 · ตั้งแต่นั้นใบ TSS ใหม่ไม่ได้ co-producer อัตโนมัติ (ตรวจแล้ว 0)
+2. `scripts/ops/offboard.py --leaver phoemsiri.p@ --actor narasit.k@` dry-run (28 แถว)
+   → ถ่ายเสร็จไป 1 ใบระหว่างวัน → `--apply` = **26 ใบอนาคต coProducer→NULL + users.active=false
+   = 27 แถว** post-check ตรง · audit key `offboardRun=offboard-2026-09-28-d375f76b`
+3. ปฏิทิน — reconciler รอบ 16:04 ถอดเธอออกจากแขก **23/23 event** (รอบ 15:50 ที่บูตวิ่ง
+   ก่อน apply จึงต้องรอรอบถัดไป) · description มีบรรทัด "Co-Producer: แก้ว" แค่ 2 event
+   ลบด้วยสคริปต์ในคอนเทนเนอร์ (`sendUpdates: none`)
+4. ชีท — `_Users` ไม่มีเธอ (11 แถว) · Bookings ไม่มีคอลัมน์ Co-Producer → ไม่ต้องทำ
+5. นอกแอป — ยังไม่ได้แจ้ง HR/IT และแพร (นอกขอบเขตคำสั่ง)
+
+**สิ่งที่รู้ใหม่ระหว่างทาง (ลง runbook แล้ว):**
+- `users.active=false` ไม่หยุด **กฎในโค้ด** (นอกจากไม่หยุดเมล/ปฏิทินอย่างที่รู้จากเคสซัง)
+  → ต้องถอดจากโค้ดและ deploy **ก่อน** apply ไม่งั้นใบใหม่งอกชื่อเขาระหว่างรอ
+- `POST /api/admin/import-producers` เป็น endpoint ที่แอดมินกด ไม่ใช่ seed ตอนบูต และไม่แตะ
+  role/active ของแถวเดิม · `prisma/seed.ts` upsert `team-profiles.ts` ทุกบูตแต่ `update` ไม่แตะ
+  active — ลบแถวทิ้งเท่านั้นที่ทำให้กลับมา active
+- `/api/admin/calendar-refresh` ต้อง session แอดมิน — สคริปต์ปฏิบัติการใช้ไม่ได้
+- DWD ของ service account ไม่มี scope `calendar.readonly`/`spreadsheets.readonly` —
+  สคริปต์อ่านอย่างเดียวก็ต้องขอ scope เต็มเหมือนแอป
+
+**ผลข้างเคียงที่ยอมรับ:** ชื่อค้างในใบอดีต 46 ใบ + createdByEmail 15 · แถว seed ยังอยู่ ·
+แก้วได้ใบยกเลิกปฏิทิน 23 ฉบับ (ถ้าบัญชีปิดแล้วก็ตีกลับเงียบ)
+
+**runbook:** `docs/runbook-offboarding.md` · เครื่องมือ `scripts/ops/offboard.py` (`--selftest`)
+
 ## 2026-09-25 · v1.238 — log 96% เป็นขยะ และลูป restart ที่ไม่เคยรอดการแครช
 
 นัทสั่งตรวจ worker ทุกตัวหลัง deploy · ทั้ง 16 ตัวปกติ (stale 0 · neverTicked 0
