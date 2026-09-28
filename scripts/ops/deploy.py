@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""deploy.py <short-sha> — deploy พรอด โดยจดทางถอยไว้ก่อนเสมอ
+"""deploy.py <short-sha> [--set KEY=VALUE ...] — deploy พรอด โดยจดทางถอยไว้ก่อนเสมอ
+
+--set ตั้ง/แก้ env บน stack ในรอบ redeploy เดียวกัน (container ถูกสร้างใหม่ครั้งเดียว) ·
+ค่าเดิมถูกจดลง deploy-state.json คู่ rollback_to เพื่อย้อนได้ · ห้ามใช้กับ secret (ค่าโผล่ใน shell history)
 
 ลำดับที่ยอมข้ามไม่ได้ (ทุกขั้นมีเหตุผลจากของที่เคยพังจริง):
 
@@ -118,6 +121,13 @@ def main():
     target = sys.argv[1].strip()
     tag = target if target.startswith('sha-') else f'sha-{target}'
     sha = tag[4:]
+    sets = {}
+    rest = sys.argv[2:]
+    for i, a in enumerate(rest):
+        if a == '--set' and i + 1 < len(rest) and '=' in rest[i + 1]:
+            k, v = rest[i + 1].split('=', 1)
+            if k == 'IMAGE_TAG': sys.exit('ใช้ <sha> ตั้ง IMAGE_TAG ไม่ใช่ --set')
+            sets[k.strip()] = v.strip()
 
     cur, stack = stack_tag()
     print(f'IMAGE_TAG ปัจจุบัน (จุดถอย) = {cur}')
@@ -154,6 +164,8 @@ def main():
     state = {
         'rollback_to': cur,
         'deploying': tag,
+        # env ที่ --set จะเปลี่ยน พร้อมค่าเดิม (None = ยังไม่มีบน stack) — ย้อนได้โดยไม่ต้องเดา
+        'env_changes': {k: {'from': next((e['value'] for e in (stack.get('Env') or []) if e['name'] == k), None), 'to': v} for k, v in sets.items()},
         'schema_changed': schema_changed,
         'backup': {'fileName': b['fileName'], 'driveFileId': b['driveFileId'], 'sizeBytes': b['sizeBytes']},
         'at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -169,6 +181,11 @@ def main():
         envs.append({'name': 'IMAGE_TAG', 'value': tag})
     for e in envs:
         if e['name'] == 'IMAGE_TAG': e['value'] = tag
+    for k, v in sets.items():
+        hit = next((e for e in envs if e['name'] == k), None)
+        if hit: hit['value'] = v
+        else: envs.append({'name': k, 'value': v})
+        print(f'  --set {k} = {v}')
     print('ยิง redeploy (pullImage=true) — client มักขาดก่อน Portainer ทำเสร็จ ห้ามยิงซ้ำ')
     try:
         portainer('PUT', f'/api/stacks/{STACK}/git/redeploy?endpointId={EP}',

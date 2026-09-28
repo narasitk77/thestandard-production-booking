@@ -15,6 +15,7 @@ import {
   type MixActor, type MixStatus,
 } from '@/lib/mix-jobs'
 import { notifyMixAssigned, notifyMixDelivered } from '@/lib/mix-notify'
+import { syncMixJobCalendar, mixCalendarAuditNote } from '@/lib/mix-calendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -169,6 +170,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       notified = await notifyMixDelivered(job, job.deliveryLink, session.email)
       if (!notified.sent) console.warn(`[mix] แจ้งส่งงานไม่ออก: ${notified.reason}`)
     }
+    // v1.245 — ปฏิทินมิกซ์แยก: ทุกการแก้ (แจก/ส่งงาน/วันที่/ยกเลิก) ตามไปที่ event เดียว
+    const cal = await syncMixJobCalendar(job.id)
+    const calFields = cal.action === 'off' ? {}
+      : cal.ok ? { calendarEventId: cal.eventId, calendarSyncError: null } : { calendarSyncError: cal.error }
 
     logAudit({
       actorEmail: session.email,
@@ -179,9 +184,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       changes: {
         number: job.number, ...changes,
         ...(notified ? { notified: notified.sent, notifiedTo: notified.to, notifyError: notified.reason ?? null } : {}),
+        ...mixCalendarAuditNote(cal),
       },
     })
-    return NextResponse.json({ job: { ...job, code: formatMixNumber(job.number) }, notified })
+    return NextResponse.json({ job: { ...job, ...calFields, code: formatMixNumber(job.number) }, notified })
   } catch (e) {
     console.error('PATCH /api/mix/[id] error:', e)
     return NextResponse.json({ error: 'บันทึกไม่สำเร็จ' }, { status: 500 })
@@ -210,15 +216,18 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
 
     // soft delete — ทั้งรีโปนี้ไม่มีการลบถาวร และเลขที่ออกไปแล้วต้องไม่ถูกใช้ซ้ำ
     await prisma.mixJob.update({ where: { id: existing.id }, data: { deletedAt: new Date() } })
+    // v1.245 — ลบคำขอ = เอา event ออกจากปฏิทินมิกซ์ด้วย ไม่งั้นปฏิทินโชว์งานที่ไม่มีแล้ว
+    const cal = await syncMixJobCalendar(existing.id)
     logAudit({
       actorEmail: session.email,
       action: 'mix.delete',
       entityType: 'MixJob',
       entityId: existing.id,
       bookingCode: existing.bookingCode,
-      changes: { number: existing.number, title: existing.title },
+      changes: { number: existing.number, title: existing.title, ...mixCalendarAuditNote(cal) },
     })
-    return NextResponse.json({ ok: true })
+    // แถวที่ลบแล้วไม่โผล่บนการ์ด → error ต้องตอบกลับตรงนี้ ไม่งั้นไม่มีใครเห็นว่า event ยังค้าง
+    return NextResponse.json({ ok: true, ...(cal.action !== 'off' && !cal.ok ? { calendarError: cal.error } : {}) })
   } catch (e) {
     console.error('DELETE /api/mix/[id] error:', e)
     return NextResponse.json({ error: 'ลบไม่สำเร็จ' }, { status: 500 })

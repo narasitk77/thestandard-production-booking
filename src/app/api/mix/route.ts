@@ -17,10 +17,17 @@ import {
   episodeBelongsToBooking, findDuplicateMixJobs,
 } from '@/lib/mix-jobs'
 import { notifyMixRequested } from '@/lib/mix-notify'
+import { syncMixJobCalendar, mixCalendarAuditNote, mixCalendarId } from '@/lib/mix-calendar'
 
 export const dynamic = 'force-dynamic'
 
 const LIST_LIMIT = 300
+
+/** ผลซิงก์ปฏิทินที่ต้องสะท้อนกลับในแถวที่ตอบ (แถวที่ create คืนมายังไม่มีค่าจากการซิงก์) */
+function calendarFields(cal: Awaited<ReturnType<typeof syncMixJobCalendar>>) {
+  if (cal.action === 'off') return {}
+  return cal.ok ? { calendarEventId: cal.eventId, calendarSyncError: null } : { calendarSyncError: cal.error }
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -59,9 +66,11 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
+    const calendarOn = !!mixCalendarId()
     const jobs = rows
       .sort(compareMixQueue)
-      .map((j) => ({ ...j, code: formatMixNumber(j.number), flag: mixFlag(j) }))
+      // ปิดปฏิทินมิกซ์แล้ว (ล้าง MIX_CALENDAR_ID) = error เก่าไม่มีความหมาย ไม่ให้ค้างบนการ์ดตลอดไป
+      .map((j) => ({ ...j, calendarSyncError: calendarOn ? j.calendarSyncError : null, code: formatMixNumber(j.number), flag: mixFlag(j) }))
 
     return NextResponse.json({
       jobs,
@@ -161,6 +170,8 @@ export async function POST(request: NextRequest) {
     // ว่าแจ้งถึงใครแล้วบ้าง — "ส่งคำขอแล้ว" ที่ไม่มีใครได้รับคือคำโกหกที่สุภาพ
     const notified = await notifyMixRequested(job)
     if (!notified.sent) console.warn(`[mix] แจ้งเตือนไม่ออก: ${notified.reason}`)
+    // v1.245 — ปฏิทินมิกซ์แยก (ปิดอยู่ถ้าไม่ได้ตั้ง MIX_CALENDAR_ID) · รอผลเพื่อบันทึกความจริงลง audit
+    const cal = await syncMixJobCalendar(job.id)
 
     logAudit({
       actorEmail: session.email,
@@ -173,11 +184,12 @@ export async function POST(request: NextRequest) {
         number: job.number, title: job.title, dueDate: clean.value.dueDate,
         episodeCode, duplicateConfirmed: body.confirmDuplicate === true || undefined,
         notified: notified.sent, notifiedTo: notified.to, notifyError: notified.reason ?? null,
+        ...mixCalendarAuditNote(cal),
       },
     })
 
     return NextResponse.json({
-      job: { ...job, code: formatMixNumber(job.number) },
+      job: { ...job, ...calendarFields(cal), code: formatMixNumber(job.number) },
       notified,
     }, { status: 201 })
   } catch (e) {

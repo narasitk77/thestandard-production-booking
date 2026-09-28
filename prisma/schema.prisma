@@ -1191,6 +1191,10 @@ model MixJob {
   episodeRowId String?
   /// v1.244 — snapshot EP ID ตอนสร้าง (เช่น PP-26-034-L01) ให้คนอ่านรู้ว่าตอนไหนโดยไม่ต้อง join
   episodeCode  String?
+  /// v1.245 — event ใน **ปฏิทินมิกซ์แยก** (MIX_CALENDAR_ID) ไม่ใช่ปฏิทินคิวถ่าย · null = ยังไม่มี/ปิดอยู่
+  calendarEventId   String?
+  /// v1.245 — ซิงก์ปฏิทินล้มครั้งล่าสุดเพราะอะไร · null = ครั้งล่าสุดผ่าน — เก็บไว้ให้เห็น ไม่ใช่ล้มเงียบ
+  calendarSyncError String?
 
   /// คนขอ — มาจาก session ตอนสร้าง ไม่มีช่องให้พิมพ์แทนกัน
   requesterEmail String

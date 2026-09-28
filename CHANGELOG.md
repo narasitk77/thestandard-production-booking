@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added — งานมิกซ์ขึ้น Google Calendar **ปฏิทินแยก** ไม่ปนกับปฏิทินคิวถ่าย (v1.245)
+
+คำสั่ง operator 28 ก.ย. 2569: "ยิง google calendar เป็นอันแยก ไม่ปนกับ probook เดิม · ทดสอบก่อน"
+
+- env ใหม่ `MIX_CALENDAR_ID` (ประกาศใน compose) — ว่าง = ปิด ไม่ยิงปฏิทินเลย · **ตั้งเป็นปฏิทินคิวถ่าย = โค้ดปฏิเสธ** (`mixCalendarTargetError` เทียบทั้ง `GOOGLE_CALENDAR_ID` และค่าสำรองในโค้ด) แล้วเก็บ error ไว้ ไม่ยิงเข้าไปเงียบ ๆ
+- event = งานทั้งวันบนวันที่ต้องการไฟล์ · ชื่อ `🎚 MIX-014 · ชื่องาน · คนทำ` (Requested = "รอแจก", Completed = ✅) · สีตามสถานะ · `transparent` ไม่บล็อกเวลาว่าง · **ไม่มีผู้เข้าร่วม = ไม่มีเมลเชิญหาใคร** คนที่อยากเห็นกด subscribe ปฏิทินเอง
+- ซิงก์ตอนสร้าง/แจก/ส่งงาน/แก้วันที่/ยกเลิก/ลบ (`syncMixJobCalendar` อ่านแถวล่าสุดจาก DB แล้วทำตาม `planMixCalendar`) · event ถูกลบจากฝั่ง Google → สร้างใหม่ · **ไม่ throw** คำขอเดินต่อได้แม้ปฏิทินล่ม แต่ผลล้มถูกเก็บที่ `calendarSyncError` (คอลัมน์ใหม่ nullable คู่ `calendarEventId`) และโชว์บนการ์ดให้ Sound Admin/แอดมิน + ลง audit
+- `GET /api/internal/mix-calendar/sync` (secret) — ซิงก์ทั้งคิวตอนเปิดฟีเจอร์ครั้งแรก/ซ่อม · **ค่าเริ่มต้น dry-run** ใช้แผนตัวเดียวกับของจริง + preflight อ่านชื่อปฏิทินจาก Google (dry-run ที่ไม่แตะ Google จะบอกผ่านทั้งที่สิทธิ์ขาด) · เรียงงานใหม่สุดก่อน · ดึงแถวที่ซิงก์ล้มค้างมาซ่อมด้วย
+- **event id คำนวณจาก id งาน** (`mixEventId`) — insert ซ้ำ Google ตอบ 409 → patch · กัน event ซ้ำ/กำพร้าเมื่อสองคำขอซิงก์พร้อมกัน หรือ insert สำเร็จแต่บันทึก DB ไม่ทัน (ผู้ตรวจเจอก่อน commit) · patch ใส่ `status: confirmed` ดึง event ที่ถูกลบในแอปปฏิทินกลับมา · ทุกคำขอ Google มี timeout 10 วิ
+- ลบคำขอแล้วเอา event ออกไม่สำเร็จ → หน้าคิวขึ้นเตือนสีเหลือง (แถวที่ลบไม่มีการ์ดให้โชว์ error) · ปิดฟีเจอร์ (ล้าง `MIX_CALENDAR_ID`) → error เก่าไม่ค้างบนการ์ด
+- `scripts/ops/deploy.py --set KEY=VALUE` — ตั้ง env บน stack ในรอบ redeploy เดียว จดค่าเดิมลง deploy-state.json ไว้ย้อน
+
 ### Added — คิวมิกซ์เสียง: เลือกงานของฉัน / ตรวจ EP ID · แท็บ "คิว Mixing" ในหน้าแอดมิน · ปฏิทินภาระงาน · ส่งงานบนการ์ด (v1.244)
 
 คำขอของ operator 28 ก.ย. 2569 — ต่อยอด /mix (v1.215–219) ให้เป็นวงจรเดียวกับการจองถ่าย: **Requested → Assigned → Completed**

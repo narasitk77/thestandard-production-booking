@@ -41,6 +41,8 @@ export interface MixJobView {
   notes: string | null
   createdAt: string
   flag: MixFlag
+  /** v1.245 — ซิงก์ปฏิทินมิกซ์ครั้งล่าสุดล้มเพราะอะไร (null = ผ่าน / ปิดอยู่) */
+  calendarSyncError?: string | null
 }
 
 export interface MixNotified { sent: boolean; to: string[]; reason?: string }
@@ -217,6 +219,13 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
         </a>
       )}
       {job.notes && <p className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-words">{job.notes}</p>}
+      {/* v1.245 — ซิงก์ปฏิทินมิกซ์ล้ม: โชว์ให้คนที่แก้ได้ (Sound Admin/แอดมิน) — ปฏิทินที่ผิดโดยไม่มีใครรู้
+          คือปฏิทินที่คนเลิกเชื่อ · คำขอยังเดินต่อได้ปกติ ไม่ได้ติดที่ปฏิทิน */}
+      {job.calendarSyncError && (actor.isCoordinator || actor.canEditAll) && (
+        <p className="mt-1 text-[11px] text-amber-700 break-words">
+          📅 ปฏิทินมิกซ์ซิงก์ไม่ได้: {job.calendarSyncError}
+        </p>
+      )}
 
       {/* ── ส่งแล้ว: ลิงก์ไฟล์คือสิ่งที่คนขอมาหา ── */}
       {status === 'DONE' && (

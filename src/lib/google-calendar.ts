@@ -15,6 +15,14 @@ const VAN_EMOJI = '🚐'
 const PROD_CALENDAR_FALLBACK = '72bf6ae390fb09d1e0a117dbaf421799be6bcc3b21ec2b7c3e2d7a65e65f9dc5@group.calendar.google.com'
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || PROD_CALENDAR_FALLBACK
 
+/**
+ * v1.245 — id ของปฏิทินคิวถ่ายเดิม (ทั้งค่าที่ตั้ง และค่าสำรองในโค้ด) ให้ปฏิทินมิกซ์ตรวจได้ว่า
+ * ไม่ได้ชี้มาที่นี่ — operator สั่ง "ไม่ปนกับ probook เดิม"
+ */
+export function bookingCalendarIds(): string[] {
+  return Array.from(new Set([CALENDAR_ID, PROD_CALENDAR_FALLBACK].map(s => s.trim().toLowerCase())))
+}
+
 // v1.29.4 — hardcoded fallback for the impersonated Workspace user. Same
 // value as the default baked into docker-compose.portainer.yml. Single-tenant
 // internal tool, so safe to hardcode; this guards against the deploy class of

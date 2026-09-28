@@ -130,7 +130,9 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || `ลบไม่สำเร็จ (${res.status})`)
       setJobs(prev => prev.filter(j => j.id !== job.id))
-      setFlash({ tone: 'ok', text: `ลบ ${job.code} แล้ว` })
+      setFlash(data.calendarError
+        ? { tone: 'warn', text: `ลบ ${job.code} แล้ว แต่เอางานออกจากปฏิทินมิกซ์ไม่สำเร็จ (${data.calendarError}) — ลบในปฏิทินเองหรือแจ้งแอดมิน` }
+        : { tone: 'ok', text: `ลบ ${job.code} แล้ว` })
     } catch (e: any) {
       setFlash({ tone: 'err', text: e?.message || 'ลบไม่สำเร็จ' })
     } finally {
