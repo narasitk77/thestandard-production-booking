@@ -1,6 +1,6 @@
 # Architecture overview
 
-One-page mental model for new developers (or future-me). Last updated **v1.233.1** (2026-09-23).
+One-page mental model for new developers (or future-me). Last updated **v1.241.0** (2026-09-28).
 
 ## What this is
 
@@ -25,9 +25,11 @@ Deploy: self-hosted Portainer on `thestandard.fortiddns.com:9000`, stack 125
 > reason — when a fact cannot be written publicly, write
 > "ดูไฟล์ CLAUDE.local.md (ไม่ commit)" instead of the value.
 
-Scale measured at v1.233.1: 45 pages · 156 API routes · 15 supervised workers
-(16 heartbeat keys) · 32 Prisma models · 139 modules in `src/lib` · 900 tests
-across 100 files.
+Scale measured at v1.241.0 (2026-09-28, counted directly from the repo, not
+copied from another doc): 45 pages · 157 API routes · 15 supervised workers
+(16 heartbeat keys) · 32 Prisma models · 143 modules in `src/lib` (see Code
+map for how that number is counted) · 950 tests across 105 files · 14 MCP
+tools.
 
 ## Stack
 
@@ -77,7 +79,7 @@ across 100 files.
 3. Approve ───────┼────────────────────────────────►│ /admin/[id]          │
                   │                                 │  POST …/approve     ►│ Status = CONFIRMED
                   │                                 │  or "อนุมัติทั้งชุด"  │ Background: Calendar event
-                  │                                 │  (v1.229, 1.5s apart)│   w/ guests (DWD impersonate)
+                  │                                 │  (v1.229.1, 3s apart)│   w/ guests (DWD impersonate)
                   │                                 │                      │ Landing folder if imminent
                   │                                 │                      │
 4. Assign crew ───┼────────────────────────────────►│ /admin/[id] assign   │ Update assignedEmails
@@ -177,10 +179,12 @@ pinned to it (`src/lib/__tests__/episode-program-segment.test.ts`).
 
 ## Code map
 
-`src/lib` has 139 modules; this groups them by what they own rather than
-listing every file. `src/lib/__tests__/` holds all 900 tests in 100 files, plus
-the `FakeDrive` harness (`__tests__/helpers/fake-drive.ts`) that makes the Drive
-logic testable without touching Google.
+`src/lib` has 143 modules — 137 top-level `.ts` files plus 3 in `mcp/` and 3 in
+`reconciler/` (`find src/lib -name "*.ts" -not -path "*__tests__*" | wc -l`;
+excludes the `__tests__/` harness itself). This groups them by what they own
+rather than listing every file. `src/lib/__tests__/` holds all 950 tests in
+105 files, plus the `FakeDrive` harness (`__tests__/helpers/fake-drive.ts`)
+that makes the Drive logic testable without touching Google.
 
 ```
 src/
@@ -200,7 +204,7 @@ src/
 │   │   │                        monitor · workspace · reviews · feedback
 │   │   └── production-space/  Hub for equipment · loans · repairs · rentals ·
 │   │                            purchases · vendors · vendor-prices
-│   └── api/                   156 routes — admin 66 · internal 29 · bookings 16 ·
+│   └── api/                   157 routes — admin 67 · internal 29 · bookings 16 ·
 │                                ot 8 · upload 7 · rest singletons
 └── lib/
     ├── Booking core           create-booking · booking-status · booking-access ·
@@ -236,7 +240,7 @@ src/
     ├── Ops                    heartbeat (worker specs) · audit · audit-retention ·
     │                          backup · app-env (staging fail-closed) ·
     │                          id-first-metrics · page-events
-    └── mcp/                   server.ts · tools.ts — 14 MCP tools
+    └── mcp/                   auth.ts · server.ts · tools.ts — 14 MCP tools
 ```
 
 ## Background work
