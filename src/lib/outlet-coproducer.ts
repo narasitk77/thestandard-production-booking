@@ -1,6 +1,10 @@
 /**
  * v1.183 — Co-Producer ประจำ outlet ที่ระบบเติมให้เอง
  *
+ * v1.242 (28 ก.ย. 2569) — แก้วออกจากทีม operator ให้แพรดูแล TSS คนเดียว ตารางค่าตั้งต้น
+ * จึงว่าง กลไกยังอยู่ครบ (เปิดผ่าน env AUTO_COPRODUCER_<CODE> หรือเติมตาราง) — ดู
+ * docs/runbook-offboarding.md ว่าทำไมคนที่ออกต้องถูกถอดจาก "กฎ" ที่นี่ ไม่ใช่แค่ปิด active
+ *
  * คำสั่ง operator (2026-08-20): "งานของ TSS ทุกงานหลังจากนี้ ให้ยิงแก้ว co-po TSS
  * ในคิวด้วย" — งานที่จองเข้ามาใหม่ของ TSS ต้องมีแก้วเป็น Co-Producer ติดอยู่ในคิว
  * โดยที่คนจองไม่ต้องเลือกเอง
@@ -29,13 +33,12 @@ export interface DefaultCoProducer {
 }
 
 /**
- * ค่าตั้งต้นในโค้ด. แก้ว = TSS Co-Producer ตาม seed ของ outlet-producers.ts
- * (TSD00334 · phoemsiri.p@thestandard.co) — ให้ตรงกัน ไม่งั้นชื่อในคิวจะไม่ใช่
- * คนเดียวกับที่อยู่ใน dropdown
+ * ค่าตั้งต้นในโค้ด — **ว่างตั้งแต่ v1.242** (แก้ว TSS ออก 28 ก.ย. 2569 ไม่มีคนแทน)
+ * ถ้าจะตั้งคนใหม่: ต้องเป็นคนเดียวกับ seed ใน outlet-producers.ts (ไม่งั้นชื่อในคิว
+ * จะไม่ใช่คนใน dropdown) และเมื่อคนนั้นออก ต้องถอดออกจากที่นี่ด้วย — users.active=false
+ * ไม่ได้หยุดกฎนี้ เพราะกฎอ่านจากตารางนี้ ไม่ได้ join users
  */
-export const BUILT_IN_DEFAULT_COPRODUCERS: Record<string, DefaultCoProducer> = {
-  TSS: { nickname: 'แก้ว', email: 'phoemsiri.p@thestandard.co' },
-}
+export const BUILT_IN_DEFAULT_COPRODUCERS: Record<string, DefaultCoProducer> = {}
 
 export function autoCoProducerEnabled(): boolean {
   return process.env.AUTO_COPRODUCER?.trim() !== '0'

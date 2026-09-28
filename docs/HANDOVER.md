@@ -55,6 +55,7 @@ Stack: Next.js 14.2 App Router · TypeScript · Prisma 5 → Postgres 16 · Next
 | `docs/room-booking-integration-plan.md` | งานเชื่อมระบบจองห้องของ IT · **อ่าน §12 ก่อน §1** (ของเก่าล้าสมัยแล้ว) |
 | `docs/mcp.md` | ต่อ AI client เข้า `/api/mcp` |
 | `docs/runbook-impersonate-swap.md` | คนที่ระบบ DWD impersonate ลาออก/ย้าย |
+| `docs/runbook-offboarding.md` | **คนออกจากทีม** — โอนใบอนาคต ปิดบัญชี ถอดชื่อจากกฎในโค้ด (`scripts/ops/offboard.py`) |
 | `docs/runbook-sheet-swap.md` | ชี้ไปชีท Producer Dashboard ใบอื่น |
 | `docs/runbook-ghcr-pull-denied.md` | Portainer ดึงอิมเมจไม่ได้ `denied: denied` |
 | `docs/runbook-lark-export.md` | คลังข้อมูลรายวันบน Lark (ของที่ระบบจะลบทิ้ง) |
