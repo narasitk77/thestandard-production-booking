@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { SlidersHorizontal, Plus } from 'lucide-react'
-import { MIX_STATUS_LABEL, type MixStatus } from '@/lib/mix-jobs'
+import { MIX_STATUS_LABEL, MIX_STATUS_HINT, type MixStatus } from '@/lib/mix-jobs'
 
 type Job = {
   id: string
@@ -28,6 +28,8 @@ type Job = {
   dueDate: string | null
   assigneeEmail: string | null
   deliveryLink: string | null
+  /** v1.244 — ตอนที่ขอ (null = ทั้งใบ) */
+  episodeCode?: string | null
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -91,14 +93,21 @@ export default function MixRequests({ bookingId, bookingCode }: { bookingId: str
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-gray-400">{j.code}</span>
-                  <span className={`px-1.5 py-0.5 rounded ${STATUS_STYLE[j.status] || ''}`}>
+                  <span
+                    className={`px-1.5 py-0.5 rounded ${STATUS_STYLE[j.status] || ''}`}
+                    title={MIX_STATUS_HINT[j.status as MixStatus] || undefined}
+                  >
                     {MIX_STATUS_LABEL[j.status as MixStatus] || j.status}
                   </span>
+                  {/* v1.244 — ขอเฉพาะตอน: โชว์ว่าตอนไหน ไม่งั้นใบหลายตอนดูไม่ออกว่าขอซ้ำหรือคนละตอน */}
+                  {j.episodeCode && j.episodeCode !== bookingCode && (
+                    <span className="font-mono text-gray-500">ตอน {j.episodeCode}</span>
+                  )}
                 </div>
                 <div className="text-gray-700 mt-0.5 break-words">{j.title}</div>
                 <div className="text-gray-400 mt-0.5">
-                  {j.assigneeEmail ? `มิกซ์โดย ${j.assigneeEmail.split('@')[0]}` : 'รอ coordinator แจกงาน'}
-                  {j.dueDate && ` · ส่ง ${j.dueDate.slice(0, 10)}`}
+                  {j.assigneeEmail ? `มิกซ์โดย ${j.assigneeEmail.split('@')[0]}` : j.status === 'QUEUED' ? 'รอ Sound Admin แจกงาน' : null}
+                  {j.dueDate && ` · ต้องการไฟล์ ${j.dueDate.slice(0, 10)}`}
                 </div>
               </div>
               {j.deliveryLink && (

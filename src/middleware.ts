@@ -21,12 +21,17 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/calendar') ||
     pathname.startsWith('/ot') ||
     pathname.startsWith('/switcher') ||
+    pathname.startsWith('/mix') ||
     pathname === '/'
 
   if (isAuthRequired && !hasSession) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    url.searchParams.set('callbackUrl', pathname)
+    // v1.244 — เก็บ query ไว้ใน callbackUrl: ลิงก์ในเมล (/admin?st=MIX, /mix?scope=mine) ต้องพาไปแท็บที่
+    // ตั้งใจหลังล็อกอิน · ล้าง search ของ url ก่อน ไม่งั้น ?st= ติดไปกับหน้า /login ด้วย
+    const back = pathname + request.nextUrl.search
+    url.search = ''
+    url.searchParams.set('callbackUrl', back)
     return NextResponse.redirect(url)
   }
 

@@ -1186,6 +1186,11 @@ model MixJob {
   bookingId   String?
   /// snapshot ตอนสร้าง เพื่อให้รายงานยังอ่านออกหลัง booking ถูกเปลี่ยนชื่อ/ย้ายสังกัด
   bookingCode String?
+  /// v1.244 — ตอนที่ขอให้มิกซ์ (id แถว Episode) · null = ทั้งใบ · plain column เหตุผลเดียวกับ
+  /// bookingId (ลดจำนวนตอน v1.236 ต้องไม่ลบคำขอที่เคยขอไว้) · route ตรวจว่าอยู่ในใบเดียวกันจริง
+  episodeRowId String?
+  /// v1.244 — snapshot EP ID ตอนสร้าง (เช่น PP-26-034-L01) ให้คนอ่านรู้ว่าตอนไหนโดยไม่ต้อง join
+  episodeCode  String?
 
   /// คนขอ — มาจาก session ตอนสร้าง ไม่มีช่องให้พิมพ์แทนกัน
   requesterEmail String

@@ -5,7 +5,9 @@ import {
   canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isAssignableTo,
   canCloseMixJob, normalizeHttpLink,
   mixFlag, deliveredOnTime, validateMixJob, compareMixQueue,
-  type MixActor,
+  normalizeMixQuery, resolveMixTarget, canSetDeliveryLink, episodeBelongsToBooking, findDuplicateMixJobs,
+  mixLoadLevel, buildMixCalendar, bangkokDateKey, addDaysKey, MIX_STATUS_LABEL,
+  type MixActor, type MixTargetBooking,
 } from '../mix-jobs'
 
 // v1.215 — กฎของคิวมิกซ์ · ไฟล์นี้คือที่เดียวที่ตอบว่า "ใครทำอะไรได้"
@@ -157,10 +159,10 @@ test('กำหนดส่งต้องเป็นวันที่จร�
 })
 
 test('ค่าที่ผ่านแล้วถูกทำความสะอาด ไม่ใช่ส่งดิบ ๆ ลง DB', () => {
-  const r = validateMixJob({ title: '  มิกซ์ EP.4  ', bookingId: ' bk_9 ', notes: '  ด่วน  ', sourceLink: '' })
+  const r = validateMixJob({ title: '  มิกซ์ EP.4  ', bookingId: ' bk_9 ', episodeRowId: ' ep_2 ', notes: '  ด่วน  ', sourceLink: '' })
   assert.equal(r.ok, true)
   assert.deepEqual((r as any).value, {
-    title: 'มิกซ์ EP.4', bookingId: 'bk_9', dueDate: null, sourceLink: null, notes: 'ด่วน',
+    title: 'มิกซ์ EP.4', bookingId: 'bk_9', episodeRowId: 'ep_2', dueDate: null, sourceLink: null, notes: 'ด่วน',
   })
 })
 
@@ -239,4 +241,188 @@ test('ปิดงานไม่ได้เมื่อไม่มีลิ�
   assert.equal(canCloseMixJob({ deliveryLink: 'ไม่ใช่ลิงก์' }), false,
     'ค่าที่เคยเก็บไว้แต่ใช้ไม่ได้ ต้องไม่ถือว่าผ่าน')
   assert.equal(canCloseMixJob({}, 'javascript:alert(1)'), false)
+})
+
+/* ───────────────────── v1.244 ส่งงาน: เฉพาะคนที่ถูกแจก ───────────────────── */
+
+test('v1.244 — ป้ายสถานะตามคำของ operator: Requested → Assigned → Completed', () => {
+  assert.equal(MIX_STATUS_LABEL.QUEUED, 'Requested')
+  assert.equal(MIX_STATUS_LABEL.IN_PROGRESS, 'Assigned')
+  assert.equal(MIX_STATUS_LABEL.DONE, 'Completed')
+})
+
+test('v1.244 — ส่งงาน (DONE) ได้เฉพาะคนที่ถูกแจก · coordinator/แอดมินเป็นทางสำรอง · วิศวกรคนอื่นไม่ได้', () => {
+  const mine = { ...claimed, assigneeEmail: 'sound@thestandard.co' }
+  const notMine = { ...claimed, assigneeEmail: 'thaphat.t@thestandard.co' }
+  assert.equal(canSetMixStatus(engineer, mine, 'DONE'), true, 'คนที่ถูกแจกส่งงานตัวเองได้')
+  assert.equal(canSetMixStatus(engineer, notMine, 'DONE'), false,
+    'วิศวกรเสียงคนอื่นปิดงานของเพื่อนไม่ได้ — ไม่งั้นเมลถึงคนขอบอกผิดว่าใครมิกซ์')
+  assert.equal(canSetMixStatus(coordinator, notMine, 'DONE'), true)
+  assert.equal(canSetMixStatus(admin, notMine, 'DONE'), true)
+  assert.equal(canSetMixStatus(requester, notMine, 'DONE'), false)
+  // สิทธิ์อื่นของทีมเสียงยังเหมือนเดิม
+  assert.equal(canSetMixStatus(engineer, notMine, 'QUEUED'), true)
+})
+
+/* ─────────────────────── v1.244 จับคู่ EP ID / Booking ID ─────────────────────── */
+
+test('normalizeMixQuery: full-width / ขีดยาว / ช่องว่าง / ตัวเล็ก → รหัสเดียวกัน', () => {
+  assert.equal(normalizeMixQuery(' nws-tsn-260702-01 '), 'NWS-TSN-260702-01')
+  assert.equal(normalizeMixQuery('ＮＷＳ－ＴＳＮ－２６０７０２－０１'), 'NWS-TSN-260702-01')
+  assert.equal(normalizeMixQuery('PP–26—034_L01'), 'PP-26-034-L01')
+  assert.equal(normalizeMixQuery('PP 26 034'), 'PP-26-034', 'ช่องว่างกลางรหัส = ขีด (รหัสจริงไม่มีช่องว่าง)')
+  assert.equal(normalizeMixQuery('pp–26–099 l01'), 'PP-26-099-L01', 'เคสที่เจอตอนทดสอบบนเบราว์เซอร์')
+  assert.equal(normalizeMixQuery('PP-26-034 - L01'), 'PP-26-034-L01', 'ขีดกับช่องว่างปนกันยุบเป็นขีดเดียว')
+  assert.equal(normalizeMixQuery(' -NWS-TSN-260702-01- '), 'NWS-TSN-260702-01')
+  assert.equal(normalizeMixQuery(null), '')
+})
+
+const NOW = new Date('2026-09-28T05:00:00Z')
+const bk = (over: Partial<MixTargetBooking> & { id: string }): MixTargetBooking => ({
+  bookingCode: null, status: 'CONFIRMED', shootDate: '2026-09-28', episodes: [], ...over,
+})
+// เคสจริงจาก prod: รหัสใบจอง = EP ID ของตอนที่ 1 ในใบเดียวกัน
+const single = bk({ id: 'b1', bookingCode: 'NWS-TSN-260702-01', episodes: [{ id: 'e1', episodeId: 'NWS-TSN-260702-01', title: 'NOW' }] })
+const multi = bk({ id: 'b2', bookingCode: 'WLT-MNW-261013-01', episodes: [
+  { id: 'e21', episodeId: 'WLT-MNW-261013-01' }, { id: 'e22', episodeId: 'WLT-ITV-261013-01' }, { id: 'e23', episodeId: 'WLT-OTH-261013-01' },
+] })
+// EP ID เดียวถ่ายหลายวัน (PP-26-034-L01 อยู่ 10 ใบบน prod)
+const agnA = bk({ id: 'a1', bookingCode: 'AGN-260911-02', shootDate: '2026-09-11', producerEmail: 'nice@thestandard.co', episodes: [{ id: 'x1', episodeId: 'PP-26-034-L01' }] })
+const agnB = bk({ id: 'a2', bookingCode: 'AGN-260929-01', shootDate: '2026-09-29', producerEmail: 'other@thestandard.co', episodes: [{ id: 'x2', episodeId: 'PP-26-034-L01' }] })
+const agnC = bk({ id: 'a3', bookingCode: 'AGN-261003-01', shootDate: '2026-10-03', producerEmail: 'other@thestandard.co', episodes: [{ id: 'x3', episodeId: 'PP-26-034-L01' }] })
+
+test('รหัสใบจองที่มีตอนเดียว → ผูกตอนนั้นให้เลย ไม่ต้องถาม', () => {
+  const r = resolveMixTarget('nws-tsn-260702-01', [single], 'me@x', NOW)
+  assert.deepEqual(r, { kind: 'match', via: 'bookingCode', pick: { bookingId: 'b1', episodeRowId: 'e1' }, needsEpisodePick: false })
+})
+
+test('รหัสใบจองที่มีหลายตอน → ผูกทั้งใบ แล้วให้เลือกตอนต่อ (ไม่ผูกตอนที่ 1 ให้เงียบ ๆ)', () => {
+  const r = resolveMixTarget('WLT-MNW-261013-01', [multi], 'me@x', NOW)
+  assert.equal(r.kind, 'match')
+  if (r.kind !== 'match') return
+  assert.equal(r.via, 'bookingCode')
+  assert.deepEqual(r.pick, { bookingId: 'b2', episodeRowId: null })
+  assert.equal(r.needsEpisodePick, true)
+})
+
+test('EP ID ของตอนที่ 2 → ใบนั้น + ตอนนั้นตรง ๆ', () => {
+  const r = resolveMixTarget('wlt-itv-261013-01', [multi], 'me@x', NOW)
+  assert.deepEqual(r, { kind: 'match', via: 'episodeId', pick: { bookingId: 'b2', episodeRowId: 'e22' }, needsEpisodePick: false })
+})
+
+test('ไอดีภายในของใบจองก็ใช้ได้ (ลิงก์ /dashboard/<id> ที่ส่งต่อกันในแชท)', () => {
+  const r = resolveMixTarget('b2', [multi], 'me@x', NOW)
+  assert.equal(r.kind, 'match')
+  if (r.kind === 'match') assert.equal(r.via, 'bookingId')
+})
+
+test('EP ID ที่อยู่หลายใบ → ambiguous ห้ามเดา · ใบของคนขอขึ้นก่อน แล้วใบที่วันถ่ายใกล้วันนี้', () => {
+  const r = resolveMixTarget('PP-26-034-L01', [agnC, agnA, agnB], 'nice@thestandard.co', NOW)
+  assert.equal(r.kind, 'ambiguous')
+  if (r.kind !== 'ambiguous') return
+  assert.deepEqual(r.options.map(o => o.bookingId), ['a1', 'a2', 'a3'],
+    'a1 เป็นของคนขอ → ก่อน · a2 (29 ก.ย.) ใกล้วันนี้กว่า a3 (3 ต.ค.)')
+  const r2 = resolveMixTarget('PP-26-034-L01', [agnC, agnA, agnB], 'nobody@x', NOW)
+  if (r2.kind === 'ambiguous') assert.deepEqual(r2.options.map(o => o.bookingId), ['a2', 'a3', 'a1'])
+})
+
+test('ใบที่ถูกยกเลิก/ลบไม่นับ · เจอแต่ใบยกเลิก = บอกเหตุผลตรง ๆ ไม่ใช่ "ไม่พบ"', () => {
+  const cancelled = { ...single, status: 'CANCELLED' }
+  const r = resolveMixTarget('NWS-TSN-260702-01', [cancelled], 'me@x', NOW)
+  assert.equal(r.kind, 'none')
+  if (r.kind === 'none') assert.match(r.reason, /ยกเลิก/)
+  const deleted = { ...agnA, deletedAt: '2026-09-20' }
+  const r2 = resolveMixTarget('PP-26-034-L01', [deleted, agnB], 'nice@thestandard.co', NOW)
+  assert.deepEqual(r2, { kind: 'match', via: 'episodeId', pick: { bookingId: 'a2', episodeRowId: 'x2' }, needsEpisodePick: false },
+    'เหลือใบเดียวที่ยังมีชีวิต = ไม่กำกวมแล้ว')
+})
+
+test('ไม่พบ / พิมพ์ว่าง → none พร้อมข้อความที่บอกว่าทำอะไรต่อ', () => {
+  const r = resolveMixTarget('XYZ-000', [single], 'me@x', NOW)
+  assert.equal(r.kind, 'none')
+  assert.equal(resolveMixTarget('   ', [single], 'me@x', NOW).kind, 'none')
+})
+
+test('ตอนต้องอยู่ในใบจองที่เลือกจริง — กันผูกใบ A กับตอนของใบ B', () => {
+  assert.equal(episodeBelongsToBooking({ bookingId: 'b2' }, 'b2'), true)
+  assert.equal(episodeBelongsToBooking({ bookingId: 'b1' }, 'b2'), false)
+  assert.equal(episodeBelongsToBooking(null, 'b2'), false)
+})
+
+test('ระบุตอนต้องมีใบจอง · คำขอใหม่ต้องมีวันที่ต้องการไฟล์ · ของเดิมตอนแก้ไม่บังคับย้อนหลัง', () => {
+  assert.equal(validateMixJob({ title: 'x', episodeRowId: 'e1', sourceLink: 'https://a.b' }).ok, false)
+  assert.equal(validateMixJob({ title: 'x', bookingId: 'b1' }, { requireDueDate: true }).ok, false)
+  const ok = validateMixJob({ title: 'x', bookingId: 'b1', episodeRowId: 'e1', dueDate: '2026-10-01' }, { requireDueDate: true })
+  assert.equal(ok.ok, true)
+  if (ok.ok) assert.equal(ok.value.episodeRowId, 'e1')
+  assert.equal(validateMixJob({ title: 'x', bookingId: 'b1' }).ok, true, 'แก้งานเก่าที่ไม่มีวันยังผ่าน')
+})
+
+test('คำขอซ้ำ: ใบเดียวกันและ (ตอนเดียวกัน หรือฝั่งใดขอทั้งใบ) ที่ยังเปิดอยู่', () => {
+  const jobs = [
+    { bookingId: 'b2', episodeRowId: 'e22', status: 'QUEUED' },
+    { bookingId: 'b2', episodeRowId: null, status: 'IN_PROGRESS' },
+    { bookingId: 'b2', episodeRowId: 'e23', status: 'DONE' },
+    { bookingId: 'b2', episodeRowId: 'e21', status: 'CANCELLED' },
+    { bookingId: 'b1', episodeRowId: 'e1', status: 'QUEUED' },
+    { bookingId: 'b2', episodeRowId: 'e22', status: 'QUEUED', deletedAt: '2026-09-01' },
+  ]
+  assert.equal(findDuplicateMixJobs(jobs, { bookingId: 'b2', episodeRowId: 'e22' }).length, 2, 'ตอนเดียวกัน + คำขอทั้งใบ')
+  assert.equal(findDuplicateMixJobs(jobs, { bookingId: 'b2', episodeRowId: 'e23' }).length, 1, 'DONE ไม่นับ เหลือคำขอทั้งใบ')
+  assert.equal(findDuplicateMixJobs(jobs, { bookingId: 'b2', episodeRowId: null }).length, 2, 'ขอทั้งใบชนทุกตอนที่ยังเปิด')
+  assert.equal(findDuplicateMixJobs(jobs, { bookingId: 'b9', episodeRowId: null }).length, 0)
+})
+
+/* ─────────────────────── v1.244 ปฏิทินภาระงาน ─────────────────────── */
+
+test('ระดับความแน่นเทียบกับจำนวนวิศวกร (1 งาน/คน/วัน)', () => {
+  assert.equal(mixLoadLevel(0, 4), 'free')
+  assert.equal(mixLoadLevel(2, 4), 'light')
+  assert.equal(mixLoadLevel(3, 4), 'busy')
+  assert.equal(mixLoadLevel(4, 4), 'busy')
+  assert.equal(mixLoadLevel(5, 4), 'heavy')
+  assert.equal(mixLoadLevel(1, 0), 'busy', 'ไม่มีวิศวกร active = ความจุขั้นต่ำ 1 ไม่ใช่หารศูนย์')
+})
+
+test('ปฏิทินนับตามวันที่ต้องการไฟล์ · ยกเลิก/ลบไม่นับ · แยกเปิด/ส่งแล้ว/ยังไม่มีคนรับ/ต่อคน', () => {
+  const jobs = [
+    { dueDate: '2026-10-01', status: 'QUEUED', assigneeEmail: null },
+    { dueDate: '2026-10-01', status: 'IN_PROGRESS', assigneeEmail: 'Note@X' },
+    { dueDate: '2026-10-01', status: 'DONE', assigneeEmail: 'note@x' },
+    { dueDate: '2026-10-01', status: 'CANCELLED', assigneeEmail: null },
+    { dueDate: '2026-10-02', status: 'IN_PROGRESS', assigneeEmail: 'note@x', deletedAt: '2026-09-30' },
+    { dueDate: '2026-11-20', status: 'QUEUED', assigneeEmail: null },
+    { dueDate: null, status: 'QUEUED', assigneeEmail: null },
+  ]
+  const days = buildMixCalendar(jobs, '2026-09-30', '2026-10-02', 4)
+  assert.deepEqual(days.map(d => d.date), ['2026-09-30', '2026-10-01', '2026-10-02'])
+  const oct1 = days[1]
+  assert.deepEqual({ total: oct1.total, open: oct1.open, done: oct1.done, unassigned: oct1.unassigned },
+    { total: 3, open: 2, done: 1, unassigned: 1 })
+  assert.deepEqual(oct1.byAssignee, { 'note@x': 1 }, 'อีเมลรวมตัวพิมพ์เล็ก/ใหญ่เป็นคนเดียว')
+  assert.equal(oct1.level, 'busy')
+  assert.equal(days[2].total, 0, 'ลบแล้วไม่นับ')
+  assert.deepEqual(buildMixCalendar(jobs, '2026-10-05', '2026-10-01', 4), [], 'ช่วงกลับหัว = ว่าง ไม่ใช่พัง')
+  assert.equal(buildMixCalendar([], '2026-01-01', '2026-12-31', 4).length, 93, 'เพดาน 93 วัน')
+})
+
+test('วันไทย: 23:30 น. ของวันที่ 30 (UTC 16:30) ยังเป็นวันที่ 30 · 07:30 น. วันที่ 1 (UTC 00:30) เป็นวันที่ 1', () => {
+  assert.equal(bangkokDateKey(new Date('2026-09-30T16:29:00Z')), '2026-09-30')
+  assert.equal(bangkokDateKey(new Date('2026-09-30T17:00:00Z')), '2026-10-01')
+  assert.equal(addDaysKey('2026-09-30', 1), '2026-10-01')
+  assert.equal(addDaysKey('2026-03-01', -1), '2026-02-28')
+})
+
+test('v1.244 — ลิงก์ส่งงาน: Sound Admin ส่งแทนได้จริง (route กับการ์ดใช้กฎเดียวกัน ไม่ใช่การ์ดโชว์ปุ่มแล้ว 403)', () => {
+  const notMine = { ...claimed, assigneeEmail: 'thaphat.t@thestandard.co' }
+  assert.equal(canSetDeliveryLink(coordinator, notMine, 'DONE'), true, 'coordinator ส่งงานแทน')
+  assert.equal(canSetDeliveryLink(coordinator, notMine, undefined), false, 'แค่แปะลิงก์ไว้เฉย ๆ ไม่ใช่เรื่องของ coordinator')
+  assert.equal(canSetDeliveryLink(engineer, { ...claimed, assigneeEmail: 'sound@thestandard.co' }), true, 'คนที่ถูกแจกแปะลิงก์ได้เสมอ')
+  assert.equal(canSetDeliveryLink(engineer, notMine, 'DONE'), false, 'วิศวกรคนอื่นส่งงานของเพื่อนไม่ได้')
+  assert.equal(canSetDeliveryLink(requester, notMine, 'DONE'), false)
+})
+
+test('v1.244 — ส่งตีหนึ่งของวันถัดไป (เวลาไทย) = ไม่ทัน แม้ตามนาฬิกา UTC ยังเป็นวันกำหนด', () => {
+  assert.equal(deliveredOnTime({ deliveredAt: '2026-09-10T16:30:00Z', dueDate: '2026-09-10' }), true, '23:30 BKK วันกำหนด')
+  assert.equal(deliveredOnTime({ deliveredAt: '2026-09-10T18:00:00Z', dueDate: '2026-09-10' }), false, '01:00 BKK วันถัดไป')
 })

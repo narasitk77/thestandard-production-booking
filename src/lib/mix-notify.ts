@@ -54,6 +54,8 @@ export interface MixNotifyJob {
   number: number
   title: string
   bookingCode: string | null
+  /** v1.244 — EP ID ของตอนที่ขอ (null = ทั้งใบ) */
+  episodeCode?: string | null
   dueDate: Date | string | null
   requesterEmail: string
   sourceLink: string | null
@@ -67,19 +69,20 @@ function dueText(due: Date | string | null): string {
   return `ต้องการภายใน ${s.slice(0, 10)}`
 }
 
-function body(job: MixNotifyJob, lead: string): string {
+function body(job: MixNotifyJob, lead: string, openPath = '/mix', extraLinks: string[] = []): string {
   const url = appUrl()
   return [
     lead,
     '',
     `${formatMixNumber(job.number)} — ${job.title}`,
     dueText(job.dueDate),
-    job.bookingCode ? `ใบจอง: ${job.bookingCode}` : null,
+    job.bookingCode ? `ใบจอง: ${job.bookingCode}${job.episodeCode && job.episodeCode !== job.bookingCode ? ` · ตอน ${job.episodeCode}` : ''}` : null,
     `ผู้ขอ: ${job.requesterEmail}`,
     job.sourceLink ? `ไฟล์ต้นทาง: ${job.sourceLink}` : null,
     job.notes ? `โน้ต: ${job.notes}` : null,
     '',
-    url ? `เปิดคิว: ${url}/mix` : null,
+    url ? `เปิดคิว: ${url}${openPath}` : null,
+    ...(url ? extraLinks.map(l => l.replace('{url}', url)) : []),
   ].filter(Boolean).join('\n')
 }
 
@@ -103,7 +106,10 @@ export async function notifyMixRequested(job: MixNotifyJob): Promise<MixNotifyRe
     await sendEmail({
       to: to.join(','),
       subject: `[คิวมิกซ์] ${formatMixNumber(job.number)} ${job.title}`,
-      text: body(job, 'มีคำขอมิกซ์เสียงเข้ามาใหม่ — รอ coordinator แจกงาน'),
+      // v1.244 — ลิงก์พาไปแท็บ "คิว Mixing" ในหน้าแอดมินที่ Sound Admin แจกงาน (ไม่ใช่ /mix)
+      // กล่องกลาง sound@ อ่านโดยวิศวกร tier crew ที่เปิด /admin ไม่ได้ → ให้ลิงก์ /mix คู่กัน
+      text: body(job, 'มีคำขอมิกซ์เสียงเข้ามาใหม่ (Requested) — รอ Sound Admin แจกงาน', '/mix',
+        ['แจกงาน (Sound Admin): {url}/admin?st=MIX']),
     })
     return { sent: true, to }
   } catch (e: any) {
@@ -133,7 +139,8 @@ export async function notifyMixAssigned(
     await sendEmail({
       to: to.join(','),
       subject: `[คิวมิกซ์] ${formatMixNumber(job.number)} มอบหมายให้ ${assigneeEmail.split('@')[0]}`,
-      text: body(job, `${assignedBy} มอบหมายงานนี้ให้ ${assigneeEmail}`),
+      // v1.244 — คนที่ถูกแจกอยู่ tier crew เปิด /admin ไม่ได้ ลิงก์ต้องพาไปที่ส่งงานได้จริง
+      text: body(job, `${assignedBy} มอบหมายงานนี้ให้ ${assigneeEmail} (Assigned) — มิกซ์เสร็จแล้ววางลิงก์และกดส่งงานที่การ์ดนี้`, '/mix?scope=mine'),
     })
     return { sent: true, to }
   } catch (e: any) {
@@ -169,7 +176,7 @@ export async function notifyMixDelivered(
         `${by} มิกซ์เสร็จแล้ว`,
         '',
         `${formatMixNumber(job.number)} — ${job.title}`,
-        job.bookingCode ? `ใบจอง: ${job.bookingCode}` : null,
+        job.bookingCode ? `ใบจอง: ${job.bookingCode}${job.episodeCode && job.episodeCode !== job.bookingCode ? ` · ตอน ${job.episodeCode}` : ''}` : null,
         '',
         `ไฟล์ที่มิกซ์แล้ว: ${deliveryLink}`,
         '',

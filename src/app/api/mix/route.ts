@@ -14,6 +14,7 @@ import { getSession, getSoundAccess } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import {
   OPEN_MIX_STATUSES, validateMixJob, formatMixNumber, mixFlag, compareMixQueue,
+  episodeBelongsToBooking, findDuplicateMixJobs,
 } from '@/lib/mix-jobs'
 import { notifyMixRequested } from '@/lib/mix-notify'
 
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
     if (!access.canOpen) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const body = await request.json().catch(() => ({}))
-    const clean = validateMixJob(body)
+    const clean = validateMixJob(body, { requireDueDate: true })
     if (!clean.ok) return NextResponse.json({ error: clean.error }, { status: 400 })
 
     // ผูกใบจอง = ต้องมีใบจองนั้นจริง · เก็บ bookingCode เป็น snapshot ไว้ให้รายงาน
@@ -98,13 +99,46 @@ export async function POST(request: NextRequest) {
     // bookingCode ใหม่) — เก็บแค่ id อย่างเดียวแล้ววันหนึ่งใบจองหาย รายงานจะกลาย
     // เป็นแถวที่ไม่มีใครรู้ว่าคืองานอะไร
     let bookingCode: string | null = null
+    let episodeCode: string | null = null
     if (clean.value.bookingId) {
       const booking = await prisma.booking.findFirst({
         where: { id: clean.value.bookingId, deletedAt: null },
-        select: { id: true, bookingCode: true },
+        select: { id: true, bookingCode: true, status: true },
       })
       if (!booking) return NextResponse.json({ error: 'ไม่พบใบจองที่ผูกมา' }, { status: 400 })
+      if (booking.status === 'CANCELLED') {
+        return NextResponse.json({ error: `ใบจอง ${booking.bookingCode || ''} ถูกยกเลิกแล้ว — ถ้ายังต้องมิกซ์ ใส่ลิงก์ไฟล์เป็นงานเดี่ยวแทน` }, { status: 400 })
+      }
       bookingCode = booking.bookingCode
+
+      // v1.244 — ตอนที่เลือกต้องอยู่ในใบจองนี้จริง: ฟอร์มส่งสองค่าแยกกัน หน้าเว็บค้าง/ร่างเก่า
+      // ทำให้ผูกใบ A กับตอนของใบ B ได้ แล้วทีมเสียงไปหยิบไฟล์ผิดกอง
+      if (clean.value.episodeRowId) {
+        const ep = await prisma.episode.findUnique({
+          where: { id: clean.value.episodeRowId },
+          select: { bookingId: true, episodeId: true },
+        })
+        if (!episodeBelongsToBooking(ep, booking.id)) {
+          return NextResponse.json({ error: `ตอนที่เลือกไม่ได้อยู่ในใบจอง ${booking.bookingCode || ''} — ตรวจรหัสใหม่อีกครั้ง` }, { status: 400 })
+        }
+        episodeCode = ep!.episodeId
+      }
+
+      // v1.244 — ขอซ้ำ: ไม่ห้าม (งานเดียวกันอาจต้องสองเวอร์ชัน) แต่ต้องยืนยัน — คำขอซ้ำที่ไม่มีใคร
+      // รู้คือทีมเสียงทำงานเดียวกันสองรอบ · 409 พร้อมรหัสที่ชน ให้ฟอร์มถามต่อได้
+      if (body.confirmDuplicate !== true) {
+        const open = await prisma.mixJob.findMany({
+          where: { deletedAt: null, bookingId: booking.id, status: { in: [...OPEN_MIX_STATUSES] } },
+          select: { number: true, bookingId: true, episodeRowId: true, status: true, deletedAt: true },
+        })
+        const dupes = findDuplicateMixJobs(open, { bookingId: booking.id, episodeRowId: clean.value.episodeRowId })
+        if (dupes.length > 0) {
+          return NextResponse.json({
+            error: `มีคำขอที่ยังเปิดอยู่ของงานนี้แล้ว: ${dupes.map(d => formatMixNumber(d.number)).join(', ')}`,
+            duplicates: dupes.map(d => formatMixNumber(d.number)),
+          }, { status: 409 })
+        }
+      }
     }
 
     const job = await prisma.mixJob.create({
@@ -112,6 +146,8 @@ export async function POST(request: NextRequest) {
         title: clean.value.title,
         bookingId: clean.value.bookingId,
         bookingCode,
+        episodeRowId: clean.value.episodeRowId,
+        episodeCode,
         dueDate: clean.value.dueDate ? new Date(`${clean.value.dueDate}T00:00:00Z`) : null,
         sourceLink: clean.value.sourceLink,
         notes: clean.value.notes,
@@ -135,6 +171,7 @@ export async function POST(request: NextRequest) {
       // บันทึกผลการแจ้งเตือนแบบราย recipient ไม่ยุบเป็น boolean (บทเรียน v1.186)
       changes: {
         number: job.number, title: job.title, dueDate: clean.value.dueDate,
+        episodeCode, duplicateConfirmed: body.confirmDuplicate === true || undefined,
         notified: notified.sent, notifiedTo: notified.to, notifyError: notified.reason ?? null,
       },
     })

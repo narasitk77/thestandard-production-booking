@@ -5,6 +5,7 @@ import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
 import CardFootageActions from '@/app/_components/CardFootageActions'
 import MiniMonthCalendar from '@/app/_components/MiniMonthCalendar'
+import MixQueuePanel from '@/app/_components/MixQueuePanel'
 import { CameraMicTag } from './_components/CameraMicTag'
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { resolveTier, tierAllows, type Tier } from '@/lib/tiers'
@@ -91,6 +92,20 @@ export default function AdminPage() {
       setTier(resolveTier(d?.user?.role, d?.user?.position))
     }).catch(() => {})
   }, [])
+  // v1.244 — ตัวเลขบนแท็บคิว Mixing = งานที่ยังรอแจก · ดึงใหม่ทุกครั้งที่สลับแท็บ (แจกงานในแผงแล้ว
+  // กลับมาแท็บอื่นต้องไม่เห็นเลขเก่า) และซ่อนตอนอยู่แท็บ Mixing ที่หัวแผงมีตัวเลขสดอยู่แล้ว
+  // ล้ม (403/500/เน็ต) = ไม่โชว์ตัวเลขเลย ไม่ใช่โชว์ 0 — "ไม่รู้" ต้องไม่หน้าตาเหมือน "ไม่มี"
+  const [mixUnassigned, setMixUnassigned] = useState<string | null>(null)
+  useEffect(() => {
+    fetch('/api/mix?scope=open')
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+      .then(d => {
+        if (!Array.isArray(d?.jobs)) return
+        const n = d.jobs.filter((j: { assigneeEmail?: string | null }) => !j.assigneeEmail).length
+        setMixUnassigned(n > 0 ? `${n}${d.truncated ? '+' : ''}` : null)
+      })
+      .catch(() => {})
+  }, [filter])
 
   // v1.124 — filters live in the URL so they survive opening a booking and
   // coming Back (and a filtered view can be shared as a link). Read once on
@@ -167,6 +182,8 @@ export default function AdminPage() {
 
   const showingDeleted = filter === 'DELETED'
   const showingRoutine = filter === 'ROUTINE'
+  // v1.244 — แท็บคิว Mixing ไม่ใช่สถานะใบจอง · ระหว่างค้นหา ID ยังค้นใบจองทุกสถานะเหมือนแท็บอื่น
+  const showingMix = filter === 'MIX' && !searchApplied
 
   // v1.54.1 — limit raised 50→200 (parity with the other list surfaces; at 50
   // the desc sort silently dropped the most imminent rows), the fetch is
@@ -175,6 +192,9 @@ export default function AdminPage() {
   const fetchSeq = useRef(0)
   const fetch_ = useCallback(async () => {
     const seq = ++fetchSeq.current
+    // v1.244 — แท็บ MIX ไม่ยิง /api/bookings (ไม่งั้นได้ status=MIX = ลิสต์ผิด) · seq ที่ขยับแล้ว
+    // ทิ้งผลของแท็บก่อนหน้าที่ยังค้างอยู่ด้วย
+    if (filter === 'MIX' && !searchApplied) { setLoading(false); return }
     setLoading(true)
     try {
       // v1.56 — Routine tab shows only routine bookings (any status); the
@@ -279,12 +299,14 @@ export default function AdminPage() {
       )}
 
       {/* Status tabs */}
-      <div className="flex gap-1 mb-5 border-b border-gray-200">
+      {/* v1.244 — แถวแท็บเลื่อนได้บนมือถือ: 9 แท็บกว้างเกิน 375px และ html/body ตั้ง overflow-x-hidden
+          แท็บท้าย ๆ (รวมคิว Mixing) จึงถูกตัดทิ้งแตะไม่ได้ · จอ sm ขึ้นไปหน้าตาเดิม */}
+      <div className="flex gap-1 mb-5 border-b border-gray-200 overflow-x-auto pb-px sm:overflow-visible sm:pb-0">
         {STATUS_ORDER.map(s => (
           <button
             key={s}
             onClick={() => setFilter(s)}
-            className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+            className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
               filter === s
                 ? 'border-[#673ab7] text-[#673ab7] font-medium'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -295,7 +317,7 @@ export default function AdminPage() {
         ))}
         <button
           onClick={() => setFilter('')}
-          className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
             filter === ''
               ? 'border-[#673ab7] text-[#673ab7] font-medium'
               : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -306,7 +328,7 @@ export default function AdminPage() {
         <button
           onClick={() => setFilter('ROUTINE')}
           title="งาน Routine รายสัปดาห์ (เช่น THE STANDARD NOW) — สร้างที่หน้า Routine Planner"
-          className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
             showingRoutine
               ? 'border-[#673ab7] text-[#673ab7] font-medium'
               : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -317,7 +339,7 @@ export default function AdminPage() {
         <button
           onClick={() => setFilter('CANCEL_REQ')}
           title="งานที่มีคนขอยกเลิก — รอ admin ตัดสินใจยกเลิกจริงหรือไม่"
-          className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+          className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
             filter === 'CANCEL_REQ'
               ? 'border-red-500 text-red-600 font-medium'
               : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -325,11 +347,28 @@ export default function AdminPage() {
         >
           🚫 ขอยกเลิก
         </button>
+        <button
+          onClick={() => setFilter('MIX')}
+          title="คิวงานมิกซ์เสียง — แยกจากคิวถ่ายทำ · แจกงานให้ทีมเสียงที่นี่"
+          className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+            filter === 'MIX'
+              ? 'border-[#673ab7] text-[#673ab7] font-medium'
+              : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          🎚 คิว Mixing
+          {mixUnassigned && filter !== 'MIX' && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-medium"
+              title="งานมิกซ์ที่ยังรอแจก">
+              {mixUnassigned}
+            </span>
+          )}
+        </button>
         {isAdmin && (
           <button
             onClick={() => setFilter('DELETED')}
             title="คิวที่ถูกลบ (ซ่อนจากเว็บ แต่ยังอยู่ในฐานข้อมูล) — กู้คืนหรือลบถาวรได้จากที่นี่"
-            className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ml-auto ${
+            className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm border-b-2 transition-colors -mb-px ml-auto ${
               showingDeleted
                 ? 'border-gray-700 text-gray-800 font-medium'
                 : 'border-transparent text-gray-400 hover:text-gray-600'
@@ -340,6 +379,10 @@ export default function AdminPage() {
         )}
       </div>
 
+      {showingMix && <MixQueuePanel variant="admin" />}
+
+      {/* v1.244 — ตัวกรอง + รายการของคิวถ่ายทำทั้งก้อน ซ่อนตอนอยู่แท็บคิว Mixing */}
+      {!showingMix && <>
       {/* v1.210 — a plain opt-in filter for everyone. It used to be forced ON and
           un-untickable for the sound lead; that tier is gone (see src/lib/tiers.ts). */}
       <label className="flex items-center gap-2 mb-4 text-sm text-gray-600 w-fit cursor-pointer">
@@ -606,6 +649,7 @@ export default function AdminPage() {
         </div>
         </>
       )}
+      </>}
     </div>
   )
 }

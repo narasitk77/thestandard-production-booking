@@ -10,7 +10,7 @@ import { prisma } from '@/lib/db'
 import { getSession, getSoundAccess } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import {
-  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, canCloseMixJob,
+  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, canCloseMixJob, canSetDeliveryLink,
   isMixStatus, isAssignableTo, normalizeHttpLink, validateMixJob, formatMixNumber,
   type MixActor, type MixStatus,
 } from '@/lib/mix-jobs'
@@ -90,8 +90,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     // ให้ทำสองอย่างพร้อมกันในคลิกเดียว
     let deliveryLinkIn: string | null = null
     if ('deliveryLink' in body) {
-      if (!canEditMixJob(actor, existing)) {
-        return NextResponse.json({ error: 'ใส่ลิงก์ได้เฉพาะคนที่รับงานนี้ไว้' }, { status: 403 })
+      if (!canSetDeliveryLink(actor, existing, body.status)) {
+        return NextResponse.json({ error: 'ใส่ลิงก์ได้เฉพาะคนที่รับงานนี้ไว้ (หรือ Sound Admin ตอนส่งงานแทน)' }, { status: 403 })
       }
       const link = normalizeHttpLink(body.deliveryLink)
       if (body.deliveryLink && !link) {
