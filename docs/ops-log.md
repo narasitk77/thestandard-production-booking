@@ -21,6 +21,9 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ย้อน: ล้าง `MIX_CALENDAR_ID` บน stack = ปิด (event ที่มีอยู่ค้างในปฏิทินทดสอบ ลบทั้งปฏิทินได้)
 
+---
+
+
 ## 2026-09-28 · v1.242 — แก้ว (TSS Co-Producer) ออกจากทีม · มี runbook + เครื่องมือ offboarding แล้ว
 
 นัทแจ้งว่าแก้วออก และสั่งให้ "กำหนดวิธีจัดการเมื่อมีคนออกไว้" · ตัดสินให้แพรดูแล TSS
