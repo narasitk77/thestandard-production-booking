@@ -99,3 +99,23 @@ test('กล่องหลายโฟลเดอร์ (AGN มีทั้�
   assert.equal(r.state, 'has-footage')
   assert.equal(r.files, 1)
 })
+
+test('v1.251 มี Sub + XML แต่ต้นฉบับ MXF ยังไม่มา → originals-pending (ห้ามทิ้ง) — เคส PP-26-034 29 ก.ย.', async () => {
+  trees = { box: [
+    { name: 'B022C001_2609297HS03.MP4', folderPath: ['PP-26-034-L01 · EP.1', 'CAM-B', 'B022', 'XDROOT', 'Sub'] },
+    { name: 'B022C001_2609297HM01.XML', folderPath: ['PP-26-034-L01 · EP.1', 'CAM-B', 'B022', 'XDROOT', 'Clip'] },
+  ] }
+  const r = await boxFootageState('C-1') as any
+  assert.equal(r.state, 'originals-pending')
+  assert.deepEqual(r.pending, ['B022C001_2609297H'])
+  assert.match(r.reason, /ต้นฉบับยังมาไม่ครบ 1 คลิป: B022C001_2609297H/)
+})
+
+test('v1.251 ต้นฉบับมาครบแล้ว → has-footage ตามเดิม', async () => {
+  trees = { box: [
+    { name: 'B022C001_2609297HS03.MP4', folderPath: ['EP.1', 'CAM-B', 'XDROOT', 'Sub'] },
+    { name: 'B022C001_2609297HM01.XML', folderPath: ['EP.1', 'CAM-B', 'XDROOT', 'Clip'] },
+    { name: 'B022C001_2609297H.MXF', folderPath: ['EP.1', 'CAM-B', 'XDROOT', 'Clip'] },
+  ] }
+  assert.equal(((await boxFootageState('C-1')) as any).state, 'has-footage')
+})

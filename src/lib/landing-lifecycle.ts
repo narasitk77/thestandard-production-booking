@@ -120,6 +120,13 @@ function landingCreateDays(): number {
   return Math.min(14, Math.max(1, Number.isFinite(n) ? Math.floor(n) : 1))
 }
 
+/** เหตุผลที่ไม่ทิ้งโฟลเดอร์ drop — ข้อความเดียวกันทั้ง sweep 19:00 และ prune เที่ยง */
+function keepLabel(state: string): string {
+  if (state === 'no-footage') return 'ยังไม่มีฟุตเทจในกล่อง'
+  if (state === 'originals-pending') return 'ต้นฉบับกล้องยังมาไม่ครบ (ยังอัปจาก NAS อยู่)'
+  return 'ตรวจกล่องไม่ได้'
+}
+
 export async function manageLandingFolders(
   opts: { dryRun?: boolean; createOffsetDays?: number; createDays?: number; keepPastDays?: number } = {},
 ): Promise<LandingLifecycleResult> {
@@ -215,7 +222,7 @@ export async function manageLandingFolders(
     const fs = await boxFootageState(code, { excludeFolderId: f.id })
     if (fs.state !== 'has-footage') {
       base.keptNoFootage.push({ name: f.name, code, reason: fs.reason })
-      base.actions.push(`KEEP "${f.name}" — ${fs.state === 'no-footage' ? 'ยังไม่มีฟุตเทจในกล่อง' : 'ตรวจกล่องไม่ได้'}: ${fs.reason}`)
+      base.actions.push(`KEEP "${f.name}" — ${keepLabel(fs.state)}: ${fs.reason}`)
       continue
     }
     base.actions.push(`trash past-empty landing "${f.name}" (shoot ${shootDate.toISOString().slice(0, 10)} < ${cutoff.toISOString().slice(0, 10)} · กล่องมี ${fs.files} ไฟล์)`)
@@ -372,7 +379,7 @@ export async function pruneLandingToToday(
       const fs = await boxFootageState(code, { excludeFolderId: f.id })
       if (fs.state !== 'has-footage') {
         base.keptNoFootage.push({ name: f.name, code, reason: fs.reason })
-        base.actions.push(`KEEP "${f.name}" — ${fs.state === 'no-footage' ? 'ยังไม่มีฟุตเทจในกล่อง' : 'ตรวจกล่องไม่ได้'}: ${fs.reason}`)
+        base.actions.push(`KEEP "${f.name}" — ${keepLabel(fs.state)}: ${fs.reason}`)
         continue
       }
     }

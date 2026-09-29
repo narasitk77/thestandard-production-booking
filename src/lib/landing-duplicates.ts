@@ -18,6 +18,7 @@
  * ตัวนี้จึงไม่ลบอะไรเลย — หน้าที่เดียวคือ **ตอบให้ชัดว่าลบได้หรือไม่ได้**
  * แล้วส่งคำตอบนั้นไปให้คนตัดสินใจ
  */
+import { pendingOriginals } from './footage-completeness'
 import { listFilesRecursive, findFoldersByCode } from './google-drive'
 
 export interface LandingDupVerdict {
@@ -124,6 +125,8 @@ export type BoxFootageState =
   | { state: 'no-footage'; reason: string }
   /** อ่านไม่ได้ = ตัดสินไม่ได้ ห้ามตีความเป็นอย่างใดอย่างหนึ่ง */
   | { state: 'unknown'; reason: string }
+  /** v1.251 — มีฟุตเทจแล้ว แต่ต้นฉบับกล้องยังมาไม่ครบ (Sub/XML มาก่อน MXF) = **ยังอัปอยู่** ห้ามทิ้งโฟลเดอร์ drop */
+  | { state: 'originals-pending'; reason: string; files: number; pending: string[] }
 
 /** ไฟล์ stub ที่ระบบสร้างเอง ไม่ใช่ฟุตเทจ */
 const SHOOT_STUB = /^_SHOOT\b.*\.txt$/i
@@ -161,16 +164,22 @@ export async function boxFootageState(
   if (folders.length === 0) return { state: 'no-footage', reason: 'ไม่มีโฟลเดอร์ในกล่องเลย' }
 
   let files = 0
+  const camera: Array<{ name: string; folderPath?: string[] }> = []
   for (const f of folders) {
     try {
       for (const file of await listFilesRecursive(f.id, { maxFiles })) {
-        if (isCameraFootage(file)) files++
+        if (isCameraFootage(file)) { files++; camera.push(file) }
       }
     } catch (e: any) {
       return { state: 'unknown', reason: `อ่านกล่องไม่ครบ: ${e?.message || e}` }
     }
   }
-  return files > 0
-    ? { state: 'has-footage', files }
-    : { state: 'no-footage', reason: 'กล่องมีแต่ไฟล์เสียง/stub — ยังไม่มีฟุตเทจกล้อง' }
+  if (files === 0) return { state: 'no-footage', reason: 'กล่องมีแต่ไฟล์เสียง/stub — ยังไม่มีฟุตเทจกล้อง' }
+  // v1.251 — "มีฟุตเทจ" ไม่พอ: ต้นฉบับ MXF อัปตามหลัง Sub/XML 1–2 วัน ทิ้งตอนนี้ = ต้นฉบับตกถังขยะ (PP-26-034)
+  const pending = pendingOriginals(camera)
+  if (pending.length > 0) {
+    const shown = pending.slice(0, 5).join(', ') + (pending.length > 5 ? ` และอีก ${pending.length - 5}` : '')
+    return { state: 'originals-pending', files, pending, reason: `ต้นฉบับยังมาไม่ครบ ${pending.length} คลิป: ${shown}` }
+  }
+  return { state: 'has-footage', files }
 }
