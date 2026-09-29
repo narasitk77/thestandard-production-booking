@@ -35,10 +35,30 @@ export interface MixCalendarJob {
 export function mixCalendarTargetError(mixId: string | null | undefined, bookingCalendarIds: string[]): string | null | 'off' {
   const id = (mixId || '').trim().toLowerCase()
   if (!id) return 'off'
+  // id ปฏิทิน Google เป็น ASCII ล้วน · ค่าที่วางมาพร้อมอักขระแปลก (ไทย/ช่องว่างกลาง/zero-width) = ตั้งผิด
+  // ต้องดังที่นี่ที่เดียว: ซิงก์ปฏิเสธ + ไม่มีปุ่มลิงก์ (เดิม btoa โยน error ทำ /api/mix/calendar ล้มทั้งหน้า)
+  if (!/^[\x21-\x7e]+$/.test(id)) return 'MIX_CALENDAR_ID มีอักขระที่ไม่ใช่ id ปฏิทิน (นอก ASCII หรือช่องว่างกลาง) — ตรวจค่าบน stack'
   if (bookingCalendarIds.map(s => s.trim().toLowerCase()).includes(id)) {
     return 'MIX_CALENDAR_ID ชี้ไปปฏิทินคิวถ่ายเดิม — ต้องเป็นปฏิทินแยก (ไม่ยิงเพื่อกันงานมิกซ์ปนกับกองถ่าย)'
   }
   return null
+}
+
+/**
+ * v1.246 — ลิงก์เปิดปฏิทินมิกซ์ใน Google Calendar (หน้าปฏิทิน + ป๊อปอัปในฟอร์มขอมิกซ์)
+ * `?cid=` = base64 ของ id ปฏิทิน — Google เปิดปฏิทินนั้นและถามว่าจะเพิ่มลงรายการของฉันไหม
+ * · ปฏิทินแชร์ทั้งโดเมน thestandard.co (ผู้ใช้ทุกคนในระบบอยู่โดเมนนี้ ตรวจ 29 ก.ย. 2569)
+ * · null เมื่อปิด **หรือตั้งผิด** — ปุ่มที่พาไปปฏิทินคิวถ่ายเท่ากับบอกคนดูว่านั่นคือคิวมิกซ์
+ */
+export function mixCalendarViewUrl(
+  mixId: string | null | undefined, bookingCalendarIds: string[], viewerEmail?: string | null,
+): string | null {
+  if (mixCalendarTargetError(mixId, bookingCalendarIds) !== null) return null
+  const cid = btoa(mixId!.trim()).replace(/=+$/, '')
+  // u/0 = บัญชี Google แรกในเบราว์เซอร์ · คนที่ล็อกอินบัญชีส่วนตัวไว้ก่อนจะเจอ "ไม่มีสิทธิ์" ·
+  // authuser=<อีเมลคนดู> ให้ Google สลับไปบัญชีงานเอง (อีเมลของคนดูเอง ส่งให้ Google ที่เป็นเจ้าของบัญชีนั้น)
+  const who = viewerEmail?.trim() ? `&authuser=${encodeURIComponent(viewerEmail.trim())}` : ''
+  return `https://calendar.google.com/calendar/u/0?cid=${encodeURIComponent(cid)}${who}`
 }
 
 export type MixCalendarPlan = 'create' | 'update' | 'delete' | 'none'

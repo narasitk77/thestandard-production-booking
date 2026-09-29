@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  mixCalendarTargetError, planMixCalendar, mixJobWantsEvent, buildMixCalendarEvent, mixEventId, type MixCalendarJob,
+  mixCalendarTargetError, planMixCalendar, mixJobWantsEvent, buildMixCalendarEvent, mixEventId, mixCalendarViewUrl, type MixCalendarJob,
 } from '../mix-calendar-event'
 
 // v1.245 — งานมิกซ์ → ปฏิทินแยก · operator: "ไม่ปนกับ probook เดิม"
@@ -69,4 +69,31 @@ test('event id คำนวณจาก id งาน: เหมือนเด�
 
 test('patch พร้อม status confirmed — ดึง event ที่ถูกลบในแอปปฏิทิน (status=cancelled) กลับมาได้', () => {
   assert.equal(buildMixCalendarEvent(base).status, 'confirmed')
+})
+
+test('ลิงก์เปิดใน Google Calendar: ปิด/ชี้ปฏิทินคิวถ่าย = ไม่มีลิงก์ · ตั้งถูก = cid ถอดกลับได้ id เดิม', () => {
+  assert.equal(mixCalendarViewUrl('', [SHOOT_CAL]), null, 'ปิดอยู่ = ไม่มีปุ่ม')
+  assert.equal(mixCalendarViewUrl(SHOOT_CAL, [SHOOT_CAL]), null, 'ห้ามมีปุ่มที่พาไปปฏิทินคิวถ่ายในชื่อคิวมิกซ์')
+  const id = 'c_abc123mix@group.calendar.google.com'
+  const url = mixCalendarViewUrl(` ${id} `, [SHOOT_CAL])!
+  assert.match(url, /^https:\/\/calendar\.google\.com\/calendar\/u\/0\?cid=/)
+  const cid = decodeURIComponent(new URL(url).searchParams.get('cid')!)
+  assert.ok(!cid.endsWith('='), 'ตัด padding ตามรูปที่ Google ใช้')
+  assert.equal(atob(cid.padEnd(Math.ceil(cid.length / 4) * 4, '=')), id)
+})
+
+test('id ปฏิทินที่มีอักขระนอก ASCII = ตั้งผิด (ดัง) · ไม่มีลิงก์ · ไม่ทำ route ล้ม', () => {
+  for (const bad of ['c_abc\u200b@group.calendar.google.com', 'ปฏิทินมิกซ์', 'c_abc @group.calendar.google.com']) {
+    const err = mixCalendarTargetError(bad, [SHOOT_CAL])
+    assert.ok(err && err !== 'off', `ต้องเป็น error ไม่ใช่ปิดเงียบ ๆ: ${JSON.stringify(bad)}`)
+    assert.equal(mixCalendarViewUrl(bad, [SHOOT_CAL]), null)
+  }
+})
+
+test('ลิงก์ใส่ authuser = อีเมลคนดู ให้ Google เลือกบัญชีงาน · ไม่มีอีเมลก็ยังได้ลิงก์', () => {
+  const id = 'c_abc123mix@group.calendar.google.com'
+  const url = new URL(mixCalendarViewUrl(id, [SHOOT_CAL], 'pd@thestandard.co')!)
+  assert.equal(url.searchParams.get('authuser'), 'pd@thestandard.co')
+  assert.ok(url.searchParams.get('cid'))
+  assert.equal(new URL(mixCalendarViewUrl(id, [SHOOT_CAL], null)!).searchParams.get('authuser'), null)
 })

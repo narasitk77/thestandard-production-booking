@@ -10,15 +10,20 @@
  * v1.244 — เลือกงานได้ 3 แบบ: งานของฉัน (/api/mix/candidates) · ใส่ EP ID / Booking ID
  * (/api/mix/resolve ตรวจก่อนส่ง) · งานเดี่ยวที่ไม่มีใบจอง (บังคับลิงก์)
  *
+ * v1.246 — ปุ่ม "ดูปฏิทินคิวทั้งเดือน" ข้างช่องวันที่ เปิดปฏิทินคิวมิกซ์เป็นป๊อปอัป (<dialog> ของ
+ * เบราว์เซอร์: Esc ปิด · โฟกัสอยู่ในกล่อง · ไม่ต้องมีไลบรารี) แล้วเลือกวันกลับมาใส่ฟอร์มได้ · อยู่ใน
+ * ฟอร์มนี้ที่เดียว จึงขึ้นทั้งหน้า /mix และ /new?mode=mix · วาง <dialog> นอก <form> ไม่งั้นปุ่มใน
+ * ปฏิทินที่ลืมใส่ type="button" จะกลายเป็นปุ่มส่งคำขอ
+ *
  * กฎที่ห้ามพัง: bookingId/episodeRowId ที่ส่งไปต้องมาจาก **การเลือกหรือผลตรวจล่าสุด** เท่านั้น
  * — แก้ช่องรหัสหลังตรวจ = ผลเดิมถูกล้างทันที จนกว่าจะตรวจใหม่ (เดิม v1.218 ค้นรหัสตอนกดส่ง
  * แล้วผูกใบแรกที่เจอ ซึ่งผูกผิดกองได้เมื่อ EP ID อยู่หลายใบ)
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, CheckCircle2, Loader2, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CalendarDays, Check, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react'
 import StatusPill from '@/app/_components/StatusPill'
-import { MixLoadStrip } from '@/app/_components/MixLoadCalendar'
+import { MixLoadCalendar, MixLoadStrip } from '@/app/_components/MixLoadCalendar'
 import {
   MIX_STATUS_LABEL, MIX_STATUS_HINT, bangkokDateKey, findDuplicateMixJobs, normalizeHttpLink,
   type MixResolution, type MixStatus,
@@ -184,6 +189,17 @@ export default function MixRequestForm({ onDone, initialBookingCode }: {
   const [title, setTitle] = useState('')
   const titleEdited = useRef(false)
   const [dueDate, setDueDate] = useState('')
+  const [calOpen, setCalOpen] = useState(false)
+  const calRef = useRef<HTMLDialogElement>(null)
+  // ปิดเมื่อ "กดและปล่อย" บนฉากหลังเท่านั้น — ลากคลุมข้อความในกล่องแล้วปล่อยนอกกล่อง เบราว์เซอร์ส่ง click
+  // ไปที่ตัว <dialog> (บรรพบุรุษร่วม) ซึ่งหน้าตาเหมือนคลิกฉากหลังทุกประการ
+  const pressOnBackdrop = useRef(false)
+  useEffect(() => {
+    const d = calRef.current
+    if (!d) return
+    if (calOpen && !d.open) d.showModal()
+    else if (!calOpen && d.open) d.close()
+  }, [calOpen])
   const [sourceLink, setSourceLink] = useState('')
   const [notes, setNotes] = useState('')
 
@@ -526,6 +542,7 @@ export default function MixRequestForm({ onDone, initialBookingCode }: {
   }
 
   return (
+    <>
     <form onSubmit={submit} className="mb-4 p-3 sm:p-4 border border-gray-200 rounded-lg bg-gray-50 space-y-4">
       <div>
         <p className="block text-xs text-gray-500 mb-1">มิกซ์งานไหน *</p>
@@ -626,11 +643,19 @@ export default function MixRequestForm({ onDone, initialBookingCode }: {
 
       <div>
         <label htmlFor="mix-due" className="block text-xs text-gray-500 mb-1">วันที่ต้องการไฟล์ *</label>
-        <input
-          id="mix-due" type="date" value={dueDate} min={today} required
-          onChange={e => setDueDate(e.target.value)}
-          className={`${input} sm:w-56`}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            id="mix-due" type="date" value={dueDate} min={today} required
+            onChange={e => setDueDate(e.target.value)}
+            className={`${input} sm:w-56`}
+          />
+          <button
+            type="button" onClick={() => setCalOpen(true)} aria-haspopup="dialog"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-100"
+          >
+            <CalendarDays size={15} aria-hidden /> ดูปฏิทินคิวทั้งเดือน
+          </button>
+        </div>
         <MixLoadStrip value={dueDate} onPick={setDueDate} />
       </div>
 
@@ -676,5 +701,37 @@ export default function MixRequestForm({ onDone, initialBookingCode }: {
         </p>
       </div>
     </form>
+
+    {/* ป๊อปอัปปฏิทินคิวมิกซ์ · คลิกนอกกล่อง (ตัว <dialog> เอง = ฉากหลัง) ก็ปิด · เมานต์ปฏิทินเฉพาะตอนเปิด
+        = ได้ตัวเลขล่าสุดทุกครั้ง และเปิดมาที่เดือนของวันที่กรอกไว้ */}
+    <dialog
+      ref={calRef}
+      aria-label="ปฏิทินคิวมิกซ์"
+      onClose={() => setCalOpen(false)}
+      onPointerDown={e => { pressOnBackdrop.current = e.target === e.currentTarget }}
+      onClick={e => { if (pressOnBackdrop.current && e.target === e.currentTarget) setCalOpen(false) }}
+      className="p-0 w-[calc(100vw-1rem)] max-w-4xl max-h-[92vh] overflow-y-auto rounded-lg border border-gray-200 shadow-xl backdrop:bg-black/40"
+    >
+      <div className="p-2 sm:p-3">
+        <div className="flex items-start justify-between gap-2 mb-2 px-1">
+          <p className="text-sm text-gray-600">
+            ดูว่าวันไหนคิวเบา แล้วแตะวันเพื่อดูงานของวันนั้น หรือเลือกเป็นวันที่ต้องการไฟล์
+          </p>
+          <button
+            type="button" onClick={() => setCalOpen(false)} aria-label="ปิดปฏิทิน"
+            className="shrink-0 p-1.5 rounded hover:bg-gray-100 text-gray-500"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        {calOpen && (
+          <MixLoadCalendar
+            initialDate={dueDate || undefined}
+            onPickDate={d => { setDueDate(d); setCalOpen(false) }}
+          />
+        )}
+      </div>
+    </dialog>
+    </>
   )
 }

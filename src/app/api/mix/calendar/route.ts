@@ -5,6 +5,7 @@
  * ดูว่า "ใครแน่นวันไหน" ก่อนแจกงาน — ตอบจากชุดเดียวกัน (buildMixCalendar ใน mix-jobs.ts)
  *
  * ทุกคนที่ล็อกอินดูได้ เหตุผลเดียวกับคิว: คนขอต้องเห็นว่าคิวยาวแค่ไหนก่อนรับปากลูกค้า
+ * (v1.246 — ป๊อปอัปในฟอร์มขอมิกซ์ใช้ route นี้ด้วย ผู้ใช้ทั่วไปเปิดฟอร์มได้ทุกคน ห้ามจำกัดสิทธิ์ที่นี่)
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
@@ -13,6 +14,9 @@ import {
   buildMixCalendar, bangkokDateKey, addDaysKey, isValidISODate, formatMixNumber,
   MIX_CALENDAR_MAX_DAYS,
 } from '@/lib/mix-jobs'
+import { mixCalendarViewUrl } from '@/lib/mix-calendar-event'
+import { mixCalendarId } from '@/lib/mix-calendar'
+import { bookingCalendarIds } from '@/lib/google-calendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +51,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       from, to, today,
+      // v1.246 — ปุ่ม "เปิดใน Google Calendar" · null = ปฏิทินมิกซ์ปิด/ตั้งผิด → ไม่มีปุ่ม
+      googleCalendarUrl: mixCalendarViewUrl(mixCalendarId(), bookingCalendarIds(), session.email),
       engineers: roster.length,
       soundTeam: roster,
       days: buildMixCalendar(jobs, from, to, roster.length),

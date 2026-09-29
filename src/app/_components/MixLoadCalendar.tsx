@@ -12,13 +12,16 @@
  *
  * โหลดไม่ได้ ≠ คิวว่าง (bug-classes #2): ตัวเลข/สีโผล่เฉพาะเมื่อได้ข้อมูลของช่วงนั้นจริง ๆ
  * ระหว่างโหลดหรือโหลดล้ม ช่องวันมีแค่เลขวัน + ข้อความบอกว่ายังไม่รู้ ไม่มีช่องไหนดู "ว่าง"
+ *
+ * v1.246 — ปุ่ม "เปิดใน Google Calendar" (ลิงก์มาจาก server เพราะ id ปฏิทินอยู่ใน env) และใช้เป็น
+ * ป๊อปอัปในฟอร์มขอมิกซ์ได้ (`initialDate` + `onPickDate`) — ผู้ใช้ทั่วไปเห็นเหมือนทีมเสียง
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, CalendarCheck, ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw } from 'lucide-react'
 import {
   MIX_STATUS_LABEL, MIX_STATUS_HINT, MIX_LOAD_LABEL, MIX_FLAG_LABEL, MIX_JOBS_PER_ENGINEER_PER_DAY,
-  MIX_CALENDAR_MAX_DAYS, mixLoadLevel, mixFlag, compareMixQueue, bangkokDateKey, addDaysKey,
+  MIX_CALENDAR_MAX_DAYS, mixLoadLevel, mixFlag, compareMixQueue, bangkokDateKey, addDaysKey, isValidISODate,
   type MixCalendarDay, type MixLoadLevel, type MixStatus,
 } from '@/lib/mix-jobs'
 
@@ -43,6 +46,8 @@ interface CalendarData {
   soundTeam: SoundMember[]
   days: MixCalendarDay[]
   jobs: CalendarJob[]
+  /** v1.246 — null = ปฏิทินมิกซ์บน Google ปิดอยู่ (ไม่มีปุ่ม) */
+  googleCalendarUrl?: string | null
 }
 
 const LEVELS: MixLoadLevel[] = ['free', 'light', 'busy', 'heavy']
@@ -71,7 +76,11 @@ function fmt(key: string, opts: Intl.DateTimeFormatOptions): string {
 
 function shiftMonth(ym: string, n: number): string {
   const [y, m] = ym.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7)
+  // setUTCFullYear ไม่ใช่ Date.UTC — Date.UTC แปลงปี 0–99 เป็น 19xx: เดือน '0069-10' เลื่อนแล้วกลายเป็น
+  // '1969-11' แล้ว monthGrid วาด ~694,000 วันจนแท็บค้าง (ผู้ตรวจเจอ: พิมพ์ปี "69" ในช่องวันที่แล้วเปิดป๊อปอัป)
+  const d = new Date(0)
+  d.setUTCFullYear(y, m - 1 + n, 1)
+  return d.toISOString().slice(0, 7)
 }
 
 /** ทุกวันในกริดของเดือน 'YYYY-MM' — จันทร์เป็นวันแรก เติมหัว/ท้ายให้ครบสัปดาห์ (28–42 วัน) */
@@ -109,6 +118,8 @@ function useMixCalendar(from: string, to: string) {
   const [data, setData] = useState<CalendarData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(true)
+  // ลิงก์ไม่ขึ้นกับช่วงวันที่ — เก็บค่าล่าสุดไว้ ปุ่มจะได้ไม่หายวูบทุกครั้งที่เลื่อนเดือน
+  const [googleCalendarUrl, setGoogleCalendarUrl] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const retry = useCallback(() => setTick(t => t + 1), [])
 
@@ -121,7 +132,10 @@ function useMixCalendar(from: string, to: string) {
         const body = await res.json().catch(() => null)
         if (!res.ok) throw new Error(body?.error || `โหลดไม่สำเร็จ (${res.status})`)
         if (!body || !Array.isArray(body.days) || !Array.isArray(body.jobs)) throw new Error('ข้อมูลปฏิทินผิดรูปแบบ')
-        if (!cancelled) setData(body as CalendarData)
+        if (!cancelled) {
+          setData(body as CalendarData)
+          setGoogleCalendarUrl(typeof body.googleCalendarUrl === 'string' ? body.googleCalendarUrl : null)
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'โหลดปฏิทินไม่สำเร็จ')
@@ -131,7 +145,7 @@ function useMixCalendar(from: string, to: string) {
   }, [from, to, tick])
 
   const fresh = !error && data && data.from === from && data.to === to ? data : null
-  return { data: fresh, error, pending, retry }
+  return { data: fresh, error, pending, retry, googleCalendarUrl }
 }
 
 function LoadLegend({ engineers, compact }: { engineers: number; compact?: boolean }) {
@@ -161,16 +175,35 @@ export interface MixLoadCalendarProps {
   onOpenJob?: (jobId: string) => void
   /** แสดงสรุปภาระงานต่อคน (Sound Admin) */
   showAssigneeLoad?: boolean
+  /** เปิดมาที่เดือนของวันนี้และเลือกวันนี้ไว้ 'YYYY-MM-DD' (ป๊อปอัปในฟอร์ม: วันที่กรอกไว้แล้ว) */
+  initialDate?: string
+  /** มี = วันที่เลือกมีปุ่ม "ใช้ <วันที่> เป็นวันที่ต้องการไฟล์" ส่งวันกลับให้ฟอร์ม · เฉพาะวันนี้เป็นต้นไป */
+  onPickDate?: (date: string) => void
 }
 
-export function MixLoadCalendar({ onOpenJob, showAssigneeLoad }: MixLoadCalendarProps) {
+/** initialDate มาจากช่องที่คนพิมพ์ — ปีสองหลัก ("69" = 2569) ได้ค่า '0069-10-05' ที่รูปถูกแต่ไม่มีใครหมายถึง
+ *  · รับเฉพาะวันจริงในช่วง ค.ศ. 2000–2100 นอกนั้นเปิดที่เดือนนี้แบบไม่เลือกวัน */
+const plausibleDate = (s: string | undefined): s is string =>
+  isValidISODate(s) && s >= '2000-01-01' && s <= '2100-12-31'
+
+export function MixLoadCalendar({ onOpenJob, showAssigneeLoad, initialDate, onPickDate }: MixLoadCalendarProps) {
   const [clientToday] = useState(() => bangkokDateKey())
-  const [ym, setYm] = useState(() => clientToday.slice(0, 7))
-  const [picked, setPicked] = useState<string | null>(null)
+  const start = plausibleDate(initialDate) ? initialDate : null
+  const [ym, setYm] = useState(() => (start || clientToday).slice(0, 7))
+  const [picked, setPicked] = useState<string | null>(start)
   const grid = useMemo(() => monthGrid(ym), [ym])
   const from = grid[0]
   const to = grid[grid.length - 1]
-  const { data, error, pending, retry } = useMixCalendar(from, to)
+  const { data, error, pending, retry, googleCalendarUrl } = useMixCalendar(from, to)
+  // แตะวันแล้วรายละเอียดอยู่ใต้กริด — ในป๊อปอัปมันตกขอบล่าง คนแตะแล้วเห็นแค่กรอบวันเปลี่ยน ·
+  // เลื่อนให้เห็นเฉพาะตอนคนแตะ ไม่ใช่ตอนเปิดมาพร้อม initialDate (ไม่งั้นหัวเดือนหลุดจอตั้งแต่เปิด)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const revealPanel = useRef(false)
+  useEffect(() => {
+    if (!revealPanel.current || !picked || !panelRef.current) return
+    revealPanel.current = false
+    panelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [picked, data])
   const today = data?.today || clientToday
 
   const dayMap = useMemo(() => new Map((data?.days || []).map(d => [d.date, d])), [data])
@@ -234,6 +267,15 @@ export function MixLoadCalendar({ onOpenJob, showAssigneeLoad }: MixLoadCalendar
             ปฏิทินคิวมิกซ์ · {fmt(`${ym}-01`, { month: 'long', year: 'numeric' })}
           </h2>
           <p className="text-xs text-gray-500">นับตามวันที่ต้องการไฟล์ — ดูว่าช่วงไหนคิวเบาหรือแน่น</p>
+          {googleCalendarUrl && (
+            <a
+              href={googleCalendarUrl} target="_blank" rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-xs text-blue-700 hover:underline"
+              title="เปิดปฏิทินคิวมิกซ์ใน Google Calendar — กดเพิ่มลงปฏิทินของฉันได้ เห็นทุกคนในบริษัท"
+            >
+              <ExternalLink size={12} aria-hidden /> เปิดใน Google Calendar
+            </a>
+          )}
         </div>
         <div className="flex items-center gap-0.5">
           <button type="button" onClick={() => go(-1)} className={navBtn} aria-label="เดือนก่อน"><ChevronLeft size={16} /></button>
@@ -283,7 +325,7 @@ export function MixLoadCalendar({ onOpenJob, showAssigneeLoad }: MixLoadCalendar
               key={key}
               type="button"
               disabled={!data}
-              onClick={() => setPicked(p => (p === key ? null : key))}
+              onClick={() => { revealPanel.current = picked !== key; setPicked(p => (p === key ? null : key)) }}
               aria-label={label}
               aria-pressed={picked === key}
               title={label}
@@ -316,7 +358,7 @@ export function MixLoadCalendar({ onOpenJob, showAssigneeLoad }: MixLoadCalendar
       {data && <div className="mt-2"><LoadLegend engineers={data.engineers} /></div>}
 
       {picked && data && (
-        <div className="mt-3 border-t border-gray-100 pt-3">
+        <div ref={panelRef} className="mt-3 border-t border-gray-100 pt-3 scroll-mb-3">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
             <h3 className="text-sm font-medium text-gray-800">
               {fmt(picked, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
@@ -328,6 +370,16 @@ export function MixLoadCalendar({ onOpenJob, showAssigneeLoad }: MixLoadCalendar
               </span>
             )}
           </div>
+          {onPickDate && (picked >= today ? (
+            <button
+              type="button" onClick={() => onPickDate(picked)}
+              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-gray-900 text-white hover:bg-gray-800"
+            >
+              <CalendarCheck size={14} aria-hidden /> ใช้ {fmt(picked, { day: 'numeric', month: 'short' })} เป็นวันที่ต้องการไฟล์
+            </button>
+          ) : (
+            <p className="mt-2 text-xs text-gray-400">วันที่ผ่านมาแล้ว เลือกเป็นวันที่ต้องการไฟล์ไม่ได้</p>
+          ))}
           {pickedJobs.length === 0 ? (
             <p className="mt-2 text-xs text-gray-400">ว่าง — ยังไม่มีงานที่ต้องส่งวันดังกล่าว</p>
           ) : (
