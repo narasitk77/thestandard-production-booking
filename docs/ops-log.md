@@ -5,6 +5,19 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-09-29 · v1.249 DEPLOYED `sha-6d7d23a` (23:01 BKK) — ประวัติงานมิกซ์ + dashboard ภาระ/ผลงาน + CSV
+
+นัท: "เก็บ data การทำงานมิกซ์เสียง เพื่อเก็บ performance และข้อมูลทีมงานทุกคน · export.csv · dashboard ใคร load มาก น้อย"
+
+- CI + Build and Push Docker Image เขียวก่อนยิง · **schema เปลี่ยน** (ตารางใหม่ `mix_job_events`) · backup ก่อน deploy
+  `backup-2026-09-29T155511.sql.gz` 1.15MB ขึ้นไดรฟ์ · จุดถอย `sha-4fd1d8b` — **ถอยอิมเมจ = db push ลบตารางประวัติ ต้องกู้ backup ด้วย**
+- บูตสะอาด: db push สร้างตาราง · app Ready · ไม่มี error · ตารางมี 0 แถว (ยังไม่มีใครแก้งาน) · งานเดิม 3 งานเป็น QUEUED ไม่มีคนทำทั้งหมด
+  → ประวัติช่วงต้นที่สร้างจากแถวงานตรงกับจริง
+- `/api/mix/stats` และ `/api/mix/export` ตอบ 401 เมื่อไม่ล็อกอิน · สิทธิ์ Sound Admin + ADMIN/MANAGER (ทดสอบบนเครื่อง 3 บทบาท)
+- ผู้ตรวจ 3 มุมเจอ 7 ข้อ แก้ครบก่อน deploy (CHANGELOG v1.249) · เรื่องที่รอนัท: คนถืองานลบงานของตัวเองได้ทุกสถานะ (สิทธิ์เดิม ไม่ได้แตะ)
+
+---
+
 ## 2026-09-29 · v1.247 + v1.248 DEPLOYED `sha-4fd1d8b` (22:24 BKK)
 
 นัทสั่ง "deploy เลย รอ CI เขียวก่อน" · CI + Build and Push Docker Image ของ `4fd1d8b` เขียวทั้งคู่ก่อนยิง ·
