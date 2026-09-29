@@ -14,6 +14,7 @@
 // function (notifyLine) wired into reminders.ts — nothing else changes.
 import { createHmac } from 'crypto'
 import { sendEmail, isEmailConfigured } from './email'
+import { dropSender } from './email-list'
 
 /**
  * v1.152.2 — Discord carries FOOTAGE news only (ops decision 2026-07-23:
@@ -39,6 +40,22 @@ function discordAllows(category: NotifyCategory): boolean {
 }
 
 /**
+ * v1.248 — webhook ปลายทางของข้อความนี้ (null = ไม่ส่ง)
+ *
+ * `DISCORD_OPS_WEBHOOK_URL` = ห้อง ops แยก: ข้อความ 'ops' (worker ตาย · ซิงก์ล้ม · reminders)
+ * ไปห้องนี้ถ้าตั้งไว้ โดยไม่แตะห้องทีม (`DISCORD_WEBHOOK_URL` ยัง footage-only ตามที่ตกลงไว้)
+ * ไม่ตั้ง = พฤติกรรมเดิมทุกตัวอักษร · ตรวจพรอด 29 ก.ย. 2569: 'ops' ไม่มีช่องไหนถึงคนเลย
+ */
+function discordTarget(category: NotifyCategory): string | null {
+  if (category === 'ops') {
+    const ops = process.env.DISCORD_OPS_WEBHOOK_URL?.trim()
+    if (ops) return ops
+  }
+  if (!discordAllows(category)) return null
+  return process.env.DISCORD_WEBHOOK_URL?.trim() || null
+}
+
+/**
  * POST a message to the configured Discord webhook. Returns false (not throw)
  * when unset, filtered out by scope, or failed.
  *
@@ -46,8 +63,7 @@ function discordAllows(category: NotifyCategory): boolean {
  * uses it as an email fallback) must pass 'footage', which is never filtered.
  */
 export async function notifyDiscord(content: string, category: NotifyCategory = 'footage'): Promise<boolean> {
-  if (!discordAllows(category)) return false
-  const url = process.env.DISCORD_WEBHOOK_URL?.trim()
+  const url = discordTarget(category)
   if (!url) return false
   try {
     const res = await fetch(url, {
@@ -181,10 +197,32 @@ export async function notifyChatDetailed(
   return { discord, lark, any: discord || lark }
 }
 
+/**
+ * v1.248 — ผู้รับ digest ที่ส่งถึงได้จริง · ว่าง = ไม่มีใครได้รับ
+ *
+ * ตัดบัญชีที่ใช้ส่งออกด้วยกฎเดียวกับคิวมิกซ์ (`dropSender`): Gmail ไม่ส่งเมลหาบัญชีตัวเอง
+ * พรอดตั้ง `REMINDER_ADMIN_EMAIL` = `SMTP_USER` มาตลอด → digest ทุกฉบับหายเงียบ แต่ฟังก์ชันนี้
+ * เคยคืน true → footage-ready/reminders/เตือน ops บันทึกว่า "ส่งแล้ว" (bug class 1)
+ */
+export function digestRecipients(): string[] {
+  const to = process.env.REMINDER_ADMIN_EMAIL?.trim() || process.env.EMAIL_FROM?.trim() || ''
+  return dropSender(to.split(','), process.env.SMTP_USER || process.env.EMAIL_FROM)
+}
+
+let warnedSelfDigest = false
+
 /** Send the daily digest email to REMINDER_ADMIN_EMAIL. Best-effort. */
 export async function notifyEmailDigest(subject: string, text: string): Promise<boolean> {
-  const to = process.env.REMINDER_ADMIN_EMAIL?.trim() || process.env.EMAIL_FROM?.trim()
-  if (!to) return false
+  if (!(process.env.REMINDER_ADMIN_EMAIL?.trim() || process.env.EMAIL_FROM?.trim())) return false
+  const to = digestRecipients()
+  if (to.length === 0) {
+    // ไม่ส่ง + คืน false: ส่งไปก็ไม่มีใครได้รับ · เตือนครั้งเดียวต่อโปรเซส ไม่ท่วม log (dead-man เรียกทุก 10 นาที)
+    if (!warnedSelfDigest) {
+      warnedSelfDigest = true
+      console.warn('[notify] email digest ไม่ส่ง — ผู้รับ (REMINDER_ADMIN_EMAIL) คือบัญชีที่ใช้ส่งเอง Gmail ไม่ส่งเมลหาตัวเอง · ตั้งเป็นกล่องอื่นถ้าอยากได้ทางอีเมล')
+    }
+    return false
+  }
   if (!isEmailConfigured()) {
     console.warn('[notify] email digest skipped — no non-interactive email provider configured (SMTP/Resend/SendGrid).')
     return false

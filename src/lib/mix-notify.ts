@@ -21,6 +21,7 @@
 import { sendEmail, isEmailConfigured } from './email'
 import { formatMixNumber } from './mix-jobs'
 import { soundCoordinatorEmails } from './session'
+import { dropSender } from './email-list'
 
 /** กล่องกลางของทีมเสียง — ปลายทางหลักของคำขอใหม่ */
 export function soundTeamEmail(): string {
@@ -31,24 +32,8 @@ function appUrl(): string {
   return (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || '').replace(/\/+$/, '')
 }
 
-/**
- * ตัดที่อยู่ผู้ส่งออกจากรายชื่อผู้รับ + ตัดตัวซ้ำ
- *
- * ไม่ใช่การขัดเงา: เมลที่ส่งจากบัญชี Gmail เดียวกับผู้รับจะหายเงียบ ฉะนั้นการปล่อย
- * ให้ผู้ส่งอยู่ในลิสต์ = สร้างผู้รับที่ไม่มีวันได้รับ แล้วบันทึกว่า "ส่งแล้ว"
- */
-export function dropSender(recipients: string[], sender: string | undefined): string[] {
-  const from = (sender || '').toLowerCase().replace(/^.*<|>.*$/g, '').trim()
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const r of recipients) {
-    const e = r.trim().toLowerCase()
-    if (!e || e === from || seen.has(e)) continue
-    seen.add(e)
-    out.push(e)
-  }
-  return out
-}
+// v1.248 — dropSender ย้ายไป email-list.ts (notify.ts ใช้กฎเดียวกันกับ digest) · export ต่อที่นี่ให้ผู้เรียกเดิมไม่ต้องแก้
+export { dropSender }
 
 export interface MixNotifyJob {
   number: number

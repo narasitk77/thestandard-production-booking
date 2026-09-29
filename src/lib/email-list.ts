@@ -25,3 +25,25 @@ export function cleanEmailList(value: unknown): string[] {
   }
   return out
 }
+
+/**
+ * ตัดที่อยู่ผู้ส่งออกจากรายชื่อผู้รับ + ตัดตัวซ้ำ (lowercase — ใช้ตอนส่ง ไม่ใช่ตอนเก็บ)
+ *
+ * ไม่ใช่การขัดเงา: เมลที่ส่งจากบัญชี Gmail เดียวกับผู้รับจะหายเงียบ ฉะนั้นการปล่อย
+ * ให้ผู้ส่งอยู่ในลิสต์ = สร้างผู้รับที่ไม่มีวันได้รับ แล้วบันทึกว่า "ส่งแล้ว"
+ *
+ * v1.248 — ย้ายมาจาก mix-notify.ts เพราะ notifyEmailDigest (notify.ts) ต้องใช้กฎเดียวกัน
+ * (digest ของ ops ส่งหาบัญชี SMTP ตัวเองมาตลอด = ไม่มีใครได้รับ แต่คืน true)
+ */
+export function dropSender(recipients: string[], sender: string | undefined): string[] {
+  const from = (sender || '').toLowerCase().replace(/^.*<|>.*$/g, '').trim()
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const r of recipients) {
+    const e = r.trim().toLowerCase()
+    if (!e || e === from || seen.has(e)) continue
+    seen.add(e)
+    out.push(e)
+  }
+  return out
+}

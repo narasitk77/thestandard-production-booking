@@ -34,6 +34,11 @@ worker ติ๊กทุก 30 นาที, `errors=0`, SMTP ตอบ `235 Ac
 **ดูโค้ด:** `src/lib/footage-ready.ts:429-441` (คอมเมนต์ WHY ของ `SentResult`) · `:469-471` และ
 `:520-523` (`ADMIN_DIGEST` เข้ารายชื่อเฉพาะเมื่อส่งผ่านจริง) · `operatorChannels {digestOk, discordOk, larkOk}`
 
+**รอบที่สาม (v1.248, 2026-09-29):** ช่อง `'ops'` ทั้งหมด (dead-man ของทุก worker · reminders ·
+ซิงก์ปฏิทินมิกซ์) ไม่ถึงใครบนพรอด — Lark ว่าง · Discord ทิ้ง `'ops'` · digest ส่งหาบัญชีผู้ส่งเองแต่คืน `true`
+→ `src/lib/ops-alert.ts` (`alertOps` จุดเดียว คืนผลรายช่อง) · `notify.ts` `digestRecipients()` ตัดผู้ส่ง
+(ผู้รับ 0 = ไม่ส่ง + `false`) · `DISCORD_OPS_WEBHOOK_URL` ห้อง ops แยก
+
 ---
 
 ## 2. `error is not emptiness` — ความล้มเหลวที่หน้าตาเหมือน "ไม่มีข้อมูล"
@@ -382,7 +387,7 @@ FROM bookings WHERE "routineGroupId"='…' AND "deletedAt" IS NULL;
 7. **กฎใหม่** — กฎนี้มีสำเนาที่อื่นอีกไหม (`grep` ชื่อฟังก์ชัน/ค่าคงที่)? ถ้ามี รวมเป็นที่เดียวก่อน (9)
 8. **สิทธิ์** — server อนุญาต → ปุ่มโผล่ → แถวอยู่ในลิสต์ที่เขาเห็น ครบสามชั้นไหม พิสูจน์ด้วย SQL ไม่ใช่ด้วยตาแอดมิน (10)
 9. **env ใหม่** — ประกาศใน compose แล้ว (เทส `compose-env-coverage` จับ) · empty string ถูกอ่านเป็น unset ไหม (8)
-10. **worker ใหม่** — มี heartbeat key, มีสเปก, และล้มแล้วมีเสียงไหม (11) · **หน้าใหม่** — อยู่ใน `TRACKED_PATHS` และมีเมนูพาไปไหม (13)
+10. **worker ใหม่** — มี heartbeat key, มีสเปก, และล้มแล้วมีเสียงไหม (11) — เสียง = `alertOps(key, …)` (ห้ามเขียน throttle/ช่องทางเอง) + บรรทัดล้มที่ `BAD_RE` ของ Hermes จับได้ (`run failed` / `] 4xx:`) · **หน้าใหม่** — อยู่ใน `TRACKED_PATHS` และมีเมนูพาไปไหม (13)
 11. **log/audit ใหม่ที่ผูกกับ booking** — ใครอ่านได้บ้าง? default ต้อง fail-closed (14)
 12. **ผลข้างเคียงที่ไม่ await** (`.then().catch(()=>{})`) — ค่าที่ตอบกลับนับมันด้วยไหม? ถ้าไม่ มีวิธีอ่านของจริงฝั่งปลายทางหรือยัง? (16)
 

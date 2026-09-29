@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed — ช่องเตือน ops ในแอปไม่ถึงใครเลย · มีจุดเตือนจุดเดียว + ห้อง Discord ops แยก (v1.248)
+
+ตรวจพรอดตอนทำ v1.247 (29 ก.ย. 2569): ข้อความ category `'ops'` ทุกฉบับ — dead-man ของ worker ทุกตัว · digest reminders · เตือนซิงก์ปฏิทินมิกซ์ — **ไม่มีช่องไหนถึงคน**: `LARK_WEBHOOK_URL` ไม่ได้ตั้ง · Discord ทิ้ง `'ops'` เพราะห้องทีมเป็น footage-only (ตกลงไว้ 23 ก.ค.) · digest ส่งหา `REMINDER_ADMIN_EMAIL` ซึ่งเป็นบัญชีเดียวกับ `SMTP_USER` = Gmail ไม่ส่งเมลหาตัวเอง แต่ `notifyEmailDigest` คืน `true` → ระบบบันทึกว่า "เตือนแล้ว" (bug class 1 รอบที่สาม) · เสียงเดียวที่ถึงนัทคือ Hermes worker-check วันละ 2 รอบ
+
+- **`alertOps(key, subject, text)`** (`src/lib/ops-alert.ts` ใหม่) — จุดเดียวสำหรับ "ระบบพัง ต้องบอกคน": throttle ต่อ key 6 ชม. (แถว `alert:<key>` เดิมใน `system_heartbeats` — **ไม่มี schema ใหม่**, key `alert:stale-workers` เท่าเดิม throttle ต่อเนื่องข้าม deploy) · คืนผล **รายช่อง** (`discord`/`lark`/`email`) ไม่ยุบเป็น boolean เดียว · ไม่ถึงช่องไหนเลย = `console.error` ดัง ๆ · ไม่ throw · ประทับ throttle เมื่อ "ลองส่งแล้ว" (ไม่ใช่เมื่อส่งถึง) เพราะ dead-man เรียกทุก 10 นาที ถ้าไม่ประทับ ช่วงที่ไม่มีช่องไหนตั้งไว้ log จะท่วม
+- ผู้เรียก 2 ที่ที่เคยเขียน throttle + ยิงเองย้ายมาใช้ตัวนี้: `maybeAlertStaleWorkers` (heartbeat.ts) และ route ซิงก์ปฏิทินมิกซ์ (v1.247) · **ฟีเจอร์ใหม่ที่ต้องมีเสียงเมื่อพัง เรียก `alertOps` อย่างเดียว** ช่องทางเพิ่มที่ `notify.ts` ที่เดียว ทุกผู้เรียกได้ด้วยกันหมด
+- **`DISCORD_OPS_WEBHOOK_URL`** (ใหม่ · ประกาศใน compose · ว่าง = พฤติกรรมเดิมทุกตัวอักษร) — ห้อง Discord **แยก** ให้ข้อความ `'ops'` โดยห้องทีม (`DISCORD_WEBHOOK_URL`) ยัง footage-only · ตั้งแล้ว reminders digest ก็ไปห้องนี้ด้วย (เป็น `'ops'` อยู่แล้ว)
+- **`notifyEmailDigest` พูดความจริง** — ผู้รับที่เป็นบัญชีผู้ส่งถูกตัดด้วยกฎเดียวกับคิวมิกซ์ (`dropSender` ย้ายไป `email-list.ts`, `mix-notify.ts` export ต่อ ผู้เรียกเดิมไม่ต้องแก้) · เหลือผู้รับ 0 = **ไม่ส่ง + คืน `false`** + เตือนใน log ครั้งเดียวต่อโปรเซส · ผลตาม: `operatorChannels.digestOk` ของ footage-ready และ `dispatched.email` ของ reminders กลายเป็นค่าจริง (เดิม `true` ทั้งที่ไม่มีใครได้รับ) · ไม่มีเมลที่เคย "ถึง" หายไป เพราะไม่เคยถึง
+- `GET /api/internal/notify-test` บอก `configured.discordOps` + `configured.emailDigest` (digest มีผู้รับที่ส่งถึงได้ไหม — ไม่ยิงเมล)
+- เทส `ops-alert.test.ts` (6 เคส) · ลองกลับตรรกะ 5 แบบ (ถอดด่านส่งหาตัวเอง · ops รั่วเข้าห้องทีม · ไม่สนห้อง ops · ถอด throttle · ประทับเฉพาะตอนส่งถึง) เทสแดงทุกแบบ
+
+**สิ่งที่ต้องทำเพื่อให้ถึงคนจริง (ตั้งค่าบน stack ไม่ต้องแก้โค้ด):** สร้าง webhook ในห้อง Discord ที่อ่านอยู่แล้วตั้ง `DISCORD_OPS_WEBHOOK_URL` · หรือตั้ง `LARK_WEBHOOK_URL` · หรือ `REMINDER_ADMIN_EMAIL` เป็นกล่องที่ไม่ใช่ `SMTP_USER` · ก่อนตั้ง Hermes worker-check ยังเป็นเสียงเดียว (เหมือนวันนี้)
+
 ### Added — worker ซ่อมปฏิทินคิวมิกซ์ทุกชั่วโมง · ซิงก์ล้มแล้วมีคนลองใหม่ + ล้มแล้วมีเสียง (v1.247)
 
 ช่องที่ v1.246 เปิดทิ้งไว้: ตั้งแต่แชร์ปฏิทินมิกซ์ให้ทั้งโดเมนดู ผู้ใช้ทั่วไปเชื่อปฏิทิน Google ว่าครบ แต่ซิงก์เกิดแค่ inline ตอนสร้าง/แก้/ลบงาน (`syncMixJobCalendar`) ล้มแล้วเก็บ `calendarSyncError` ไว้บนการ์ด (เห็นแค่ Sound Admin/แอดมิน) **และไม่มีอะไรลองใหม่** — งานนั้นหายจากปฏิทินจนกว่าจะมีคนรัน sync route ด้วยมือ
@@ -15,7 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **สวิตช์ `MIX_CALENDAR_WORKER_ENABLED`** ประกาศใน `docker-compose.portainer.yml` ทั้ง service `app` และ `worker` · **เปิดเป็นค่าเริ่มต้น** แบบ prep-folders/sound-merge (idempotent: event id คำนวณจาก id งาน · เขียนแค่ปฏิทินมิกซ์ของตัวเอง) · `0`/`false`/`no` = ปิด (exit 78, supervisor หยุดปลุก)
 - **ล้มต้องดัง ไม่ใช่เงียบ** — worker นับเป็นล้มทุกกรณีที่ไม่ใช่ "ตอบ 2xx + `ok === true` + `failed` = 0": non-2xx (401/400/502/500) · `ok` ไม่ใช่ `true` (body ที่ไม่มี `ok` ก็นับ — fail closed) · `failed > 0` แม้ `ok:true` · **timeout** (`no activity for`) · ต่อไม่ติด · ตอบ 200 แต่ไม่ใช่ JSON → `console.error` บรรทัดที่ `BAD_RE` ของ Hermes worker-check จับได้ · `truncated` พิมพ์ออกมา (ธงที่ไม่มีคนอ่าน = ไม่มีธง)
 - **`off:true` (ไม่ได้ตั้ง `MIX_CALENDAR_ID`) = ไม่มีอะไรทำ เงียบ** พิมพ์ครั้งเดียวต่อโปรเซส ไม่ท่วม log ทุกชั่วโมง (บทเรียน v1.238)
-- route: รอบจริงทุกคำตอบผ่าน `answer()` — tick heartbeat `mix-calendar` (**liveness แยกจากผล**: tick รวมรอบที่ล้มและรอบ off · ซิงก์ล้มทุกรอบไม่ใช่ "worker ตาย") แล้ว **ล้ม = แชต ops + อีเมล digest** ทางเดียวกับ dead-man ของ `heartbeat.ts` บอกรหัสงาน + error · throttle 6 ชม. เท่า `maybeAlertStaleWorkers` · ประทับเวลา throttle **เฉพาะเมื่อส่งถึงอย่างน้อยหนึ่งช่อง** ไม่งั้นรอบหน้าลองเตือนใหม่ · ส่วนที่ route ตอบเองไม่ได้ (401 secret ไม่ตรง · แครช 500 · ค้าง) = ไม่มี tick → dead-man เตือนใน ~3 ชม.
+- route: รอบจริงทุกคำตอบผ่าน `answer()` — tick heartbeat `mix-calendar` (**liveness แยกจากผล**: tick รวมรอบที่ล้มและรอบ off · ซิงก์ล้มทุกรอบไม่ใช่ "worker ตาย") แล้ว **ล้ม = แชต ops + อีเมล digest** ทางเดียวกับ dead-man ของ `heartbeat.ts` บอกรหัสงาน + error · throttle 6 ชม. เท่า `maybeAlertStaleWorkers` (v1.248 ย้ายไปใช้ `alertOps` ตัวกลาง) · ส่วนที่ route ตอบเองไม่ได้ (401 secret ไม่ตรง · แครช 500 · ค้าง) = ไม่มี tick → dead-man เตือนใน ~3 ชม.
 - `workerSpecs()` มี spec `mix-calendar` (1 ชม., เปิดเว้นแต่ปิด) · เทส `mix-calendar-worker.test.ts` (8 เคส ยิงเซิร์ฟเวอร์ปลอมผ่าน `httpRequest` ตัวจริง · ตรวจว่าบรรทัดล้มเข้า `BAD_RE` ของ Hermes) · `heartbeat-specs` เพิ่ม mapping + เคส on-by-default · ลองกลับตรรกะ 5 แบบ (off=ล้ม, non-2xx=ผ่าน, timeout=ผ่าน, ตัด `failed>0`, `ok===false` แทน `ok!==true`) เทสแดงทุกแบบ
 - `ponytail:` ที่ต้องรู้ — `planMixCalendar` ไม่รู้ว่า event ตรงอยู่แล้ว รอบจริงจึง **patch ทุก event ในหน้าต่างทุกชั่วโมง** · 29 ก.ย. 2569 มี 3 งาน = ~4 call Google/ชม. · คิวโตจนใกล้ `LIMIT` 300 เมื่อไร ให้ worker ซ่อมเฉพาะแถวที่ล้ม/ต้อง create/ต้อง delete
 

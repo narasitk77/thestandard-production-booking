@@ -3,7 +3,7 @@
 // silently-dead worker (app still up, worker gone) becomes a same-minute alert
 // instead of hours of unnoticed downtime.
 import { prisma } from './db'
-import { notifyChat, notifyEmailDigest } from './notify'
+import { alertOps } from './ops-alert'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -144,20 +144,14 @@ export async function evaluateWorkers(): Promise<WorkerHealth[]> {
  * Dead-man check: called from the always-on reconcile worker each run. If any
  * enabled worker has gone stale, fire ONE alert and throttle further alerts to
  * once / 6h (state stored in a heartbeat row) so it doesn't spam every cycle.
+ *
+ * v1.248 — ผ่าน alertOps (ops-alert.ts) ตัวเดียวกับทุกที่ · throttle key เดิม `alert:stale-workers`
+ * · เดิมเขียนรายชื่อ worker ลง note ของแถว throttle — ตอนนี้ note เก็บผลรายช่องแทน (ไม่มีใครอ่านรายชื่อนั้น)
  */
 export async function maybeAlertStaleWorkers(): Promise<void> {
   const stale = (await evaluateWorkers()).filter((w) => w.stale)
   if (stale.length === 0) return
-  try {
-    const last = (await prisma.systemHeartbeat.findUnique({ where: { key: 'alert:stale-workers' } }))?.at
-    if (last && Date.now() - last.getTime() < 6 * HOUR) return // throttled
-    await recordHeartbeat('alert:stale-workers', stale.map((w) => w.key).join(','))
-    const lines = stale.map((w) => `• ${w.label} — last tick ${w.ageMs != null ? Math.round(w.ageMs / MINUTE) + ' min ago' : 'never'}`)
-    const msg = `⚠️ Production Booking: worker(s) ไม่ตอบสนอง\n${lines.join('\n')}\nตรวจ container logs / restart stack`
-    // v1.152.2 — 'ops': worker health is not footage news, so it stays off
-    // Discord by default and reaches the admin by email.
-    await Promise.all([notifyChat(msg, 'ops'), notifyEmailDigest('⚠️ Worker หยุดทำงาน — Production Booking', msg)])
-  } catch (e: any) {
-    console.warn('[heartbeat] stale-worker alert failed:', e?.message || e)
-  }
+  const lines = stale.map((w) => `• ${w.label} — last tick ${w.ageMs != null ? Math.round(w.ageMs / MINUTE) + ' min ago' : 'never'}`)
+  const msg = `⚠️ Production Booking: worker(s) ไม่ตอบสนอง\n${lines.join('\n')}\nตรวจ container logs / restart stack`
+  await alertOps('stale-workers', '⚠️ Worker หยุดทำงาน — Production Booking', msg)
 }

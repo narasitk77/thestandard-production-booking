@@ -25,7 +25,7 @@ import { bookingCalendarIds, getCalendarAuth } from '@/lib/google-calendar'
 import { mixCalendarId, syncMixJobCalendar } from '@/lib/mix-calendar'
 import { logAudit } from '@/lib/audit'
 import { recordHeartbeat } from '@/lib/heartbeat'
-import { notifyChat, notifyEmailDigest } from '@/lib/notify'
+import { alertOps } from '@/lib/ops-alert'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,30 +33,23 @@ export const dynamic = 'force-dynamic'
 // event ตรงอยู่แล้ว) · 29 ก.ย. 2569 มี 3 งาน = ~4 call/ชม. · ถ้าคิวโตจนใกล้ LIMIT ให้ worker ซ่อมเฉพาะ
 // แถวที่มี calendarSyncError/ต้อง create/ต้อง delete แทน
 const LIMIT = 300
-const ALERT_KEY = 'alert:mix-calendar'
-const ALERT_EVERY_MS = 6 * 3_600_000 // เท่ากับ throttle ของ maybeAlertStaleWorkers
 
-/** ล้ม → แชต ops + อีเมล digest · ส่งไม่ถึงใครเลย = ไม่ประทับเวลา รอบหน้าลองใหม่ (a record is not delivery) */
-async function alertOps(json: Record<string, any>) {
-  const last = (await prisma.systemHeartbeat.findUnique({ where: { key: ALERT_KEY } }).catch(() => null))?.at
-  if (last && Date.now() - last.getTime() < ALERT_EVERY_MS) return
+/** ข้อความเตือนตอนรอบจริงล้ม — บอกรหัสงาน + error (ส่งผ่าน alertOps: throttle 6 ชม. ต่อ key) */
+function failureText(json: Record<string, any>): string {
   const failedRows = (json.results || []).filter((r: any) => r.ok === false)
   const lines = [
     json.error ? `• ${json.error}` : null,
     ...failedRows.slice(0, 10).map((r: any) => `• ${r.code} (${r.plan}): ${String(r.error || '').slice(0, 200)}`),
     failedRows.length > 10 ? `• …อีก ${failedRows.length - 10} งาน` : null,
   ].filter(Boolean)
-  const msg = `⚠️ Production Booking: ซิงก์ปฏิทินคิวมิกซ์ล้ม${json.failed ? ` ${json.failed} งาน` : ''}\n${lines.join('\n')}\n`
+  return `⚠️ Production Booking: ซิงก์ปฏิทินคิวมิกซ์ล้ม${json.failed ? ` ${json.failed} งาน` : ''}\n${lines.join('\n')}\n`
     + 'ปฏิทิน Google ที่ทั้งโดเมนดูอยู่ขาดงานพวกนี้ · worker ลองใหม่ทุกชั่วโมง · error รายงานอยู่บนการ์ดใน /mix'
-  const [chat, email] = await Promise.all([notifyChat(msg, 'ops'), notifyEmailDigest('⚠️ ซิงก์ปฏิทินคิวมิกซ์ล้ม — Production Booking', msg)])
-  if (chat || email) await recordHeartbeat(ALERT_KEY, `chat=${chat} email=${email}`)
-  else console.error('[mix-calendar] เตือน ops ไม่ถึงใครเลย (แชต/อีเมลไม่ได้ตั้งหรือล้ม) — ลองใหม่รอบหน้า')
 }
 
 async function answer(dryRun: boolean, json: Record<string, any>, status = 200) {
   if (!dryRun) {
     await recordHeartbeat('mix-calendar', json.off ? 'off' : json.ok ? `ok ${JSON.stringify(json.counts ?? {})}` : `ล้ม ${json.failed ?? json.error ?? ''}`)
-    if (json.ok !== true) await alertOps(json).catch(e => console.error('[mix-calendar] alert failed:', e?.message || e))
+    if (json.ok !== true) await alertOps('mix-calendar', '⚠️ ซิงก์ปฏิทินคิวมิกซ์ล้ม — Production Booking', failureText(json))
   }
   return NextResponse.json(json, { status })
 }

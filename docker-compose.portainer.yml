@@ -239,6 +239,11 @@ services:
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       # footage (default) = only file news reaches Discord | all = ops too
       DISCORD_NOTIFY_SCOPE: ${DISCORD_NOTIFY_SCOPE:-footage}
+      # v1.248 — ห้อง Discord **แยก** สำหรับ ops (worker ตาย · ซิงก์ปฏิทินมิกซ์ล้ม · reminders)
+      # ข้อความ 'ops' ไปที่นี่ถ้าตั้งไว้ ห้องทีมข้างบนยัง footage-only · ว่าง = พฤติกรรมเดิม
+      # สร้าง: ห้องที่ต้องการ → Edit Channel → Integrations → Webhooks → New Webhook → Copy URL
+      # ตรวจหลังตั้ง: GET /api/internal/notify-test?category=ops · ค่า URL คือความลับ ตั้งบน stack เท่านั้น
+      DISCORD_OPS_WEBHOOK_URL: ${DISCORD_OPS_WEBHOOK_URL:-}
       # v1.209 — Lark (Feishu) custom-bot webhook, sent ALONGSIDE Discord so
       # nothing goes dark while the org moves chat platforms. Unset = off.
       # Get the URL from: <group> → Settings → Bots → Add Bot → Custom Bot

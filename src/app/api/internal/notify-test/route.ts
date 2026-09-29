@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
-import { notifyChatDetailed } from '@/lib/notify'
+import { notifyChatDetailed, digestRecipients } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,8 +40,12 @@ export async function GET(request: NextRequest) {
     sent: { discord: result.discord, lark: result.lark },
     configured: {
       discord: Boolean(process.env.DISCORD_WEBHOOK_URL?.trim()),
+      // v1.248 — ห้อง ops แยก (ข้อความ category=ops ไปที่นี่ก่อนถ้าตั้งไว้)
+      discordOps: Boolean(process.env.DISCORD_OPS_WEBHOOK_URL?.trim()),
       lark: Boolean(process.env.LARK_WEBHOOK_URL?.trim()),
       larkSigned: Boolean(process.env.LARK_WEBHOOK_SECRET?.trim()),
+      // v1.248 — digest มีผู้รับที่ส่งถึงได้จริงไหม (false = ผู้รับคือบัญชีที่ใช้ส่งเอง/ไม่ได้ตั้ง) · ไม่ยิงเมลในเทสนี้
+      emailDigest: digestRecipients().length > 0,
     },
     scope: {
       discord: (process.env.DISCORD_NOTIFY_SCOPE || 'footage').trim().toLowerCase(),

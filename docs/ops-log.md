@@ -5,6 +5,26 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-09-29 · v1.248 — ช่องเตือน ops: จุดเตือนจุดเดียว + ห้อง Discord ops แยก + digest พูดความจริง (push แล้ว · **ยังไม่ deploy**)
+
+ต่อจากข้อค้นพบใน v1.247 ข้างล่าง · นัท: "ops ถ้ากระทบแล้วดีขึ้น ก็ต้องปรับทั้งหมดให้รับกันได้ ·
+เติมฟีเจอร์ได้ประมาณนึง · เน้นปลอดภัยที่สุด ไม่กระทบระบบทั้งหมดมาก" · รายละเอียดใน CHANGELOG v1.248
+
+**ความปลอดภัยของการเปลี่ยน:** ไม่มี schema ใหม่ (throttle ใช้แถว `alert:<key>` เดิม) · ไม่มี env ใหม่ที่บังคับ ·
+ห้องทีม Discord ไม่ถูกแตะ (ยัง footage-only) · สิ่งเดียวที่ "หยุดทำ" คือยิง digest หาบัญชีที่ใช้ส่งเอง
+ซึ่งไม่เคยถึงใครอยู่แล้ว · ถอยได้ด้วยการถอยอิมเมจ ไม่มีข้อมูลอะไรเปลี่ยนรูป
+
+**หลัง deploy ก่อนตั้งค่าใด ๆ:** เสียงเตือนยังไม่ถึงคนเหมือนวันนี้ (Hermes ยังเป็นเสียงเดียว) แต่ log บอกความจริงแล้ว:
+`[notify] email digest ไม่ส่ง — ผู้รับ … คือบัญชีที่ใช้ส่งเอง` ครั้งเดียว และ `[ops-alert] <key>: เตือนไม่ถึงช่องไหนเลย`
+ตอนมีเรื่องจริง · `GET /api/internal/notify-test?category=ops` → `configured.emailDigest=false`
+
+**ให้ถึงคนจริง (นัทเลือก — ตั้งค่าบน stack ไม่ต้องแก้โค้ด):**
+1. Discord ห้องที่อ่านอยู่ (แนะนำห้องเดียวกับที่ Hermes ส่งรายงาน) → Edit Channel → Integrations → Webhooks → New Webhook → Copy URL
+2. `python3 scripts/ops/deploy.py <sha> --set DISCORD_OPS_WEBHOOK_URL=<url>` (จดค่าเดิมไว้ย้อนให้เอง)
+3. `GET /api/internal/notify-test?category=ops` → ต้องได้ `sent.discord=true` และเห็นข้อความทดสอบในห้องนั้น
+
+---
+
 ## 2026-09-29 · v1.247 — worker ซ่อมปฏิทินคิวมิกซ์ทุกชั่วโมง (โค้ดพร้อม · **ยังไม่ deploy**)
 
 ปิดช่องที่ v1.246 ทิ้งไว้: ซิงก์ปฏิทินมิกซ์ล้มตอน inline แล้วไม่มีอะไรลองใหม่ ทั้งที่ทั้งโดเมนดูปฏิทินนี้อยู่
@@ -28,6 +48,7 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 `BAD_RE` + health-summary) ซึ่งบรรทัดล้มของ worker ตัวนี้เทสแล้วว่าเข้า `BAD_RE` ทุกกรณี ·
 ทางแก้ต้องแก้ env บน stack (เลือกอย่างใดอย่างหนึ่ง: ตั้ง `LARK_WEBHOOK_URL` · `DISCORD_NOTIFY_SCOPE=all`
 · `REMINDER_ADMIN_EMAIL` เป็นกล่องที่ไม่ใช่ `SMTP_USER`) — **รอนัทตัดสิน ไม่ได้ทำ**
+→ ฝั่งโค้ดแก้แล้วที่ v1.248 ข้างบน (เพิ่มทางเลือก `DISCORD_OPS_WEBHOOK_URL` ห้องแยก ไม่ต้องเปิด ops เข้าห้องทีม)
 
 ---
 
