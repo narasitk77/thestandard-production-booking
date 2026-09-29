@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MIX_STATUSES, isMixStatus, formatMixNumber, canTransition,
-  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isAssignableTo,
+  canEditMixJob, canDeleteMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isAssignableTo,
   canCloseMixJob, normalizeHttpLink,
   mixFlag, deliveredOnTime, validateMixJob, compareMixQueue,
   normalizeMixQuery, resolveMixTarget, canSetDeliveryLink, episodeBelongsToBooking, findDuplicateMixJobs,
@@ -71,6 +71,21 @@ test('คนที่รับงานแก้ได้ตลอด · คน�
   assert.equal(canEditMixJob(other, queued), false)
   assert.equal(canEditMixJob(other, claimed), false)
   assert.equal(canEditMixJob(admin, claimed), true)
+})
+
+test('v1.250 ลบคำขอ: แอดมินทุกแถว · คนขอเฉพาะตอนยังไม่มีคนรับ · คนถืองานและ Sound Admin ลบไม่ได้', () => {
+  const done = { ...claimed, status: 'DONE' }
+  const overdueHeld = { ...claimed, dueDate: '2026-01-01' }
+  const requeuedWithAssignee = { ...claimed, status: 'QUEUED' }
+  assert.equal(canDeleteMixJob(requester, queued), true, 'ถอนคำขอของตัวเองก่อนมีคนรับได้')
+  assert.equal(canDeleteMixJob(requester, claimed), false, 'มีคนรับแล้ว ถอนเองไม่ได้')
+  assert.equal(canDeleteMixJob(requester, requeuedWithAssignee), false, 'ส่งกลับคิวแต่ยังมีชื่อคนทำ = มีคนรับแล้ว')
+  assert.equal(canDeleteMixJob(engineer, claimed), false, 'คนถืองานลบงานตัวเองไม่ได้ (เดิมลบได้ทุกสถานะ)')
+  assert.equal(canDeleteMixJob(engineer, overdueHeld), false, 'งานเลยกำหนดยิ่งห้ามหายจากคิว')
+  assert.equal(canDeleteMixJob(coordinator, queued), false, 'Sound Admin ยกเลิกได้ แต่ลบไม่ได้')
+  assert.equal(canDeleteMixJob(other, queued), false)
+  for (const j of [queued, claimed, done, requeuedWithAssignee]) assert.equal(canDeleteMixJob(admin, j), true, `แอดมินลบได้: ${j.status}`)
+  assert.equal(canEditMixJob(engineer, claimed), true, 'สิทธิ์แก้ของคนถืองานยังเหมือนเดิม — แยกกฎกันแล้ว')
 })
 
 test('รับงานได้เฉพาะทีมเสียง และเฉพาะแถวที่ยังไม่มีเจ้าของ', () => {

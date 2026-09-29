@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { Check, Clock, ExternalLink, Loader2, RotateCcw, Send, Trash2, UserPlus } from 'lucide-react'
 import {
   MIX_STATUS_LABEL, MIX_STATUS_HINT, MIX_FLAG_LABEL, canAssignMixJob, canClaimMixJob,
-  canEditMixJob, canSetMixStatus, normalizeHttpLink, type MixActor, type MixFlag, type MixStatus,
+  canEditMixJob, canDeleteMixJob, canSetMixStatus, normalizeHttpLink, type MixActor, type MixFlag, type MixStatus,
 } from '@/lib/mix-jobs'
 
 /** แถวจาก GET /api/mix (วันที่เป็นสตริง ISO หลังผ่าน JSON) */
@@ -133,7 +133,7 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
   const canReopen = status === 'DONE' && canSetMixStatus(actor, job, 'IN_PROGRESS')
   // canTransition ยอม X→X (บันทึกซ้ำไม่พัง) → ต้องกันสถานะปัจจุบันเอง ไม่งั้นการ์ดที่ยกเลิกแล้วมีปุ่มยกเลิก
   const canCancel = status !== 'CANCELLED' && canSetMixStatus(actor, job, 'CANCELLED')
-  const canDelete = canEditMixJob(actor, job)
+  const canDelete = canDeleteMixJob(actor, job) // v1.250 — กฎเดียวกับ route DELETE
 
   async function run(body: Record<string, unknown>) {
     setNotice(null)

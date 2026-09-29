@@ -11,7 +11,7 @@ import { getSession, getSoundAccess } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { mixEventData, mixStateOf } from '@/lib/mix-stats'
 import {
-  canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, canCloseMixJob, canSetDeliveryLink,
+  canEditMixJob, canDeleteMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, canCloseMixJob, canSetDeliveryLink,
   isMixStatus, isAssignableTo, normalizeHttpLink, validateMixJob, formatMixNumber,
   type MixActor, type MixStatus,
 } from '@/lib/mix-jobs'
@@ -240,8 +240,9 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
       isCoordinator: access.isCoordinator,
       canEditAll: access.canEditAll,
     }
-    if (!canEditMixJob(actor, existing)) {
-      return NextResponse.json({ error: 'ลบได้เฉพาะคำขอของตัวเองที่ยังไม่มีคนรับ' }, { status: 403 })
+    // v1.250 — กฎลบแยกจากกฎแก้: คนถืองาน/Sound Admin ลบไม่ได้แล้ว (ใช้ "ยกเลิก" แทน)
+    if (!canDeleteMixJob(actor, existing)) {
+      return NextResponse.json({ error: 'ลบได้เฉพาะคนขอ (ตอนยังไม่มีคนรับ) หรือแอดมิน — งานที่ไม่ต้องทำแล้วให้กด "ยกเลิก"' }, { status: 403 })
     }
 
     // soft delete — ทั้งรีโปนี้ไม่มีการลบถาวร และเลขที่ออกไปแล้วต้องไม่ถูกใช้ซ้ำ

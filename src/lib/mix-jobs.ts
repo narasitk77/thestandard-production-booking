@@ -116,6 +116,19 @@ export function canEditMixJob(actor: MixActor, job: MixJobLike): boolean {
 }
 
 /**
+ * v1.250 — **ลบคำขอ** ได้ไหม: แอดมินทุกแถว · คนขอเฉพาะคำขอของตัวเองที่ยังไม่มีคนรับ
+ *
+ * คำสั่ง operator 30 ก.ย. 2569 "จำกัดสิทธิ์ลบให้คนขอกับแอดมินเท่านั้น" · เดิมลบใช้กฎเดียวกับแก้งาน
+ * (canEditMixJob) ซึ่งให้ **คนถืองาน** ลบได้ทุกสถานะ — ลบงานที่เลยกำหนดของตัวเองทิ้งได้ (ผู้ตรวจ v1.249 เจอ)
+ * · แยกกฎเพราะ "แก้" กับ "ลบ" คนละเรื่อง: คนทำยังต้องแก้ลิงก์/โน้ตของงานที่ถืออยู่ได้ แต่ไม่ควรทำให้งานหายจากคิว
+ * · Sound Admin ก็ลบไม่ได้ (ยกเลิกได้ตามเดิม) — งานที่ไม่ต้องทำแล้วให้ "ยกเลิก" ซึ่งยังเหลือร่องรอยในคิว
+ */
+export function canDeleteMixJob(actor: MixActor, job: MixJobLike): boolean {
+  if (actor.canEditAll) return true
+  return sameEmail(job.requesterEmail, actor.email) && (job.status || 'QUEUED') === 'QUEUED' && !job.assigneeEmail
+}
+
+/**
  * "หยิบงานเอง" ได้ไหม — เฉพาะทีมเสียง และเฉพาะแถวที่ยังไม่มีเจ้าของ
  *
  * v1.216: กระบวนการหลักคือ **coordinator แจก** (ดู canAssignMixJob) — ตัวนี้เป็น
