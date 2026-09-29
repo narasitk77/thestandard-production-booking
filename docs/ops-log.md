@@ -5,7 +5,26 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-09-29 · v1.248 — ช่องเตือน ops: จุดเตือนจุดเดียว + ห้อง Discord ops แยก + digest พูดความจริง (push แล้ว · **ยังไม่ deploy**)
+## 2026-09-29 · v1.247 + v1.248 DEPLOYED `sha-4fd1d8b` (22:24 BKK)
+
+นัทสั่ง "deploy เลย รอ CI เขียวก่อน" · CI + Build and Push Docker Image ของ `4fd1d8b` เขียวทั้งคู่ก่อนยิง ·
+backup heartbeat 6.7 ชม. (ไม่เกิน 25 ชม.) · `deploy.py 4fd1d8b` (ไม่มี `--set` — ไม่ได้แตะ env บน stack)
+
+- backup ก่อน deploy `backup-2026-09-29T151535.sql.gz` 1.16MB ขึ้นไดรฟ์ · จุดถอย `sha-a0fc1e6`
+- PUT 22:15:40 → คอนเทนเนอร์ใหม่ 22:21:05 → ครบสามชั้น 22:24:04 (`/api/version` = 1.248.0) · เว็บตอบ 502 ~4 นาทีช่วงบูต
+- บูต: `The database is already in sync with the Prisma schema` (ไม่มี schema เปลี่ยน) · worker 16 ตัวขึ้น ·
+  ปิดตามตั้งใจ 2 ตัว (lark-export, footage-sync → exit 78) · `[mix-calendar] worker started … secret=set` · ไม่มี error
+- รอบแรกของ mix-calendar 22:26:00: `create=0 update=3 delete=0 failed=0` · heartbeat `mix-calendar` เขียนแล้ว ·
+  audit `mix.calendar_sync` 1 แถว · `mix_jobs.calendarSyncError` 0/3 · ไม่มีแถว `alert:mix-calendar` (ไม่มีอะไรล้ม)
+- `/api/health-summary` HTTP 200 `ok:true` · `mix-calendar` enabled, ไม่ stale
+- ด่าน v1.248 ทำงานจริง: reminders ส่ง digest หลังบูต → `[notify] email digest ไม่ส่ง — ผู้รับ … คือบัญชีที่ใช้ส่งเอง` ครั้งเดียว
+
+**ยังค้าง:** `DISCORD_OPS_WEBHOOK_URL` ยังไม่ได้ตั้ง → เตือน ops ในแอปยังไม่ถึงใคร (ตอนนี้บอกความจริงแล้ว) ·
+Hermes worker-check ยังเป็นเสียงเดียว · ขั้นตอนตั้งอยู่ในหัวข้อ v1.248 ข้างล่าง · ถอย: `python3 scripts/ops/rollback.py`
+
+---
+
+## 2026-09-29 · v1.248 — ช่องเตือน ops: จุดเตือนจุดเดียว + ห้อง Discord ops แยก + digest พูดความจริง (deploy แล้ว — ดูข้างบน)
 
 ต่อจากข้อค้นพบใน v1.247 ข้างล่าง · นัท: "ops ถ้ากระทบแล้วดีขึ้น ก็ต้องปรับทั้งหมดให้รับกันได้ ·
 เติมฟีเจอร์ได้ประมาณนึง · เน้นปลอดภัยที่สุด ไม่กระทบระบบทั้งหมดมาก" · รายละเอียดใน CHANGELOG v1.248
@@ -25,7 +44,7 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-09-29 · v1.247 — worker ซ่อมปฏิทินคิวมิกซ์ทุกชั่วโมง (โค้ดพร้อม · **ยังไม่ deploy**)
+## 2026-09-29 · v1.247 — worker ซ่อมปฏิทินคิวมิกซ์ทุกชั่วโมง (deploy แล้ว — ดูข้างบน)
 
 ปิดช่องที่ v1.246 ทิ้งไว้: ซิงก์ปฏิทินมิกซ์ล้มตอน inline แล้วไม่มีอะไรลองใหม่ ทั้งที่ทั้งโดเมนดูปฏิทินนี้อยู่
 รายละเอียดโค้ดใน CHANGELOG v1.247 · **ไม่ได้แตะ stack env และยังไม่ได้ deploy — รอนัทสั่ง**
