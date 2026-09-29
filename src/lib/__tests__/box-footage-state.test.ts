@@ -119,3 +119,10 @@ test('v1.251 ต้นฉบับมาครบแล้ว → has-footage �
   ] }
   assert.equal(((await boxFootageState('C-1')) as any).state, 'has-footage')
 })
+
+test('ผู้ตรวจ 3: กล่องใหญ่ชนเพดาน = unknown (ห้ามทิ้ง) ไม่ใช่ has-footage จากรายการที่ถูกตัดท้าย', async () => {
+  trees = { box: Array.from({ length: 5 }, (_, i) => ({ name: `A00${i}C001_260101AAS03.MP4`, folderPath: ['EP', 'CAM-A', 'XDROOT', 'Sub'] })) }
+  const r = await boxFootageState('C-1', { maxFiles: 5 }) as any
+  assert.equal(r.state, 'unknown')
+  assert.match(r.reason, /เกินเพดาน/)
+})

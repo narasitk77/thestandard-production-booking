@@ -154,7 +154,8 @@ export async function boxFootageState(
   code: string,
   opts: { excludeFolderId?: string; maxFiles?: number } = {},
 ): Promise<BoxFootageState> {
-  const maxFiles = opts.maxFiles ?? 2000
+  // v1.251 — ต้องเห็นรายการครบถึงจะบอกได้ว่าต้นฉบับครบ (เดิมเจอไฟล์กล้องไฟล์เดียวก็พอ) · เพดานสูงขึ้น และถ้าชนเพดาน = unknown
+  const maxFiles = opts.maxFiles ?? 20000
   let folders
   try {
     folders = (await findFoldersByCode(code)).filter(f => f.id !== opts.excludeFolderId)
@@ -167,7 +168,12 @@ export async function boxFootageState(
   const camera: Array<{ name: string; folderPath?: string[] }> = []
   for (const f of folders) {
     try {
-      for (const file of await listFilesRecursive(f.id, { maxFiles })) {
+      const list = await listFilesRecursive(f.id, { maxFiles })
+      if (list.length >= maxFiles) {
+        // ถูกตัดท้าย (BFS — โฟลเดอร์ Clip/Sub ลึกสุดโดนตัดก่อน) = ตัดสินความครบไม่ได้ ห้ามทิ้ง
+        return { state: 'unknown', reason: `กล่องใหญ่เกินเพดาน ${maxFiles} ไฟล์ — ตรวจว่าต้นฉบับครบไม่ได้` }
+      }
+      for (const file of list) {
         if (isCameraFootage(file)) { files++; camera.push(file) }
       }
     } catch (e: any) {

@@ -29,10 +29,43 @@ test('ครบสามอย่าง / ไม่มีคลิปกล้�
   assert.deepEqual(pendingOriginals([{ name: 'Final_Export.mp4', folderPath: ['EXPORT'] }]), [], 'MP4 ที่ไม่ใช่ชื่อกล้อง ไม่ถูกนับ')
 })
 
+test('ผู้ตรวจ 1: ต้นฉบับชื่อแบบอื่นที่ครบ ไม่ค้าง · ไฟล์ export ลงท้าย S03 ที่ไม่อยู่ในโฟลเดอร์ Sub ไม่ใช่ proxy', () => {
+  assert.deepEqual(pendingOriginals([
+    { name: 'CAMA0001.MP4', folderPath: ['EP.1', 'CAM-A', 'PRIVATE', 'M4ROOT', 'CLIP'] },
+    { name: 'CAMA0001S03.MP4', folderPath: ['EP.1', 'CAM-A', 'PRIVATE', 'M4ROOT', 'SUB'] },
+    { name: 'CAMA0001M01.XML', folderPath: ['EP.1', 'CAM-A', 'PRIVATE', 'M4ROOT', 'CLIP'] },
+    { name: 'Teaser_EPS03.mp4', folderPath: ['EXPORT'] },
+  ]), [])
+})
+
+test('ผู้ตรวจ 2: ต้นฉบับ FX6 ที่ถูกวางคนละ path กับ Sub (เช่นกู้มาวางที่ CAM-B) ยังนับว่าครบ', () => {
+  assert.deepEqual(pendingOriginals([
+    xd('EP.1', 'CAM-B', 'Sub', 'B022C001_2609297HS03.MP4', 'B022'),
+    xd('EP.1', 'CAM-B', 'Clip', 'B022C001_2609297HM01.XML', 'B022'),
+    { name: 'B022C001_2609297H.MXF', folderPath: ['EP.1', 'CAM-B', 'recovered'] },
+  ]), [])
+})
+
+test('ผู้ตรวจ 4: M4ROOT C0001 สองวันในกลุ่มเดียวกัน — ต้นฉบับวันแรกไม่ทำให้ Sub วันที่สองดูครบ', () => {
+  const m = (kind: 'CLIP' | 'SUB', name: string) => ({ name, folderPath: ['EP01', 'CAM-A', 'PRIVATE', 'M4ROOT', kind] })
+  assert.deepEqual(pendingOriginals([m('CLIP', 'C0001.MP4'), m('SUB', 'C0001S03.MP4'), m('SUB', 'C0001S03.MP4')]), ['C0001'])
+  assert.deepEqual(pendingOriginals([m('CLIP', 'C0001.MP4'), m('CLIP', 'C0001.MP4'), m('SUB', 'C0001S03.MP4'), m('SUB', 'C0001S03.MP4')]), [])
+})
+
 test('M4ROOT: C0001 ของกล้อง A ครบ ไม่ได้ทำให้ C0001 ของกล้อง B (ขาดต้นฉบับ) ดูครบไปด้วย', () => {
   const m4 = (cam: string, kind: 'CLIP' | 'SUB', name: string) => ({ name, folderPath: ['EP.1', cam, 'PRIVATE', 'M4ROOT', kind] })
   assert.deepEqual(pendingOriginals([
     m4('CAM-A', 'CLIP', 'C0001.MP4'), m4('CAM-A', 'SUB', 'C0001S03.MP4'),
     m4('CAM-B', 'SUB', 'C0001S03.MP4'),
   ]), ['C0001'])
+})
+
+test('การ์ดที่ถูกคัดลอกสองรอบ (Card 2 + Card 2 (คอมดับ)) ได้ Sub/XML สองชุดต่อ MXF เดียว — ไม่ค้าง (เคสจริง 260915-02)', () => {
+  assert.deepEqual(pendingOriginals([
+    xd('EP.1', 'CAM-C', 'Sub', 'C009C001_260915M6S03.MP4', 'Card 2 (คอมดับ)'),
+    xd('EP.1', 'CAM-C', 'Clip', 'C009C001_260915M6M01.XML', 'Card 2 (คอมดับ)'),
+    xd('EP.1', 'CAM-C', 'Clip', 'C009C001_260915M6.MXF', 'Card 2 (คอมดับ)'),
+    xd('EP.1', 'CAM-C', 'Sub', 'C009C001_260915M6S03.MP4', 'Card 2'),
+    xd('EP.1', 'CAM-C', 'Clip', 'C009C001_260915M6M01.XML', 'Card 2'),
+  ]), [])
 })

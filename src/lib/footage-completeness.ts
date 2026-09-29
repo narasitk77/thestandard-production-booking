@@ -18,10 +18,12 @@ export interface FootageFileLike {
 const SUB = /^(.+?)S03\.MP4$/i
 const XML = /^(.+?)M01\.XML$/i
 const ORIG = /^(.+)\.(MXF|MP4|MOV)$/i
-/** ชื่อคลิปกล้องที่รู้จัก: FX6 XDROOT (A009R001_2609151T) · M4ROOT (C0001) — MP4 อื่นไม่ใช่ต้นฉบับกล้อง */
-const CAMERA = /^([A-Z]\d{3}[A-Z]\d{3}_[0-9A-Z]{6,}|C\d{4})$/i
-/** ส่วนท้ายของโครงการ์ด — ตัดออกเพื่อให้ Clip กับ Sub ของการ์ดเดียวกันอยู่กลุ่มเดียวกัน */
+/** ชื่อแบบ FX6 XDROOT มี reel + วันที่ + รหัสกล้องในตัว = ไม่ซ้ำข้ามโฟลเดอร์ → จับคู่ด้วยชื่ออย่างเดียว */
+const UNIQUE_NAME = /^[A-Z]\d{3}[A-Z]\d{3}_[0-9A-Z]{6,}$/i
+/** ส่วนท้ายของโครงการ์ด — ตัดออกเพื่อให้ Clip กับ Sub ของการ์ดเดียวกันอยู่กลุ่มเดียวกัน (ใช้กับชื่อที่ซ้ำได้ เช่น C0001) */
 const CARD_TAIL = new Set(['XDROOT', 'M4ROOT', 'PRIVATE', 'CLIP', 'SUB'])
+
+const lastFolder = (f: FootageFileLike) => (f.folderPath || []).slice(-1)[0]?.trim().toUpperCase() || ''
 
 function groupOf(f: FootageFileLike): string {
   const segs: string[] = []
@@ -33,21 +35,40 @@ function groupOf(f: FootageFileLike): string {
   return segs.join('/')
 }
 
-/** ชื่อคลิปที่มี Sub/XML แต่ยังไม่มีต้นฉบับ (เรียงตามชื่อ) · ว่าง = ครบ หรือไม่มีคลิปกล้องแบบที่รู้จักเลย */
+/**
+ * ชื่อคลิปที่มี Sub/XML แต่ต้นฉบับยังมาไม่ครบ (เรียงตามชื่อ) · ว่าง = ครบ หรือไม่มีคลิปโครง Sony เลย
+ *
+ * ผู้ตรวจ v1.251 เจอ 4 ข้อ ก่อน deploy:
+ *  - นับเป็น Sub/XML เฉพาะที่อยู่ในโครง Sony จริง (…S03.MP4 ในโฟลเดอร์ Sub · …M01.XML ในโฟลเดอร์ Clip) —
+ *    ไฟล์ export ชื่อลงท้าย S03 (Teaser_EPS03.mp4) ไม่ใช่ proxy · ต้นฉบับชื่อไหนก็ได้ (CAMA0001, Clip0001)
+ *    เพราะมีผลก็ต่อเมื่อจับคู่กับ Sub/XML เท่านั้น
+ *  - ชื่อ FX6 ไม่ซ้ำ → จับคู่ด้วยชื่ออย่างเดียว (ต้นฉบับที่กู้ไปวางคนละ path ยังนับว่าครบ)
+ *  - ชื่อที่ซ้ำได้ (M4ROOT C0001 หลายวัน/หลายการ์ด) นับ **จำนวน**: ค้าง = Sub หรือ XML มากกว่าต้นฉบับ
+ *    (ชื่อ FX6 ใช้แค่ "มีต้นฉบับไหม" — การ์ดที่ถูกคัดลอกซ้ำทำให้ Sub/XML มีสองชุดได้)
+ */
 export function pendingOriginals(files: FootageFileLike[]): string[] {
-  const clips = new Map<string, { name: string; orig: boolean; proxy: boolean }>()
+  const clips = new Map<string, { name: string; orig: number; sub: number; xml: number }>()
   for (const f of files) {
     let m: RegExpExecArray | null
-    let clip: string
-    let orig = false
-    if ((m = SUB.exec(f.name)) || (m = XML.exec(f.name))) clip = m[1]
-    else if ((m = ORIG.exec(f.name)) && CAMERA.test(m[1])) { clip = m[1]; orig = true }
+    let kind: 'orig' | 'sub' | 'xml'
+    const where = lastFolder(f)
+    if ((m = SUB.exec(f.name)) && where === 'SUB') kind = 'sub'
+    else if ((m = XML.exec(f.name)) && where === 'CLIP') kind = 'xml'
+    else if ((m = ORIG.exec(f.name)) && !SUB.test(f.name)) kind = 'orig'
     else continue
-    const key = `${groupOf(f)}|${clip.toUpperCase()}`
-    const c = clips.get(key) || { name: clip, orig: false, proxy: false }
-    if (orig) c.orig = true
-    else c.proxy = true
+    const clip = m[1]
+    const key = UNIQUE_NAME.test(clip) ? clip.toUpperCase() : `${groupOf(f)}|${clip.toUpperCase()}`
+    const c = clips.get(key) || { name: clip, orig: 0, sub: 0, xml: 0 }
+    c[kind]++
     clips.set(key, c)
   }
-  return Array.from(clips.values()).filter(c => c.proxy && !c.orig).map(c => c.name).sort()
+  return Array.from(clips.values())
+    .filter(c => {
+      if (!c.sub && !c.xml) return false
+      // ชื่อไม่ซ้ำ (FX6): มีต้นฉบับสักไฟล์ = ครบ — การ์ดที่ถูกคัดลอกซ้ำ ("Card 2" + "Card 2 (คอมดับ)") ได้ Sub/XML
+      // สองชุดต่อ MXF เดียว (เจอจริงใน 260915-02) ต้องไม่ถูกนับว่าค้าง · ชื่อที่ซ้ำได้ (C0001) ใช้การนับ
+      return UNIQUE_NAME.test(c.name) ? c.orig === 0 : Math.max(c.sub, c.xml) > c.orig
+    })
+    .map(c => c.name)
+    .sort()
 }
