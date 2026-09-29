@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession, getSoundAccess } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
+import { mixEventData, mixStateOf } from '@/lib/mix-stats'
 import {
   canEditMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, canCloseMixJob, canSetDeliveryLink,
   isMixStatus, isAssignableTo, normalizeHttpLink, validateMixJob, formatMixNumber,
@@ -22,6 +23,19 @@ export const dynamic = 'force-dynamic'
 async function load(id: string) {
   return prisma.mixJob.findFirst({ where: { id, deletedAt: null } })
 }
+
+/**
+ * v1.249 — เขียนได้เฉพาะเมื่อสถานะงาน (สถานะ/คนทำ/วันที่) ยังเป็นอย่างที่อ่านมา · สองคำขอพร้อมกัน (ส่งงาน ×
+ * แจกใหม่) เดิมจบที่แถวผสมของทั้งสอง และประวัติสองแถวเล่าสถานะที่ไม่เคยมีจริง (ผู้ตรวจเจอ) · ตอนนี้คำขอที่มาทีหลัง
+ * ได้ 409 ให้โหลดใหม่ — ปิด "รับงานซ้อน" ที่มีมาก่อน v1.249 ไปด้วย · ไม่เทียบ updatedAt เพราะการซิงก์ปฏิทิน
+ * ก็แตะ updatedAt (จะ 409 ทั้งที่ไม่มีอะไรชน)
+ */
+function sameWorkState(existing: { id: string; status: string; assigneeEmail: string | null; dueDate: Date | null }) {
+  return { id: existing.id, deletedAt: null, status: existing.status, assigneeEmail: existing.assigneeEmail, dueDate: existing.dueDate }
+}
+
+const CONFLICT = 'งานนี้เพิ่งถูกแก้โดยอีกคน — โหลดคิวใหม่แล้วลองอีกครั้ง'
+const isNotFound = (e: unknown) => (e as { code?: string })?.code === 'P2025'
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -155,7 +169,23 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       return NextResponse.json({ error: 'ไม่มีอะไรให้แก้' }, { status: 400 })
     }
 
-    const job = await prisma.mixJob.update({ where: { id: existing.id }, data })
+    // v1.249 — ประวัติการเปลี่ยนครั้งนี้ (สถานะก่อน/หลัง) เขียนใน update เดียวกัน: งานเปลี่ยนแต่ประวัติหาย
+    // เกิดไม่ได้ · ตัวเลขผลงาน/ภาระรายคนคิดจากที่นี่ (mix-stats.ts)
+    const before = mixStateOf(existing)
+    const after = mixStateOf({
+      status: 'status' in data ? (data.status as string) : existing.status,
+      assigneeEmail: 'assigneeEmail' in data ? (data.assigneeEmail as string | null) : existing.assigneeEmail,
+      dueDate: 'dueDate' in data ? (data.dueDate as Date | null) : existing.dueDate,
+    })
+    data.events = { create: mixEventData(before, after, session.email, { claimed: body.claim === true }) }
+
+    let job
+    try {
+      job = await prisma.mixJob.update({ where: sameWorkState(existing), data })
+    } catch (e) {
+      if (isNotFound(e)) return NextResponse.json({ error: CONFLICT }, { status: 409 })
+      throw e
+    }
 
     // แจ้งคนที่ถูกแจก + คนขอ · ไม่ throw ไม่ว่ากรณีใด งานที่แจกไปแล้วต้องไม่ถูก
     // ย้อนกลับเพราะเมลไม่ออก
@@ -215,7 +245,16 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
     }
 
     // soft delete — ทั้งรีโปนี้ไม่มีการลบถาวร และเลขที่ออกไปแล้วต้องไม่ถูกใช้ซ้ำ
-    await prisma.mixJob.update({ where: { id: existing.id }, data: { deletedAt: new Date() } })
+    const state = mixStateOf(existing)
+    try {
+      await prisma.mixJob.update({
+        where: sameWorkState(existing),
+        data: { deletedAt: new Date(), events: { create: mixEventData(state, state, session.email, { deleted: true }) } },
+      })
+    } catch (e) {
+      if (isNotFound(e)) return NextResponse.json({ error: CONFLICT }, { status: 409 })
+      throw e
+    }
     // v1.245 — ลบคำขอ = เอา event ออกจากปฏิทินมิกซ์ด้วย ไม่งั้นปฏิทินโชว์งานที่ไม่มีแล้ว
     const cal = await syncMixJobCalendar(existing.id)
     logAudit({

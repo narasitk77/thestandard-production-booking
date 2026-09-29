@@ -12,11 +12,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, CalendarDays, List, Loader2, Plus, X } from 'lucide-react'
+import { AlertTriangle, BarChart3, CalendarDays, List, Loader2, Plus, X } from 'lucide-react'
 import MixRequestForm from '@/app/_components/MixRequestForm'
 import MixJobCard, { type MixJobView, type MixActResult, type SoundMember } from '@/app/_components/MixJobCard'
 import { MixLoadCalendar } from '@/app/_components/MixLoadCalendar'
+import MixStatsDashboard from '@/app/_components/MixStatsDashboard'
 import { MIX_STATUS_LABEL, mixFlag, type MixActor } from '@/lib/mix-jobs'
+import { canViewMixStats } from '@/lib/mix-stats'
 
 export interface MixQueuePanelProps {
   /** 'page' = หน้า /mix (ทุกคน) · 'admin' = แท็บ "คิว Mixing" ในหน้าแอดมิน (Sound Admin) */
@@ -54,7 +56,8 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
   const [busy, setBusy] = useState<string | null>(null)
   const [flash, setFlash] = useState<Flash | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [view, setView] = useState<'list' | 'calendar'>('list')
+  // v1.249 — 'stats' = ภาระงาน & ผลงานรายคน (เฉพาะ Sound Admin + แอดมิน · ตรวจซ้ำที่ /api/mix/stats)
+  const [view, setView] = useState<'list' | 'calendar' | 'stats'>('list')
   // Sound Admin เปิดแท็บนี้มาเพื่อแจกงาน → งานที่ยังไม่แจกขึ้นก่อน
   const [queuedFirst, setQueuedFirst] = useState(isAdmin)
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -106,7 +109,10 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
         body: JSON.stringify(body),
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok) return { ok: false, error: data?.error || `บันทึกไม่สำเร็จ (${res.status})` }
+      if (!res.ok) {
+        if (res.status === 409) load(scope) // มีคนแก้งานนี้ไปก่อน — เอาสถานะจริงมาแสดงแทนของเก่าบนการ์ด
+        return { ok: false, error: data?.error || `บันทึกไม่สำเร็จ (${res.status})` }
+      }
       if (data?.job) {
         setJobs(prev => prev.map(j => (j.id === id ? { ...j, ...data.job, flag: mixFlag(data.job) } : j)))
       } else {
@@ -128,7 +134,10 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
     try {
       const res = await fetch(`/api/mix/${job.id}`, { method: 'DELETE' })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || `ลบไม่สำเร็จ (${res.status})`)
+      if (!res.ok) {
+        if (res.status === 409) load(scope)
+        throw new Error(data.error || `ลบไม่สำเร็จ (${res.status})`)
+      }
       setJobs(prev => prev.filter(j => j.id !== job.id))
       setFlash(data.calendarError
         ? { tone: 'warn', text: `ลบ ${job.code} แล้ว แต่เอางานออกจากปฏิทินมิกซ์ไม่สำเร็จ (${data.calendarError}) — ลบในปฏิทินเองหรือแจ้งแอดมิน` }
@@ -167,6 +176,9 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
     setView('list')
     setFocusId(id)
   }, [])
+
+  // ปุ่มแค่ซ่อน/แสดง — สิทธิ์จริงอยู่ที่ route (canViewMixStats) ตัวเดียวกัน
+  const canSeeStats = !!me && canViewMixStats(me)
 
   const actor: MixActor | null = me
     ? { email: me.email, isSound: me.isSound, isCoordinator: me.isCoordinator, canEditAll: me.canEditAll }
@@ -262,6 +274,15 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
           >
             <CalendarDays size={14} /> ปฏิทิน
           </button>
+          {canSeeStats && (
+            <button
+              onClick={() => setView('stats')}
+              aria-pressed={view === 'stats'}
+              className={`inline-flex items-center gap-1 px-3 py-1.5 text-sm border-l border-gray-200 ${view === 'stats' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              <BarChart3 size={14} /> ภาระงาน
+            </button>
+          )}
         </div>
 
         {view === 'list' && (
@@ -289,7 +310,9 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
         )}
       </div>
 
-      {view === 'calendar' ? (
+      {view === 'stats' && canSeeStats ? (
+        <MixStatsDashboard />
+      ) : view === 'calendar' ? (
         <MixLoadCalendar showAssigneeLoad={isAdmin} onOpenJob={openJob} />
       ) : loading ? (
         <div className="py-16 text-center text-gray-400">

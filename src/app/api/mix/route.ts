@@ -18,6 +18,7 @@ import {
 } from '@/lib/mix-jobs'
 import { notifyMixRequested } from '@/lib/mix-notify'
 import { syncMixJobCalendar, mixCalendarAuditNote, mixCalendarId } from '@/lib/mix-calendar'
+import { mixEventData } from '@/lib/mix-stats'
 
 export const dynamic = 'force-dynamic'
 
@@ -163,6 +164,8 @@ export async function POST(request: NextRequest) {
         requesterEmail: session.email,
         createdByEmail: session.email,
         status: 'QUEUED',
+        // v1.249 — ประวัติงานเริ่มที่นี่ ใน write เดียวกัน (ไม่ใช่ audit_logs ที่หายได้)
+        events: { create: mixEventData(null, { status: 'QUEUED', assigneeEmail: null, dueDate: clean.value.dueDate }, session.email) },
       },
     })
 

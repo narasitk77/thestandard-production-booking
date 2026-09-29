@@ -1237,10 +1237,50 @@ model MixJob {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  /// v1.249 — ประวัติทุกการเปลี่ยน (ดู MixJobEvent)
+  events MixJobEvent[]
+
   @@index([status, dueDate])
   @@index([assigneeEmail, status])
   @@index([assignedByEmail])
   @@index([requesterEmail, createdAt])
   @@index([bookingId])
   @@map("mix_jobs")
+}
+
+/// v1.249 — ประวัติงานมิกซ์ทีละการเปลี่ยน (ขอ · แจก · รับเอง · ส่ง · เปิดแก้ · ยกเลิก · เลื่อนวัน · ลบ) — **append-only**
+///
+/// ทำไมไม่อ่านจากแถว MixJob อย่างเดียว: แถวเก็บแค่ "ตอนนี้" — แจกใหม่ A→B แล้ว claimedAt ยังเป็นเวลาที่แจก A,
+/// ส่งแล้วเปิดแก้ deliveredAt ถูกล้าง · ตัวเลขผลงาน/ภาระรายคน (/api/mix/stats, export CSV) ต้องรู้ว่าใครถืองาน
+/// ช่วงไหน และส่งครั้งแรกเมื่อไร
+///
+/// ทำไมไม่ใช้ audit_logs: ตั้งใจเป็น best-effort เขียนนอก transaction หายได้ (ดู audit.ts) · ที่นี่เขียนใน write
+/// เดียวกับการแก้งาน (nested create) — งานเปลี่ยนแต่ประวัติไม่ถูกเขียน เกิดไม่ได้
+///
+/// แต่ละแถวเก็บทั้งสถานะ "หลัง" และ "ก่อน" การเปลี่ยน — คำนวณย้อนหลังได้โดยไม่ต้องเดาจากแถวก่อนหน้า
+/// และงานที่มีอยู่ก่อน v1.249 เริ่มประวัติกลางทางได้ (mixTimeline สร้างช่วงต้นจากแถวงาน ติดธง synthetic)
+model MixJobEvent {
+  id    String   @id @default(cuid())
+  jobId String
+  /// MixJob ไม่เคยถูกลบจริง (soft delete) — Cascade มีไว้ให้ constraint ครบ ไม่ใช่เส้นทางที่ใช้
+  job   MixJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  at    DateTime @default(now())
+  /// REQUESTED ASSIGNED REASSIGNED CLAIMED STARTED DELIVERED REOPENED REQUEUED CANCELLED RESTORED DUE_CHANGED EDITED DELETED
+  kind       String
+  actorEmail String?
+
+  /// สถานะหลังการเปลี่ยน
+  status        String
+  assigneeEmail String?
+  dueDate       DateTime? @db.Date
+
+  /// สถานะก่อนการเปลี่ยน · null ทั้งหมด = คำขอใหม่ (REQUESTED)
+  fromStatus   String?
+  fromAssignee String?
+  fromDueDate  DateTime? @db.Date
+
+  @@index([jobId, at])
+  @@index([assigneeEmail, at])
+  @@index([at])
+  @@map("mix_job_events")
 }
