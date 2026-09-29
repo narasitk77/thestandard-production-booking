@@ -5,6 +5,32 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
+## 2026-09-29 · v1.247 — worker ซ่อมปฏิทินคิวมิกซ์ทุกชั่วโมง (โค้ดพร้อม · **ยังไม่ deploy**)
+
+ปิดช่องที่ v1.246 ทิ้งไว้: ซิงก์ปฏิทินมิกซ์ล้มตอน inline แล้วไม่มีอะไรลองใหม่ ทั้งที่ทั้งโดเมนดูปฏิทินนี้อยู่
+รายละเอียดโค้ดใน CHANGELOG v1.247 · **ไม่ได้แตะ stack env และยังไม่ได้ deploy — รอนัทสั่ง**
+
+**สภาพพรอดตอนเขียน (อ่านอย่างเดียว):** `sha-a0fc1e6` · `mix_jobs` 3 แถว อยู่ในหน้าต่างทั้ง 3 มี event ครบ
+`calendarSyncError` 0 · `MIX_CALENDAR_ID` ตั้งแล้ว · `MIX_CALENDAR_WORKER_ENABLED` ไม่มีบน stack
+⇒ ค่าเริ่มต้นใน compose (`1`) = **deploy แล้ว worker เปิดทันที** (ไม่ต้องแก้ env) · อยากขึ้นโค้ดแต่ยังไม่เปิด:
+`deploy.py <sha> --set MIX_CALENDAR_WORKER_ENABLED=0`
+
+**ตรวจหลัง deploy:** log บูตมี `[mix-calendar] worker started … secret=set` · ~2.5 นาทีต่อมามี
+`[mix-calendar] create=0 update=3 delete=0 failed=0` · `/api/health-summary` มี `mix-calendar` และ
+`lastTickAgoSec` ไม่เกิน ~1 ชม. · audit `mix.calendar_sync` actor `mix-calendar-sync` เพิ่มชั่วโมงละแถว
+ย้อน: ตั้ง `MIX_CALENDAR_WORKER_ENABLED=0` แล้ว redeploy (ไม่มี schema เปลี่ยน ถอยอิมเมจได้ปลอดภัย)
+
+**⚠️ เจอระหว่างทาง — ช่องเตือน ops ในแอปบนพรอด "ส่งไม่ถึงใคร" ตอนนี้** (กระทบ dead-man ของ worker ทุกตัวด้วย
+ไม่ใช่แค่ตัวใหม่): `LARK_WEBHOOK_URL` ไม่ได้ตั้ง · Discord ทิ้งข้อความ `'ops'` (ไม่ได้ตั้ง
+`DISCORD_NOTIFY_SCOPE` = `footage`) · `REMINDER_ADMIN_EMAIL` = `SMTP_USER` = เมลส่งหาตัวเองทาง Gmail
+ซึ่ง bug class 1 บันทึกไว้ว่าไม่เข้า Inbox · `notifyEmailDigest` คืน `true` เพราะ SMTP รับไว้ ⇒ บันทึกบอกว่า
+"เตือนแล้ว" ทั้งที่ไม่มีคนได้ยิน · **เสียงที่ถึงคนจริงวันนี้คือ Hermes worker-check** (09:00 + 21:00 — log scan
+`BAD_RE` + health-summary) ซึ่งบรรทัดล้มของ worker ตัวนี้เทสแล้วว่าเข้า `BAD_RE` ทุกกรณี ·
+ทางแก้ต้องแก้ env บน stack (เลือกอย่างใดอย่างหนึ่ง: ตั้ง `LARK_WEBHOOK_URL` · `DISCORD_NOTIFY_SCOPE=all`
+· `REMINDER_ADMIN_EMAIL` เป็นกล่องที่ไม่ใช่ `SMTP_USER`) — **รอนัทตัดสิน ไม่ได้ทำ**
+
+---
+
 ## 2026-09-28 · v1.245 — คิวมิกซ์ขึ้นปฏิทิน Google **แยก** (ปฏิทินทดสอบ)
 
 นัทสั่ง "ยิง google calendar เป็นอันแยก ไม่ปนกับ probook เดิม · ทดสอบก่อน"

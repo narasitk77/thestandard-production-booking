@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added — worker ซ่อมปฏิทินคิวมิกซ์ทุกชั่วโมง · ซิงก์ล้มแล้วมีคนลองใหม่ + ล้มแล้วมีเสียง (v1.247)
+
+ช่องที่ v1.246 เปิดทิ้งไว้: ตั้งแต่แชร์ปฏิทินมิกซ์ให้ทั้งโดเมนดู ผู้ใช้ทั่วไปเชื่อปฏิทิน Google ว่าครบ แต่ซิงก์เกิดแค่ inline ตอนสร้าง/แก้/ลบงาน (`syncMixJobCalendar`) ล้มแล้วเก็บ `calendarSyncError` ไว้บนการ์ด (เห็นแค่ Sound Admin/แอดมิน) **และไม่มีอะไรลองใหม่** — งานนั้นหายจากปฏิทินจนกว่าจะมีคนรัน sync route ด้วยมือ
+
+- `scripts/mix-calendar-worker.js` (ใหม่ · worker ตัวที่ 16) — ทุกชั่วโมงยิง `GET /api/internal/mix-calendar/sync?dryRun=0` route ตัวเดิม (เลือกแถวที่ซิงก์ล้มค้าง + แถวที่ต้องลบ event + งานในหน้าต่าง -45..+180 วัน) · thin scheduler ตามแบบเดิม: `scripts/lib/http.js` · secret `x-reconcile-secret` · เริ่มรอบแรก 150 วิหลังบูต · กันรอบซ้อน
+- **สวิตช์ `MIX_CALENDAR_WORKER_ENABLED`** ประกาศใน `docker-compose.portainer.yml` ทั้ง service `app` และ `worker` · **เปิดเป็นค่าเริ่มต้น** แบบ prep-folders/sound-merge (idempotent: event id คำนวณจาก id งาน · เขียนแค่ปฏิทินมิกซ์ของตัวเอง) · `0`/`false`/`no` = ปิด (exit 78, supervisor หยุดปลุก)
+- **ล้มต้องดัง ไม่ใช่เงียบ** — worker นับเป็นล้มทุกกรณีที่ไม่ใช่ "ตอบ 2xx + `ok === true` + `failed` = 0": non-2xx (401/400/502/500) · `ok` ไม่ใช่ `true` (body ที่ไม่มี `ok` ก็นับ — fail closed) · `failed > 0` แม้ `ok:true` · **timeout** (`no activity for`) · ต่อไม่ติด · ตอบ 200 แต่ไม่ใช่ JSON → `console.error` บรรทัดที่ `BAD_RE` ของ Hermes worker-check จับได้ · `truncated` พิมพ์ออกมา (ธงที่ไม่มีคนอ่าน = ไม่มีธง)
+- **`off:true` (ไม่ได้ตั้ง `MIX_CALENDAR_ID`) = ไม่มีอะไรทำ เงียบ** พิมพ์ครั้งเดียวต่อโปรเซส ไม่ท่วม log ทุกชั่วโมง (บทเรียน v1.238)
+- route: รอบจริงทุกคำตอบผ่าน `answer()` — tick heartbeat `mix-calendar` (**liveness แยกจากผล**: tick รวมรอบที่ล้มและรอบ off · ซิงก์ล้มทุกรอบไม่ใช่ "worker ตาย") แล้ว **ล้ม = แชต ops + อีเมล digest** ทางเดียวกับ dead-man ของ `heartbeat.ts` บอกรหัสงาน + error · throttle 6 ชม. เท่า `maybeAlertStaleWorkers` · ประทับเวลา throttle **เฉพาะเมื่อส่งถึงอย่างน้อยหนึ่งช่อง** ไม่งั้นรอบหน้าลองเตือนใหม่ · ส่วนที่ route ตอบเองไม่ได้ (401 secret ไม่ตรง · แครช 500 · ค้าง) = ไม่มี tick → dead-man เตือนใน ~3 ชม.
+- `workerSpecs()` มี spec `mix-calendar` (1 ชม., เปิดเว้นแต่ปิด) · เทส `mix-calendar-worker.test.ts` (8 เคส ยิงเซิร์ฟเวอร์ปลอมผ่าน `httpRequest` ตัวจริง · ตรวจว่าบรรทัดล้มเข้า `BAD_RE` ของ Hermes) · `heartbeat-specs` เพิ่ม mapping + เคส on-by-default · ลองกลับตรรกะ 5 แบบ (off=ล้ม, non-2xx=ผ่าน, timeout=ผ่าน, ตัด `failed>0`, `ok===false` แทน `ok!==true`) เทสแดงทุกแบบ
+- `ponytail:` ที่ต้องรู้ — `planMixCalendar` ไม่รู้ว่า event ตรงอยู่แล้ว รอบจริงจึง **patch ทุก event ในหน้าต่างทุกชั่วโมง** · 29 ก.ย. 2569 มี 3 งาน = ~4 call Google/ชม. · คิวโตจนใกล้ `LIMIT` 300 เมื่อไร ให้ worker ซ่อมเฉพาะแถวที่ล้ม/ต้อง create/ต้อง delete
+
 ### Added — ปฏิทินคิวมิกซ์เปิดใน Google Calendar ได้ + ป๊อปอัปในฟอร์มขอมิกซ์ (v1.246)
 
 คำขอ operator 29 ก.ย. 2569: "ดูที่ calendar หรือขึ้น pop-up ในหน้าจองคิว mix · user ทั่วไปต้องดูได้ด้วย"

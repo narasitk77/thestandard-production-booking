@@ -503,6 +503,10 @@ services:
       # ไม่ยิงปฏิทินเลย · ตั้งเป็น id เดียวกับปฏิทินคิวถ่าย = โค้ดปฏิเสธ (mixCalendarTargetError)
       # event ไม่มีผู้เข้าร่วม = ไม่มีเมลเชิญหาใคร · คนที่อยากเห็นกด subscribe ปฏิทินนี้เอง
       MIX_CALENDAR_ID: ${MIX_CALENDAR_ID:-}
+      # v1.247 — worker ซ่อมปฏิทินมิกซ์ทุกชั่วโมง (ซิงก์ inline ล้ม = เดิมไม่มีใครลองใหม่) · เปิดเป็น
+      # ค่าเริ่มต้น · MIX_CALENDAR_ID ว่าง = ไม่ทำอะไร เงียบ · ล้ม = เตือนแชต ops + อีเมล digest
+      # ตั้ง 0 เพื่อปิด (ต้องตั้งให้ service worker ด้วยถ้าเปิด profile workers)
+      MIX_CALENDAR_WORKER_ENABLED: ${MIX_CALENDAR_WORKER_ENABLED:-1}
 
       # ─── v1.214 — สวิตช์/ที่อยู่ที่ operator ควรตั้งได้ แต่ตั้งไม่ได้จริงมาตลอด ───
       #
@@ -646,6 +650,7 @@ services:
       FOOTAGE_INTEGRITY_HOUR: ${FOOTAGE_INTEGRITY_HOUR:-13}
       FOOTAGE_INTEGRITY_DAYS: ${FOOTAGE_INTEGRITY_DAYS:-30}
       FOOTAGE_INTEGRITY_LIMIT: ${FOOTAGE_INTEGRITY_LIMIT:-60}
+      MIX_CALENDAR_WORKER_ENABLED: ${MIX_CALENDAR_WORKER_ENABLED:-1}
       SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
       FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
       FOOTAGE_WORKER_ENABLED: ${FOOTAGE_WORKER_ENABLED:-0}

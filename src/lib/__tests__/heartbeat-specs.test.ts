@@ -86,6 +86,7 @@ const SCRIPT_TO_KEY: Record<string, string> = {
   'footage-sheet-sync-worker.js': 'footage',
   'landing-worker.js': 'landing',
   'lark-export-worker.js': 'lark-export',
+  'mix-calendar-worker.js': 'mix-calendar',
   'prep-folders-worker.js': 'prep-folders',
   'reminders-worker.js': 'reminders',
   'room-booking-worker.js': 'room-booking-reconcile',
@@ -155,6 +156,7 @@ test('on-by-default workers stay enabled when their env var is unset', () => {
     ['landing', 'LANDING_WORKER_ENABLED'],
     ['sound-merge', 'SOUND_MERGE_WORKER_ENABLED'],
     ['video-merge', 'VIDEO_MERGE_WORKER_ENABLED'],
+    ['mix-calendar', 'MIX_CALENDAR_WORKER_ENABLED'],
   ] as const) {
     const on = withEnv({ [env]: undefined }, () => heartbeat.workerSpecs().find((s) => s.key === key)!)
     assert.equal(on.enabled, true, `${key} should be ON when ${env} is unset`)

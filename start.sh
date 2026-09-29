@@ -538,6 +538,13 @@ supervise "landing" "scripts/landing-worker.js"
 echo "==> Starting footage integrity worker (supervised)..."
 supervise "footage-integrity" "scripts/footage-integrity-worker.js"
 
+# v1.247 — mix-calendar repair. ON BY DEFAULT: hourly re-syncs the mix queue into
+# its own Google Calendar (MIX_CALENDAR_ID) so a sync that failed inline is retried
+# instead of waiting for someone to run the route by hand. No-op when
+# MIX_CALENDAR_ID is unset. Set MIX_CALENDAR_WORKER_ENABLED=0 to disable.
+echo "==> Starting mix-calendar repair worker (supervised)..."
+supervise "mix-calendar" "scripts/mix-calendar-worker.js"
+
 fi  # end RUN_WORKERS
 
 if [ "$APP_ROLE" = "worker" ]; then

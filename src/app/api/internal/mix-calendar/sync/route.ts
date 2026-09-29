@@ -8,6 +8,12 @@
  * (บทเรียนซ้ำ 3 ครั้ง: preview ที่เดินคนละทางกับของจริงคือ preview ที่โกหก)
  *
  * secret: x-reconcile-secret เหมือน worker อื่น (MIX_CALENDAR_SECRET ไม่มี — ไม่มีใครต้องหมุนแยก)
+ *
+ * v1.247 — scripts/mix-calendar-worker.js เรียก `?dryRun=0` ทุกชั่วโมง (จังหวะ (3) ไม่ต้องรอคน)
+ * รอบจริงทุกคำตอบผ่าน `answer()`: tick heartbeat 'mix-calendar' (liveness = worker ยิงถึงและ route ตอบ
+ * ไม่ว่าผลจะเป็นอะไร — รวม off) แล้ว **ล้ม = เตือนแชต ops + อีเมล digest** ทางเดียวกับ dead-man ของ
+ * heartbeat.ts · แยก liveness ออกจากผล (bug class 11): ซิงก์ล้มทุกรอบไม่ใช่ "worker ตาย" ·
+ * ส่วนที่ route ตอบเองไม่ได้ (401, แครช 500, ค้าง) = ไม่มี tick → dead-man เตือนใน ~3 ชม.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
@@ -18,10 +24,42 @@ import { planMixCalendar, mixCalendarTargetError, type MixCalendarJob } from '@/
 import { bookingCalendarIds, getCalendarAuth } from '@/lib/google-calendar'
 import { mixCalendarId, syncMixJobCalendar } from '@/lib/mix-calendar'
 import { logAudit } from '@/lib/audit'
+import { recordHeartbeat } from '@/lib/heartbeat'
+import { notifyChat, notifyEmailDigest } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
+// ponytail: รอบจริง patch ทุก event ในหน้าต่าง -45..+180 วันทุกชั่วโมง (planMixCalendar ไม่รู้ว่า
+// event ตรงอยู่แล้ว) · 29 ก.ย. 2569 มี 3 งาน = ~4 call/ชม. · ถ้าคิวโตจนใกล้ LIMIT ให้ worker ซ่อมเฉพาะ
+// แถวที่มี calendarSyncError/ต้อง create/ต้อง delete แทน
 const LIMIT = 300
+const ALERT_KEY = 'alert:mix-calendar'
+const ALERT_EVERY_MS = 6 * 3_600_000 // เท่ากับ throttle ของ maybeAlertStaleWorkers
+
+/** ล้ม → แชต ops + อีเมล digest · ส่งไม่ถึงใครเลย = ไม่ประทับเวลา รอบหน้าลองใหม่ (a record is not delivery) */
+async function alertOps(json: Record<string, any>) {
+  const last = (await prisma.systemHeartbeat.findUnique({ where: { key: ALERT_KEY } }).catch(() => null))?.at
+  if (last && Date.now() - last.getTime() < ALERT_EVERY_MS) return
+  const failedRows = (json.results || []).filter((r: any) => r.ok === false)
+  const lines = [
+    json.error ? `• ${json.error}` : null,
+    ...failedRows.slice(0, 10).map((r: any) => `• ${r.code} (${r.plan}): ${String(r.error || '').slice(0, 200)}`),
+    failedRows.length > 10 ? `• …อีก ${failedRows.length - 10} งาน` : null,
+  ].filter(Boolean)
+  const msg = `⚠️ Production Booking: ซิงก์ปฏิทินคิวมิกซ์ล้ม${json.failed ? ` ${json.failed} งาน` : ''}\n${lines.join('\n')}\n`
+    + 'ปฏิทิน Google ที่ทั้งโดเมนดูอยู่ขาดงานพวกนี้ · worker ลองใหม่ทุกชั่วโมง · error รายงานอยู่บนการ์ดใน /mix'
+  const [chat, email] = await Promise.all([notifyChat(msg, 'ops'), notifyEmailDigest('⚠️ ซิงก์ปฏิทินคิวมิกซ์ล้ม — Production Booking', msg)])
+  if (chat || email) await recordHeartbeat(ALERT_KEY, `chat=${chat} email=${email}`)
+  else console.error('[mix-calendar] เตือน ops ไม่ถึงใครเลย (แชต/อีเมลไม่ได้ตั้งหรือล้ม) — ลองใหม่รอบหน้า')
+}
+
+async function answer(dryRun: boolean, json: Record<string, any>, status = 200) {
+  if (!dryRun) {
+    await recordHeartbeat('mix-calendar', json.off ? 'off' : json.ok ? `ok ${JSON.stringify(json.counts ?? {})}` : `ล้ม ${json.failed ?? json.error ?? ''}`)
+    if (json.ok !== true) await alertOps(json).catch(e => console.error('[mix-calendar] alert failed:', e?.message || e))
+  }
+  return NextResponse.json(json, { status })
+}
 
 export async function GET(request: NextRequest) {
   // helper กลาง (timing-safe + ลอง fallback ครบทุกตัว) — ไม่เขียนเทียบ secret เองซ้ำ
@@ -32,8 +70,8 @@ export async function GET(request: NextRequest) {
 
   const calendarId = mixCalendarId()
   const target = mixCalendarTargetError(calendarId, bookingCalendarIds())
-  if (target === 'off') return NextResponse.json({ ok: true, off: true, note: 'MIX_CALENDAR_ID ไม่ได้ตั้ง — ปฏิทินมิกซ์ปิดอยู่' })
-  if (target) return NextResponse.json({ ok: false, error: target }, { status: 400 })
+  if (target === 'off') return answer(dryRun, { ok: true, off: true, note: 'MIX_CALENDAR_ID ไม่ได้ตั้ง — ปฏิทินมิกซ์ปิดอยู่' })
+  if (target) return answer(dryRun, { ok: false, error: target }, 400)
 
   // (1) งานที่ควรมี event ในช่วง -45..+180 วัน (2) แถวที่มี event แต่ไม่ควรมีแล้ว (ต้องลบ) (3) แถวที่ซิงก์ล้มค้าง
   // เรียงใหม่สุดก่อน: ถ้าชนเพดาน สิ่งที่หลุดคืองานเก่า ไม่ใช่งานใหม่ที่ยังไม่มี event (ผู้ตรวจเจอ + บั๊กเดิมที่ reconcile)
@@ -61,7 +99,7 @@ export async function GET(request: NextRequest) {
     const cal = google.calendar({ version: 'v3', auth: getCalendarAuth() })
     calendarSummary = (await cal.calendars.get({ calendarId: calendarId! }, { timeout: 10_000 })).data.summary || null
   } catch (e: any) {
-    return NextResponse.json({ ok: false, dryRun, calendarId, error: `preflight: ${String(e?.message || e).slice(0, 300)}`, counts, planned }, { status: 502 })
+    return answer(dryRun, { ok: false, dryRun, calendarId, error: `preflight: ${String(e?.message || e).slice(0, 300)}`, counts, planned }, 502)
   }
 
   if (dryRun) {
@@ -82,5 +120,5 @@ export async function GET(request: NextRequest) {
     entityId: 'bulk',
     changes: { calendarId, counts, failed, results: results.slice(0, 50) },
   })
-  return NextResponse.json({ ok: failed === 0, dryRun, calendarId, calendarSummary, counts, failed, results, truncated: rows.length === LIMIT })
+  return answer(dryRun, { ok: failed === 0, dryRun, calendarId, calendarSummary, counts, failed, results, truncated: rows.length === LIMIT })
 }

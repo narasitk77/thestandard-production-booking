@@ -19,7 +19,7 @@
 |---|---|
 | หน้า (`src/app/**/page.tsx`) | **45** |
 | API routes (`src/app/api/**/route.ts`) | **156** — admin 66 · internal 29 · bookings 16 · ot 8 · upload 7 · ที่เหลือกระจาย |
-| Supervised workers (`scripts/*-worker.js`) | **15** |
+| Supervised workers (`scripts/*-worker.js`) | **16** (v1.247 +`mix-calendar`) |
 | Prisma models | **32** (ยังไม่มี `prisma/migrations/` เลย — ดูข้อ 6) |
 | โมดูลใน `src/lib` | **133** ไฟล์ `.ts` ชั้นบน |
 | เทส | **900 ผ่าน** ใน 99 ไฟล์ (`npm test`, รันจริง 2026-09-23) |
@@ -74,9 +74,9 @@ Stack: Next.js 14.2 App Router · TypeScript · Prisma 5 → Postgres 16 · Next
 - **CI**: push เข้า `main` → 2 workflow (`ci.yml` = lint + build, `docker-build.yml` = build + push GHCR tag `sha-<short>` / `<branch>` / `latest`) · **ต้องดูตัวที่สอง** — เคยมี CI เขียวแต่ Docker build แดงจนไม่มีอิมเมจ 3 ครั้ง (ดูข้อ 6.8)
 - **container 2 บทบาท** (`start.sh`, `APP_ROLE`): `web` (default) ทำ schema + seed + worker + Next.js · `worker` ทำแต่ worker (ต้องมี `WORKER_APP_URL` ไม่งั้น FATAL ตั้งใจ) · **มีแค่ web เท่านั้นที่แตะ schema** — สอง container รัน `db push` พร้อมกันบนฐานเดียว = คอลัมน์หาย · ถ้าเปิด service `worker` ต้องตั้ง `RUN_WORKERS=0` ที่ app พร้อมกัน ไม่งั้นทุกงานรันสองรอบ
 
-**15 supervised workers** ทุกตัวเป็น **นาฬิกาปลุกล้วน ๆ**: เช็ค env → นอนรอ → ยิง HTTP ไป `/api/internal/...` พร้อม shared secret · ไม่มีตัวไหนแตะ Postgres หรือ Drive เอง (ยกเว้น `backup` ที่ต้องใช้ `pg_dump`) การย้ายจึงเท่ากับเปลี่ยน URL
+**16 supervised workers** ทุกตัวเป็น **นาฬิกาปลุกล้วน ๆ**: เช็ค env → นอนรอ → ยิง HTTP ไป `/api/internal/...` พร้อม shared secret · ไม่มีตัวไหนแตะ Postgres หรือ Drive เอง (ยกเว้น `backup` ที่ต้องใช้ `pg_dump`) การย้ายจึงเท่ากับเปลี่ยน URL
 
-`calendar-reconcile` (10 นาที) · `prep-folders` (1 ชม.) · `folder-integrity` (1 ชม.) · `sound-merge` (1 ชม.) · `video-merge` (NAS sync-gated, fallback รายชั่วโมง) · `landing` (19:00 BKK สร้าง + เที่ยง prune) · `footage-integrity` (13:00) · `footage-sheet-sync` (10 นาที) · `footage-ready` (30 นาที) · `reminders` · `backup` · `shoot-marker` (03:10) · `shoot-review` · `room-booking` (1 ชม.) · `lark-export` (23:00)
+`calendar-reconcile` (10 นาที) · `prep-folders` (1 ชม.) · `folder-integrity` (1 ชม.) · `sound-merge` (1 ชม.) · `video-merge` (NAS sync-gated, fallback รายชั่วโมง) · `landing` (19:00 BKK สร้าง + เที่ยง prune) · `footage-integrity` (13:00) · `footage-sheet-sync` (10 นาที) · `footage-ready` (30 นาที) · `reminders` · `backup` · `shoot-marker` (03:10) · `shoot-review` · `room-booking` (1 ชม.) · `lark-export` (23:00) · `mix-calendar` (1 ชม. ซ่อมปฏิทินคิวมิกซ์, v1.247)
 
 > **"default state" ในโค้ด/compose ไม่ใช่ค่าที่ prod ใช้จริง** — `${VAR:-0}` บอกได้แค่ค่าตั้งต้น ต้องอ่าน env ของ **stack** หรือ `/admin/health` · เรื่องนี้หลอกไปแล้วสองรอบในวันเดียว (`SHOOT_MARKER_WORKER_ENABLED`)
 > ทุก worker เขียน heartbeat ลง `system_heartbeats`; `/api/health-summary` ตอบ 503 เมื่อตัวที่เปิดอยู่เงียบเกิน `interval + 2 ชม.`

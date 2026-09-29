@@ -97,6 +97,10 @@ export function workerSpecs(): WorkerSpec[] {
     // day you need it.
     { key: 'lark-export', label: 'Lark export', enabled: enabled(process.env.LARK_EXPORT_ENABLED),
       intervalMs: 24 * HOUR },
+    // v1.247 — ซ่อมปฏิทินคิวมิกซ์ทุกชั่วโมง (ปฏิทินที่ทั้งโดเมนดู) · tick ทุกคำตอบของรอบจริง รวม off
+    // (ไม่ได้ตั้ง MIX_CALENDAR_ID) — ไม่งั้น stack ที่ปิดปฏิทินจะฟ้องว่า worker ตายทุก 3 ชม.
+    { key: 'mix-calendar', label: 'Mix calendar sync', enabled: enabledUnlessOff(process.env.MIX_CALENDAR_WORKER_ENABLED),
+      intervalMs: HOUR },
   ]
 }
 
