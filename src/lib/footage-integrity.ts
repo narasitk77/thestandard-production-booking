@@ -490,7 +490,17 @@ export interface CheckDocInput {
  * The Doc body. Everything that decides the content goes into the hash; the
  * "checked at" line does not, so an unchanged box is not rewritten every day.
  */
-export function renderCheckDoc(c: CheckDocInput, meta: { checkedAt: Date; appUrl: string }): { html: string; hash: string } {
+export function renderCheckDoc(input: CheckDocInput, meta: { checkedAt: Date; appUrl: string }): { html: string; hash: string } {
+  // Drive lists a folder tree in no fixed order (and the walk is concurrent), so sort
+  // everything that reaches the body — otherwise the hash flips and an unchanged box
+  // is rewritten every run.
+  const c = {
+    ...input,
+    issues: [...input.issues]
+      .map(i => ({ ...i, fileIds: [...i.fileIds].sort() }))
+      .sort((a, b) => a.kind.localeCompare(b.kind) || a.detail.localeCompare(b.detail)),
+    rows: input.rows.map(r => ({ ...r, kinds: [...r.kinds].sort() })),
+  }
   const live = c.issues.filter(i => isLive(i, c.waiting))
   const statusLine: Record<BoxState, string> = {
     ok: '✅ ครบ — ทุกคลิปกล้องในกล่องมีต้นฉบับ + M01.XML',

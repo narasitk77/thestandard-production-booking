@@ -230,3 +230,13 @@ test('v1.253 รีวิว: ไฟล์ในโฟลเดอร์ _แย
   const rows = groupRows([f({ name: 'A004R001_260911TJ.MXF', folderPath: ['_แยกไว้ · ไฟล์อัปไม่จบ'] })], [])
   assert.deepEqual(rows, [])
 })
+
+test('v1.253.2: hash ไม่ขึ้นกับลำดับที่ Drive คืนไฟล์ (ลำดับปัญหา / fileIds / kinds ในแถว)', () => {
+  const i1 = { bookingCode: 'X', kind: 'missing-original' as const, detail: 'C022C001_260929R4', fileIds: ['b', 'a'] }
+  const i2 = { bookingCode: 'X', kind: 'missing-original' as const, detail: 'B022C001_2609297H', fileIds: ['d', 'c'] }
+  const row = (kinds: any[]) => ({ ep: 'EP.1', cam: 'CAM-B', files: 1, bytes: 1, audio: false, sony: true, kinds })
+  const at = { checkedAt: new Date('2026-09-30T06:00:00Z'), appUrl: 'https://p' }
+  const a = renderCheckDoc(doc({ state: 'issues', issues: [i1, i2], rows: [row(['zero-byte', 'missing-original'])] }), at)
+  const b = renderCheckDoc(doc({ state: 'issues', issues: [{ ...i2, fileIds: ['c', 'd'] }, { ...i1, fileIds: ['a', 'b'] }], rows: [row(['missing-original', 'zero-byte'])] }), at)
+  assert.equal(a.hash, b.hash)
+})
