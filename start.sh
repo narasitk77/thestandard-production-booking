@@ -197,7 +197,12 @@ END $$;
 SQL
 
 echo "==> Syncing database schema..."
-npx prisma db push --accept-data-loss
+# v1.252 — ผ่านด่านแทน `npx prisma db push --accept-data-loss` ตรง ๆ: push ที่จะลบข้อมูล (เช่นถอยอิมเมจ
+# ข้าม release ที่เพิ่มตาราง) ถูกข้าม + ดังใน log แทนที่จะ DROP · ล้มด้วยเหตุอื่น = exit non-zero เหมือนเดิม
+# ต้องเป็นคำสั่งเปล่า (ไม่มี `|| ...`) ให้ set -e หยุดบูตตอนล้มจริง · รายละเอียด: scripts/schema-sync.js
+node scripts/schema-sync.js
+# `npm start` (exec ท้ายไฟล์) เรียกด่านซ้ำ — บอกว่ารอบนี้ sync แล้ว ไม่ต้อง push รอบสอง (เดิม push สองรอบทุกบูต)
+export SCHEMA_SYNC_DONE=1
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Post-push: backfill booking_code for existing bookings created before the

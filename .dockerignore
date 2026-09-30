@@ -18,6 +18,8 @@ uploads
 # Secrets
 .env
 .env.*
+# v1.252 — สถานะ push schema รอบบูตล่าสุด (scripts/schema-sync.js เขียนตอนรัน ไม่ใช่ของในรีโป)
+.schema-sync.json
 
 # Log junk
 npm-debug.log*

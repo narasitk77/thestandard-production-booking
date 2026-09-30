@@ -74,6 +74,11 @@ services:
       # start.sh contains a defensive CREATE DATABASE IF NOT EXISTS, so the
       # app self-heals if the postgres volume was initialized with a stale name.
       DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD}@db:5432/production_booking
+      # v1.252 — push schema ตอนบูตผ่านด่าน (scripts/schema-sync.js): จะลบข้อมูล = ข้าม ไม่ลบ
+      # ยอมลบได้เฉพาะ object ที่ระบุชื่อ เช่น "column:uploads.wasabiKey table:purchase_items"
+      # อย่าตั้งเองบน stack — ใช้ deploy.py (มันบอกรายชื่อ + ขอให้ยืนยัน + ล้มค่านี้ทิ้งรอบถัดไปให้เอง)
+      # ว่าง = ไม่ยอมลบอะไรเลย (ค่าเริ่มต้นที่ถูก)
+      SCHEMA_ACCEPT_DATA_LOSS: ${SCHEMA_ACCEPT_DATA_LOSS:-}
 
       # --- Auth ---
       # AUTH_DISABLED=1 → no login, every request is the seeded admin (LAN use).

@@ -26,6 +26,8 @@ yarn-error.log*
 # local env files
 .env
 .env*.local
+# v1.252 — สถานะ push schema รอบบูตล่าสุด (scripts/schema-sync.js เขียนตอนรัน ไม่ใช่ของในรีโป)
+.schema-sync.json
 
 # DB dumps + local backup artifacts (never commit production data)
 /backups

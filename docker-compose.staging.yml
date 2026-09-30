@@ -53,6 +53,12 @@ services:
       APP_ENV: staging
 
       DATABASE_URL: postgresql://prod_booking:${POSTGRES_PASSWORD}@db-staging:5432/production_booking
+      # v1.252 — push schema ตอนบูตผ่านด่าน (scripts/schema-sync.js): จะลบข้อมูล = ข้าม ไม่ลบ
+      # ยอมลบได้เฉพาะ object ที่ระบุชื่อ เช่น "column:uploads.wasabiKey table:purchase_items"
+      # staging ไม่มี deploy.py: ตั้งรายชื่อที่ log `[schema-guard] run failed:` บอกบน stack ของ staging
+      # redeploy หนึ่งรอบ แล้ว **ล้างค่านี้ทันที** (ค่าที่ค้างอยู่ = ใบอนุญาตลบของชื่อนั้นในอนาคต)
+      # ว่าง = ไม่ยอมลบอะไรเลย (ค่าเริ่มต้นที่ถูก)
+      SCHEMA_ACCEPT_DATA_LOSS: ${SCHEMA_ACCEPT_DATA_LOSS:-}
 
       # --- Auth (staging default: no login wall — trusted LAN testing) ---
       AUTH_DISABLED: ${AUTH_DISABLED:-1}

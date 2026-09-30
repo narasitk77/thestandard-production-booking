@@ -69,6 +69,13 @@ Push to `main` does **not** auto-redeploy. CI builds and pushes the image; pulli
 
 Or enable Portainer's automatic stack updates (Stacks → edit → toggle "Automatic updates").
 
+> ⚠️ **Do not change `IMAGE_TAG` by hand to an older image — use `python3 scripts/ops/deploy.py <sha>` / `scripts/ops/rollback.py <sha>`.**
+> Every boot pushes the Prisma schema. Images built before v1.252 push with `--accept-data-loss`, so an older
+> image **drops every table/column the database has but its schema does not** — with the data (happened for real
+> at v1.231: the 2nd/3rd directors of every booking were lost). The scripts compare the target image's schema with
+> the live database first and refuse when data would be lost (`--check` shows what would happen without touching
+> anything). The Portainer UI does no such check. Details: `docs/runbook-deploy-rollback.md`.
+
 ---
 
 ## 5. Common gotchas

@@ -49,6 +49,7 @@ const ALLOWED_UNDECLARED: Record<string, string> = {
   NODE_ENV: 'set by Next.js / the Dockerfile',
   APP_GIT_SHA: 'baked in at image build time',
   npm_package_version: 'read from package.json by npm at runtime',
+  SCHEMA_SYNC_DONE: 'set by start.sh itself for the npm start child (v1.252), never by the operator',
 
   // Inlined at build time by Next.js — a stack value would arrive too late.
   NEXT_PUBLIC_GOOGLE_CALENDAR_ID: 'NEXT_PUBLIC_* is compiled into the bundle',

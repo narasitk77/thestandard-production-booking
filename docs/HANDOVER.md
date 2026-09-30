@@ -81,10 +81,11 @@ Stack: Next.js 14.2 App Router · TypeScript · Prisma 5 → Postgres 16 · Next
 > **"default state" ในโค้ด/compose ไม่ใช่ค่าที่ prod ใช้จริง** — `${VAR:-0}` บอกได้แค่ค่าตั้งต้น ต้องอ่าน env ของ **stack** หรือ `/admin/health` · เรื่องนี้หลอกไปแล้วสองรอบในวันเดียว (`SHOOT_MARKER_WORKER_ENABLED`)
 > ทุก worker เขียน heartbeat ลง `system_heartbeats`; `/api/health-summary` ตอบ 503 เมื่อตัวที่เปิดอยู่เงียบเกิน `interval + 2 ชม.`
 
-**`prisma db push --accept-data-loss` รันทุก boot** (`start.sh` + `npm start`) และโปรเจกต์ **ไม่มี migration history เลย** แปลว่า:
+**`prisma db push` รันทุก boot** (`start.sh` + `npm start`) และโปรเจกต์ **ไม่มี migration history เลย** · ตั้งแต่ v1.252 ผ่านด่าน `scripts/schema-sync.js` (push ที่จะลบข้อมูล = ข้าม ไม่ลบ · ยอมลบได้เฉพาะ object ที่ระบุชื่อใน `SCHEMA_ACCEPT_DATA_LOSS`) — **แต่อิมเมจก่อน v1.252 ยัง push แบบ `--accept-data-loss`** แปลว่า:
 
 - แก้ `schema.prisma` = สั่ง DROP ทันทีตอน container ขึ้น ไม่มีขั้นให้ทาน
 - **ถอยอิมเมจ ≠ ถอย schema** — อิมเมจเก่าจะ push schema เก่าทับ = คอลัมน์ใหม่หายพร้อมข้อมูล (เคสจริง: v1.231 เพิ่ม `director2/3` ถอยกลับ = ผู้กำกับคนที่ 2-3 ของทุกใบหาย)
+  → **ถอยผ่าน `scripts/ops/rollback.py` เท่านั้น** (เทียบกับ DB จริงแล้วปฏิเสธเอง · `--check` ดูก่อนได้) · **ห้ามเปลี่ยน `IMAGE_TAG` เองใน Portainer ไปอิมเมจก่อน v1.252** · รายละเอียด `docs/runbook-deploy-rollback.md`
 - ลบค่าออกจาก enum ที่ยังมีแถวค้าง = boot ล้ม (`set -e`) → container วนรีสตาร์ท → **ทั้งบริษัทเข้าเว็บไม่ได้**
 - ก่อน `db push` `start.sh` รัน SQL pre-migration มือ ๆ ไว้หลายชุด (rename ค่า enum `Category`, เพิ่มค่า `UploadStatus`/`OTApprovalStatus`, ย้าย `PENDING`→`SUBMITTED`) ทุกชุด idempotent — ถ้าต้องเปลี่ยน enum ให้เขียนแบบเดียวกันเพิ่ม **ก่อน** บรรทัด `db push`
 
