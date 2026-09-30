@@ -571,7 +571,7 @@ export function renderCheckDoc(input: CheckDocInput, meta: { checkedAt: Date; ap
   out.push('<li>โฟลเดอร์ drop ที่ระบบทิ้งแล้วแต่ยังมีไฟล์ที่ไม่อยู่ในกล่อง (ถังขยะลบถาวรใน ~30 วัน)</li>')
   out.push('<li>Media Pool จากไฟล์ .drp ล่าสุดของ Production ID บน Drive: คลิปที่คนตัดใช้ต้องมีในกล่อง · คลิปในกล่องที่ยังไม่ถูกดึงเข้า</li>')
   out.push('</ol><p>"ครบ" = ทุกคลิปที่อยู่ในกล่องมีครบชุด ไม่ได้รับประกันว่าถ่ายมาครบทุกคลิป — คลิปที่หายทั้งชุดจะรู้ได้ต่อเมื่อมันอยู่ใน Media Pool · ระบบดูชื่อ ขนาด md5 ไม่ได้เปิดไฟล์ และมองไม่เห็น NAS (ตรวจ NAS ด้วยมือตาม MEDIAPOOL-CHECK.md)</p>')
-  out.push(`<p>ระบบ probook เขียนเอกสารนี้เอง — แก้ในนี้จะถูกเขียนทับ · ตรวจทุกวัน ~13:00 น. เอกสารเปลี่ยนเมื่อผลเปลี่ยน หรืออย่างน้อยทุก 7 วัน · แอดมินสั่งตรวจใหม่: ${esc(meta.appUrl)}/api/internal/footage-integrity/run?codes=${esc(encodeURIComponent(c.bookingCode))}&amp;docs=1</p>`)
+  out.push(`<p>ระบบ probook เขียนเอกสารนี้เอง — แก้ในนี้จะถูกเขียนทับ · ตรวจซ้ำทุกวัน ~13:00 น. จนงานถ่ายเกิน 30 วัน (หลังจากนั้นผลค้างที่วัน "ตรวจเมื่อ" ท้ายเอกสาร) · เอกสารเปลี่ยนเมื่อผลเปลี่ยน หรืออย่างน้อยทุก 7 วัน · แอดมินสั่งตรวจใหม่: ${esc(meta.appUrl)}/api/internal/footage-integrity/run?codes=${esc(encodeURIComponent(c.bookingCode))}&amp;docs=1</p>`)
 
   const body = out.join('\n')
   const hash = createHash('sha1').update(DOC_TEMPLATE).update(body).digest('hex')
