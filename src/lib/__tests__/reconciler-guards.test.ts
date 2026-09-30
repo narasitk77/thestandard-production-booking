@@ -131,3 +131,10 @@ test('twins match on the IMMUTABLE lead, never fuzzily — the POP-PIV EP-split 
   // A name with no lead must never match anything — that is what fuzzy did.
   assert.equal(twinsMatch('ชื่อมั่ว', 'ชื่อมั่ว'), false)
 })
+
+// v1.253 — the per-box report must never count as footage, in any format it ends up in.
+import { isFootageCheckReport, FOOTAGE_CHECK_DOC_NAME } from '../reconciler/guards'
+test('_FOOTAGE-CHECK (Doc, or a downloaded .md/.txt/.docx copy) is our report, not footage', () => {
+  for (const n of [FOOTAGE_CHECK_DOC_NAME, '_FOOTAGE-CHECK.md', '_footage-check.TXT', '_FOOTAGE-CHECK.docx', ' _FOOTAGE-CHECK ']) assert.equal(isFootageCheckReport(n), true, n)
+  for (const n of ['A001C001_260901AA.MXF', '_FOOTAGE-CHECK-old.mov', 'FOOTAGE-CHECK.md', '_SHOOT.txt']) assert.equal(isFootageCheckReport(n), false, n)
+})

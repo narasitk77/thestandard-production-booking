@@ -1,12 +1,15 @@
-// Footage integrity worker (v1.221) — supervised by start.sh on every container
+// Footage check worker (v1.221, v1.253) — supervised by start.sh on every container
 // boot. Once a day (default 13:00 Asia/Bangkok, after the noon landing prune has
-// settled) it calls /api/internal/footage-integrity/run, which walks each recent
-// booking's project box and reports files that are structurally present but
-// obviously wrong: 0-byte uploads, two files sharing one name in one folder, and
-// episodes that have sound but no picture.
+// settled) it walks EVERY booking shot in the last FOOTAGE_INTEGRITY_DAYS days,
+// page by page, through /api/internal/footage-integrity/run, then posts one
+// summary back so the team gets ONE chat message per run.
 //
-// REPORT ONLY. The endpoint has no apply path at all — see
-// src/lib/footage-integrity.ts for why repair is left to a human with the card.
+// What each page checks (src/lib/footage-integrity.ts): 0-byte uploads, duplicate
+// names, sound without picture, originals that never arrived, missing Sony
+// sidecars, files stranded in a trashed drop folder, and the editor's Media Pool
+// (.drp) against the box. With FOOTAGE_CHECK_DOCS=1 it also keeps a Google Doc
+// `_FOOTAGE-CHECK` in each booking box; with it off, the pages still decide
+// everything and report `would-*`.
 //
 // ON by default. FOOTAGE_INTEGRITY_ENABLED=0 turns it off.
 
@@ -20,7 +23,12 @@ if (enabled === '0' || enabled === 'false' || enabled === 'no') {
 
 const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.FOOTAGE_INTEGRITY_HOUR, 13)))
 const days = Math.max(1, parsePositiveInt(process.env.FOOTAGE_INTEGRITY_DAYS, 30))
-const limit = Math.max(1, parsePositiveInt(process.env.FOOTAGE_INTEGRITY_LIMIT, 60))
+// v1.253 — page size (was a hard cap of 60 bookings that left most of the month
+// unchecked). Each page also stops early at its own deadline, so this only sets
+// how many bookings one request may try.
+const pageSize = Math.max(1, parsePositiveInt(process.env.FOOTAGE_INTEGRITY_LIMIT, 60))
+const docs = ['1', 'true', 'yes'].includes(String(process.env.FOOTAGE_CHECK_DOCS ?? '0').trim().toLowerCase())
+const MAX_PAGES = 100
 const baseUrl = appBaseUrl(process.env.FOOTAGE_INTEGRITY_URL)
 // No bespoke FOOTAGE_INTEGRITY_SECRET on purpose: a new secret is a new thing
 // that can be set on the stack, forgotten in compose, and 401 in silence — the
@@ -52,14 +60,51 @@ let running = false
 async function runOnce() {
   if (running) return
   running = true
+  const endpoint = `${baseUrl.replace(/\/$/, '')}/api/internal/footage-integrity/run`
+  const headers = secret ? { 'x-footage-integrity-secret': secret } : {}
+  const boxes = []
+  let noBox = 0
+  const noBoxCodes = []
+  let failure = null
+  let since = null
+  let until = null
   try {
-    const url = `${baseUrl.replace(/\/$/, '')}/api/internal/footage-integrity/run?days=${days}&limit=${limit}`
-    const res = await httpRequest(url, { headers: secret ? { 'x-footage-integrity-secret': secret } : {} })
-    const body = res.text
-    if (!res.ok) { console.error(`[footage-integrity] ${res.status}: ${body.slice(0, 500)}`); return }
-    const j = JSON.parse(body)
-    if (j.skipped) { console.log(`[footage-integrity] skipped: ${j.reason}`); return }
-    console.log(`[footage-integrity] scanned=${j.scanned} withIssues=${j.withIssues} issues=${(j.issues || []).length} errors=${j.errors}`)
+    let offset = 0
+    for (let page = 1; ; page++) {
+      let j
+      try {
+        const res = await httpRequest(`${endpoint}?days=${days}&limit=${pageSize}&offset=${offset}${docs ? '&docs=1' : ''}`, { headers })
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.text.slice(0, 300)}`)
+        j = JSON.parse(res.text)
+      } catch (err) {
+        failure = `หน้า offset=${offset} ล้ม: ${err?.message || err}`
+        break
+      }
+      if (j.skipped) { failure = `ข้ามทั้งรอบ: ${j.reason}`; break }
+      since = j.since
+      until = j.until
+      boxes.push(...(j.boxes || []))
+      noBox += Number(j.noBox) || 0
+      for (const c of j.noBoxCodes || []) if (noBoxCodes.length < 10) noBoxCodes.push(c)
+      console.log(`[footage-integrity] page ${page} offset=${offset} boxes=${(j.boxes || []).length} next=${j.nextOffset} total=${j.total}`)
+      if (j.nextOffset == null) break
+      if (!(j.nextOffset > offset)) { failure = `หน้า offset=${offset} ไม่ขยับ (next=${j.nextOffset})`; break }
+      if (page >= MAX_PAGES) { failure = `เกิน ${MAX_PAGES} หน้า — หยุดที่ offset=${j.nextOffset} จาก ${j.total}`; break }
+      offset = j.nextOffset
+    }
+    if (failure) console.error(`[footage-integrity] run failed: ${failure}`)
+
+    // Always send the summary — an incomplete run must say so, not go quiet.
+    const res = await httpRequest(endpoint, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ boxes, noBox, noBoxCodes, since, until, docs, failure }),
+    })
+    if (!res.ok) { console.error(`[footage-integrity] run failed: summary HTTP ${res.status}: ${res.text.slice(0, 300)}`); return }
+    const s = JSON.parse(res.text)
+    if (s.report && !(s.chat && s.chat.any)) console.error('[footage-integrity] run failed: summary not delivered to any chat channel')
+    const count = st => boxes.filter(b => b.state === st).length
+    console.log(`[footage-integrity] done boxes=${boxes.length} ok=${count('ok')} issues=${count('issues')} waiting=${count('waiting')} unreadable=${count('unreadable')} nobox=${noBox} docs=${docs ? 'on' : 'off'}${failure ? ' INCOMPLETE' : ''}`)
   } catch (err) {
     console.error('[footage-integrity] run failed:', err?.message || err)
   } finally {
@@ -82,5 +127,5 @@ function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
 
-console.log(`[footage-integrity] worker started; daily at ${String(targetHourBkk).padStart(2, '0')}:00 BKK; days=${days} limit=${limit}; baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`)
+console.log(`[footage-integrity] worker started; daily at ${String(targetHourBkk).padStart(2, '0')}:00 BKK; days=${days} pageSize=${pageSize} docs=${docs ? 'on' : 'off'}; baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`)
 scheduleDaily()

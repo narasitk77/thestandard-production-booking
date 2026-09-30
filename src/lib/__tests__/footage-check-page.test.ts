@@ -1,0 +1,240 @@
+/**
+ * v1.253 — the daily footage check, end to end with Drive and Prisma faked.
+ *
+ * What these pin:
+ *   • paging covers EVERY booking (the old `take: 60` left 127 of 187 unchecked)
+ *     and `nextOffset` counts what was actually processed
+ *   • dry run walks the exact same reads/decisions as the real run and parts only
+ *     at the write (a preview that differs from the run is a recurring bug here)
+ *   • a person's own `_FOOTAGE-CHECK`, a shared project box, or a box that is not
+ *     this booking's never gets written to
+ *   • an unreadable box is "could not check", never "complete"
+ */
+import { test, mock, before, beforeEach } from 'node:test'
+import assert from 'node:assert/strict'
+
+type Row = { id: string; bookingCode: string; projectId: string | null; projectName: string | null; shootDate: Date; shootEndDate?: Date | null; driveFolders: any }
+let rows: Row[] = []
+let sharing = 1
+let boxNames: Record<string, string> = {}
+let boxFiles: Record<string, any[] | Error> = {}
+let docs: Record<string, Array<{ id: string; ours: boolean; hash: string | null; writtenAt: string | null; webViewLink: string | null }>> = {}
+let writes: any[] = []
+let trashed: string[] = []
+let tree: 'in-tree' | 'not-in-tree' | 'unknown' = 'in-tree'
+let trashFolders: Array<{ id: string; name: string; trashedTime: string | null }> = []
+let trashTrees: Record<string, any[] | Error> = {}
+let drp: { buf: Buffer; modifiedTime: string } | null = null
+
+mock.module('../db', {
+  namedExports: {
+    prisma: {
+      booking: {
+        count: async ({ where }: any) => (where.driveFolders ? sharing : rows.length),
+        findMany: async ({ skip, take }: any) => rows.slice(skip, skip + take),
+      },
+    },
+  },
+})
+
+mock.module('../google-drive', {
+  namedExports: {
+    hasDriveCredentials: () => true,
+    getDriveItemState: async (id: string) => (boxNames[id] ? { id, name: boxNames[id], mimeType: 'folder', trashed: false, trashedTime: null, driveId: 'd' } : null),
+    listFilesRecursive: async (id: string) => {
+      const t = boxFiles[id]
+      if (t instanceof Error) throw t
+      return (t || []).map((x, i) => ({
+        id: `${id}-${i}`, name: x.name, mimeType: 'video/mp4', parents: [x.parent || 'p'], webViewLink: null,
+        size: x.size ?? 1, createdTime: null, modifiedTime: null, md5: null, folderPath: x.folderPath, topFolderId: null,
+      }))
+    },
+    findTrashedFoldersByCode: async () => trashFolders,
+    listFolderTreeIncludingTrashed: async (id: string) => {
+      const t = trashTrees[id]
+      if (t instanceof Error) throw t
+      return { files: t || [], truncated: false }
+    },
+    findFootageCheckDocs: async (id: string) => docs[id] || [],
+    writeFootageCheckDoc: async (input: any) => { writes.push(input); return input.existingId || 'new-doc' },
+    trashDriveItem: async (id: string) => { trashed.push(id) },
+    findLatestDrp: async () => (drp ? { id: 'drp1', name: 'PP-26-034_DaVinci_2026-09-29.drp', size: drp.buf.length, modifiedTime: drp.modifiedTime, webViewLink: null } : null),
+    downloadDriveFile: async () => drp!.buf,
+    classifyFootageTreeFolder: async () => tree,
+  },
+})
+
+let fi: typeof import('../footage-integrity')
+before(async () => { fi = await import('../footage-integrity') })
+
+const NOW = new Date('2026-09-30T06:00:00Z') // 13:00 BKK
+const clip = (name: string, kind = 'Clip') => ({ name, folderPath: ['EP.1', 'CAM-A', 'XDROOT', kind] })
+function booking(i: number, over: Partial<Row> = {}): Row {
+  const code = `AGN-2609${String(10 + (i % 18)).padStart(2, '0')}-${String(i).padStart(2, '0')}`
+  const box = `box${i}`
+  boxNames[box] = `GDH (${code})`
+  boxFiles[box] = [clip('A001C001_260901AA.MXF'), clip('A001C001_260901AAM01.XML')]
+  return { id: `id${String(i).padStart(3, '0')}`, bookingCode: code, projectId: null, projectName: null, shootDate: new Date('2026-09-20'), driveFolders: { box }, ...over }
+}
+
+beforeEach(() => {
+  rows = []; sharing = 1; boxNames = {}; boxFiles = {}; docs = {}; writes = []; trashed = []; tree = 'in-tree'
+  trashFolders = []; trashTrees = {}; drp = null
+})
+
+test('60 ใบ หน้าละ 25 → 25, 50, null · ครบทุกใบ', async () => {
+  rows = Array.from({ length: 60 }, (_, i) => booking(i))
+  const seen: string[] = []
+  let offset: number | null = 0
+  const nexts: Array<number | null> = []
+  while (offset != null) {
+    const p = await fi.scanFootagePage({ offset, limit: 25, now: NOW })
+    seen.push(...p.boxes.map(b => b.bookingCode))
+    nexts.push(p.nextOffset)
+    offset = p.nextOffset
+  }
+  assert.deepEqual(nexts, [25, 50, null])
+  assert.equal(new Set(seen).size, 60)
+})
+
+test('ชนเส้นตาย → nextOffset = offset + ที่ทำจริง (ไม่มีใบหล่น)', async () => {
+  rows = Array.from({ length: 10 }, (_, i) => booking(i))
+  const p = await fi.scanFootagePage({ offset: 0, limit: 10, deadlineMs: -1, now: NOW })
+  assert.equal(p.boxes.length, 1, 'ทำอย่างน้อยหนึ่งใบเสมอ — ไม่มีวันติดอยู่ที่เดิม')
+  assert.equal(p.nextOffset, 1)
+})
+
+test('dry run กับของจริงตัดสินเหมือนกัน · dry run ไม่เขียน · ของจริงเขียนครั้งเดียว แล้วรอบถัดไปไม่เปลี่ยน', async () => {
+  rows = [booking(1)]
+  const dry = await fi.scanFootagePage({ now: NOW })
+  assert.equal(dry.boxes[0].state, 'ok')
+  assert.equal(dry.boxes[0].doc.action, 'would-create')
+  assert.equal(writes.length, 0)
+
+  const real = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.equal(real.boxes[0].doc.action, 'created')
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].folderId, 'box1')
+  assert.match(writes[0].html, /ตรวจฟุตเทจ · AGN-260911-01/)
+
+  docs.box1 = [{ id: 'new-doc', ours: true, hash: writes[0].hash, writtenAt: NOW.toISOString(), webViewLink: 'u' }]
+  const again = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.equal(again.boxes[0].doc.action, 'unchanged')
+  assert.equal(writes.length, 1)
+
+  const weekLater = await fi.scanFootagePage({ docs: true, now: new Date(NOW.getTime() + 8 * 86_400_000) })
+  assert.equal(weekLater.boxes[0].doc.action, 'refreshed', 'เนื้อหาเดิมแต่เก่ากว่า 7 วัน → เขียนเวลาใหม่')
+})
+
+test('เอกสารที่คนสร้างเอง / กล่องใช้ร่วม / ชื่อกล่องไม่ใช่ของคิว / นอกไดรฟ์ฟุตเทจ → ไม่เขียน', async () => {
+  rows = [booking(1)]
+  docs.box1 = [{ id: 'h', ours: false, hash: null, writtenAt: null, webViewLink: 'u' }]
+  assert.equal((await fi.scanFootagePage({ docs: true, now: NOW })).boxes[0].doc.action, 'skipped')
+
+  docs = {}; sharing = 2
+  const shared = (await fi.scanFootagePage({ docs: true, now: NOW })).boxes[0].doc
+  assert.equal(shared.action, 'skipped')
+  assert.match(shared.note!, /ผูกกับ 2 ใบจอง/)
+
+  sharing = 1; boxNames.box1 = 'GDH x 8 Minute History (PP-26-034)'
+  assert.match((await fi.scanFootagePage({ docs: true, now: NOW })).boxes[0].doc.note!, /ไม่ใช่ของคิวนี้/)
+
+  boxNames.box1 = 'GDH (AGN-260911-01)'; tree = 'unknown'
+  const outside = (await fi.scanFootagePage({ docs: true, now: NOW })).boxes[0].doc
+  assert.equal(outside.action, 'skipped')
+  assert.match(outside.note!, /ไม่อยู่ในไดรฟ์ฟุตเทจ/)
+  assert.equal(writes.length, 0)
+})
+
+test('เอกสารของเราซ้ำสองฉบับ → อัปเดตตัวใหม่สุด ทิ้งตัวเก่า', async () => {
+  rows = [booking(1)]
+  docs.box1 = [
+    { id: 'old', ours: true, hash: 'x', writtenAt: NOW.toISOString(), webViewLink: 'u1' },
+    { id: 'new', ours: true, hash: 'y', writtenAt: NOW.toISOString(), webViewLink: 'u2' },
+  ]
+  const d = (await fi.scanFootagePage({ docs: true, now: NOW })).boxes[0].doc
+  assert.equal(d.action, 'updated')
+  assert.equal(writes[0].existingId, 'new')
+  assert.deepEqual(trashed, ['old'])
+})
+
+test('อ่านกล่องไม่ได้ → unreadable (ไม่ใช่ครบ) และเอกสารบอกว่าตรวจไม่ได้ · ไม่มี box = noBox', async () => {
+  rows = [booking(1), booking(2, { driveFolders: {} })]
+  boxFiles.box1 = new Error('Drive 500')
+  const p = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.equal(p.noBox, 1)
+  assert.equal(p.boxes[0].state, 'unreadable')
+  assert.match(p.boxes[0].errors[0], /Drive 500/)
+  assert.match(writes[0].html, /ตรวจไม่ได้รอบนี้ — ห้ามถือว่าครบ/)
+})
+
+test('ถ่ายเมื่อวาน + ต้นฉบับยังไม่มา → waiting (ไม่ขึ้นแชต) · ผ่านไป 3 วัน → issues', async () => {
+  rows = [booking(1, { shootDate: new Date('2026-09-29') })]
+  boxFiles.box1 = [clip('B022C001_2609297HS03.MP4', 'Sub'), clip('B022C001_2609297HM01.XML')]
+  assert.equal((await fi.scanFootagePage({ now: NOW })).boxes[0].state, 'waiting')
+  rows = [booking(1, { shootDate: new Date('2026-09-26') })]
+  boxFiles.box1 = [clip('B022C001_2609297HS03.MP4', 'Sub'), clip('B022C001_2609297HM01.XML')]
+  assert.equal((await fi.scanFootagePage({ now: NOW })).boxes[0].state, 'issues')
+})
+
+test('รีวิว: งานถ่ายหลายวัน — นับผ่อนผันจากวันสุดท้าย ไม่ใช่วันแรก', async () => {
+  rows = [booking(1, { shootDate: new Date('2026-09-27'), shootEndDate: new Date('2026-09-29') })]
+  boxFiles.box1 = [clip('B022C001_2609297HS03.MP4', 'Sub'), clip('B022C001_2609297HM01.XML')]
+  const b = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  assert.equal(b.waiting, true)
+  assert.equal(b.state, 'waiting')
+})
+
+test('รีวิว: เอกสารของเราซ้ำ + เนื้อหาไม่เปลี่ยน → ยังทิ้งตัวซ้ำ (ไม่รอ 7 วัน)', async () => {
+  rows = [booking(1)]
+  await fi.scanFootagePage({ docs: true, now: NOW })
+  const hash = writes[0].hash
+  writes = []
+  docs.box1 = [
+    { id: 'old', ours: true, hash, writtenAt: NOW.toISOString(), webViewLink: 'u1' },
+    { id: 'new', ours: true, hash, writtenAt: NOW.toISOString(), webViewLink: 'u2' },
+  ]
+  const d = (await fi.scanFootagePage({ docs: true, now: NOW })).boxes[0].doc
+  assert.equal(d.action, 'unchanged')
+  assert.deepEqual(trashed, ['old'])
+  assert.equal(writes.length, 0)
+})
+
+test('รีวิว: โฟลเดอร์ drop ในถังสองอัน อันหนึ่งอ่านไม่ได้ → ไฟล์ค้างจากอีกอันยังถูกรายงาน', async () => {
+  rows = [booking(1)]
+  trashFolders = [{ id: 't1', name: 'x (AGN-260911-01)', trashedTime: '2026-09-25T05:00:00Z' }, { id: 't2', name: 'y (AGN-260911-01)', trashedTime: null }]
+  trashTrees = { t1: [{ id: 'm1', name: 'B005C001_2609114B.MXF', size: 100e9, md5: 'zz', folderPath: ['EP.1', 'CAM-B'], webViewLink: null }], t2: new Error('Drive 500') }
+  const b = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  assert.equal(b.state, 'issues')
+  assert.deepEqual(b.stranded, { files: 1, bytes: 100e9, purgeAfter: '2026-10-25T05:00:00.000Z' })
+  assert.match(b.errors.join(' '), /Drive 500/)
+})
+
+test('รีวิว: Media Pool ใช้ Sub ที่ต้นฉบับยังอัปอยู่ → รอ (ถ่ายเมื่อวาน) · ผ่าน 4 วัน → ต้องตาม', async () => {
+  const { deflateRawSync } = await import('zlib')
+  const xml = `<x><Sm2MpVideoClip DbId="a"><FieldsBlob>0</FieldsBlob><Name>B022C001_2609297HS03.MP4</Name></Sm2MpVideoClip></x>`
+  const name = Buffer.from('MediaPool/Master/000_1_FOOTAGE/000_2026-09-29 · AGN-260911-01/MpFolder.xml')
+  const data = deflateRawSync(Buffer.from(xml)), raw = Buffer.from(xml)
+  const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(8, 8); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22); lh.writeUInt16LE(name.length, 26)
+  const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(8, 10); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(name.length, 28)
+  const cd = Buffer.concat([ch, name]); const off = 30 + name.length + data.length
+  const eo = Buffer.alloc(22); eo.writeUInt32LE(0x06054b50, 0); eo.writeUInt16LE(1, 8); eo.writeUInt16LE(1, 10); eo.writeUInt32LE(cd.length, 12); eo.writeUInt32LE(off, 16)
+  drp = { buf: Buffer.concat([lh, name, data, cd, eo]), modifiedTime: '2026-09-29T12:00:00Z' }
+
+  rows = [booking(1, { projectId: 'PP-26-034', shootDate: new Date('2026-09-29') })]
+  boxFiles.box1 = [clip('B022C001_2609297HS03.MP4', 'Sub'), clip('B022C001_2609297HM01.XML')]
+  const early = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  assert.equal(early.counts['mediapool-pending'], 1)
+  assert.equal(early.state, 'waiting')
+  assert.equal(early.mediaPool?.status, 'partial')
+
+  const late = (await fi.scanFootagePage({ now: new Date(NOW.getTime() + 3 * 86_400_000) })).boxes[0]
+  assert.equal(late.state, 'issues')
+})
+
+test('รีวิว: ใบที่ไม่มีกล่องผูก (ไม่ใช่งานรูป) ถูกนับและบอกรหัส', async () => {
+  rows = [booking(1, { driveFolders: {} }), booking(2, { driveFolders: { photo: 'p1' } })]
+  const p = await fi.scanFootagePage({ now: NOW })
+  assert.equal(p.noBox, 1)
+  assert.deepEqual(p.noBoxCodes, [rows[0].bookingCode])
+})

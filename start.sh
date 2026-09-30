@@ -539,7 +539,9 @@ supervise "landing" "scripts/landing-worker.js"
 # for footage that is in the right place but unusable — 0-byte uploads, two
 # files sharing one name in one folder, an episode with sound but no picture.
 # Every other Drive worker checks PLACEMENT; a truncated upload passes them all.
-# Set FOOTAGE_INTEGRITY_ENABLED=0 to disable.
+# v1.253: runs the whole MEDIAPOOL-CHECK procedure over every booking in the
+# window (paged) and, with FOOTAGE_CHECK_DOCS=1, keeps a `_FOOTAGE-CHECK` Google
+# Doc in each booking box. Set FOOTAGE_INTEGRITY_ENABLED=0 to disable.
 echo "==> Starting footage integrity worker (supervised)..."
 supervise "footage-integrity" "scripts/footage-integrity-worker.js"
 

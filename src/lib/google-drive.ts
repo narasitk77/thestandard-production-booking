@@ -20,6 +20,7 @@ import { google, drive_v3 } from 'googleapis'
 import { getCalendarImpersonateSubject } from './google-calendar'
 import { assertStagingDriveIsolation } from './app-env'
 import { folderNameMatchesCode, PRODUCTION_ID_IN_NAME_RE } from './outlet-folders'
+import { FOOTAGE_CHECK_DOC_NAME, isFootageCheckReport } from './reconciler/guards'
 export { PRODUCTION_ID_IN_NAME_RE }
 
 // v1.36.0 — read path uses the SAME full `drive` scope as the write path.
@@ -268,8 +269,9 @@ export async function listFilesRecursive(
           // (path is still empty when we're listing the root); deeper folders
           // inherit their ancestor's topId.
           queue.push({ folderId: f.id, path: [...path, f.name], topId: path.length === 0 ? f.id : topId })
-        } else if (SKIP_FILE_MIME.has(f.mimeType)) {
-          // Shortcuts + Google-native docs aren't real footage — skip.
+        } else if (SKIP_FILE_MIME.has(f.mimeType) || isFootageCheckReport(f.name)) {
+          // Shortcuts + Google-native docs aren't real footage — skip. v1.253: nor is our
+          // own per-box _FOOTAGE-CHECK report, whatever format it ends up in.
           continue
         } else {
           out.push({
@@ -1606,4 +1608,186 @@ export async function getDriveFile(fileId: string): Promise<{
   } catch {
     return null
   }
+}
+
+// ── v1.253 footage check (per-box report · trashed landing · DaVinci project) ──
+
+const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document'
+
+/**
+ * State of one Drive item. `null` = definitively gone (404/410). Anything else
+ * THROWS — a read error must never look like "not trashed" or "gone" (the
+ * helpers above that return null on any error are exactly how error became
+ * emptiness in this codebase).
+ */
+export async function getDriveItemState(fileId: string): Promise<{
+  id: string; name: string; mimeType: string; trashed: boolean; trashedTime: string | null; driveId: string | null
+} | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  try {
+    const res = await withDriveRetry(`state ${fileId}`, () => drive.files.get({
+      fileId, fields: 'id, name, mimeType, trashed, trashedTime, driveId', supportsAllDrives: true,
+    }))
+    return {
+      id: res.data.id ?? fileId, name: res.data.name ?? '', mimeType: res.data.mimeType ?? '',
+      trashed: !!res.data.trashed, trashedTime: res.data.trashedTime ?? null, driveId: res.data.driveId ?? null,
+    }
+  } catch (e: any) {
+    const status = driveErrorStatus(e)
+    if (status === 404 || status === 410) return null
+    throw e
+  }
+}
+
+export interface TrashTreeFile {
+  id: string
+  name: string
+  size: number | null
+  md5: string | null
+  folderPath: string[]
+  webViewLink: string | null
+}
+
+/**
+ * Every file under a TRASHED folder that a person did not trash on purpose.
+ *
+ * PP-26-034 (2026-09-30): the noon prune trashed drop folders, then 100+ GB
+ * originals uploaded INTO them. Those files are `trashed=false` themselves but
+ * live under a trashed parent, so every normal listing (`trashed = false` on the
+ * parent walk) never sees them, and shared-drive trash purges after ~30 days.
+ * No trashed filter here on purpose. Subfolders or files someone trashed by hand
+ * (`explicitlyTrashed`) are skipped — that was a person's decision. The root is
+ * always walked (the prune trashes the root explicitly).
+ */
+export async function listFolderTreeIncludingTrashed(rootId: string, maxFiles = 5000): Promise<{ files: TrashTreeFile[]; truncated: boolean }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const files: TrashTreeFile[] = []
+  const queue: Array<{ id: string; path: string[] }> = [{ id: rootId, path: [] }]
+  const walkOne = async ({ id, path }: { id: string; path: string[] }) => {
+    let pageToken: string | undefined
+    do {
+      const res: { data: drive_v3.Schema$FileList } = await withDriveRetry(`trash-tree ${id}`, () => drive.files.list({
+        q: `'${id}' in parents`,
+        fields: 'nextPageToken, files(id, name, mimeType, size, md5Checksum, explicitlyTrashed, webViewLink)',
+        pageSize: 1000, pageToken, supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+      }))
+      for (const f of res.data.files ?? []) {
+        if (!f.id || !f.name || f.explicitlyTrashed) continue
+        if (f.mimeType === FOLDER_MIME) queue.push({ id: f.id, path: [...path, f.name] })
+        else if (!SKIP_FILE_MIME.has(f.mimeType || '')) {
+          files.push({
+            id: f.id, name: f.name, size: f.size ? Number(f.size) : null, md5: f.md5Checksum ?? null,
+            folderPath: path, webViewLink: f.webViewLink ?? null,
+          })
+        }
+      }
+      pageToken = res.data.nextPageToken ?? undefined
+    } while (pageToken && files.length < maxFiles)
+  }
+  // Same 6-wide walk as listFilesRecursive — a drop folder is dozens of small card folders.
+  while (queue.length && files.length < maxFiles) await Promise.all(queue.splice(0, 6).map(walkOne))
+  return { files, truncated: files.length >= maxFiles }
+}
+
+/** Production Team shared drive (landing / NAS drop zone). Same default as the 7 older copies — new code imports this one. */
+export const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
+
+/**
+ * Landing folders for a booking that sit in the Production Team TRASH. Covers the
+ * case where `driveFolders.landing` was later overwritten by a newer drop folder
+ * (links are never cleared, only replaced).
+ */
+export async function findTrashedFoldersByCode(bookingCode: string): Promise<Array<{ id: string; name: string; trashedTime: string | null }>> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res: { data: drive_v3.Schema$FileList } = await withDriveRetry(`trashed folders ${bookingCode}`, () => drive.files.list({
+    q: `name contains '${bookingCode.replace(/'/g, "\\'")}' and trashed = true and mimeType = '${FOLDER_MIME}'`,
+    fields: 'files(id, name, trashedTime)', pageSize: 50,
+    corpora: 'drive', driveId: PRODUCTION_TEAM_ROOT, supportsAllDrives: true, includeItemsFromAllDrives: true,
+  }))
+  return (res.data.files ?? [])
+    .filter(f => f.id && f.name && folderNameMatchesCode(f.name, bookingCode))
+    .map(f => ({ id: f.id!, name: f.name!, trashedTime: f.trashedTime ?? null }))
+}
+
+/** `_FOOTAGE-CHECK` Docs directly in `folderId`, oldest first. `ours` = written by this worker (appProperties). */
+export async function findFootageCheckDocs(folderId: string): Promise<Array<{ id: string; ours: boolean; hash: string | null; writtenAt: string | null; announced: string | null; webViewLink: string | null }>> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res: { data: drive_v3.Schema$FileList } = await withDriveRetry(`find ${FOOTAGE_CHECK_DOC_NAME} ${folderId}`, () => drive.files.list({
+    q: `'${folderId}' in parents and trashed = false and name = '${FOOTAGE_CHECK_DOC_NAME}' and mimeType = '${GOOGLE_DOC_MIME}'`,
+    fields: 'files(id, appProperties, webViewLink)',
+    orderBy: 'createdTime', pageSize: 20,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+  }))
+  return (res.data.files ?? []).filter(f => f.id).map(f => ({
+    id: f.id!,
+    ours: !!f.appProperties?.probookFootageCheck,
+    hash: f.appProperties?.probookFootageCheck ?? null,
+    writtenAt: f.appProperties?.probookFootageCheckAt ?? null,
+    announced: f.appProperties?.probookFootageCheckAnnounced ?? null,
+    webViewLink: f.webViewLink ?? null,
+  }))
+}
+
+/**
+ * Remember which set of issues already reached chat — written ONLY after a chat
+ * channel accepted the summary (a Doc written is not a message delivered).
+ */
+export async function markFootageCheckAnnounced(docId: string, issueKey: string): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  await withDriveRetry(`announce ${FOOTAGE_CHECK_DOC_NAME}`, () => drive.files.update({
+    fileId: docId, requestBody: { appProperties: { probookFootageCheckAnnounced: issueKey } }, fields: 'id', supportsAllDrives: true,
+  }))
+}
+
+/**
+ * Create or overwrite the `_FOOTAGE-CHECK` Google Doc from HTML (Drive converts
+ * it — no Docs API scope needed). The content hash rides on appProperties so the
+ * next run can skip an unchanged box without a DB column.
+ */
+export async function writeFootageCheckDoc(input: { folderId: string; existingId: string | null; html: string; hash: string; writtenAt: string }): Promise<string> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  const media = { mimeType: 'text/html', body: input.html }
+  const appProperties = { probookFootageCheck: input.hash, probookFootageCheckAt: input.writtenAt }
+  if (input.existingId) {
+    await withDriveRetry(`update ${FOOTAGE_CHECK_DOC_NAME}`, () => drive.files.update({
+      fileId: input.existingId!, requestBody: { appProperties }, media, fields: 'id', supportsAllDrives: true,
+    }))
+    return input.existingId
+  }
+  const created = await withDriveRetry(`create ${FOOTAGE_CHECK_DOC_NAME}`, () => drive.files.create({
+    requestBody: { name: FOOTAGE_CHECK_DOC_NAME, mimeType: GOOGLE_DOC_MIME, parents: [input.folderId], appProperties },
+    media, fields: 'id', supportsAllDrives: true,
+  }))
+  if (!created.data.id) throw new Error(`Drive create returned no id for ${FOOTAGE_CHECK_DOC_NAME}`)
+  return created.data.id
+}
+
+/**
+ * Newest DaVinci project export for a Production ID anywhere on the shared
+ * drives: `<projectId>…​.drp` (e.g. `PP-26-034_DaVinci_2026-09-29.drp`). The
+ * name must START with the ID followed by a non-alphanumeric, so PP-26-03 never
+ * picks up PP-26-034's project. null = none found (not an error).
+ */
+export async function findLatestDrp(projectId: string): Promise<{ id: string; name: string; size: number | null; modifiedTime: string | null; webViewLink: string | null } | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const pid = projectId.trim()
+  const res: { data: drive_v3.Schema$FileList } = await withDriveRetry(`find drp ${pid}`, () => drive.files.list({
+    q: `name contains '${pid.replace(/'/g, "\\'")}' and name contains '.drp' and trashed = false and mimeType != '${FOLDER_MIME}'`,
+    fields: 'incompleteSearch, files(id, name, size, modifiedTime, webViewLink)',
+    orderBy: 'modifiedTime desc', pageSize: 50,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+  }))
+  // allDrives may skip drives: then "none" or an older project is not an answer.
+  if (res.data.incompleteSearch) throw new Error(`ค้น ${pid}…drp ไม่ครบทุก shared drive (incompleteSearch) — ผลเชื่อไม่ได้`)
+  const lead = new RegExp(`^${pid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![0-9A-Z])`, 'i')
+  const f = (res.data.files ?? []).find(x => x.id && x.name && lead.test(x.name) && /\.drp$/i.test(x.name))
+  return f ? { id: f.id!, name: f.name!, size: f.size ? Number(f.size) : null, modifiedTime: f.modifiedTime ?? null, webViewLink: f.webViewLink ?? null } : null
+}
+
+export async function downloadDriveFile(fileId: string): Promise<Buffer> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res = await withDriveRetry(`download ${fileId}`, () => drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true }, { responseType: 'arraybuffer' },
+  ))
+  return Buffer.from(res.data as ArrayBuffer)
 }

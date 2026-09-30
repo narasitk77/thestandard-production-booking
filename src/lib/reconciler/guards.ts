@@ -61,6 +61,20 @@ export function markerDateHasBuddhistYear(content: string): boolean {
   return (content || '').split('\n').some(line => /^\s*(วันถ่าย|Shoot date)\s*:.*\b(25\d{2})\b/i.test(line))
 }
 
+/**
+ * v1.253 — the per-box footage-check report the daily worker writes at the root
+ * of every booking box. It is a Google Doc (skipped by listFilesRecursive via
+ * SKIP_FILE_MIME), and the name is matched too so a downloaded-and-re-uploaded
+ * copy (`_FOOTAGE-CHECK.docx/.md/.txt`) still never counts as footage: every
+ * "has the footage arrived?" gate walks the box recursively, and a stray file
+ * there would open the landing-trash gate and fire the footage-ready email.
+ */
+export const FOOTAGE_CHECK_DOC_NAME = '_FOOTAGE-CHECK'
+
+export function isFootageCheckReport(name: string): boolean {
+  return /^_FOOTAGE-CHECK(\.(md|txt|docx|html|pdf))?$/i.test((name || '').trim())
+}
+
 // ── "is this folder empty?" ──────────────────────────────────────────────────
 
 /**

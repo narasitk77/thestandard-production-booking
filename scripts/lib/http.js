@@ -60,7 +60,7 @@ function resolveTimeoutMs(explicit) {
  *   Rejects only on transport failure (connection refused, DNS, inactivity
  *   timeout), also like fetch.
  */
-function httpRequest(url, { method = 'GET', headers = {}, timeoutMs } = {}) {
+function httpRequest(url, { method = 'GET', headers = {}, timeoutMs, body } = {}) {
   const timeout = resolveTimeoutMs(timeoutMs)
   return new Promise((resolve, reject) => {
     let target
@@ -89,6 +89,7 @@ function httpRequest(url, { method = 'GET', headers = {}, timeoutMs } = {}) {
       req.destroy(new Error(`no activity for ${Math.round(timeout / 1000)}s — giving up`))
     })
     req.on('error', reject)
+    if (body != null) req.write(body)
     req.end()
   })
 }

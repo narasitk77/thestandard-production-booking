@@ -221,10 +221,14 @@ services:
       LANDING_PRUNE_HOUR: ${LANDING_PRUNE_HOUR:-12}
       # v1.221 — footage integrity scan (report-only): 0-byte uploads, two files
       # sharing one name in one folder, episodes with sound but no picture.
+      # v1.253 — daily footage check over EVERY booking in the window (LIMIT is
+      # now the page size) + a `_FOOTAGE-CHECK` Google Doc in each booking box
+      # when FOOTAGE_CHECK_DOCS=1 (off = dry run, the summary says would-*).
       FOOTAGE_INTEGRITY_ENABLED: ${FOOTAGE_INTEGRITY_ENABLED:-1}
       FOOTAGE_INTEGRITY_HOUR: ${FOOTAGE_INTEGRITY_HOUR:-13}
       FOOTAGE_INTEGRITY_DAYS: ${FOOTAGE_INTEGRITY_DAYS:-30}
       FOOTAGE_INTEGRITY_LIMIT: ${FOOTAGE_INTEGRITY_LIMIT:-60}
+      FOOTAGE_CHECK_DOCS: ${FOOTAGE_CHECK_DOCS:-0}
       LANDING_KEEP_PAST_DAYS: ${LANDING_KEEP_PAST_DAYS:-3}
       LANDING_REPORT_EMAIL: ${LANDING_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}
       # LANDING_MANAGE_URL: ${LANDING_MANAGE_URL:-}  # override only if app isn't on 127.0.0.1:3000
@@ -660,6 +664,7 @@ services:
       FOOTAGE_INTEGRITY_HOUR: ${FOOTAGE_INTEGRITY_HOUR:-13}
       FOOTAGE_INTEGRITY_DAYS: ${FOOTAGE_INTEGRITY_DAYS:-30}
       FOOTAGE_INTEGRITY_LIMIT: ${FOOTAGE_INTEGRITY_LIMIT:-60}
+      FOOTAGE_CHECK_DOCS: ${FOOTAGE_CHECK_DOCS:-0}
       MIX_CALENDAR_WORKER_ENABLED: ${MIX_CALENDAR_WORKER_ENABLED:-1}
       SHOOT_MARKER_WORKER_ENABLED: ${SHOOT_MARKER_WORKER_ENABLED:-0}
       FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
