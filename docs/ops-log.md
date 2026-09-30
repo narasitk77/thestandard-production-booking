@@ -5,7 +5,24 @@ the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
 
 ---
 
-## 2026-09-30 · v1.252 — ถอยอิมเมจแล้วข้อมูลหาย: ด่านตอนบูต + deploy/rollback เทียบ DB จริง (push แล้ว · **ยังไม่ deploy**)
+## 2026-09-30 · v1.252 DEPLOYED `sha-32391ff` (09:52 BKK) · เว็บ 502 ~4 นาทีเพราะ Postgres ถูกสร้างใหม่
+
+นัทสั่ง "deploy เลย รอ CI เขียวก่อน" · CI + Docker build ของ `32391ff` เขียวทั้งคู่ · backup heartbeat 7.8 ชม. ·
+`deploy.py 32391ff --check` exit 0 (อิมเมจมีด่าน · ไม่มีอะไรเปลี่ยนใน DB) · ยิงจริงครั้งเดียว exit 0
+
+- backup ก่อน deploy `backup-2026-09-30T024340.sql.gz` 1.16 MB · จุดถอย `sha-a622aab`
+- **502 ช่วง ~09:48–09:52:** `pullImage: true` ของ deploy.py ดึงอิมเมจ **ทั้ง stack** — `postgres:16-alpine` มี digest ใหม่ →
+  คอนเทนเนอร์ db ถูกสร้างใหม่ (created 09:47:17 · start 09:49:39 · ขึ้นเป็น **PostgreSQL 16.15** major เดิม volume เดิม) และแอป
+  (`depends_on: db: service_healthy`) ค้างสถานะ "created" จน db healthy แล้วค่อยบูต · session Probook เห็น 502 แล้วแจ้งเข้ามา — ไม่ได้แตะ stack
+- บูต: ด่าน push **ครั้งเดียว** `already in sync` → `schemaSync=in-sync` · worker 16 ตัวขึ้น (ปิดตามตั้งใจ 2) · Next.js Ready 09:52:22
+- หลัง deploy: `/api/version` 1.252.0 · health-summary ok ไม่มี worker ค้าง · `rollback.py --check` → ถอยไป `a622aab` ได้ (exit 0) ·
+  ข้อมูลครบ: bookings 870 · มีการแก้ใบจองเข้ามา 09:53 · mix_jobs 3 · users 94
+- **ข้อเสนอ (ยังไม่ทำ):** pin อิมเมจ Postgres ใน compose (เช่น `postgres:16.15-alpine` หรือ digest) — ไม่งั้นทุก deploy มีโอกาสรีสตาร์ท DB
+  ตามรอบออกอิมเมจของ upstream โดยไม่มีใครตั้งใจ
+
+---
+
+## 2026-09-30 · v1.252 — ถอยอิมเมจแล้วข้อมูลหาย: ด่านตอนบูต + deploy/rollback เทียบ DB จริง (deploy แล้ว — ดูข้างบน)
 
 นัท: "ระวังแล้วแก้ให้ด้วย" · หลัง v1.249 เพิ่มตาราง `mix_job_events` · รายละเอียดโค้ดใน CHANGELOG v1.252
 
