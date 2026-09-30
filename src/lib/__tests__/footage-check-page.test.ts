@@ -15,6 +15,7 @@ import assert from 'node:assert/strict'
 
 type Row = { id: string; bookingCode: string; projectId: string | null; projectName: string | null; shootDate: Date; shootEndDate?: Date | null; driveFolders: any }
 let rows: Row[] = []
+let lastWhere: any = null
 let sharing = 1
 let boxNames: Record<string, string> = {}
 let boxFiles: Record<string, any[] | Error> = {}
@@ -31,7 +32,7 @@ mock.module('../db', {
     prisma: {
       booking: {
         count: async ({ where }: any) => (where.driveFolders ? sharing : rows.length),
-        findMany: async ({ skip, take }: any) => rows.slice(skip, skip + take),
+        findMany: async ({ where, skip, take }: any) => { lastWhere = where; return rows.slice(skip, skip + take) },
       },
     },
   },
@@ -237,4 +238,15 @@ test('รีวิว: ใบที่ไม่มีกล่องผูก (�
   const p = await fi.scanFootagePage({ now: NOW })
   assert.equal(p.noBox, 1)
   assert.deepEqual(p.noBoxCodes, [rows[0].bookingCode])
+})
+
+test('ตรวจตาม Production ID ไม่เอางานที่ยังไม่ถ่าย (ถึงเมื่อวาน) · ตรวจตามรหัสคิวเอาตามที่สั่ง', async () => {
+  rows = [booking(1)]
+  await fi.scanFootagePage({ projects: ['PP-26-034'], now: NOW })
+  assert.deepEqual(lastWhere.shootDate, { lte: new Date('2026-09-29') })
+  assert.equal(lastWhere.OR, undefined)
+  await fi.scanFootagePage({ codes: ['AGN-261003-01'], now: NOW })
+  assert.equal(lastWhere.shootDate, undefined)
+  await fi.scanFootagePage({ now: NOW })
+  assert.deepEqual(lastWhere.OR[0], { shootDate: { gte: new Date('2026-08-31'), lte: new Date('2026-09-29') } })
 })

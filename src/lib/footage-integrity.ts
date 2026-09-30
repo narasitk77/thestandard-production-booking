@@ -677,6 +677,8 @@ export async function scanFootagePage(opts: {
     status: { not: 'CANCELLED' as const },
     bookingCode: codes.length ? { in: codes } : { not: null },
     ...(projects.length ? { projectId: { in: projects } } : {}),
+    // A Production ID covers future shoots too — nothing to check there yet. Codes stay exact.
+    ...(projects.length && !codes.length ? { shootDate: { lte: new Date(until) } } : {}),
     // A multi-day shoot that ENDED in the window is in the window.
     ...(targeted ? {} : { OR: [
       { shootDate: { gte: new Date(since), lte: new Date(until) } },
@@ -696,28 +698,37 @@ export async function scanFootagePage(opts: {
   const deadline = opts.deadlineMs ?? 240_000
   const drp = new Map<string, Promise<DrpLoad>>()
   const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  // Rows START in order and a new one never starts after the deadline, so what was
+  // processed is always a prefix and nextOffset drops nothing. A Sony box walk is
+  // ~100 folder lists (10–15 s); three boxes at a time ≈ 1,800 Drive reads/min.
+  const results: Array<BoxCheck | null> = []
   let processed = 0
-  for (const b of rows) {
-    if (processed > 0 && Date.now() - started > deadline) break
-    processed++
-    const folders = (b.driveFolders || {}) as Record<string, unknown>
-    const boxId = typeof folders.box === 'string' ? folders.box : null
-    if (!b.bookingCode || !boxId) {
-      if (typeof folders.photo !== 'string') {
-        base.noBox++
-        if (b.bookingCode && base.noBoxCodes.length < 10) base.noBoxCodes.push(b.bookingCode)
+  const next = async (): Promise<void> => {
+    while (processed < rows.length && (processed === 0 || Date.now() - started <= deadline)) {
+      const idx = processed++
+      const b = rows[idx]
+      const folders = (b.driveFolders || {}) as Record<string, unknown>
+      const boxId = typeof folders.box === 'string' ? folders.box : null
+      if (!b.bookingCode || !boxId) {
+        if (typeof folders.photo !== 'string') {
+          base.noBox++
+          if (b.bookingCode && base.noBoxCodes.length < 10) base.noBoxCodes.push(b.bookingCode)
+        }
+        results[idx] = null
+        continue
       }
-      continue
+      const projectId = b.projectId?.trim() || null
+      if (projectId && !drp.has(projectId)) drp.set(projectId, loadDrp(projectId))
+      results[idx] = await checkBox({
+        code: b.bookingCode, boxId, projectId, projectName: b.projectName, shootDate: b.shootDate.toISOString().slice(0, 10),
+        lastDay: lastShootDay(b).toISOString().slice(0, 10),
+        landingId: typeof folders.landing === 'string' ? folders.landing : undefined,
+        drp: projectId ? drp.get(projectId)! : null, docs, now, today, appUrl,
+      })
     }
-    const projectId = b.projectId?.trim() || null
-    if (projectId && !drp.has(projectId)) drp.set(projectId, loadDrp(projectId))
-    base.boxes.push(await checkBox({
-      code: b.bookingCode, boxId, projectId, projectName: b.projectName, shootDate: b.shootDate.toISOString().slice(0, 10),
-      lastDay: lastShootDay(b).toISOString().slice(0, 10),
-      landingId: typeof folders.landing === 'string' ? folders.landing : undefined,
-      drp: projectId ? drp.get(projectId)! : null, docs, now, today, appUrl,
-    }))
   }
+  await Promise.all([next(), next(), next()])
+  base.boxes = results.filter((r): r is BoxCheck => !!r)
   return { ...base, since: targeted ? null : since, until: targeted ? null : until, total, nextOffset: offset + processed < total ? offset + processed : null }
 }
 
