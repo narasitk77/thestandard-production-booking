@@ -23,6 +23,12 @@ const UNIQUE_NAME = /^[A-Z]\d{3}[A-Z]\d{3}_[0-9A-Z]{6,}$/i
 /** ส่วนท้ายของโครงการ์ด — ตัดออกเพื่อให้ Clip กับ Sub ของการ์ดเดียวกันอยู่กลุ่มเดียวกัน (ใช้กับชื่อที่ซ้ำได้ เช่น C0001) */
 const CARD_TAIL = new Set(['XDROOT', 'M4ROOT', 'PRIVATE', 'CLIP', 'SUB'])
 
+/**
+ * v1.253.4 — ชื่อที่ Drive ใส่ตอนกด "ทำสำเนา" (`Copy of X` / `สำเนาของ X`) คือไฟล์ X · เจอจริง AGN-260909-01:
+ * Sub ถูกทำสำเนาในโฟลเดอร์ SUB เลยดูเหมือนมีคลิป "Copy of A003C107_…" ที่ไม่มีต้นฉบับ (ต้นฉบับอยู่ครบ)
+ */
+export const baseName = (name: string) => name.replace(/^(?:Copy of |สำเนาของ )+/i, '')
+
 const lastFolder = (f: FootageFileLike) => (f.folderPath || []).slice(-1)[0]?.trim().toUpperCase() || ''
 
 function groupOf(f: FootageFileLike): string {
@@ -60,9 +66,10 @@ export function pendingOriginalClips(files: FootageFileLike[]): Array<{ clip: st
     let m: RegExpExecArray | null
     let kind: 'orig' | 'sub' | 'xml'
     const where = lastFolder(f)
-    if ((m = SUB.exec(f.name)) && where === 'SUB') kind = 'sub'
-    else if ((m = XML.exec(f.name)) && where === 'CLIP') kind = 'xml'
-    else if ((m = ORIG.exec(f.name)) && !SUB.test(f.name)) kind = 'orig'
+    const name = baseName(f.name)
+    if ((m = SUB.exec(name)) && where === 'SUB') kind = 'sub'
+    else if ((m = XML.exec(name)) && where === 'CLIP') kind = 'xml'
+    else if ((m = ORIG.exec(name)) && !SUB.test(name)) kind = 'orig'
     else continue
     const clip = m[1]
     const key = clipKey(f, clip)
@@ -94,7 +101,8 @@ export function isQuarantined(f: FootageFileLike): boolean {
 export type ClipPart = 'orig' | 'sub' | 'xml'
 
 /** ไฟล์นี้เป็นส่วนไหนของคลิปกล้อง Sony (ต้นฉบับ / Sub / M01.XML) · null = ไม่ใช่คลิปกล้อง (เพลง กราฟิก export) */
-export function sonyClipPart(name: string): { clip: string; part: ClipPart } | null {
+export function sonyClipPart(fileName: string): { clip: string; part: ClipPart } | null {
+  const name = baseName(fileName)
   let m: RegExpExecArray | null
   if ((m = SUB.exec(name)) && CAMERA.test(m[1])) return { clip: m[1], part: 'sub' }
   if ((m = XML.exec(name)) && CAMERA.test(m[1])) return { clip: m[1], part: 'xml' }
@@ -158,7 +166,7 @@ export function compareMediaPool(pool: MediaPoolItem[], bookingCode: string, box
       const k = p.clip.toUpperCase()
       if (!drive.has(k)) drive.set(k, new Set())
       drive.get(k)!.add(p.part)
-    } else if (WAV.test(f.name)) driveWavs.set(f.name.toUpperCase(), f.name)
+    } else if (WAV.test(f.name)) driveWavs.set(baseName(f.name).toUpperCase(), baseName(f.name))
   }
 
   const isMine = (i: MediaPoolItem) => i.bookingCode?.toUpperCase() === code

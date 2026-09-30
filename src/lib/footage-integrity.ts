@@ -46,7 +46,7 @@ import {
   type DriveFile, type TrashTreeFile,
 } from './google-drive'
 import {
-  pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, type MediaPoolItem,
+  pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, type MediaPoolItem,
 } from './footage-completeness'
 import { parseDrpMediaPool } from './drp-mediapool'
 import { folderNameMatchesCode } from './outlet-folders'
@@ -214,7 +214,7 @@ export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssu
   // at the card that is short, not at every C0001 in the box.
   const partsOf = (clip: string, key: string) => {
     const re = new RegExp(`^${clip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(S03\\.MP4|M01\\.XML|\\.[A-Z0-9]+)$`, 'i')
-    return real.filter(f => re.test(f.name) && clipKey(f, clip) === key).map(f => f.id)
+    return real.filter(f => re.test(baseName(f.name)) && clipKey(f, clip) === key).map(f => f.id)
   }
   const at = (group: string) => (group ? `${group} · ` : '')
   const pending = pendingOriginalClips(real)

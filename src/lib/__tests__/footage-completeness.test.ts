@@ -158,3 +158,15 @@ test('compareMediaPool: bin ที่ไม่ได้ตั้งชื่อ�
   ])
   assert.deepEqual(r, { inPool: 0, missing: [], notInPool: [] })
 })
+
+test('v1.253.4: สำเนาใน Drive ("Copy of …S03.MP4") ไม่ใช่คลิปใหม่ที่ขาดต้นฉบับ (เคสจริง AGN-260909-01)', () => {
+  const m4 = (kind: 'CLIP' | 'SUB', name: string) => ({ name, folderPath: ['S03', 'CAM-A', 'M4ROOT', kind] })
+  const files = [
+    m4('CLIP', 'A003C107_260910BJ.MP4'), m4('CLIP', 'A003C107_260910BJM01.XML'),
+    m4('SUB', 'A003C107_260910BJS03.MP4'), m4('SUB', 'Copy of A003C107_260910BJS03.MP4'),
+  ]
+  assert.deepEqual(pendingOriginals(files), [])
+  assert.deepEqual(missingSidecars(files), [])
+  assert.deepEqual(sonyClipPart('สำเนาของ A003C107_260910BJS03.MP4'), { clip: 'A003C107_260910BJ', part: 'sub' })
+  assert.deepEqual(pendingOriginals([m4('SUB', 'Copy of A003C107_260910BJS03.MP4')]), ['A003C107_260910BJ'], 'มีแต่สำเนา Sub ยังขาดต้นฉบับจริง')
+})
