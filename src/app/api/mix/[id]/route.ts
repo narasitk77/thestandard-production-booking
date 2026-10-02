@@ -12,10 +12,11 @@ import { logAudit } from '@/lib/audit'
 import { mixEventData, mixStateOf } from '@/lib/mix-stats'
 import {
   canEditMixJob, canDeleteMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, canCloseMixJob, canSetDeliveryLink,
+  canMoveMixDueDate, canRequestMixPostpone, canDecideMixPostpone, validateMixPostpone, bangkokDateKey,
   isMixStatus, isAssignableTo, normalizeHttpLink, validateMixJob, formatMixNumber,
   type MixActor, type MixStatus,
 } from '@/lib/mix-jobs'
-import { notifyMixAssigned, notifyMixDelivered } from '@/lib/mix-notify'
+import { notifyMixAssigned, notifyMixDelivered, notifyMixPostponeRequested, notifyMixPostponeDecided } from '@/lib/mix-notify'
 import { syncMixJobCalendar, mixCalendarAuditNote } from '@/lib/mix-calendar'
 import { attachBookingProducer } from '@/lib/mix-targets'
 
@@ -36,6 +37,7 @@ function sameWorkState(existing: { id: string; status: string; assigneeEmail: st
 }
 
 const CONFLICT = 'งานนี้เพิ่งถูกแก้โดยอีกคน — โหลดคิวใหม่แล้วลองอีกครั้ง'
+const NO_POSTPONE = { postponeToDate: null, postponeReason: null, postponeRequestedBy: null, postponeRequestedAt: null }
 const isNotFound = (e: unknown) => (e as { code?: string })?.code === 'P2025'
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
@@ -142,12 +144,58 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       changes.status = { from: existing.status, to: next }
     }
 
+    // ── v1.257 ขอเลื่อนกำหนดส่ง (คนถืองาน) → คนขอ/Producer ของใบอนุมัติ ──────
+    // นัท 2 ต.ค. 2569: "ขอเลื่อนแล้วให้แจ้งไปให้คนจองอนุมัติ" · คนถืองานเลื่อนเองไม่ได้ (canMoveMixDueDate)
+    let postpone: { toDate: string; reason: string } | null = null
+    if (body.postpone !== undefined) {
+      if (!canRequestMixPostpone(actor, existing)) {
+        return NextResponse.json({ error: 'ขอเลื่อนได้เฉพาะคนที่ถูกแจกงานนี้ ระหว่างกำลังทำ' }, { status: 403 })
+      }
+      const p = validateMixPostpone(body.postpone, existing.dueDate, bangkokDateKey())
+      if (!p.ok) return NextResponse.json({ error: p.error }, { status: 400 })
+      postpone = p.value
+      data.postponeToDate = new Date(`${p.value.toDate}T00:00:00Z`)
+      data.postponeReason = p.value.reason
+      data.postponeRequestedBy = session.email
+      data.postponeRequestedAt = new Date()
+      changes.postponeRequested = p.value
+    }
+
+    // ── v1.257 อนุมัติ/ไม่อนุมัติคำขอเลื่อน ──────────────────────────────────
+    let decided: { approved: boolean; toDate: string; requestedBy: string } | null = null
+    if (body.postponeDecision === 'approve' || body.postponeDecision === 'reject') {
+      if (!canDecideMixPostpone(actor, existing)) {
+        return NextResponse.json(
+          { error: 'อนุมัติได้เฉพาะคนขอหรือ Producer ของใบ (คนที่ขอเลื่อนอนุมัติของตัวเองไม่ได้) และต้องมีคำขอค้างอยู่' },
+          { status: 403 },
+        )
+      }
+      const pending = existing.postponeToDate!.toISOString().slice(0, 10)
+      // คำขอถูกแทนด้วยวันใหม่ระหว่างที่คนอนุมัติเปิดการ์ดอยู่ = ห้ามอนุมัติวันที่เขาไม่เห็น
+      if (body.postponeTo !== pending) return NextResponse.json({ error: CONFLICT }, { status: 409 })
+      const approved = body.postponeDecision === 'approve'
+      // กำหนดส่งถูกแก้ตรง ๆ หลังมีคำขอ (แอดมิน) → อนุมัติวันเก่าจะดึงกำหนดเข้ามาแทนที่จะเลื่อนออก
+      if (approved && existing.dueDate && pending <= existing.dueDate.toISOString().slice(0, 10)) {
+        return NextResponse.json({ error: 'คำขอเลื่อนนี้ไม่ได้อยู่หลังกำหนดส่งปัจจุบันแล้ว — ให้คนทำขอใหม่' }, { status: 409 })
+      }
+      if (approved) data.dueDate = existing.postponeToDate
+      Object.assign(data, NO_POSTPONE)
+      decided = { approved, toDate: pending, requestedBy: existing.postponeRequestedBy || '' }
+      changes.postponeDecision = { approved, toDate: pending, requestedBy: existing.postponeRequestedBy, reason: existing.postponeReason }
+    }
+
     // ── แก้รายละเอียด ───────────────────────────────────────────────────────
     const editing = ['title', 'dueDate', 'sourceLink', 'notes'].some(k => k in body)
     if (editing) {
       if (!canEditMixJob(actor, existing)) {
         return NextResponse.json(
           { error: 'แก้ได้เฉพาะคำขอของตัวเอง (หรือของใบจองที่คุณเป็น Producer) ที่ยังไม่มีคนรับ หรืองานที่ตัวเองรับไว้' },
+          { status: 403 },
+        )
+      }
+      if ('dueDate' in body && !canMoveMixDueDate(actor, existing)) {
+        return NextResponse.json(
+          { error: 'คนทำงานเลื่อนกำหนดส่งเองไม่ได้ — กด "ขอเลื่อน" ให้คนขอ/Producer อนุมัติ' },
           { status: 403 },
         )
       }
@@ -172,6 +220,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: 'ไม่มีอะไรให้แก้' }, { status: 400 })
     }
+    // v1.257 — งานเปลี่ยนสถานะ/เปลี่ยนคนทำ = คำขอเลื่อนที่ค้างอยู่ไม่มีความหมายแล้ว (ไม่งั้นเปิดงานกลับมาแล้วคำขอเก่าโผล่)
+    // แก้กำหนดส่งตรง ๆ ก็เหมือนกัน: คำขอที่ค้างตั้งอยู่บนกำหนดเดิม (ผู้ตรวจ v1.257)
+    if (('status' in data || assignedTo || (editing && 'dueDate' in body)) && !postpone) Object.assign(data, NO_POSTPONE)
 
     // v1.249 — ประวัติการเปลี่ยนครั้งนี้ (สถานะก่อน/หลัง) เขียนใน update เดียวกัน: งานเปลี่ยนแต่ประวัติหาย
     // เกิดไม่ได้ · ตัวเลขผลงาน/ภาระรายคนคิดจากที่นี่ (mix-stats.ts)
@@ -185,7 +236,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     let job
     try {
-      job = await prisma.mixJob.update({ where: sameWorkState(existing), data })
+      // ตัดสินคำขอเลื่อน: คำขอต้องยังเป็นตัวที่อ่านมา ณ ตอนเขียน ไม่งั้นคำขอใหม่ที่เพิ่งเข้ามาถูกล้างทิ้งเงียบ ๆ
+      const where = decided ? { ...sameWorkState(existing), postponeToDate: existing.postponeToDate } : sameWorkState(existing)
+      job = await prisma.mixJob.update({ where, data })
     } catch (e) {
       if (isNotFound(e)) return NextResponse.json({ error: CONFLICT }, { status: 409 })
       throw e
@@ -203,6 +256,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (data.status === 'DONE' && job.deliveryLink) {
       notified = await notifyMixDelivered(job, job.deliveryLink, session.email)
       if (!notified.sent) console.warn(`[mix] แจ้งส่งงานไม่ออก: ${notified.reason}`)
+    }
+    // v1.257 — ขอเลื่อน → คนขอ + Producer ของใบ · ตัดสินแล้ว → คนที่ขอเลื่อน
+    if (postpone) {
+      notified = await notifyMixPostponeRequested(
+        job, [job.requesterEmail, existing.bookingProducerEmail], session.email, postpone.toDate, postpone.reason)
+      if (!notified.sent) console.warn(`[mix] แจ้งขอเลื่อนไม่ออก: ${notified.reason}`)
+    }
+    if (decided) {
+      notified = await notifyMixPostponeDecided(job, decided.requestedBy, session.email, decided.approved, decided.toDate)
+      if (!notified.sent) console.warn(`[mix] แจ้งผลขอเลื่อนไม่ออก: ${notified.reason}`)
     }
     // v1.245 — ปฏิทินมิกซ์แยก: ทุกการแก้ (แจก/ส่งงาน/วันที่/ยกเลิก) ตามไปที่ event เดียว
     const cal = await syncMixJobCalendar(job.id)

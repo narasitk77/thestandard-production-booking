@@ -56,6 +56,9 @@ export interface MixJobLike {
    * (ดู attachBookingProducer) · ไม่ได้เติม = ไม่มีสิทธิ์จากทางนี้ (ปลอดภัยฝั่งปฏิเสธ)
    */
   bookingProducerEmail?: string | null
+  /** v1.257 — คำขอเลื่อนกำหนดส่งที่รออนุมัติ (null = ไม่มี) */
+  postponeToDate?: Date | string | null
+  postponeRequestedBy?: string | null
 }
 
 export interface MixActor {
@@ -120,9 +123,62 @@ function sameEmail(a: string | null | undefined, b: string | null | undefined): 
 export function canEditMixJob(actor: MixActor, job: MixJobLike): boolean {
   if (actor.canEditAll) return true
   if (sameEmail(job.assigneeEmail, actor.email)) return true
-  const owner = sameEmail(job.requesterEmail, actor.email) || sameEmail(job.bookingProducerEmail, actor.email)
-  if (owner) return (job.status || 'QUEUED') === 'QUEUED'
-  return false
+  return isMixOwner(actor, job) && (job.status || 'QUEUED') === 'QUEUED'
+}
+
+/** คนขอ หรือ Producer ของใบจองที่ผูกไว้ — "เจ้าของงาน" ฝั่งคนจอง */
+function isMixOwner(actor: MixActor, job: MixJobLike): boolean {
+  return sameEmail(job.requesterEmail, actor.email) || sameEmail(job.bookingProducerEmail, actor.email)
+}
+
+/**
+ * v1.257 — **เลื่อนกำหนดส่งตรง ๆ** ได้ไหม: เหมือน canEditMixJob แต่ไม่รวมคนถืองาน
+ *
+ * mix-stats ตัดสิน "ส่งทันไหม" จากกำหนดส่ง ณ ตอนส่งงาน — คนถืองานเลื่อนกำหนดของตัวเองได้ = งานช้ากลายเป็นทัน
+ * นัท 2 ต.ค. 2569: "ขอเลื่อนแล้วให้แจ้งไปให้คนจองอนุมัติ" → คนถืองานใช้ canRequestMixPostpone แทน
+ */
+export function canMoveMixDueDate(actor: MixActor, job: MixJobLike): boolean {
+  if (actor.canEditAll) return true
+  // คนขอที่ถืองานเองด้วย: ดันงานกลับ QUEUED (ทีมเสียงทำได้) แล้วเลื่อนเอง = ทางอ้อมของการเลื่อนเอง (ผู้ตรวจ v1.257)
+  if (sameEmail(job.assigneeEmail, actor.email)) return false
+  return isMixOwner(actor, job) && (job.status || 'QUEUED') === 'QUEUED'
+}
+
+/** v1.257 — **ขอเลื่อน**กำหนดส่ง: คนที่ถูกแจก ระหว่างกำลังทำ (ขอใหม่ = แทนคำขอเดิมที่ยังไม่มีใครตัดสิน) */
+export function canRequestMixPostpone(actor: MixActor, job: MixJobLike): boolean {
+  return (job.status || 'QUEUED') === 'IN_PROGRESS' && sameEmail(job.assigneeEmail, actor.email)
+}
+
+/**
+ * v1.257 — **อนุมัติ/ไม่อนุมัติ** คำขอเลื่อน: คนขอ หรือ Producer ของใบ (แอดมินเป็นทางสำรอง เช่นคนขอลาออก)
+ * · ต้องมีคำขอค้างและงานยังเดินอยู่ · **คนที่ขอเลื่อนอนุมัติของตัวเองไม่ได้** แม้จะเป็นคนของานด้วย
+ * (ไม่งั้นวนกลับไปเป็นการเลื่อนเองที่กฎนี้ตั้งใจปิด)
+ */
+export function canDecideMixPostpone(actor: MixActor, job: MixJobLike): boolean {
+  if (!job.postponeToDate || (job.status || 'QUEUED') !== 'IN_PROGRESS') return false
+  if (actor.canEditAll) return true
+  return isMixOwner(actor, job) && !sameEmail(job.postponeRequestedBy, actor.email)
+}
+
+/**
+ * v1.257 — ตรวจคำขอเลื่อน: วันที่ต้องถูกรูป · ไม่ย้อนหลัง · **ต้องหลังกำหนดเดิม** (ขอเลื่อนเข้ามาไม่ใช่การขอเลื่อน)
+ * · ต้องมีเหตุผล (คนอนุมัติต้องรู้ว่าทำไม) · `today` รับเข้ามาให้เทสได้
+ */
+export function validateMixPostpone(
+  input: unknown,
+  currentDue: Date | string | null | undefined,
+  today: string,
+): { ok: true; value: { toDate: string; reason: string } } | { ok: false; error: string } {
+  const o = (input && typeof input === 'object' ? input : {}) as { toDate?: unknown; reason?: unknown }
+  const toDate = typeof o.toDate === 'string' ? o.toDate.trim() : ''
+  if (!isValidISODate(toDate)) return { ok: false, error: 'วันที่ขอเลื่อนต้องเป็นรูปแบบ YYYY-MM-DD' }
+  if (toDate < today) return { ok: false, error: 'วันที่ขอเลื่อนย้อนหลังไม่ได้' }
+  const due = currentDue ? (typeof currentDue === 'string' ? currentDue : currentDue.toISOString()).slice(0, 10) : null
+  if (due && toDate <= due) return { ok: false, error: `ต้องเป็นวันหลังกำหนดเดิม (${due})` }
+  const reason = typeof o.reason === 'string' ? o.reason.trim() : ''
+  if (!reason) return { ok: false, error: 'ใส่เหตุผลที่ขอเลื่อนด้วย — คนอนุมัติต้องรู้ว่าทำไม' }
+  if (reason.length > 500) return { ok: false, error: 'เหตุผลยาวเกิน 500 ตัวอักษร' }
+  return { ok: true, value: { toDate, reason } }
 }
 
 /**

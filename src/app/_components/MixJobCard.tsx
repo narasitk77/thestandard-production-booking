@@ -13,10 +13,10 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Check, Clock, ExternalLink, Loader2, Pencil, RotateCcw, Send, Trash2, UserPlus } from 'lucide-react'
+import { CalendarClock, Check, Clock, ExternalLink, Loader2, Pencil, RotateCcw, Send, Trash2, UserPlus } from 'lucide-react'
 import {
-  MIX_STATUS_LABEL, MIX_STATUS_HINT, MIX_FLAG_LABEL, bangkokDateKey, canAssignMixJob, canClaimMixJob,
-  canEditMixJob, canDeleteMixJob, canSetMixStatus, normalizeHttpLink, type MixActor, type MixFlag, type MixStatus,
+  MIX_STATUS_LABEL, MIX_STATUS_HINT, MIX_FLAG_LABEL, addDaysKey, bangkokDateKey, canAssignMixJob, canClaimMixJob,
+  canEditMixJob, canMoveMixDueDate, canRequestMixPostpone, canDecideMixPostpone, canDeleteMixJob, canSetMixStatus, normalizeHttpLink, type MixActor, type MixFlag, type MixStatus,
 } from '@/lib/mix-jobs'
 
 /** แถวจาก GET /api/mix (วันที่เป็นสตริง ISO หลังผ่าน JSON) */
@@ -45,6 +45,11 @@ export interface MixJobView {
   calendarSyncError?: string | null
   /** v1.256 — Producer ของใบจองที่ผูกไว้ (GET เติมให้) · ใช้ตัดสินปุ่ม "แก้ไข" ด้วยกฎเดียวกับ PATCH */
   bookingProducerEmail?: string | null
+  /** v1.257 — คำขอเลื่อนกำหนดส่งที่รออนุมัติ (null = ไม่มี) */
+  postponeToDate?: string | null
+  postponeReason?: string | null
+  postponeRequestedBy?: string | null
+  postponeRequestedAt?: string | null
 }
 
 export interface MixNotified { sent: boolean; to: string[]; reason?: string }
@@ -146,6 +151,15 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
     title: job.title, dueDate: job.dueDate?.slice(0, 10) ?? '', sourceLink: job.sourceLink ?? '', notes: job.notes ?? '',
   }
   const today = bangkokDateKey()
+  // v1.257 — คนถืองานเลื่อนกำหนดเองไม่ได้ ต้อง "ขอเลื่อน" ให้คนขอ/Producer อนุมัติ (กฎเดียวกับ route)
+  const canMoveDue = canMoveMixDueDate(actor, job)
+  const canAskPostpone = canRequestMixPostpone(actor, job)
+  const canDecidePostpone = canDecideMixPostpone(actor, job)
+  const pendingTo = status === 'IN_PROGRESS' && job.postponeToDate ? job.postponeToDate.slice(0, 10) : null
+  const [pp, setPp] = useState<{ toDate: string; reason: string } | null>(null)
+  const [ppErr, setPpErr] = useState<string | null>(null)
+  const dueKey = job.dueDate?.slice(0, 10) ?? null
+  const ppMin = dueKey && addDaysKey(dueKey, 1) > today ? addDaysKey(dueKey, 1) : today
 
   async function run(body: Record<string, unknown>) {
     setNotice(null)
@@ -196,6 +210,22 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
     setEditErr(null)
     const r = await run(Object.fromEntries(keys.map(k => [k, draft[k]])))
     if (r.ok) setDraft(null)
+  }
+
+  async function askPostpone(e: React.FormEvent) {
+    e.preventDefault()
+    if (!pp) return
+    if (!pp.reason.trim()) { setPpErr('ใส่เหตุผลที่ขอเลื่อนด้วย'); return }
+    setPpErr(null)
+    const r = await run({ postpone: { toDate: pp.toDate, reason: pp.reason } })
+    if (r.ok) setPp(null)
+  }
+
+  async function decidePostpone(approved: boolean) {
+    if (!pendingTo) return
+    if (!confirm(`${approved ? 'อนุมัติ' : 'ไม่อนุมัติ'}ให้เลื่อน ${job.code} เป็น ${pendingTo}?`)) return
+    // ส่งวันที่ที่เห็นไปด้วย — ถ้าคนทำเปลี่ยนคำขอระหว่างนี้ route ตอบ 409 ไม่อนุมัติวันที่ไม่ได้เห็น
+    await run({ postponeDecision: approved ? 'approve' : 'reject', postponeTo: pendingTo })
   }
 
   async function cancel() {
@@ -258,6 +288,38 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
         <p className="mt-1 text-[11px] text-amber-700 break-words">
           📅 ปฏิทินมิกซ์ซิงก์ไม่ได้: {job.calendarSyncError}
         </p>
+      )}
+
+      {/* ── v1.257 คำขอเลื่อนกำหนดส่งที่รออนุมัติ ── */}
+      {pendingTo && (
+        <div className="mt-2 p-2 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-900">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <CalendarClock size={13} className="shrink-0" />
+            <span>
+              <b className="font-medium">{short(job.postponeRequestedBy || '')}</b> ขอเลื่อนกำหนดส่งเป็น{' '}
+              <b className="font-medium">{dueLabel(job.postponeToDate!)}</b>
+            </span>
+          </div>
+          {job.postponeReason && <p className="mt-1 whitespace-pre-wrap break-words">เหตุผล: {job.postponeReason}</p>}
+          {canDecidePostpone ? (
+            <div className="mt-1.5 flex gap-1.5">
+              <button
+                onClick={() => decidePostpone(true)} disabled={busy}
+                className="px-2.5 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                อนุมัติ
+              </button>
+              <button
+                onClick={() => decidePostpone(false)} disabled={busy}
+                className="px-2.5 py-1 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              >
+                ไม่อนุมัติ
+              </button>
+            </div>
+          ) : (
+            <p className="mt-1 text-amber-700">รอคนขอ/Producer ของใบอนุมัติ — ระหว่างนี้กำหนดส่งยังเป็นวันเดิม</p>
+          )}
+        </div>
       )}
 
       {/* ── ส่งแล้ว: ลิงก์ไฟล์คือสิ่งที่คนขอมาหา ── */}
@@ -340,10 +402,12 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
             </label>
             {/* วันเดิมที่เลยมาแล้วต้องยังบันทึกได้ (แก้แค่โน้ต) — min จึงถอยไปที่วันเดิม */}
             <input
-              id={`mix-edit-due-${job.id}`} type="date" value={draft.dueDate} required={!!job.dueDate}
+              id={`mix-edit-due-${job.id}`} type="date" value={draft.dueDate} required={!!job.dueDate} disabled={!canMoveDue}
               min={original.dueDate && original.dueDate < today ? original.dueDate : today}
-              onChange={e => setDraft({ ...draft, dueDate: e.target.value })} className={EDIT_INPUT}
+              onChange={e => setDraft({ ...draft, dueDate: e.target.value })}
+              className={`${EDIT_INPUT} disabled:bg-gray-100 disabled:text-gray-500`}
             />
+            {!canMoveDue && <p className="mt-1 text-xs text-gray-500">เลื่อนกำหนดส่งใช้ปุ่ม &quot;ขอเลื่อน&quot; ให้คนขอ/Producer อนุมัติ</p>}
           </div>
           <div>
             <label htmlFor={`mix-edit-src-${job.id}`} className="block text-xs text-gray-500 mb-1">
@@ -372,6 +436,43 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
             </button>
             <button
               type="button" onClick={() => setDraft(null)}
+              className="px-3 py-1.5 text-xs rounded-md bg-white border border-gray-300 text-gray-600 hover:bg-gray-100"
+            >
+              ปิด
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* ── v1.257 ขอเลื่อนกำหนดส่ง (คนที่ถูกแจก) ── */}
+      {pp && canAskPostpone && (
+        <form onSubmit={askPostpone} className="mt-2 p-2.5 rounded-md border bg-amber-50 border-amber-200 space-y-2">
+          <div>
+            <label htmlFor={`mix-pp-date-${job.id}`} className="block text-xs text-gray-600 mb-1">ขอเลื่อนกำหนดส่งเป็น *</label>
+            <input
+              id={`mix-pp-date-${job.id}`} type="date" value={pp.toDate} min={ppMin} required
+              onChange={e => setPp({ ...pp, toDate: e.target.value })} className={EDIT_INPUT}
+            />
+          </div>
+          <div>
+            <label htmlFor={`mix-pp-reason-${job.id}`} className="block text-xs text-gray-600 mb-1">เหตุผล *</label>
+            <textarea
+              id={`mix-pp-reason-${job.id}`} value={pp.reason} rows={2} maxLength={500} required
+              placeholder="เช่น ไฟล์ต้นทางยังมาไม่ครบ / คิวมิกซ์ชนงานด่วน"
+              onChange={e => { setPp({ ...pp, reason: e.target.value }); setPpErr(null) }} className={EDIT_INPUT}
+            />
+          </div>
+          {ppErr && <p className="text-xs text-red-600">{ppErr}</p>}
+          <p className="text-xs text-gray-500">คนขอ (และ Producer ของใบ) จะได้อีเมลให้อนุมัติ · ระหว่างรอ กำหนดส่งยังเป็นวันเดิม</p>
+          <div className="flex gap-1.5">
+            <button
+              type="submit" disabled={busy}
+              className="px-3 py-1.5 text-xs rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              ส่งคำขอเลื่อน
+            </button>
+            <button
+              type="button" onClick={() => setPp(null)}
               className="px-3 py-1.5 text-xs rounded-md bg-white border border-gray-300 text-gray-600 hover:bg-gray-100"
             >
               ปิด
@@ -422,6 +523,15 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-50"
           >
             <Send size={11} /> ส่งงานแทน…
+          </button>
+        )}
+        {canAskPostpone && !pp && (
+          <button
+            onClick={() => { setNotice(null); setPpErr(null); setPp({ toDate: pendingTo ?? ppMin, reason: pendingTo ? job.postponeReason ?? '' : '' }) }}
+            disabled={busy}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+          >
+            <CalendarClock size={11} /> {pendingTo ? 'แก้คำขอเลื่อน' : 'ขอเลื่อน'}
           </button>
         )}
         {canEdit && !draft && (

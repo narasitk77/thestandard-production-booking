@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MIX_STATUSES, isMixStatus, formatMixNumber, canTransition,
-  canEditMixJob, canDeleteMixJob, canClaimMixJob, canAssignMixJob, canSetMixStatus, isAssignableTo,
+  canEditMixJob, canDeleteMixJob, canClaimMixJob, canMoveMixDueDate, canRequestMixPostpone, canDecideMixPostpone, validateMixPostpone, canAssignMixJob, canSetMixStatus, isAssignableTo,
   canCloseMixJob, normalizeHttpLink,
   mixFlag, deliveredOnTime, validateMixJob, compareMixQueue,
   normalizeMixQuery, resolveMixTarget, canSetDeliveryLink, episodeBelongsToBooking, findDuplicateMixJobs,
@@ -81,6 +81,47 @@ test('v1.256 Producer ของใบจองที่ผูกไว้แก�
     'มีคนรับแล้ว Producer ก็แก้ไม่ได้ — กฎเดียวกับคนขอ')
   assert.equal(canEditMixJob(producer, { ...byAssistant, bookingProducerEmail: null }), false, 'ไม่ได้เติมเจ้าของใบ = ไม่มีสิทธิ์จากทางนี้')
   assert.equal(canDeleteMixJob(producer, byAssistant), false, 'แก้ได้ ≠ ลบได้ — ลบยังเป็นของคนขอกับแอดมิน (v1.250)')
+})
+
+test('v1.257 คนถืองานแก้ช่องอื่นได้ แต่เลื่อนกำหนดส่งเองไม่ได้ — ต้องขอเลื่อน', () => {
+  assert.equal(canEditMixJob(engineer, claimed), true)
+  assert.equal(canMoveMixDueDate(engineer, claimed), false, 'เลื่อนกำหนดตัวเอง = งานช้ากลายเป็นทันในสถิติ')
+  assert.equal(canMoveMixDueDate(requester, queued), true, 'คนขอเลื่อนได้ก่อนแจก (เหมือนแก้ช่องอื่น)')
+  assert.equal(canMoveMixDueDate(requester, claimed), false)
+  assert.equal(canMoveMixDueDate(admin, claimed), true)
+  assert.equal(canMoveMixDueDate(engineer, { ...claimed, status: 'QUEUED', requesterEmail: engineer.email }), false,
+    'คนขอที่ถืองานเองด้วย: ดันกลับ QUEUED แล้วเลื่อนเอง = ทางอ้อม')
+  assert.equal(canRequestMixPostpone(engineer, claimed), true)
+  assert.equal(canRequestMixPostpone(engineer, { ...claimed, status: 'DONE' }), false, 'ส่งแล้วไม่มีอะไรให้เลื่อน')
+  assert.equal(canRequestMixPostpone(coordinator, claimed), false, 'คนอื่นในทีมขอแทนไม่ได้')
+  assert.equal(canRequestMixPostpone(requester, claimed), false)
+})
+
+test('v1.257 อนุมัติขอเลื่อน: คนขอ/Producer ของใบ (+แอดมิน) · คนที่ขอเลื่อนอนุมัติตัวเองไม่ได้', () => {
+  const pending = { ...claimed, postponeToDate: '2026-10-30', postponeRequestedBy: 'sound@thestandard.co', bookingProducerEmail: 'producer@thestandard.co' }
+  const producer: MixActor = { ...other, email: 'producer@thestandard.co' }
+  assert.equal(canDecideMixPostpone(requester, pending), true)
+  assert.equal(canDecideMixPostpone(producer, pending), true)
+  assert.equal(canDecideMixPostpone(admin, pending), true)
+  assert.equal(canDecideMixPostpone(engineer, pending), false, 'คนขอเลื่อนอนุมัติเองไม่ได้')
+  assert.equal(canDecideMixPostpone(coordinator, pending), false, 'Sound Admin ไม่ใช่คนจอง')
+  assert.equal(canDecideMixPostpone(requester, { ...pending, postponeRequestedBy: 'pd@thestandard.co' }), false,
+    'คนขอที่เป็นคนขอเลื่อนเองด้วย (เช่นถืองานเอง) ก็อนุมัติตัวเองไม่ได้')
+  assert.equal(canDecideMixPostpone(requester, { ...pending, postponeToDate: null }), false, 'ไม่มีคำขอค้าง')
+  assert.equal(canDecideMixPostpone(requester, { ...pending, status: 'DONE' }), false, 'งานจบแล้ว คำขอเก่าไม่มีความหมาย')
+})
+
+test('v1.257 ตรวจคำขอเลื่อน: รูปวันที่ · ไม่ย้อนหลัง · ต้องหลังกำหนดเดิม · ต้องมีเหตุผล', () => {
+  const today = '2026-10-02'
+  assert.deepEqual(validateMixPostpone({ toDate: '2026-10-10', reason: ' ไฟล์ไม่ครบ ' }, '2026-10-05', today),
+    { ok: true, value: { toDate: '2026-10-10', reason: 'ไฟล์ไม่ครบ' } })
+  assert.equal(validateMixPostpone({ toDate: '10/10/2026', reason: 'x' }, null, today).ok, false)
+  assert.equal(validateMixPostpone({ toDate: '2026-10-01', reason: 'x' }, null, today).ok, false, 'ย้อนหลัง')
+  assert.equal(validateMixPostpone({ toDate: '2026-10-05', reason: 'x' }, '2026-10-05', today).ok, false, 'วันเดิม = ไม่ได้เลื่อน')
+  assert.equal(validateMixPostpone({ toDate: '2026-10-04', reason: 'x' }, new Date('2026-10-05T00:00:00Z'), today).ok, false, 'เลื่อนเข้ามา')
+  assert.equal(validateMixPostpone({ toDate: '2026-10-10', reason: '  ' }, '2026-10-05', today).ok, false, 'ไม่มีเหตุผล')
+  assert.equal(validateMixPostpone({ toDate: '2026-10-10', reason: 'x'.repeat(501) }, null, today).ok, false)
+  assert.equal(validateMixPostpone(null, null, today).ok, false)
 })
 
 test('v1.250 ลบคำขอ: แอดมินทุกแถว · คนขอเฉพาะตอนยังไม่มีคนรับ · คนถืองานและ Sound Admin ลบไม่ได้', () => {

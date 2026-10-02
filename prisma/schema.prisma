@@ -1231,6 +1231,14 @@ model MixJob {
   deliveryLink String?
   notes      String?
 
+  /// v1.257 — **คำขอเลื่อนกำหนดส่งที่รออนุมัติ** · null = ไม่มีคำขอค้าง · คนถืองานขอ → คนขอ/Producer ของใบอนุมัติ
+  /// (นัท 2 ต.ค. 2569) · คนถืองานเลื่อนเองไม่ได้ เพราะ "ส่งทันไหม" ใน mix-stats คิดจากกำหนด ณ ตอนส่ง
+  /// · อนุมัติ = ย้ายไป dueDate แล้วล้างทั้งสี่ช่อง · ประวัติอยู่ใน audit_logs (mix.update) + MixJobEvent DUE_CHANGED
+  postponeToDate      DateTime? @db.Date
+  postponeReason      String?
+  postponeRequestedBy String?
+  postponeRequestedAt DateTime?
+
   /// soft delete — ทั้งรีโปนี้ไม่มีการลบถาวร
   deletedAt      DateTime?
   createdByEmail String?

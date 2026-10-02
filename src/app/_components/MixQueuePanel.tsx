@@ -17,7 +17,7 @@ import MixRequestForm from '@/app/_components/MixRequestForm'
 import MixJobCard, { type MixJobView, type MixActResult, type SoundMember } from '@/app/_components/MixJobCard'
 import { MixLoadCalendar } from '@/app/_components/MixLoadCalendar'
 import MixStatsDashboard from '@/app/_components/MixStatsDashboard'
-import { MIX_STATUS_LABEL, mixFlag, type MixActor } from '@/lib/mix-jobs'
+import { MIX_STATUS_LABEL, canDecideMixPostpone, mixFlag, type MixActor } from '@/lib/mix-jobs'
 import { canViewMixStats } from '@/lib/mix-stats'
 
 export interface MixQueuePanelProps {
@@ -194,6 +194,8 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
   const queued = jobs.filter(j => j.status === 'QUEUED').length
   const assigned = jobs.filter(j => j.status === 'IN_PROGRESS').length
   const overdue = jobs.filter(j => j.flag === 'OVERDUE').length
+  // v1.257 — คำขอเลื่อนที่รอคนนี้ตัดสิน (คนขอ/Producer) — ให้เห็นตั้งแต่บรรทัดสรุป ไม่ต้องไล่หาในการ์ด
+  const awaitingMe = actor ? jobs.filter(j => canDecideMixPostpone(actor, j)).length : 0
   // Array.sort เสถียร → ในแต่ละกลุ่มยังเรียงตามลำดับของเซิร์ฟเวอร์ (compareMixQueue: กำหนดส่งก่อน)
   const shown = queuedFirst
     ? [...jobs].sort((a, b) => Number(queuedAtLoad.has(b.id)) - Number(queuedAtLoad.has(a.id)))
@@ -210,6 +212,7 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
                 <h2 className="text-lg font-medium text-gray-800">🎚 งานมิกซ์เสียง</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
                   คำขอที่คุณส่ง และคำขอของใบจองที่คุณเป็น Producer · กด &quot;แก้ไข&quot; ได้จนกว่า Sound Admin จะแจกงาน
+                  · ทีมเสียงขอเลื่อนกำหนดส่ง = อนุมัติที่การ์ด
                 </p>
               </>
             ) : isAdmin ? (
@@ -246,6 +249,7 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
             <span>{MIX_STATUS_LABEL.QUEUED} รอแจก <b className="text-gray-900">{queued}</b></span>
             <span>{MIX_STATUS_LABEL.IN_PROGRESS} <b className="text-blue-700">{assigned}</b></span>
             <span className={overdue > 0 ? 'text-red-600' : ''}>เลยกำหนด <b>{overdue}</b></span>
+            {awaitingMe > 0 && <span className="text-amber-700">ขอเลื่อนรอคุณอนุมัติ <b>{awaitingMe}</b></span>}
           </div>
         )}
       </header>

@@ -174,3 +174,59 @@ export async function notifyMixDelivered(
     return { sent: false, to, reason: e?.message || 'ส่งไม่สำเร็จ' }
   }
 }
+
+/** v1.257 — ส่งเมลหนึ่งฉบับ คืนผลจริง (ใครได้รับ/ทำไมไม่ออก) · ไม่ throw: เมลล้มต้องไม่ย้อนการตัดสินใจที่บันทึกแล้ว */
+async function sendMixMail(recipients: string[], subject: string, text: string, tag: string): Promise<MixNotifyResult> {
+  const to = dropSender(recipients, process.env.SMTP_USER || process.env.EMAIL_FROM)
+  if (to.length === 0) return { sent: false, to: [], reason: 'ไม่มีผู้รับที่ส่งถึงได้' }
+  if (!isEmailConfigured()) return { sent: false, to, reason: 'ยังไม่ได้ตั้งค่าเมล' }
+  try {
+    await sendEmail({ to: to.join(','), subject, text })
+    return { sent: true, to }
+  } catch (e: any) {
+    console.error(`[mix-notify] ${tag} failed:`, e?.message || e)
+    return { sent: false, to, reason: e?.message || 'ส่งไม่สำเร็จ' }
+  }
+}
+
+/**
+ * v1.257 — คนถืองานขอเลื่อนกำหนดส่ง → **คนขอ + Producer ของใบ** (นัท: "แจ้งไปให้คนจองอนุมัติ")
+ * · ลิงก์หลัก /mix (คิวปัจจุบันมีงาน IN_PROGRESS ทุกงาน) — /mix?scope=mine ไม่นับ Producer ของใบที่ไม่ได้ขอเอง
+ * · /producer เป็นทางที่สองสำหรับ Producer (คนขอที่ไม่ใช่ Producer เปิดไม่ได้)
+ */
+export async function notifyMixPostponeRequested(
+  job: MixNotifyJob,
+  approvers: Array<string | null | undefined>,
+  by: string,
+  toDate: string,
+  reason: string,
+): Promise<MixNotifyResult> {
+  // คนที่ขอเลื่อนอนุมัติตัวเองไม่ได้ (canDecideMixPostpone) → ส่งหาเขา = ไม่มีคนอนุมัติรู้ แต่การ์ดขึ้นว่าส่งแล้ว (ผู้ตรวจ v1.257)
+  const to = approvers.filter((e): e is string => !!e && e.toLowerCase() !== by.toLowerCase())
+  if (to.length === 0) return { sent: false, to: [], reason: 'ไม่มีคนขอ/Producer คนอื่นที่อนุมัติได้ — ให้แอดมินอนุมัติ' }
+  return sendMixMail(
+    to,
+    `[คิวมิกซ์] ${formatMixNumber(job.number)} ขอเลื่อนกำหนดส่งเป็น ${toDate} — รอคุณอนุมัติ`,
+    body(job, `${by} ขอเลื่อนกำหนดส่งเป็น ${toDate}\nเหตุผล: ${reason}\n\nกด "อนุมัติ" หรือ "ไม่อนุมัติ" ที่การ์ดของงานนี้`,
+      '/mix', ['เมนู Producer: {url}/producer']),
+    'postpone-requested',
+  )
+}
+
+/** v1.257 — ตัดสินคำขอเลื่อนแล้ว → คนที่ขอเลื่อน (+ coordinator จะได้เห็นภาระที่เปลี่ยน) */
+export async function notifyMixPostponeDecided(
+  job: MixNotifyJob,
+  requestedBy: string,
+  by: string,
+  approved: boolean,
+  toDate: string,
+): Promise<MixNotifyResult> {
+  return sendMixMail(
+    [requestedBy, ...soundCoordinatorEmails()],
+    `[คิวมิกซ์] ${formatMixNumber(job.number)} ${approved ? `อนุมัติเลื่อนเป็น ${toDate}` : 'ไม่อนุมัติการขอเลื่อน'}`,
+    body(job, approved
+      ? `${by} อนุมัติให้เลื่อนกำหนดส่งเป็น ${toDate} แล้ว`
+      : `${by} ไม่อนุมัติการขอเลื่อนเป็น ${toDate} — กำหนดส่งยังเป็นวันเดิม`, '/mix?scope=mine'),
+    'postpone-decided',
+  )
+}
