@@ -139,4 +139,27 @@ export async function openMixJobsFor(bookingIds: string[]): Promise<OpenMixJobVi
   }))
 }
 
+/**
+ * v1.256 — เติม Producer ของใบจองให้แถวคำขอมิกซ์ ให้ canEditMixJob ตัดสินจากข้อมูลชุดเดียวกันทั้ง GET
+ * (ปุ่มบนการ์ด) และ PATCH (route) · ใบที่ลบแล้วไม่ให้สิทธิ์ (เหมือน producerEditMode)
+ */
+export async function attachBookingProducer<T extends { bookingId: string | null }>(rows: T[]) {
+  const ids = Array.from(new Set(rows.map(r => r.bookingId).filter((id): id is string => !!id)))
+  const bookings = ids.length === 0 ? [] : await prisma.booking.findMany({
+    where: { id: { in: ids }, deletedAt: null },
+    select: { id: true, producerEmail: true },
+  })
+  const producerOf = new Map(bookings.map(b => [b.id, b.producerEmail]))
+  return rows.map(r => ({ ...r, bookingProducerEmail: (r.bookingId && producerOf.get(r.bookingId)) || null }))
+}
+
+/** v1.256 — ใบจองที่คนนี้เป็น Producer (นิยามเดียวกับ GET /api/bookings?scope=producer) */
+export async function producerBookingIds(email: string): Promise<string[]> {
+  const rows = await prisma.booking.findMany({
+    where: { deletedAt: null, producerEmail: { equals: email, mode: 'insensitive' } },
+    select: { id: true },
+  })
+  return rows.map(r => r.id)
+}
+
 export type { MixTargetPick }

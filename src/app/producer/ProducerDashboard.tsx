@@ -5,6 +5,7 @@ import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useState, useCallback } from 'react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 import { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
+import MixQueuePanel from '@/app/_components/MixQueuePanel'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -90,6 +91,8 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
   const [flash, setFlash] = useState('')
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
   const [pickedDate, setPickedDate] = useState('')
+  // v1.256 — นัท 2 ต.ค. 2569: งานมิกซ์เสียงดู/แก้ได้จากเมนู Producer เหมือนงานถ่าย
+  const [tab, setTab] = useState<'shoots' | 'mix'>('shoots')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -161,12 +164,27 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
         </a>
       </div>
 
+      <div className="mb-4 inline-flex rounded-md border border-gray-200 overflow-hidden">
+        {([['shoots', '🎬 งานถ่ายทำ'], ['mix', '🎚 งานมิกซ์เสียง']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            className={`px-3 py-1.5 text-sm ${key === 'mix' ? 'border-l border-gray-200 ' : ''}${
+              tab === key ? 'bg-[#673ab7] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {flash && (
         <div className="mb-4 rounded bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-blue-800">{flash}</div>
       )}
 
       {/* v1.147 — filter by shoot day */}
-      <div className="mb-4 flex items-center gap-1.5 flex-wrap">
+      {tab === 'shoots' && <div className="mb-4 flex items-center gap-1.5 flex-wrap">
         {DATE_FILTER_CHIPS.map(c => (
           <button
             key={c.key}
@@ -192,9 +210,11 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
           }`}
           aria-label="เลือกวันถ่าย"
         />
-      </div>
+      </div>}
 
-      {loading ? (
+      {tab === 'mix' ? (
+        <MixQueuePanel variant="producer" />
+      ) : loading ? (
         <p className="text-sm text-gray-400">Loading…</p>
       ) : bookings.length === 0 ? (
         <p className="text-sm text-gray-400">ยังไม่มีงานที่คุณเป็น Producer</p>

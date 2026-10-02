@@ -51,6 +51,11 @@ export interface MixJobLike {
   dueDate?: Date | string | null
   deliveredAt?: Date | string | null
   deletedAt?: Date | string | null
+  /**
+   * v1.256 — Producer ของใบจองที่ผูกไว้ · ไม่ใช่คอลัมน์ของ MixJob — route เติมจาก bookings
+   * (ดู attachBookingProducer) · ไม่ได้เติม = ไม่มีสิทธิ์จากทางนี้ (ปลอดภัยฝั่งปฏิเสธ)
+   */
+  bookingProducerEmail?: string | null
 }
 
 export interface MixActor {
@@ -107,11 +112,16 @@ function sameEmail(a: string | null | undefined, b: string | null | undefined): 
  * คนขอแก้ของตัวเองได้ **เฉพาะตอนยังไม่มีใครรับ** — พอทีมเสียงเริ่มทำแล้ว การแก้
  * โจทย์กลางคันคือการเปลี่ยนงานที่คนอื่นลงแรงไปแล้วโดยเขาไม่รู้ตัว ถ้าจำเป็นจริง
  * ให้คุยกันแล้วให้คนที่รับงานหรือแอดมินเป็นคนแก้
+ *
+ * v1.256 — Producer ของใบจองที่ผูกไว้แก้ได้เท่าคนขอ — นัท 2 ต.ค. 2569 "ให้เขาแก้ไขงาน Mixing ได้เหมือน
+ * งานอื่นๆ ในเมนู Producer" · ผู้ช่วยกดขอแทน Producer ก็ยังแก้ได้ · ชุดคนที่แก้ได้ = ชุดที่แท็บมิกซ์ในเมนู
+ * Producer แสดง (GET scope=producer) พอดี — ไม่รวมคนสร้างใบ ไม่งั้นแก้ได้แต่หางานในเมนูไม่เจอ
  */
 export function canEditMixJob(actor: MixActor, job: MixJobLike): boolean {
   if (actor.canEditAll) return true
   if (sameEmail(job.assigneeEmail, actor.email)) return true
-  if (sameEmail(job.requesterEmail, actor.email)) return (job.status || 'QUEUED') === 'QUEUED'
+  const owner = sameEmail(job.requesterEmail, actor.email) || sameEmail(job.bookingProducerEmail, actor.email)
+  if (owner) return (job.status || 'QUEUED') === 'QUEUED'
   return false
 }
 

@@ -73,6 +73,16 @@ test('คนที่รับงานแก้ได้ตลอด · คน�
   assert.equal(canEditMixJob(admin, claimed), true)
 })
 
+test('v1.256 Producer ของใบจองที่ผูกไว้แก้คำขอได้เท่าคนขอ (ผู้ช่วยกดขอแทน)', () => {
+  const producer: MixActor = { ...other, email: 'Producer@thestandard.co' }
+  const byAssistant = { ...queued, requesterEmail: 'pa@thestandard.co', bookingProducerEmail: 'producer@thestandard.co' }
+  assert.equal(canEditMixJob(producer, byAssistant), true, 'Producer ของใบ · ตัวพิมพ์ไม่มีผล')
+  assert.equal(canEditMixJob(producer, { ...byAssistant, status: 'IN_PROGRESS', assigneeEmail: 'sound@thestandard.co' }), false,
+    'มีคนรับแล้ว Producer ก็แก้ไม่ได้ — กฎเดียวกับคนขอ')
+  assert.equal(canEditMixJob(producer, { ...byAssistant, bookingProducerEmail: null }), false, 'ไม่ได้เติมเจ้าของใบ = ไม่มีสิทธิ์จากทางนี้')
+  assert.equal(canDeleteMixJob(producer, byAssistant), false, 'แก้ได้ ≠ ลบได้ — ลบยังเป็นของคนขอกับแอดมิน (v1.250)')
+})
+
 test('v1.250 ลบคำขอ: แอดมินทุกแถว · คนขอเฉพาะตอนยังไม่มีคนรับ · คนถืองานและ Sound Admin ลบไม่ได้', () => {
   const done = { ...claimed, status: 'DONE' }
   const overdueHeld = { ...claimed, dueDate: '2026-01-01' }

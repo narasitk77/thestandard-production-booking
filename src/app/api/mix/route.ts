@@ -2,6 +2,7 @@
  * v1.215 — GET/POST /api/mix — คิวงานมิกซ์เสียง
  *
  * GET  ?scope=open|mine|all   คิวปัจจุบัน (ค่าเริ่มต้น open = ยังไม่จบ)
+ *      ?scope=producer        v1.256 เมนู Producer: ที่ฉันขอ + ที่ผูกกับใบจองที่ฉันเป็น Producer (ทุกสถานะ)
  * POST                        ตั้งคำขอมิกซ์ · **ใครที่ล็อกอินก็ขอได้**
  *
  * ทำไมใครก็ขอได้: คนขอมิกซ์คือโปรดิวเซอร์/คนตัด/ใครก็ตามที่มีงาน ถ้ากั้นด้วย role
@@ -19,6 +20,7 @@ import {
 import { notifyMixRequested } from '@/lib/mix-notify'
 import { syncMixJobCalendar, mixCalendarAuditNote, mixCalendarId } from '@/lib/mix-calendar'
 import { mixEventData } from '@/lib/mix-stats'
+import { attachBookingProducer, producerBookingIds } from '@/lib/mix-targets'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,6 +53,9 @@ export async function GET(request: NextRequest) {
       ? { deletedAt: null, bookingId }
       : scope === 'mine'
         ? { deletedAt: null, OR: [{ requesterEmail: session.email }, { assigneeEmail: session.email }] }
+        // v1.256 — นับใบที่ฉันเป็น Producer ด้วย ไม่ใช่แค่ที่ฉันกดขอ (บทเรียน v1.196: ผู้ช่วยกดแทนแล้ว Producer มองไม่เห็น)
+        : scope === 'producer'
+          ? { deletedAt: null, OR: [{ requesterEmail: session.email }, { bookingId: { in: await producerBookingIds(session.email) } }] }
         : scope === 'all'
           ? { deletedAt: null }
           : { deletedAt: null, status: { in: [...OPEN_MIX_STATUSES] } }
@@ -68,7 +73,8 @@ export async function GET(request: NextRequest) {
     ])
 
     const calendarOn = !!mixCalendarId()
-    const jobs = rows
+    // v1.256 — Producer ของใบไปกับทุกแถว ให้ปุ่ม "แก้ไข" บนการ์ดตัดสินด้วยข้อมูลเดียวกับ PATCH
+    const jobs = (await attachBookingProducer(rows))
       .sort(compareMixQueue)
       // ปิดปฏิทินมิกซ์แล้ว (ล้าง MIX_CALENDAR_ID) = error เก่าไม่มีความหมาย ไม่ให้ค้างบนการ์ดตลอดไป
       .map((j) => ({ ...j, calendarSyncError: calendarOn ? j.calendarSyncError : null, code: formatMixNumber(j.number), flag: mixFlag(j) }))

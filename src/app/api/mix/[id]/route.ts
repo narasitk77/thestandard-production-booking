@@ -17,6 +17,7 @@ import {
 } from '@/lib/mix-jobs'
 import { notifyMixAssigned, notifyMixDelivered } from '@/lib/mix-notify'
 import { syncMixJobCalendar, mixCalendarAuditNote } from '@/lib/mix-calendar'
+import { attachBookingProducer } from '@/lib/mix-targets'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,8 +45,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const access = await getSoundAccess(session.email, session.role)
     if (!access.canOpen) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const existing = await load(params.id)
-    if (!existing) return NextResponse.json({ error: 'ไม่พบงานนี้' }, { status: 404 })
+    const found = await load(params.id)
+    if (!found) return NextResponse.json({ error: 'ไม่พบงานนี้' }, { status: 404 })
+    // v1.256 — Producer ของใบจองที่ผูกไว้แก้คำขอได้ (canEditMixJob) · ชุดเดียวกับที่ GET ส่งให้การ์ด
+    const [existing] = await attachBookingProducer([found])
 
     const actor: MixActor = {
       email: session.email,
@@ -144,7 +147,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (editing) {
       if (!canEditMixJob(actor, existing)) {
         return NextResponse.json(
-          { error: 'แก้ได้เฉพาะคำขอของตัวเองที่ยังไม่มีคนรับ หรืองานที่ตัวเองรับไว้' },
+          { error: 'แก้ได้เฉพาะคำขอของตัวเอง (หรือของใบจองที่คุณเป็น Producer) ที่ยังไม่มีคนรับ หรืองานที่ตัวเองรับไว้' },
           { status: 403 },
         )
       }
@@ -156,7 +159,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         dueDate: 'dueDate' in body ? body.dueDate : existing.dueDate?.toISOString().slice(0, 10),
         sourceLink: 'sourceLink' in body ? body.sourceLink : existing.sourceLink,
         notes: 'notes' in body ? body.notes : existing.notes,
-      })
+      // v1.256 — ตอนขอบังคับวันที่ (v1.244) · แก้แล้วล้างวันที่ทิ้งไม่ได้ · แถวเก่าที่ไม่มีวันที่ยังแก้ช่องอื่นได้
+      }, { requireDueDate: 'dueDate' in body })
       if (!merged.ok) return NextResponse.json({ error: merged.error }, { status: 400 })
       data.title = merged.value.title
       data.dueDate = merged.value.dueDate ? new Date(`${merged.value.dueDate}T00:00:00Z`) : null

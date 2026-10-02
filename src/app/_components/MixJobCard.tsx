@@ -13,9 +13,9 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Check, Clock, ExternalLink, Loader2, RotateCcw, Send, Trash2, UserPlus } from 'lucide-react'
+import { Check, Clock, ExternalLink, Loader2, Pencil, RotateCcw, Send, Trash2, UserPlus } from 'lucide-react'
 import {
-  MIX_STATUS_LABEL, MIX_STATUS_HINT, MIX_FLAG_LABEL, canAssignMixJob, canClaimMixJob,
+  MIX_STATUS_LABEL, MIX_STATUS_HINT, MIX_FLAG_LABEL, bangkokDateKey, canAssignMixJob, canClaimMixJob,
   canEditMixJob, canDeleteMixJob, canSetMixStatus, normalizeHttpLink, type MixActor, type MixFlag, type MixStatus,
 } from '@/lib/mix-jobs'
 
@@ -43,6 +43,8 @@ export interface MixJobView {
   flag: MixFlag
   /** v1.245 — ซิงก์ปฏิทินมิกซ์ครั้งล่าสุดล้มเพราะอะไร (null = ผ่าน / ปิดอยู่) */
   calendarSyncError?: string | null
+  /** v1.256 — Producer ของใบจองที่ผูกไว้ (GET เติมให้) · ใช้ตัดสินปุ่ม "แก้ไข" ด้วยกฎเดียวกับ PATCH */
+  bookingProducerEmail?: string | null
 }
 
 export interface MixNotified { sent: boolean; to: string[]; reason?: string }
@@ -97,6 +99,9 @@ function whenLabel(iso: string): string {
 
 type Notice = { tone: 'ok' | 'warn' | 'err'; text: string }
 
+type EditDraft = { title: string; dueDate: string; sourceLink: string; notes: string }
+const EDIT_INPUT = 'w-full min-w-0 px-2.5 py-1.5 text-sm border border-gray-300 rounded-md bg-white'
+
 const NOTICE_STYLE: Record<Notice['tone'], string> = {
   ok: 'bg-green-50 border-green-200 text-green-800',
   warn: 'bg-amber-50 border-amber-300 text-amber-800',
@@ -134,6 +139,13 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
   // canTransition ยอม X→X (บันทึกซ้ำไม่พัง) → ต้องกันสถานะปัจจุบันเอง ไม่งั้นการ์ดที่ยกเลิกแล้วมีปุ่มยกเลิก
   const canCancel = status !== 'CANCELLED' && canSetMixStatus(actor, job, 'CANCELLED')
   const canDelete = canDeleteMixJob(actor, job) // v1.250 — กฎเดียวกับ route DELETE
+  const canEdit = canEditMixJob(actor, job) // v1.256 — กฎเดียวกับ route PATCH (แก้รายละเอียด)
+  const [draft, setDraft] = useState<EditDraft | null>(null)
+  const [editErr, setEditErr] = useState<string | null>(null)
+  const original: EditDraft = {
+    title: job.title, dueDate: job.dueDate?.slice(0, 10) ?? '', sourceLink: job.sourceLink ?? '', notes: job.notes ?? '',
+  }
+  const today = bangkokDateKey()
 
   async function run(body: Record<string, unknown>) {
     setNotice(null)
@@ -163,6 +175,27 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
   async function reopen() {
     if (!confirm(`เปิด ${job.code} กลับเป็น ${MIX_STATUS_LABEL.IN_PROGRESS}? (วันที่ส่งจะถูกล้าง ส่งใหม่ได้ภายหลัง)`)) return
     await run({ status: 'IN_PROGRESS' })
+  }
+
+  function startEdit() {
+    setNotice(null)
+    setEditErr(null)
+    setDraft(original)
+  }
+
+  // v1.256 — ส่งเฉพาะช่องที่เปลี่ยน: ประวัติ (changes.edited) บอกได้ว่าแก้อะไรจริง
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!draft) return
+    if (draft.sourceLink.trim() && !normalizeHttpLink(draft.sourceLink)) {
+      setEditErr('ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://')
+      return
+    }
+    const keys = (Object.keys(draft) as (keyof EditDraft)[]).filter(k => draft[k].trim() !== original[k].trim())
+    if (keys.length === 0) { setDraft(null); return }
+    setEditErr(null)
+    const r = await run(Object.fromEntries(keys.map(k => [k, draft[k]])))
+    if (r.ok) setDraft(null)
   }
 
   async function cancel() {
@@ -290,6 +323,63 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
         </form>
       )}
 
+      {/* ── v1.256 แก้รายละเอียด (คนขอ/Producer ของใบ ก่อนมีคนรับ · คนถืองาน · แอดมิน) ── */}
+      {/* canEdit ซ้ำตรงนี้: งานถูกแจกระหว่างเปิดฟอร์ม → โหลดใหม่แล้วฟอร์มต้องหาย ไม่ค้างให้กดแล้ว 403 วนไป */}
+      {draft && canEdit && (
+        <form onSubmit={saveEdit} className="mt-2 p-2.5 rounded-md border bg-gray-50 border-gray-200 space-y-2">
+          <div>
+            <label htmlFor={`mix-edit-title-${job.id}`} className="block text-xs text-gray-500 mb-1">ชื่องานที่จะมิกซ์ *</label>
+            <input
+              id={`mix-edit-title-${job.id}`} value={draft.title} required maxLength={200}
+              onChange={e => setDraft({ ...draft, title: e.target.value })} className={EDIT_INPUT}
+            />
+          </div>
+          <div>
+            <label htmlFor={`mix-edit-due-${job.id}`} className="block text-xs text-gray-500 mb-1">
+              วันที่ต้องการไฟล์{job.dueDate ? ' *' : ''}
+            </label>
+            {/* วันเดิมที่เลยมาแล้วต้องยังบันทึกได้ (แก้แค่โน้ต) — min จึงถอยไปที่วันเดิม */}
+            <input
+              id={`mix-edit-due-${job.id}`} type="date" value={draft.dueDate} required={!!job.dueDate}
+              min={original.dueDate && original.dueDate < today ? original.dueDate : today}
+              onChange={e => setDraft({ ...draft, dueDate: e.target.value })} className={EDIT_INPUT}
+            />
+          </div>
+          <div>
+            <label htmlFor={`mix-edit-src-${job.id}`} className="block text-xs text-gray-500 mb-1">
+              ลิงก์ไฟล์ต้นทาง{job.bookingId ? '' : ' *'}
+            </label>
+            <input
+              id={`mix-edit-src-${job.id}`} value={draft.sourceLink} required={!job.bookingId} inputMode="url"
+              placeholder="https://drive.google.com/…"
+              onChange={e => { setDraft({ ...draft, sourceLink: e.target.value }); setEditErr(null) }} className={EDIT_INPUT}
+            />
+          </div>
+          <div>
+            <label htmlFor={`mix-edit-notes-${job.id}`} className="block text-xs text-gray-500 mb-1">โน้ตถึงทีมเสียง</label>
+            <textarea
+              id={`mix-edit-notes-${job.id}`} value={draft.notes} rows={2} maxLength={4000}
+              onChange={e => setDraft({ ...draft, notes: e.target.value })} className={EDIT_INPUT}
+            />
+          </div>
+          {editErr && <p className="text-xs text-red-600">{editErr}</p>}
+          <div className="flex gap-1.5">
+            <button
+              type="submit" disabled={busy}
+              className="px-3 py-1.5 text-xs rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              บันทึก
+            </button>
+            <button
+              type="button" onClick={() => setDraft(null)}
+              className="px-3 py-1.5 text-xs rounded-md bg-white border border-gray-300 text-gray-600 hover:bg-gray-100"
+            >
+              ปิด
+            </button>
+          </div>
+        </form>
+      )}
+
       {/* ── ปุ่มตามสิทธิ์ ── */}
       <div className="mt-2 flex items-center gap-1.5 flex-wrap">
         {canAssign && soundTeam.length > 0 && (
@@ -332,6 +422,14 @@ export default function MixJobCard({ job, actor, soundTeam, busy, onAct, onRemov
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-50"
           >
             <Send size={11} /> ส่งงานแทน…
+          </button>
+        )}
+        {canEdit && !draft && (
+          <button
+            onClick={startEdit} disabled={busy}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Pencil size={11} /> แก้ไข
           </button>
         )}
         {canCancel && (

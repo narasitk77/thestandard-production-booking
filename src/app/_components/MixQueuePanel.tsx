@@ -21,12 +21,15 @@ import { MIX_STATUS_LABEL, mixFlag, type MixActor } from '@/lib/mix-jobs'
 import { canViewMixStats } from '@/lib/mix-stats'
 
 export interface MixQueuePanelProps {
-  /** 'page' = หน้า /mix (ทุกคน) · 'admin' = แท็บ "คิว Mixing" ในหน้าแอดมิน (Sound Admin) */
-  variant: 'page' | 'admin'
+  /**
+   * 'page' = หน้า /mix (ทุกคน) · 'admin' = แท็บ "คิว Mixing" ในหน้าแอดมิน (Sound Admin)
+   * · 'producer' = v1.256 แท็บในเมนู Producer: เฉพาะ scope=producer รายการอย่างเดียว ไม่มีแท็บ/ปฏิทิน
+   */
+  variant: 'page' | 'admin' | 'producer'
   initialScope?: 'open' | 'mine' | 'all'
 }
 
-type Scope = 'open' | 'mine' | 'all'
+type Scope = 'open' | 'mine' | 'all' | 'producer'
 
 interface Me { email: string; isSound: boolean; isCoordinator: boolean; canEditAll: boolean; canCreate: boolean }
 
@@ -45,7 +48,8 @@ const FLASH_STYLE: Record<Flash['tone'], string> = {
 
 export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQueuePanelProps) {
   const isAdmin = variant === 'admin'
-  const [scope, setScope] = useState<Scope>(initialScope)
+  const isProducer = variant === 'producer'
+  const [scope, setScope] = useState<Scope>(isProducer ? 'producer' : initialScope)
   const [loadedScope, setLoadedScope] = useState<Scope | null>(null)
   const [jobs, setJobs] = useState<MixJobView[]>([])
   const [me, setMe] = useState<Me | null>(null)
@@ -68,9 +72,10 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
   // สลับแท็บเร็ว ๆ แล้วคำตอบเก่ามาถึงทีหลัง = ลิสต์ของแท็บหนึ่งโชว์ใต้ชื่ออีกแท็บ
   const seq = useRef(0)
 
-  const load = useCallback(async (s: Scope) => {
+  // quiet = ไม่สลับเป็น spinner: การ์ดยังอยู่ ผลแจ้งเตือน/ฟอร์มบนการ์ดไม่หายไปกับการโหลด (ใช้หลัง 403/409)
+  const load = useCallback(async (s: Scope, quiet = false) => {
     const my = ++seq.current
-    setLoading(true)
+    if (!quiet) setLoading(true)
     setError(null)
     try {
       const res = await fetch(`/api/mix?scope=${s}`)
@@ -110,7 +115,9 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
-        if (res.status === 409) load(scope) // มีคนแก้งานนี้ไปก่อน — เอาสถานะจริงมาแสดงแทนของเก่าบนการ์ด
+        // 409 มีคนแก้งานนี้ไปก่อน · 403 ปุ่มบนการ์ดคิดจากสถานะเก่า (เช่นถูกแจกไปแล้ว) — เอาสถานะจริงมาแทน
+        // แบบเงียบ ไม่งั้น spinner ถอดการ์ดทิ้งพร้อมข้อความ error ที่คนกดยังไม่ได้อ่าน (ผู้ตรวจ v1.256)
+        if (res.status === 409 || res.status === 403) load(scope, true)
         return { ok: false, error: data?.error || `บันทึกไม่สำเร็จ (${res.status})` }
       }
       if (data?.job) {
@@ -194,11 +201,18 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
   const listReady = !loading && !error && loadedScope === scope
 
   return (
-    <div className={isAdmin ? '' : 'max-w-4xl mx-auto px-4 py-6'}>
+    <div className={isAdmin || isProducer ? '' : 'max-w-4xl mx-auto px-4 py-6'}>
       <header className="mb-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
-            {isAdmin ? (
+            {isProducer ? (
+              <>
+                <h2 className="text-lg font-medium text-gray-800">🎚 งานมิกซ์เสียง</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  คำขอที่คุณส่ง และคำขอของใบจองที่คุณเป็น Producer · กด &quot;แก้ไข&quot; ได้จนกว่า Sound Admin จะแจกงาน
+                </p>
+              </>
+            ) : isAdmin ? (
               <>
                 <h2 className="text-lg font-medium text-gray-800">🎚 คิว Mixing</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
@@ -257,8 +271,8 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
         </div>
       )}
 
-      {/* ── มุมมอง + แท็บ ── */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
+      {/* ── มุมมอง + แท็บ ── (เมนู Producer ดูรายการของตัวเองอย่างเดียว: คลิกงานในปฏิทินจะพาไปแท็บทั้งหมด) */}
+      {!isProducer && <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="inline-flex rounded-md border border-gray-200 overflow-hidden">
           <button
             onClick={() => setView('list')}
@@ -308,7 +322,7 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
             {MIX_STATUS_LABEL.QUEUED} (ยังไม่แจก) ขึ้นก่อน
           </label>
         )}
-      </div>
+      </div>}
 
       {view === 'stats' && canSeeStats ? (
         <MixStatsDashboard />
@@ -337,7 +351,8 @@ export default function MixQueuePanel({ variant, initialScope = 'open' }: MixQue
       ) : jobs.length === 0 ? (
         <div className="py-16 text-center text-gray-400 text-sm">
           {/* "ยังไม่มีใครขอ" กับ "คุณยังไม่มีงาน" คนละเรื่อง */}
-          {scope === 'mine' ? 'คุณยังไม่มีงานมิกซ์ในระบบ' : scope === 'open' ? 'ไม่มีงานมิกซ์ค้างในคิว' : 'ยังไม่มีคำขอมิกซ์'}
+          {scope === 'producer' ? 'ยังไม่มีคำขอมิกซ์ของคุณ หรือของใบจองที่คุณเป็น Producer'
+            : scope === 'mine' ? 'คุณยังไม่มีงานมิกซ์ในระบบ' : scope === 'open' ? 'ไม่มีงานมิกซ์ค้างในคิว' : 'ยังไม่มีคำขอมิกซ์'}
         </div>
       ) : (
         <>
