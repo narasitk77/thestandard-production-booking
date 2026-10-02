@@ -27,7 +27,6 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("PROBOOK_BASE", "https://probook.xtec9.xyz").rstrip("/")
 STATE = os.path.expanduser("~/.hermes/state/probook/worker-check.json")
 TIMEOUT = 20
 RETRY_DELAYS = (20, 60, 120)  # เน็ตของเครื่องนี้สะดุดเป็นชั่วโมงได้ (DNS ล่ม 11:03–12:00 วันที่ 19 ส.ค.)
@@ -113,6 +112,11 @@ def env_val(key):
     except Exception:
         pass
     return ""
+
+
+# 2026-10-02: probook.xtec9.xyz ตอบ 404 แล้ว (ย้ายโดเมน 30 ก.ย.) · ย้ายอีกรอบ = แก้ PROBOOK_BASE ใน probook.env
+# (อยู่ใต้ env_val เพราะต้องอ่าน probook.env — get()/footage-ready ใช้ BASE ตอนเรียก ไม่ใช่ตอน import)
+BASE = (env_val("PROBOOK_BASE") or "https://probook.thestandard.co").rstrip("/")
 
 
 def fetch_container_logs():

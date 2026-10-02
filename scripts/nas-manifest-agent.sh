@@ -14,10 +14,12 @@
 
 set -euo pipefail
 
-MOUNT="${NAS_MOUNT:-/Volumes/production team}"
-URL="${PROBOOK_URL:-https://probook.xtec9.xyz}/api/internal/nas-manifest"
+# env file first, so PROBOOK_URL / NAS_MOUNT set there actually take effect
 ENV_FILE="$HOME/.probook/nas-agent.env"
 [ -f "$ENV_FILE" ] && source "$ENV_FILE"
+MOUNT="${NAS_MOUNT:-/Volumes/production team}"
+# 2026-10-02: probook.xtec9.xyz now 404s — app moved to probook.thestandard.co
+URL="${PROBOOK_URL:-https://probook.thestandard.co}/api/internal/nas-manifest"
 SECRET="${NAS_SECRET:-}"
 
 if [ ! -d "$MOUNT" ]; then

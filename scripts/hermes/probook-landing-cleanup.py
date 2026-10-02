@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""probook landing drop-folder cleanup — ported from the Claude Code routine
+"""SUPERSEDED 2026-09-10 — งานนี้ย้ายเข้าคอนเทนเนอร์แล้ว (probook v1.220)
+
+รอบเที่ยงตอนนี้เป็น timer ที่สองใน scripts/landing-worker.js (LANDING_PRUNE_HOUR,
+ค่าเริ่ม 12:00 BKK) ซึ่ง resolve secret จาก process env เดียวกับรอบ 19:00 จึง drift
+ไม่ได้ และไม่ขึ้นกับว่าโน้ตบุ๊กเครื่องนี้ตื่นอยู่ไหม. job `probook-landing-cleanup`
+ถูก pause ไว้ (ไม่ได้ลบ) เผื่ออยากใช้เป็น fallback — `hermes cron resume 782fb5f1baed`
+เหตุที่ย้าย: prod หมุน NEXTAUTH_SECRET วันที่ 2026-08-25 แต่ probook.env ถือค่าเก่า
+→ 401 ติดกัน 13 รอบ (26 ส.ค.–8 ก.ย.) โดยไม่มีใครลงมือ
+นอกจากนี้ past-only guard ที่เคยอยู่ใน future_targets() ของไฟล์นี้ ตอนนี้ย้ายไปอยู่
+ฝั่ง server แล้ว (pruneLandingToToday → landingMayBeTrashed)
+
+probook landing drop-folder cleanup — ported from the Claude Code routine
 `probook-landing-cleanup` (2026-08-18). Runs headless: the endpoint accepts the
 shared secret in a header, so no browser / admin session / LLM is needed.
 
@@ -37,7 +48,6 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("PROBOOK_BASE", "https://probook.xtec9.xyz").rstrip("/")
 PATH = "/api/internal/landing/manage?prune=today&dryRun="
 ENV_FILE = os.path.expanduser("~/.hermes/scripts/probook.env")
 DRY_TIMEOUT = 180
@@ -46,19 +56,28 @@ SETTLE_SEC = 60  # รอหลัง apply ที่ 504/timeout ก่อน�
 DRY_RETRY_DELAYS = (20, 60, 120)  # dry-run อ่านอย่างเดียว retry ได้ปลอดภัย
 
 
-def secret():
-    val = os.environ.get("PROBOOK_LANDING_SECRET")
-    if val:
-        return val.strip()
+def env_val(key):
+    """อ่านจาก env ก่อน ถ้าไม่มีค่อยอ่านจาก probook.env (chmod 600) — Hermes ไม่โหลดไฟล์นี้ให้"""
+    v = os.environ.get(key)
+    if v:
+        return v.strip()
     try:
         with open(ENV_FILE) as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("PROBOOK_LANDING_SECRET="):
+                if line.startswith(key + "="):
                     return line.split("=", 1)[1].strip().strip('"').strip("'")
     except Exception:
         pass
     return ""
+
+
+def secret():
+    return env_val("PROBOOK_LANDING_SECRET")
+
+
+# 2026-10-02: probook.xtec9.xyz ตอบ 404 แล้ว (ย้ายโดเมน 30 ก.ย.) · ย้ายอีกรอบ = แก้ PROBOOK_BASE ใน probook.env
+BASE = (env_val("PROBOOK_BASE") or "https://probook.thestandard.co").rstrip("/")
 
 
 def call(dry, token, timeout):
@@ -195,6 +214,26 @@ def remember_report(outbox, text):
     if text:
         _ob_write(outbox, {"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text})
 
+
+# ── SELF-FAILURE vs FINDING ───────────────────────────────────────────────────
+# 2026-09-10: ทั้งสามสคริปต์เคย `exit 0` ทุกกรณี แม้ตอนที่ตัวเองทำงานไม่สำเร็จ.
+# ผลคือ Hermes บันทึก last_status "ok" / failure_streak 0 ตลอด และกลไกเตือนซ้ำ
+# ของมันเอง (_failure_streak_nudge, threshold 3) ไม่เคยทำงาน — รอบเที่ยงของ
+# landing จึงตอบ 401 ติดกัน 13 วันโดยไม่มีใครลงมือ
+#
+# แยกให้ชัด: `self_fail()` = *เราเอง* ทำงานไม่สำเร็จ (401 / เน็ตล่ม / พังกลางคัน)
+# → exit 1 เพื่อให้ Hermes นับ streak. ส่วน "เจอปัญหาที่ prod" (worker ค้าง,
+# fallback พุ่ง) คือสคริปต์ทำงาน *สำเร็จ* → exit 0 ไม่งั้น streak จะเตือนผิดตัว
+#
+# ปลอดภัยกับรายงาน: scheduler.py:3660 เมื่อ returncode != 0 ยัง append
+# "stdout:\n<payload>" ไปกับข้อความ ดังนั้นคนอ่านยังได้เนื้อรายงานครบเหมือนเดิม
+_SELF_FAIL = []
+
+
+def self_fail(reason=""):
+    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — epilogue จะ exit 1"""
+    _SELF_FAIL.append(reason or "self-failure")
+
 OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-landing.json")
 JOB_NAME = "probook-landing-cleanup"
 
@@ -214,15 +253,18 @@ def main():
         time.sleep(delay)
         status, data, err = call(True, token, DRY_TIMEOUT)
     if status == 0 and net_down():
+        self_fail("net down")
         print("⚠️ landing cleanup: ข้ามรอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod)")
         print("   ไม่มีการลบอะไร · worker 19:00 ในคอนเทนเนอร์ยังเคลียร์ให้ตามปกติ")
         return
 
     if status == 401:
+        self_fail("401")
         print("⚠️ landing-cleanup: prod ตอบ 401 — shared secret ไม่ตรงแล้ว (prod หมุน NEXTAUTH_SECRET?)")
         print(f"   อัปเดตค่าใน {ENV_FILE} แล้วรอบหน้าจะทำงานเอง")
         return
     if status != 200 or not isinstance(data, dict):
+        self_fail(f"dry-run http {status}")
         print(f"⚠️ landing-cleanup: dry-run ไม่สำเร็จ (http={status}) {str(err)[:120]}")
         return
     if data.get("skipped"):
@@ -308,6 +350,7 @@ if __name__ == "__main__":
     except SystemExit:
         pass
     except Exception as _e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr
+        self_fail("crash")
         _crash = f"\u26a0\ufe0f {JOB_NAME} \u0e1e\u0e31\u0e07\u0e01\u0e25\u0e32\u0e07\u0e04\u0e31\u0e19: {type(_e).__name__}: {str(_e)[:120]}"
 
     _report = _buf.getvalue().rstrip("\n")
@@ -321,3 +364,8 @@ if __name__ == "__main__":
 
     if _payload:
         print(_payload)
+
+    # exit 1 เฉพาะตอนที่ "เราเอง" ทำงานไม่สำเร็จ — Hermes จะได้นับ failure_streak
+    # และปล่อย nudge ตอนล้มติดกัน 3 รอบ. รายงานยังถูกส่งครบ (scheduler แนบ stdout)
+    if _SELF_FAIL:
+        sys.exit(1)

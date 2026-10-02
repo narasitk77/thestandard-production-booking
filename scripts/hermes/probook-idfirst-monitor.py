@@ -18,7 +18,28 @@ import time
 import urllib.error
 import urllib.request
 
-URL = "https://probook.xtec9.xyz/api/internal/id-first-stats"
+ENV_FILE = os.path.expanduser("~/.hermes/scripts/probook.env")
+
+
+def env_val(key):
+    """อ่านจาก env ก่อน ถ้าไม่มีค่อยอ่านจาก probook.env (chmod 600) — Hermes ไม่โหลดไฟล์นี้ให้"""
+    v = os.environ.get(key)
+    if v:
+        return v.strip()
+    try:
+        with open(ENV_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return ""
+
+
+# 2026-10-02: probook.xtec9.xyz ตอบ 404 แล้ว (ย้ายโดเมน 30 ก.ย.) · ย้ายอีกรอบ = แก้ PROBOOK_BASE ใน probook.env
+BASE = (env_val("PROBOOK_BASE") or "https://probook.thestandard.co").rstrip("/")
+URL = BASE + "/api/internal/id-first-stats"
 STATE = os.path.expanduser("~/.hermes/state/probook/idfirst-state.json")
 KEEP_DAYS = 14
 TIMEOUT = 25
@@ -144,6 +165,26 @@ def remember_report(outbox, text):
     if text:
         _ob_write(outbox, {"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text})
 
+
+# ── SELF-FAILURE vs FINDING ───────────────────────────────────────────────────
+# 2026-09-10: ทั้งสามสคริปต์เคย `exit 0` ทุกกรณี แม้ตอนที่ตัวเองทำงานไม่สำเร็จ.
+# ผลคือ Hermes บันทึก last_status "ok" / failure_streak 0 ตลอด และกลไกเตือนซ้ำ
+# ของมันเอง (_failure_streak_nudge, threshold 3) ไม่เคยทำงาน — รอบเที่ยงของ
+# landing จึงตอบ 401 ติดกัน 13 วันโดยไม่มีใครลงมือ
+#
+# แยกให้ชัด: `self_fail()` = *เราเอง* ทำงานไม่สำเร็จ (401 / เน็ตล่ม / พังกลางคัน)
+# → exit 1 เพื่อให้ Hermes นับ streak. ส่วน "เจอปัญหาที่ prod" (worker ค้าง,
+# fallback พุ่ง) คือสคริปต์ทำงาน *สำเร็จ* → exit 0 ไม่งั้น streak จะเตือนผิดตัว
+#
+# ปลอดภัยกับรายงาน: scheduler.py:3660 เมื่อ returncode != 0 ยัง append
+# "stdout:\n<payload>" ไปกับข้อความ ดังนั้นคนอ่านยังได้เนื้อรายงานครบเหมือนเดิม
+_SELF_FAIL = []
+
+
+def self_fail(reason=""):
+    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — epilogue จะ exit 1"""
+    _SELF_FAIL.append(reason or "self-failure")
+
 OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-idfirst.json")
 JOB_NAME = "idfirst-fallback-monitor"
 
@@ -167,6 +208,7 @@ def main():
             err = e
     if data is None:
         if net_down():
+            self_fail("net down")
             # เน็ตเราเองล่ม → ไม่ใช่หลักฐานว่า prod พัง ห้ามนับ failStreak (ไม่งั้น wifi งอแง 2 วัน = เตือนผิด)
             save_state(state)
             print("⚠️ อ่าน id-first-stats ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod) ไม่นับเป็นวันที่ล้ม")
@@ -247,6 +289,7 @@ if __name__ == "__main__":
     except SystemExit:
         pass
     except Exception as _e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr
+        self_fail("crash")
         _crash = f"\u26a0\ufe0f {JOB_NAME} \u0e1e\u0e31\u0e07\u0e01\u0e25\u0e32\u0e07\u0e04\u0e31\u0e19: {type(_e).__name__}: {str(_e)[:120]}"
 
     _report = _buf.getvalue().rstrip("\n")
@@ -260,3 +303,8 @@ if __name__ == "__main__":
 
     if _payload:
         print(_payload)
+
+    # exit 1 เฉพาะตอนที่ "เราเอง" ทำงานไม่สำเร็จ — Hermes จะได้นับ failure_streak
+    # และปล่อย nudge ตอนล้มติดกัน 3 รอบ. รายงานยังถูกส่งครบ (scheduler แนบ stdout)
+    if _SELF_FAIL:
+        sys.exit(1)
