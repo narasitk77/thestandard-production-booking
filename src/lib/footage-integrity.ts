@@ -49,6 +49,7 @@ import {
   pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, type MediaPoolItem,
 } from './footage-completeness'
 import { parseDrpMediaPool } from './drp-mediapool'
+import { loadMediaproCards, mediaproCheck, type MediaproCheck } from './mediapro'
 import { folderNameMatchesCode } from './outlet-folders'
 import { isShootMarkerFile, lastShootDay } from './reconciler/guards'
 
@@ -83,6 +84,7 @@ const DOC_TEMPLATE = 'v1'
 export type FootageIssueKind =
   | 'zero-byte' | 'duplicate-name' | 'audio-without-video'
   | 'missing-original' | 'missing-sidecar' | 'stranded-in-trash' | 'mediapool-missing' | 'mediapool-pending'
+  | 'mediapro-missing' | 'mediapro-suspect' | 'mediapro-absent'
 
 export interface FootageIssue {
   bookingCode: string
@@ -90,6 +92,8 @@ export interface FootageIssue {
   detail: string
   /** Drive ids involved — so a human can open exactly the right objects. */
   fileIds: string[]
+  /** v1.254 — EP/camera folder an issue belongs to when there is no file to point at (a file that is NOT there) */
+  group?: { ep: string; cam: string }
 }
 
 export const ISSUE_LABEL: Record<FootageIssueKind, string> = {
@@ -101,10 +105,13 @@ export const ISSUE_LABEL: Record<FootageIssueKind, string> = {
   'stranded-in-trash': 'ค้างในถังขยะ',
   'mediapool-missing': 'อยู่ใน Media Pool แต่ไม่มีในกล่อง',
   'mediapool-pending': 'อยู่ใน Media Pool แต่ในกล่องยังไม่ครบ',
+  'mediapro-missing': 'ขาดตาม MEDIAPRO',
+  'mediapro-suspect': 'น่าจะก็อปไม่จบ',
+  'mediapro-absent': 'การ์ดไม่มี MEDIAPRO',
 }
 
 /** Kinds that are normal while an upload is still running — only these wait out GRACE_DAYS. */
-const WAITING_KINDS = new Set<FootageIssueKind>(['missing-original', 'missing-sidecar', 'mediapool-pending'])
+const WAITING_KINDS = new Set<FootageIssueKind>(['missing-original', 'missing-sidecar', 'mediapool-pending', 'mediapro-missing', 'mediapro-absent'])
 const isLive = (i: FootageIssue, waiting: boolean) => !(waiting && WAITING_KINDS.has(i.kind))
 
 /** `size` is `number | null`; only a real 0 counts. `null` = Google-native. */
@@ -256,6 +263,20 @@ export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssu
   }
 
   return issues
+}
+
+/** v1.254 — the same MEDIAPRO rule the "footage ready" email waits for, as issues for the Doc. (0-byte files are already a zero-byte issue.) */
+export function mediaproIssues(bookingCode: string, c: MediaproCheck): FootageIssue[] {
+  const card = (p: string) => p.split('/').slice(-3).join('/')
+  const group = (p: string[]) => ({ ep: p[0] || '(ไฟล์ที่ root ของกล่อง)', cam: p[1] || '' })
+  return [
+    ...c.missing.map(m => ({ bookingCode, kind: 'mediapro-missing' as const, fileIds: [], group: group(m.cardPath),
+      detail: `${card(m.card)} · ${m.file} — อยู่ใน MEDIAPRO.XML ของการ์ด แต่ไม่มีในกล่อง` })),
+    ...c.suspect.map(m => ({ bookingCode, kind: 'mediapro-suspect' as const, fileIds: m.id ? [m.id] : [],
+      detail: `${card(m.card)} · ${m.file} — ขนาดต่อเฟรม ${m.ratio}× ของคลิปแบบเดียวกัน (น่าจะก็อปไม่จบ)` })),
+    ...c.unverifiablePaths.map(p => ({ bookingCode, kind: 'mediapro-absent' as const, fileIds: [], group: group(p),
+      detail: `${card(p.join('/'))} — มีต้นฉบับกล้อง Sony แต่ไม่มี MEDIAPRO.XML ระบุไว้ ตรวจไม่ได้ว่าก็อปครบไหม (ก็อปทั้งการ์ด ไม่ใช่แค่โฟลเดอร์ Clip)` })),
+  ]
 }
 
 // ── trashed drop folders ─────────────────────────────────────────────────────
@@ -440,10 +461,8 @@ export function groupRows(files: DriveFile[], issues: FootageIssue[]): GroupRow[
     rowOf.set(f.id, r)
   }
   for (const i of issues) {
-    for (const id of i.fileIds) {
-      const r = rowOf.get(id)
-      if (r && !r.kinds.includes(i.kind)) r.kinds.push(i.kind)
-    }
+    const hit = [...i.fileIds.map(id => rowOf.get(id)), i.group ? rows.get(`${i.group.ep}\u0000${i.group.cam}`) : undefined]
+    for (const r of hit) if (r && !r.kinds.includes(i.kind)) r.kinds.push(i.kind)
   }
   return [...rows.values()].sort((a, b) => (a.ep + a.cam).localeCompare(b.ep + b.cam))
 }
@@ -567,10 +586,11 @@ export function renderCheckDoc(input: CheckDocInput, meta: { checkedAt: Date; ap
   out.push('<h3>ตรวจอะไร / อ่านยังไง</h3><ol>')
   out.push('<li>คลิปกล้อง Sony 1 คลิป = ต้นฉบับ (.MXF/.MP4) + …M01.XML ต้องอยู่ในกล่องนี้ครบ · Sub (…S03.MP4) ต้องมีเมื่อคนตัดใช้ตัวนั้นใน Media Pool · กล้องอื่นนับไฟล์ให้อย่างเดียว</li>')
   out.push('<li>ไฟล์ 0 ไบต์ / ต้นฉบับชื่อเดียวกันขนาดต่างกัน = อัปไม่จบ — อย่าลบหรือย้ายจนกว่าจะเทียบกับการ์ดต้นทาง</li>')
+  out.push('<li>ทุกไฟล์ที่ MEDIAPRO.XML ของการ์ด Sony ระบุ (ต้นฉบับ · Sub · M01.XML · ภาพย่อ) ต้องอยู่ในกล่อง · การ์ดที่ไม่มี MEDIAPRO = ตรวจไม่ได้ — ระบบไม่แจ้ง "ไฟล์พร้อม" จนกว่าจะครบ</li>')
   out.push('<li>ตอนที่มีเสียงแต่ไม่มีภาพ</li>')
   out.push('<li>โฟลเดอร์ drop ที่ระบบทิ้งแล้วแต่ยังมีไฟล์ที่ไม่อยู่ในกล่อง (ถังขยะลบถาวรใน ~30 วัน)</li>')
   out.push('<li>Media Pool จากไฟล์ .drp ล่าสุดของ Production ID บน Drive: คลิปที่คนตัดใช้ต้องมีในกล่อง · คลิปในกล่องที่ยังไม่ถูกดึงเข้า</li>')
-  out.push('</ol><p>"ครบ" = ทุกคลิปที่อยู่ในกล่องมีครบชุด ไม่ได้รับประกันว่าถ่ายมาครบทุกคลิป — คลิปที่หายทั้งชุดจะรู้ได้ต่อเมื่อมันอยู่ใน Media Pool · ระบบดูชื่อ ขนาด md5 ไม่ได้เปิดไฟล์ และมองไม่เห็น NAS (ตรวจ NAS ด้วยมือตาม MEDIAPOOL-CHECK.md)</p>')
+  out.push('</ol><p>"ครบ" = ทุกคลิปที่อยู่ในกล่องมีครบชุด · การ์ด Sony ที่มี MEDIAPRO.XML รู้ได้ถึงคลิปที่หายทั้งชุด ส่วนกล้องอื่น/การ์ดที่ไม่มี MEDIAPRO รู้ได้ต่อเมื่อคลิปนั้นอยู่ใน Media Pool · ระบบดูชื่อ ขนาด md5 ไม่ได้เปิดไฟล์ และมองไม่เห็น NAS (ตรวจ NAS ด้วยมือตาม MEDIAPOOL-CHECK.md)</p>')
   out.push(`<p>ระบบ probook เขียนเอกสารนี้เอง — แก้ในนี้จะถูกเขียนทับ · ตรวจซ้ำทุกวัน ~13:00 น. จนงานถ่ายเกิน 30 วัน (หลังจากนั้นผลค้างที่วัน "ตรวจเมื่อ" ท้ายเอกสาร) · เอกสารเปลี่ยนเมื่อผลเปลี่ยน หรืออย่างน้อยทุก 7 วัน · แอดมินสั่งตรวจใหม่: ${esc(meta.appUrl)}/api/internal/footage-integrity/run?codes=${esc(encodeURIComponent(c.bookingCode))}&amp;docs=1</p>`)
 
   const body = out.join('\n')
@@ -773,6 +793,8 @@ async function checkBox(o: {
   let mediaPool: MediaPoolLine | null = null
   if (readable) {
     issues.push(...findIssues(o.code, files))
+    try { issues.push(...mediaproIssues(o.code, mediaproCheck(files, await loadMediaproCards(files)))) }
+    catch (e: any) { errors.push(`อ่าน MEDIAPRO.XML ไม่ได้: ${e?.message || e}`) }
     const landing = await probeTrashedLanding(o.code, o.landingId, files)
     issues.unshift(...landing.issues)
     stranded = landing.stranded

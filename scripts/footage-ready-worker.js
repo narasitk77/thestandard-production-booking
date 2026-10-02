@@ -52,9 +52,12 @@ async function runOnce() {
       return
     }
     const json = JSON.parse(text)
+    // v1.254 — bookings held back because the box is not complete per MEDIAPRO.XML, with why.
+    const blocked = (json.skipped || []).filter(s => s.reason === 'mediapro-incomplete')
     console.log(
-      `[footage-ready] scanned=${json.scanned} eligible=${json.eligible} walked=${json.walked} notified=${(json.notified || []).length} settling=${(json.settling || []).length} deferred=${json.deferred} errors=${(json.errors || []).length}`,
+      `[footage-ready] scanned=${json.scanned} eligible=${json.eligible} walked=${json.walked} notified=${(json.notified || []).length} settling=${(json.settling || []).length} deferred=${json.deferred} blocked=${blocked.length} errors=${(json.errors || []).length}`,
     )
+    for (const s of blocked) console.log(`[footage-ready] held ${s.code}: ${String(s.detail || '').slice(0, 300)}`)
   } catch (err) {
     console.error('[footage-ready] run failed:', err?.message || err)
   } finally {

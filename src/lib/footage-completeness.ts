@@ -20,6 +20,8 @@ const XML = /^(.+?)M01\.XML$/i
 const ORIG = /^(.+)\.(MXF|MP4|MOV)$/i
 /** ชื่อแบบ FX6 XDROOT มี reel + วันที่ + รหัสกล้องในตัว = ไม่ซ้ำข้ามโฟลเดอร์ → จับคู่ด้วยชื่ออย่างเดียว */
 const UNIQUE_NAME = /^[A-Z]\d{3}[A-Z]\d{3}_[0-9A-Z]{6,}$/i
+/** v1.254 — file name (any part: .MXF · S03.MP4 · M01.XML · T01.JPG) of a clip whose name is unique in the whole box (FX6 reel+date) */
+export const hasUniqueClipName = (fileName: string) => new RegExp(UNIQUE_NAME.source.slice(0, -1), 'i').test(baseName(fileName))
 /** ส่วนท้ายของโครงการ์ด — ตัดออกเพื่อให้ Clip กับ Sub ของการ์ดเดียวกันอยู่กลุ่มเดียวกัน (ใช้กับชื่อที่ซ้ำได้ เช่น C0001) */
 const CARD_TAIL = new Set(['XDROOT', 'M4ROOT', 'PRIVATE', 'CLIP', 'SUB'])
 

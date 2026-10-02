@@ -240,3 +240,9 @@ test('v1.253.2: hash ไม่ขึ้นกับลำดับที่ Driv
   const b = renderCheckDoc(doc({ state: 'issues', issues: [{ ...i2, fileIds: ['c', 'd'] }, { ...i1, fileIds: ['a', 'b'] }], rows: [row(['missing-original', 'zero-byte'])] }), at)
   assert.equal(a.hash, b.hash)
 })
+
+test('v1.254 รีวิว: แถว EP/กล้องที่ขาดตาม MEDIAPRO (ไม่มีไฟล์ให้ชี้) ไม่ขึ้น "ครบ"', () => {
+  const files = [f({ id: 'a', name: 'A024C001_261001AA.MP4', folderPath: ['EP01 · Osotspa', 'CAM-A', 'M4ROOT', 'CLIP'] })]
+  const issues = [{ bookingCode: 'X', kind: 'mediapro-missing' as const, detail: 'CLIP/A024C003_261001MM.MP4', fileIds: [], group: { ep: 'EP01 · Osotspa', cam: 'CAM-A' } }]
+  assert.deepEqual(groupRows(files, issues).map(r => r.kinds), [['mediapro-missing']])
+})

@@ -46,7 +46,7 @@ mock.module('../google-drive', {
       const t = boxFiles[id]
       if (t instanceof Error) throw t
       return (t || []).map((x, i) => ({
-        id: `${id}-${i}`, name: x.name, mimeType: 'video/mp4', parents: [x.parent || 'p'], webViewLink: null,
+        id: x.idSuffix ? `${id}-${x.idSuffix}` : `${id}-${i}`, name: x.name, mimeType: 'video/mp4', parents: [x.parent || 'p'], webViewLink: null,
         size: x.size ?? 1, createdTime: null, modifiedTime: null, md5: null, folderPath: x.folderPath, topFolderId: null,
       }))
     },
@@ -60,7 +60,8 @@ mock.module('../google-drive', {
     writeFootageCheckDoc: async (input: any) => { writes.push(input); return input.existingId || 'new-doc' },
     trashDriveItem: async (id: string) => { trashed.push(id) },
     findLatestDrp: async () => (drp ? { id: 'drp1', name: 'PP-26-034_DaVinci_2026-09-29.drp', size: drp.buf.length, modifiedTime: drp.modifiedTime, webViewLink: null } : null),
-    downloadDriveFile: async () => drp!.buf,
+    // v1.254 — MEDIAPRO.XML files (ids ending in -MEDIAPRO) come back as a card index listing the box's clip
+    downloadDriveFile: async (id: string) => (id.endsWith('MEDIAPRO') ? Buffer.from(mediaproXml) : drp!.buf),
     classifyFootageTreeFolder: async () => tree,
   },
 })
@@ -70,11 +71,16 @@ before(async () => { fi = await import('../footage-integrity') })
 
 const NOW = new Date('2026-09-30T06:00:00Z') // 13:00 BKK
 const clip = (name: string, kind = 'Clip') => ({ name, folderPath: ['EP.1', 'CAM-A', 'XDROOT', kind] })
+let mediaproXml = ''
+const MEDIAPRO = { name: 'MEDIAPRO.XML', folderPath: ['EP.1', 'CAM-A', 'XDROOT'], idSuffix: 'MEDIAPRO' }
+const indexFor = (...clips: string[]) => `<MediaProfile>${clips.map(c =>
+  `<Material uri="./Clip/${c}.MXF" dur="100" fps="25p" videoType="AVC"><RelevantInfo uri="./Clip/${c}M01.XML"/></Material>`).join('')}</MediaProfile>`
 function booking(i: number, over: Partial<Row> = {}): Row {
   const code = `AGN-2609${String(10 + (i % 18)).padStart(2, '0')}-${String(i).padStart(2, '0')}`
   const box = `box${i}`
   boxNames[box] = `GDH (${code})`
-  boxFiles[box] = [clip('A001C001_260901AA.MXF'), clip('A001C001_260901AAM01.XML')]
+  boxFiles[box] = [clip('A001C001_260901AA.MXF'), clip('A001C001_260901AAM01.XML'), MEDIAPRO]
+  mediaproXml = indexFor('A001C001_260901AA')
   return { id: `id${String(i).padStart(3, '0')}`, bookingCode: code, projectId: null, projectName: null, shootDate: new Date('2026-09-20'), driveFolders: { box }, ...over }
 }
 
@@ -249,4 +255,18 @@ test('ตรวจตาม Production ID ไม่เอางานที่�
   assert.equal(lastWhere.shootDate, undefined)
   await fi.scanFootagePage({ now: NOW })
   assert.deepEqual(lastWhere.OR[0], { shootDate: { gte: new Date('2026-08-31'), lte: new Date('2026-09-29') } })
+})
+
+test('v1.254: การ์ด XDROOT ที่ไม่มี MEDIAPRO.XML ตรวจความครบไม่ได้ → ไม่ใช่ "ครบ" · MEDIAPRO ระบุคลิปที่ไม่มีในกล่อง → ขาด', async () => {
+  rows = [booking(1)]
+  boxFiles.box1 = [clip('A001C001_260901AA.MXF'), clip('A001C001_260901AAM01.XML')]
+  const noIndex = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  assert.equal(noIndex.state, 'issues')
+  assert.equal(noIndex.counts['mediapro-absent'], 1)
+
+  rows = [booking(2)]
+  mediaproXml = indexFor('A001C001_260901AA', 'A001C002_260901BB')
+  const short = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  assert.equal(short.counts['mediapro-missing'], 2, 'MXF + M01.XML ของคลิปที่สอง')
+  assert.match(short.issues.find(i => i.kind === 'mediapro-missing')!.detail, /A001C002_260901BB/)
 })

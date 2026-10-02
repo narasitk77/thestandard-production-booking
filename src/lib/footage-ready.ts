@@ -19,6 +19,12 @@
  *                      (default 2 h — covers the "dump card 1 → travel/dinner →
  *                      dump card 2" gap) across sweeps, so a multi-batch card
  *                      dump doesn't fire after the first batch
+ *   g) MEDIAPRO      — v1.254: every file each Sony card's MEDIAPRO.XML lists is in
+ *                      the box (none 0 bytes, none far smaller per frame than its
+ *                      siblings), and no Sony card is missing its MEDIAPRO. A copy
+ *                      that died when the NAS lost the computer settles just like a
+ *                      finished one — (f) alone announced AGN-260929-01 with two
+ *                      144 GB originals still on the NAS. Not bypassed by forced codes.
  *
  * Send-once: Booking.readyNotifiedAt (stamped here AND by the manual notify-ready
  * route, so a manual 📣 suppresses the auto email). deliveredAt-null is also
@@ -41,6 +47,8 @@ import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
 import { ADMIN_DIGEST } from './footage-ready-health'
+import { mediaproGate } from './mediapro'
+import { folderLiveness, findFoldersByCode } from './google-drive'
 
 const DAY = 86_400_000
 
@@ -211,7 +219,7 @@ export type FootageReadyScanResult = {
                              // the calendar to guess who was starved; never again.
   notified: string[]         // booking codes notified this sweep
   settling: string[]         // codes waiting out the settle window
-  skipped: Array<{ code: string; reason: string }>
+  skipped: Array<{ code: string; reason: string; detail?: string }>
   errors: Array<{ code: string; error: string }>
 }
 
@@ -375,12 +383,29 @@ export async function runFootageReadyScan(
         continue
       }
 
+      // Gate (g) — every file the cards' MEDIAPRO.XML lists must be in place. Checks the
+      // same places the email announces: the LIVE box plus every folder named with this
+      // code (a drop folder still holding a half-copied card counts). Runs in dry-run too
+      // (read-only), so a preview says exactly what the sweep would do.
+      const box = (b.driveFolders as Record<string, unknown> | null)?.box
+      const boxState = typeof box === 'string' ? await folderLiveness(box) : 'dead'
+      if (boxState === 'unknown') {
+        result.skipped.push({ code, reason: 'mediapro-incomplete', detail: 'ตรวจกล่องไม่ได้ (Drive) — รอรอบหน้า' })
+        continue
+      }
+      const roots = [...new Set([...(boxState === 'alive' ? [box as string] : []), ...(await findFoldersByCode(code)).map(f => f.id)])]
+      const gate = await mediaproGate(roots)
+      if (!gate.ok) {
+        result.skipped.push({ code, reason: 'mediapro-incomplete', detail: gate.text })
+        continue
+      }
+
       if (dryRun) {
         result.notified.push(code) // would notify
         continue
       }
 
-      const sent = await sendFootageReadyNotification(b, payload, audience)
+      const sent = await sendFootageReadyNotification(b, payload, audience, gate.text)
       if (!sent.delivered) {
         result.errors.push({ code, error: sent.error || 'no delivery channel succeeded' })
         continue // no stamp — retried next sweep
@@ -401,6 +426,7 @@ export async function runFootageReadyScan(
           recipients: sent.recipients,
           folderCount: payload.folders.length,
           fileCount: payload.fileCount,
+          mediapro: gate.text,
           emailError: sent.error,
           forced: forced.length > 0 || undefined,
           // v1.186 — ผลจริงของช่องทาง operator: ตอบคำถาม "เขาได้ยินไหม" ได้จาก audit
@@ -424,6 +450,7 @@ async function sendFootageReadyNotification(
   b: CandidateRow,
   payload: CachedFootagePayload,
   audience: FootageReadyAudience,
+  verified: string,
 ): Promise<{
   delivered: boolean
   recipients: string[]
@@ -453,6 +480,7 @@ ${b.outlet.name} · ${show} · ${shootDate} ${b.callTime}
 
 — โฟลเดอร์ footage (${payload.folders.length} โฟลเดอร์ · ${payload.fileCount} ไฟล์ · ${formatBytes(totalBytes)}) —
 ${folderLines}
+✔︎ ${verified}
 ${payload.bookingFolderUrl ? `\nเปิดกล่องงานทั้งหมด: ${payload.bookingFolderUrl}` : ''}
 
 เปิดในระบบ: ${appUrl}/upload?bookingId=${b.id}
