@@ -128,7 +128,7 @@ async function editRequestItems(): Promise<NotifItem[]> {
         typeof ch.message === 'string' && ch.message.trim() ? ch.message.trim().slice(0, 140) : null,
         r.actorEmail ? `โดย ${r.actorEmail}` : null,
       ].filter(Boolean).join(' · ') || null,
-      href: r.entityId ? `/admin/${r.entityId}` : '/admin',
+      href: r.entityId ? `/admin/${r.entityId}?history=1` : '/admin',
       code: r.bookingCode,
     }
   })

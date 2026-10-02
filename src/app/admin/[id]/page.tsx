@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDateRange, shootTypeLabel } from '@/lib/utils'
 import { programsForOutlet, SPECIAL_EQUIPMENT_OPTIONS, OUTLETS } from '@/lib/data'
-import { ArrowLeft, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, History, Mail, CheckCircle2, Loader2, UserPlus, X, Pencil, RotateCcw, Lock, Save, AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { INITIAL_TEAM_ROSTER, ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterRole } from '@/lib/team-roster'
 import { normalizeFreelancers, splitLegacyFreelancers, freelancerRoleLabel } from '@/lib/freelancers'
@@ -13,6 +13,7 @@ import { CameraMicTag } from '../_components/CameraMicTag'
 import NumberStepper from '@/app/_components/NumberStepper'
 import BookingRentals from '@/app/_components/BookingRentals'
 import { isQuPending } from '@/lib/qu-ref'
+import BookingHistoryPanel from '@/app/_components/BookingHistoryPanel'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -79,6 +80,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
   const { id } = params
   const [booking, setBooking] = useState<BookingDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  // deep link from the notification bell: /admin/:id?history=1
+  useEffect(() => { if (new URLSearchParams(window.location.search).get('history') === '1') setHistoryOpen(true) }, [])
   const [assignEmails, setAssignEmails] = useState<string[]>([])
   const [mainVideographer, setMainVideographer] = useState('')
   const [customEmail, setCustomEmail] = useState('')
@@ -812,6 +816,12 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
         className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-2">
         <ArrowLeft className="w-4 h-4" /> Admin Console
       </button>
+      <button onClick={() => setHistoryOpen(true)}
+        className="fixed right-4 top-20 z-40 inline-flex items-center gap-1.5 text-xs bg-white border border-gray-300 rounded-full px-3 py-1.5 shadow hover:bg-gray-50">
+        <History className="w-3.5 h-3.5" /> ประวัติ
+      </button>
+      <BookingHistoryPanel bookingId={booking.id} open={historyOpen} onClose={() => setHistoryOpen(false)}
+        current={{ callTime: booking.callTime, estimatedWrap: booking.estimatedWrap }} />
 
       {/* v1.51 — soft-deleted: only ADMIN can open this page; actions 409 server-side */}
       {booking.deletedAt && (
