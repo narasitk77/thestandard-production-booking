@@ -18,7 +18,8 @@ exit: 0 สำเร็จ/ไม่มีอะไรให้ถอย · 1 �
 import json, os, re, sys, time, urllib.error, urllib.request
 
 STACK, EP = 125, 2
-APP = 'https://probook.xtec9.xyz'
+# 2026-10-02 — แอปย้ายไป probook.thestandard.co (xtec9 ตอบ /api/version เป็น 404 แล้ว = เฝ้าผลไม่มีวันเห็น 200)
+APP = os.environ.get('PROBOOK_URL', 'https://probook.thestandard.co').rstrip('/')
 STATE = os.path.expanduser('~/.probook/deploy-state.json')
 UA = {'User-Agent': 'curl/8.7.1', 'Accept': '*/*'}
 
