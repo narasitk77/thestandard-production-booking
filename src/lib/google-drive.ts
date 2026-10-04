@@ -1791,3 +1791,32 @@ export async function downloadDriveFile(fileId: string): Promise<Buffer> {
   ))
   return Buffer.from(res.data as ArrayBuffer)
 }
+
+/**
+ * v1.258 — where else on the shared drives a file with exactly this name sits
+ * (outside `excludeRootId`), as "folder/…/folder". A HINT for a person, never a
+ * verdict: TSS-TSS-261001-01 was missing C003–C005 for 3 days while they sat in
+ * a cancelled booking's drop folder, and nothing pointed there. null = not found.
+ */
+export async function locateFileByName(name: string, excludeRootId: string): Promise<string | null> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const res: { data: drive_v3.Schema$FileList } = await withDriveRetry(`locate ${name}`, () => drive.files.list({
+    q: `name = '${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' and trashed = false and mimeType != '${FOLDER_MIME}' and mimeType != 'application/vnd.google-apps.shortcut'`,
+    fields: 'files(id, parents)', pageSize: 10,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+  }))
+  for (const f of res.data.files ?? []) {
+    const chain: string[] = []
+    let cur = f.parents?.[0]
+    let inside = false
+    for (let i = 0; i < 8 && cur; i++) {
+      if (cur === excludeRootId) { inside = true; break }
+      const p = await withDriveRetry(`locate parent ${cur}`, () => drive.files.get({ fileId: cur!, fields: 'id, name, parents', supportsAllDrives: true }))
+      if (!p.data.parents?.length) break // the shared drive root itself
+      chain.unshift(p.data.name || '?')
+      cur = p.data.parents[0]
+    }
+    if (!inside && chain.length) return chain.join('/')
+  }
+  return null
+}

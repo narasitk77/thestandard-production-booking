@@ -74,7 +74,31 @@ export interface LandingLifecycleResult {
    * ฟุตเทจ = งานนี้ยังไม่ได้ส่ง ไม่ใช่ส่งเสร็จ · ต้องมีคนเห็น ไม่ใช่หายเงียบ
    */
   keptNoFootage: Array<{ name: string; code: string; reason: string }>
+  /** v1.258 — drop folders of CANCELLED bookings that still hold files: never merged, never trashed — someone dropped there by mistake */
+  cancelledWithFiles: CancelledLanding[]
   actions: string[]
+}
+
+/**
+ * v1.258 — โฟลเดอร์ drop ของใบที่ **ยกเลิกแล้ว** (เคสจริง 4 ต.ค. 2569)
+ *
+ * TSS-TSC-260925-01 (The Secret Short Clip · Whyology EP.3) ถูกยกเลิก 25 ก.ย. แต่โฟลเดอร์ drop ค้างอยู่ 9 วัน —
+ * กฎ v1.225 "ว่าง ≠ ส่งงานแล้ว" ทิ้งได้เฉพาะเมื่อกล่องมีฟุตเทจ ซึ่งใบที่ยกเลิกไม่มีวันมี → โฟลเดอร์อยู่ตลอดไป ·
+ * 1 ต.ค. ตอนก็อปการ์ดของ TSS-TSS-261001-01 (The Secret Sauce · Osotspa) ใหม่หลัง NAS หลุด คลิป C003–C005 ถูกลากลง
+ * โฟลเดอร์ชื่อคล้ายกันนี้ · video-merge ข้ามใบที่ยกเลิก → ไฟล์ 6.9 GB ค้าง ไม่มีใครถูกเตือน และ Osotspa ถูกแจ้ง "พร้อม"
+ *
+ * กฎ: ใบที่ยกเลิก **ว่าง = ทิ้งเลย** (ไม่มีฟุตเทจไหนจะมาลงที่นี่อย่างถูกต้อง · ยิ่งค้างยิ่งเป็นกับดัก) ·
+ * **มีไฟล์ = ห้ามทิ้ง ต้องร้อง** (ระบบไม่ย้ายให้ และไม่รู้ว่าเป็นของใบไหน — ต้องคนย้าย)
+ */
+export interface CancelledLanding { name: string; code: string; id: string }
+
+export function cancelledLandingText(list: CancelledLanding[]): string {
+  if (!list.length) return ''
+  return [
+    `🚨 มีไฟล์ตกอยู่ในโฟลเดอร์ drop ของงานที่ **ยกเลิกแล้ว** ${list.length} โฟลเดอร์ — ระบบไม่ย้ายให้ (น่าจะลงผิดโฟลเดอร์ตอนก็อปการ์ด)`,
+    ...list.slice(0, 8).map(c => `   • ${c.name} — https://drive.google.com/drive/folders/${c.id}`),
+    '   ดูว่าเป็นของงานไหน (ชื่อคลิป/วันที่ในชื่อไฟล์) แล้วย้ายเข้ากล่องของงานนั้น · ห้ามลบจนกว่าจะหาเจ้าของได้',
+  ].join('\n')
 }
 
 /**
@@ -147,7 +171,7 @@ export async function manageLandingFolders(
 
   const base: LandingLifecycleResult = {
     skipped: false, dryRun, targetDay, targetDayEnd, createDays, created: 0, createErrors: 0,
-    removedPastEmpty: 0, keptRecent: 0, removeErrors: 0, keepPastDays, keptNoFootage: [], actions: [],
+    removedPastEmpty: 0, keptRecent: 0, removeErrors: 0, keepPastDays, keptNoFootage: [], cancelledWithFiles: [], actions: [],
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
@@ -190,11 +214,16 @@ export async function manageLandingFolders(
   // 3-day shoot already had shootDate 2 days in the past, so a drop folder
   // that was transiently empty between upload batches got trashed mid-shoot.
   const codeToLastShootDay = new Map<string, Date>()
+  const cancelled = new Set<string>()
   const recent = await prisma.booking.findMany({
     where: { bookingCode: { not: null }, deletedAt: null },
-    select: { bookingCode: true, shootDate: true, shootEndDate: true },
+    select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true },
   })
-  for (const b of recent) if (b.bookingCode) codeToLastShootDay.set(b.bookingCode.toUpperCase(), b.shootEndDate ?? b.shootDate)
+  for (const b of recent) {
+    if (!b.bookingCode) continue
+    codeToLastShootDay.set(b.bookingCode.toUpperCase(), b.shootEndDate ?? b.shootDate)
+    if (b.status === 'CANCELLED') cancelled.add(b.bookingCode.toUpperCase())
+  }
 
   const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
   for (const f of folders) {
@@ -202,6 +231,19 @@ export async function manageLandingFolders(
     if (!code) continue // not a shoot drop folder (e.g. a manual project folder) — leave
     const shootDate = codeToLastShootDay.get(code)
     if (!shootDate) continue // unknown booking — leave (safety)
+    // v1.258 — a CANCELLED booking's drop folder: empty → trash now (any date), files → keep + shout
+    if (cancelled.has(code)) {
+      let empty = false
+      try { empty = !(await hasRealFiles(f.id)) }
+      catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR check "${f.name}": ${e?.message || e}`); continue }
+      if (!empty) { base.cancelledWithFiles.push({ name: f.name, code, id: f.id }); base.actions.push(`KEEP "${f.name}" — งานยกเลิกแล้วแต่มีไฟล์ (ลงผิดโฟลเดอร์?)`); continue }
+      base.actions.push(`trash cancelled-booking landing "${f.name}"`)
+      if (!dryRun) {
+        try { await trashDriveItem(f.id) } catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR trash: ${e?.message || e}`); continue }
+      }
+      base.removedPastEmpty++
+      continue
+    }
     if (shootDate.getTime() >= cutoff.getTime()) { base.keptRecent++; continue } // within grace / today / future
     // past the grace window → remove ONLY if empty (footage delivered)
     let empty = false
@@ -312,6 +354,8 @@ export interface LandingPruneResult {
   keptFuture: string[]
   /** v1.225 — ว่างแล้วแต่กล่องยังไม่มีฟุตเทจ = ยังไม่ได้ส่งงาน ไม่ทิ้ง + ต้องแจ้ง */
   keptNoFootage: Array<{ name: string; code: string; reason: string }>      // shoot is in the FUTURE — tomorrow's drop zone, never trash
+  /** v1.258 — see CancelledLanding (also counted in keptWithFiles) */
+  cancelledWithFiles: CancelledLanding[]
   errors: number
   actions: string[]
 }
@@ -331,21 +375,43 @@ export async function pruneLandingToToday(
   const today = bangkokDayRange(0)
   const base: LandingPruneResult = {
     skipped: false, dryRun, today: today.start.toISOString().slice(0, 10),
-    trashed: 0, keptToday: 0, keptWithFiles: [], keptWithFilesDetail: [], keptManual: [], keptByName: [], keptFuture: [], keptNoFootage: [], errors: 0, actions: [],
+    trashed: 0, keptToday: 0, keptWithFiles: [], keptWithFilesDetail: [], keptManual: [], keptByName: [], keptFuture: [], keptNoFootage: [], cancelledWithFiles: [], errors: 0, actions: [],
   }
   if (!hasDriveCredentials()) return { ...base, skipped: true, reason: 'no Drive credentials' }
 
   // v1.146 review fix — "today's shoot" must include a multi-day shoot whose
   // range SPANS today (day 2 of a 3-day shoot), not just one that STARTS today.
   const codeToShootRange = new Map<string, { start: Date; end: Date }>()
-  const rows = await prisma.booking.findMany({ where: { bookingCode: { not: null }, deletedAt: null }, select: { bookingCode: true, shootDate: true, shootEndDate: true } })
-  for (const b of rows) if (b.bookingCode) codeToShootRange.set(b.bookingCode.toUpperCase(), { start: b.shootDate, end: b.shootEndDate ?? b.shootDate })
+  const cancelled = new Set<string>()
+  const rows = await prisma.booking.findMany({ where: { bookingCode: { not: null }, deletedAt: null }, select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true } })
+  for (const b of rows) {
+    if (!b.bookingCode) continue
+    codeToShootRange.set(b.bookingCode.toUpperCase(), { start: b.shootDate, end: b.shootEndDate ?? b.shootDate })
+    if (b.status === 'CANCELLED') cancelled.add(b.bookingCode.toUpperCase())
+  }
 
   const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
   for (const f of folders) {
     if (keepNames.some(k => f.name.includes(k))) { base.keptByName.push(f.name); continue }
     const code = codeFromFolderName(f.name)
     if (!code) { base.keptManual.push(f.name); continue } // manual folder — never auto-delete
+    // v1.258 — a CANCELLED booking's drop folder, whatever its date: empty → trash, files → keep + shout
+    if (cancelled.has(code)) {
+      let empty = false
+      try { empty = !(await hasRealFiles(f.id)) }
+      catch (e: any) { base.errors++; base.actions.push(`ERROR check "${f.name}": ${e?.message || e}`); continue }
+      if (!empty) {
+        base.cancelledWithFiles.push({ name: f.name, code, id: f.id })
+        base.keptWithFiles.push(f.name); base.keptWithFilesDetail.push({ name: f.name, id: f.id, code })
+        continue
+      }
+      base.actions.push(`trash "${f.name}" (${code} · งานยกเลิกแล้ว)`)
+      if (!dryRun) {
+        try { await trashDriveItem(f.id) } catch (e: any) { base.errors++; base.actions.push(`  ERROR trash: ${e?.message || e}`); continue }
+      }
+      base.trashed++
+      continue
+    }
     const range = codeToShootRange.get(code)
     if (range && range.start.getTime() < today.end.getTime() && range.end.getTime() >= today.start.getTime()) {
       base.keptToday++; continue // shoot runs today (incl. mid-multi-day) — keep

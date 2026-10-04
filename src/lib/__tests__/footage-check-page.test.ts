@@ -15,6 +15,7 @@ import assert from 'node:assert/strict'
 
 type Row = { id: string; bookingCode: string; projectId: string | null; projectName: string | null; shootDate: Date; shootEndDate?: Date | null; driveFolders: any }
 let rows: Row[] = []
+let located: Record<string, string> = {}
 let lastWhere: any = null
 let sharing = 1
 let boxNames: Record<string, string> = {}
@@ -63,6 +64,7 @@ mock.module('../google-drive', {
     // v1.254 — MEDIAPRO.XML files (ids ending in -MEDIAPRO) come back as a card index listing the box's clip
     downloadDriveFile: async (id: string) => (id.endsWith('MEDIAPRO') ? Buffer.from(mediaproXml) : drp!.buf),
     classifyFootageTreeFolder: async () => tree,
+    locateFileByName: async (name: string) => located[name] ?? null,
   },
 })
 
@@ -269,4 +271,28 @@ test('v1.254: การ์ด XDROOT ที่ไม่มี MEDIAPRO.XML ต�
   const short = (await fi.scanFootagePage({ now: NOW })).boxes[0]
   assert.equal(short.counts['mediapro-missing'], 2, 'MXF + M01.XML ของคลิปที่สอง')
   assert.match(short.issues.find(i => i.kind === 'mediapro-missing')!.detail, /A001C002_260901BB/)
+})
+
+test('v1.258: ไฟล์ที่ MEDIAPRO บอกว่าขาด ถ้าเจอชื่อเดียวกันที่อื่นบน Drive → บอกว่าอยู่ไหน (เคส Osotspa → โฟลเดอร์ drop ของงานยกเลิก)', async () => {
+  rows = [booking(3)]
+  mediaproXml = indexFor('A001C001_260901AA', 'A024C003_261001MM')
+  located = { 'A024C003_261001MM.MXF': 'The Secret Short Clip · Whyology EP.3 (TSS-TSC-260925-01)/EP01 · Whyology EP.3/CAM-A/CLIP' }
+  const b = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  const hit = b.issues.find(i => i.kind === 'mediapro-missing' && i.detail.includes('A024C003_261001MM.MXF'))!
+  assert.match(hit.hint!, /^The Secret Short Clip · Whyology EP\.3 \(TSS-TSC-260925-01\)/)
+  assert.doesNotMatch(hit.detail, /พบไฟล์/, 'คำใบ้แยกจาก detail — ไม่เข้า issueKey (ค้นได้ผลต่างกันทุกวัน)')
+  const xml = b.issues.find(i => i.kind === 'mediapro-missing' && i.detail.includes('M01.XML'))!
+  assert.equal(xml.hint, undefined, 'ไม่เจอ = ไม่เดา')
+  located = {}
+})
+
+test('v1.258 รีวิว: ชื่อ C0001 (เริ่มนับใหม่ทุกการ์ด) ไม่ถูกค้นทั้ง Drive — เจอที่อื่นก็เป็นคลิปของงานอื่น', async () => {
+  rows = [booking(4)]
+  mediaproXml = indexFor('A001C001_260901AA', 'C0003')
+  located = { 'C0003.MXF': 'Other show (NWS-X-260901-01)/EP01/CAM-B/M4ROOT/CLIP' }
+  const b = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  const miss = b.issues.filter(i => i.kind === 'mediapro-missing')
+  assert.ok(miss.some(i => i.detail.includes('C0003.MXF')))
+  assert.ok(miss.every(i => i.hint === undefined))
+  located = {}
 })

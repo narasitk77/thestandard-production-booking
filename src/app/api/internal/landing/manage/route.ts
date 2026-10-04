@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { manageLandingFolders, pruneLandingToToday, ensureLandingForBooking } from '@/lib/landing-lifecycle'
+import { manageLandingFolders, pruneLandingToToday, ensureLandingForBooking, cancelledLandingText } from '@/lib/landing-lifecycle'
+import { alertOps } from '@/lib/ops-alert'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
 import { recordHeartbeat } from '@/lib/heartbeat'
@@ -148,6 +149,7 @@ export async function GET(request: NextRequest) {
             ...r.keptNoFootage.slice(0, 8).map(k => `   • ${k.code} — ${k.reason}`),
             '   ตรวจที่ NAS/การ์ดกล้องก่อนฟอร์แมต · ต้นฉบับที่ค้างอัปจะลงโฟลเดอร์ drop นี้ แล้วระบบย้ายเข้ากล่องเอง',
           ] : []),
+          ...(r.cancelledWithFiles.length ? ['', cancelledLandingText(r.cancelledWithFiles)] : []),
           '',
           // NOT simply "go press merge". On 2026-09-09 all five of these had
           // ALREADY merged: video-merge leaves a file in landing when the box
@@ -179,6 +181,9 @@ export async function GET(request: NextRequest) {
         try { await notifyChat(text, 'footage') }
         catch (e: any) { console.error('[landing] stale-folder notify failed (non-fatal):', e?.message || e) }
       }
+      if (!dryRun && allowed.isWorker && r.cancelledWithFiles.length) {
+        await alertOps('landing-cancelled-files', 'ไฟล์ตกในโฟลเดอร์ drop ของงานที่ยกเลิก — Production Booking', cancelledLandingText(r.cancelledWithFiles))
+      }
       // v1.220 — its OWN key, never 'landing'. The evening sweep and this noon
       // prune are different jobs with different failure modes; ticking
       // 'landing' here would let a healthy noon run hide a dead 19:00 worker,
@@ -209,9 +214,16 @@ export async function GET(request: NextRequest) {
     // ?prune=today branch above, which returns earlier and must never forge a
     // tick for the evening sweep. An admin dry run must not either.
     if (allowed.isWorker && !dryRun) await recordHeartbeat('landing', r.targetDay)
-    const worth = changed > 0 || r.createErrors > 0 || r.removeErrors > 0
+    // v1.258 — files in a cancelled booking's drop folder are never merged: say it in chat, not only the email
+    if (allowed.isWorker && !dryRun && r.cancelledWithFiles.length) {
+      const warn = cancelledLandingText(r.cancelledWithFiles)
+      try { await notifyChat(warn, 'footage') } catch (e: any) { console.error('[landing] cancelled-files notify failed (non-fatal):', e?.message || e) }
+      await alertOps('landing-cancelled-files', 'ไฟล์ตกในโฟลเดอร์ drop ของงานที่ยกเลิก — Production Booking', warn)
+    }
+    const worth = changed > 0 || r.createErrors > 0 || r.removeErrors > 0 || r.cancelledWithFiles.length > 0
     if ((allowed.isWorker && worth) || forceReport) {
       const text = [
+        ...(r.cancelledWithFiles.length ? [cancelledLandingText(r.cancelledWithFiles), ''] : []),
         `Landing lifecycle — ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''}`,
         `สร้างโฟลเดอร์งานล่วงหน้า ${r.createDays} วัน : ${r.created}${r.createErrors ? ` (error ${r.createErrors})` : ''}`,
         `ลบโฟลเดอร์ว่างที่จบแล้ว  : ${r.removedPastEmpty}${r.removeErrors ? ` (error ${r.removeErrors})` : ''}`,

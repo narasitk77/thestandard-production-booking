@@ -42,11 +42,11 @@ import { prisma } from './db'
 import {
   listFilesRecursive, hasDriveCredentials, getDriveItemState, findTrashedFoldersByCode,
   listFolderTreeIncludingTrashed, findFootageCheckDocs, writeFootageCheckDoc, trashDriveItem,
-  findLatestDrp, downloadDriveFile, classifyFootageTreeFolder,
+  findLatestDrp, downloadDriveFile, classifyFootageTreeFolder, locateFileByName,
   type DriveFile, type TrashTreeFile,
 } from './google-drive'
 import {
-  pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, type MediaPoolItem,
+  pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, hasUniqueClipName, type MediaPoolItem,
 } from './footage-completeness'
 import { parseDrpMediaPool } from './drp-mediapool'
 import { loadMediaproCards, mediaproCheck, type MediaproCheck } from './mediapro'
@@ -94,6 +94,8 @@ export interface FootageIssue {
   fileIds: string[]
   /** v1.254 — EP/camera folder an issue belongs to when there is no file to point at (a file that is NOT there) */
   group?: { ep: string; cam: string }
+  /** v1.258 — where a file of that name was seen elsewhere. Shown to people, kept OUT of issueKey: it can change run to run */
+  hint?: string
 }
 
 export const ISSUE_LABEL: Record<FootageIssueKind, string> = {
@@ -266,11 +268,12 @@ export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssu
 }
 
 /** v1.254 — the same MEDIAPRO rule the "footage ready" email waits for, as issues for the Doc. (0-byte files are already a zero-byte issue.) */
-export function mediaproIssues(bookingCode: string, c: MediaproCheck): FootageIssue[] {
+export function mediaproIssues(bookingCode: string, c: MediaproCheck, foundAt: Map<string, string> = new Map()): FootageIssue[] {
   const card = (p: string) => p.split('/').slice(-3).join('/')
+  const hint = (file: string) => { const w = foundAt.get(file.split('/').pop() || ''); return w ? { hint: w } : {} }
   const group = (p: string[]) => ({ ep: p[0] || '(ไฟล์ที่ root ของกล่อง)', cam: p[1] || '' })
   return [
-    ...c.missing.map(m => ({ bookingCode, kind: 'mediapro-missing' as const, fileIds: [], group: group(m.cardPath),
+    ...c.missing.map(m => ({ bookingCode, kind: 'mediapro-missing' as const, fileIds: [], group: group(m.cardPath), ...hint(m.file),
       detail: `${card(m.card)} · ${m.file} — อยู่ใน MEDIAPRO.XML ของการ์ด แต่ไม่มีในกล่อง` })),
     ...c.suspect.map(m => ({ bookingCode, kind: 'mediapro-suspect' as const, fileIds: m.id ? [m.id] : [],
       detail: `${card(m.card)} · ${m.file} — ขนาดต่อเฟรม ${m.ratio}× ของคลิปแบบเดียวกัน (น่าจะก็อปไม่จบ)` })),
@@ -535,7 +538,7 @@ export function renderCheckDoc(input: CheckDocInput, meta: { checkedAt: Date; ap
     return r.sony ? '✅ ครบ' : 'นับไฟล์อย่างเดียว'
   }
   const issueLine = (i: FootageIssue) =>
-    `<li>[${esc(ISSUE_LABEL[i.kind])}] ${esc(i.detail)}${i.fileIds[0] ? ` · <a href="${link(i.fileIds[0])}">เปิด</a>` : ''}</li>`
+    `<li>[${esc(ISSUE_LABEL[i.kind])}] ${esc(i.detail)}${i.fileIds[0] ? ` · <a href="${link(i.fileIds[0])}">เปิด</a>` : ''}${i.hint ? ` · 🔎 พบไฟล์ชื่อนี้อยู่ที่ ${esc(i.hint)}` : ''}</li>`
 
   const out: string[] = []
   out.push(`<h1>ตรวจฟุตเทจ · ${esc(c.bookingCode)}</h1>`)
@@ -793,8 +796,20 @@ async function checkBox(o: {
   let mediaPool: MediaPoolLine | null = null
   if (readable) {
     issues.push(...findIssues(o.code, files))
-    try { issues.push(...mediaproIssues(o.code, mediaproCheck(files, await loadMediaproCards(files)))) }
-    catch (e: any) { errors.push(`อ่าน MEDIAPRO.XML ไม่ได้: ${e?.message || e}`) }
+    try {
+      const mc = mediaproCheck(files, await loadMediaproCards(files))
+      // v1.258 — say WHERE a missing file went (a wrong drop folder, another box). Hint only:
+      // a lookup that fails just leaves the line without a location — the issue itself stands.
+      // Only names unique to one clip (FX6/FX3 reel+date): C0001 restarts on every card, so a
+      // match elsewhere is somebody else's clip. Sorted, so the same ten are asked every run.
+      const foundAt = new Map<string, string>()
+      const names = [...new Set(mc.missing.map(m => m.file.split('/').pop() || ''))].filter(n => n && hasUniqueClipName(n)).sort().slice(0, 10)
+      for (const name of names) {
+        try { const w = await locateFileByName(name, o.boxId); if (w) foundAt.set(name, w) }
+        catch (e: any) { console.warn(`[footage-check] locate ${name} failed (hint only): ${e?.message || e}`) }
+      }
+      issues.push(...mediaproIssues(o.code, mc, foundAt))
+    } catch (e: any) { errors.push(`อ่าน MEDIAPRO.XML ไม่ได้: ${e?.message || e}`) }
     const landing = await probeTrashedLanding(o.code, o.landingId, files)
     issues.unshift(...landing.issues)
     stranded = landing.stranded
@@ -924,7 +939,7 @@ export function formatRunSummary(s: RunSummary): string {
         .filter(([k]) => !(b.waiting && WAITING_KINDS.has(k)))
         .map(([k, n]) => `${ISSUE_LABEL[k]} ${n}`).join(' · ')
       const block = [`• ${b.bookingCode} — ${counts}${b.doc.url ? ` · ${b.doc.url}` : ''}`,
-        ...b.issues.filter(x => isLive(x, b.waiting)).slice(0, 2).map(x => `   – [${ISSUE_LABEL[x.kind]}] ${x.detail.slice(0, 140)}`)]
+        ...b.issues.filter(x => isLive(x, b.waiting)).slice(0, 2).map(x => `   – [${ISSUE_LABEL[x.kind]}] ${x.detail.slice(0, 140)}${x.hint ? ` · 🔎 อยู่ที่ ${x.hint.slice(0, 80)}` : ''}`)]
       if (!add(block, () => `• …อีก ${news.length - i} ใบ ดูใน _FOOTAGE-CHECK ของแต่ละกล่อง`)) break
     }
   }
