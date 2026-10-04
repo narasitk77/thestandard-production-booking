@@ -9,7 +9,7 @@ v1.252 — ก่อนแตะอะไร เทียบ schema ของอ
   --set SCHEMA_ACCEPT_DATA_LOSS='table:x column:t.c'   release ที่ตั้งใจลบ · ต้องพิมพ์ยืนยันเองใน terminal
                           ค่านี้ใช้ครั้งเดียว — รอบถัดไปสคริปต์ล้างทิ้งให้ (ค่าค้าง + ถอยกลับ = ลบของใหม่)
   --allow-schema-drop     ปลดล็อกอิมเมจก่อน v1.252 ที่จะลบข้อมูล (ต้องพิมพ์ยืนยันใน terminal · AI pipe ไม่ได้)
-exit: 0 สำเร็จ · 1 ยกเลิก · 2 ใช้ผิด · 3 ไม่ครบสามชั้นใน 20 นาที · 4 ขึ้นแล้วแต่ schema ไม่ลง · 5 ปฏิเสธเพราะ schema
+exit: 0 สำเร็จ · 1 ยกเลิก/Portainer ปฏิเสธ redeploy · 2 ใช้ผิด · 3 ไม่ครบสามชั้นใน 20 นาที · 4 ขึ้นแล้วแต่ schema ไม่ลง · 5 ปฏิเสธเพราะ schema
 อ่านผลจาก exit code เสมอ: `python3 scripts/ops/deploy.py <sha> > /tmp/deploy.log 2>&1; rc=$?; tail -30 /tmp/deploy.log; echo exit=$rc`
 
 ลำดับที่ยอมข้ามไม่ได้ (ทุกขั้นมีเหตุผลจากของที่เคยพังจริง):
@@ -132,6 +132,36 @@ def wait_until(tag, minutes=20, old_id=None):
             return True, body
         time.sleep(20)
     return False, ''
+
+def fire_redeploy(envs):
+    """ยิง PUT git/redeploy — Portainer *ตอบกลับมาเป็น error* = ปฏิเสธ (exit 1) ไม่ใช่ timeout
+
+    2026-10-04: PUT โดนปฏิเสธทันที แต่ `except Exception` ตัวเดียวพิมพ์แค่ "HTTPError — ตามคาด"
+    แล้วเฝ้า stack ที่ไม่เปลี่ยน 20 นาที (แก้ครั้งแรกใน ee4c985 · rollback.py เหมือนกันใน 56acb21) ·
+    502/503/504 = gateway ยอมแพ้แต่งานอาจเริ่มไปแล้ว · client ขาดเอง (timeout/ต่อไม่ติด) = ตามคาด →
+    สองแบบหลังคืนค่าปกติให้ลูปเฝ้าผลตัดสิน
+    """
+    try:
+        portainer('PUT', f'/api/stacks/{STACK}/git/redeploy?endpointId={EP}',
+                  {'env': envs, 'prune': False, 'pullImage': True,
+                   'repositoryReferenceName': 'refs/heads/main', 'repositoryAuthentication': False},
+                  timeout=150)
+        print('  PUT ตอบกลับแล้ว')
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', 'replace')[:800]
+        if e.code in (502, 503, 504):
+            print(f'  PUT ได้ HTTP {e.code} จาก gateway — งานอาจเริ่มแล้ว ไปเฝ้าผลแทน · {detail[:200]}')
+            return
+        print(f'  ❌ Portainer ปฏิเสธ redeploy: HTTP {e.code} — {detail}')
+        # ไม่สรุปว่า "ไม่มีอะไรเปลี่ยน" — 500 กลาง compose อาจทิ้งของครึ่ง ๆ กลาง ๆ · พิมพ์ของจริงให้อ่านเอง
+        try:
+            print(f"     ตอนนี้: stack IMAGE_TAG={stack_tag()[0]} · คอนเทนเนอร์={container_state()[0].split(':')[-1]}")
+        except Exception as e2:
+            print(f'     (อ่านสถานะปัจจุบันไม่ได้: {type(e2).__name__})')
+        print('     ดูสถานะข้างบนก่อน — ห้ามยิงซ้ำจนกว่าจะรู้สาเหตุ (exit 1)')
+        sys.exit(1)
+    except Exception as e:
+        print(f'  PUT ขาดตอนฝั่งเรา ({type(e).__name__}) — ตามคาด ไปเฝ้าผลแทน')
 
 def main():
     if len(sys.argv) < 2:
@@ -268,24 +298,7 @@ def main():
         else: envs.append({'name': k, 'value': v})
         print(f'  --set {k} = {v}')
     print('ยิง redeploy (pullImage=true) — client มักขาดก่อน Portainer ทำเสร็จ ห้ามยิงซ้ำ')
-    try:
-        portainer('PUT', f'/api/stacks/{STACK}/git/redeploy?endpointId={EP}',
-                  {'env': envs, 'prune': False, 'pullImage': True,
-                   'repositoryReferenceName': 'refs/heads/main', 'repositoryAuthentication': False},
-                  timeout=150)
-        print('  PUT ตอบกลับแล้ว')
-    except urllib.error.HTTPError as e:
-        # 2026-10-04 — Portainer ANSWERED with an error: nothing is in flight. Waiting 20 min for a
-        # deploy that was refused (and printing only "HTTPError") hid the reason completely.
-        # 502/503/504 can still mean "work started, the gateway gave up" → keep watching for those.
-        detail = e.read().decode('utf-8', 'replace')[:800]
-        if e.code not in (502, 503, 504):
-            print(f'  ❌ Portainer ปฏิเสธ redeploy: HTTP {e.code} — {detail}')
-            print('     stack ไม่ถูกเปลี่ยน (ไม่มีอะไรค้าง) — แก้สาเหตุแล้วยิงใหม่ได้')
-            sys.exit(1)
-        print(f'  PUT ได้ HTTP {e.code} จาก gateway — งานอาจเริ่มแล้ว ไปเฝ้าผลแทน · {detail[:200]}')
-    except Exception as e:
-        print(f'  PUT ขาดตอนฝั่งเรา ({type(e).__name__}) — ตามคาด ไปเฝ้าผลแทน')
+    fire_redeploy(envs)
 
     # 5) ยืนยันครบสาม (คอนเทนเนอร์ใหม่จริง)
     ok, body = wait_until(tag, old_id=old_id)
