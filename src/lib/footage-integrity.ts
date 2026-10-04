@@ -727,7 +727,7 @@ export async function scanFootagePage(opts: {
   const started = Date.now()
   const deadline = opts.deadlineMs ?? 240_000
   const drp = new Map<string, Promise<DrpLoad>>()
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   // Rows START in order and a new one never starts after the deadline, so what was
   // processed is always a prefix and nextOffset drops nothing. A Sony box walk is
   // ~100 folder lists (10–15 s); three boxes at a time ≈ 1,800 Drive reads/min.

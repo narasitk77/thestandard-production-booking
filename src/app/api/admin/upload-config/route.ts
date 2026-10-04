@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  *     a DWD round-trip; the upload init endpoint surfaces real errors)
  *
  * Used to verify a fresh deploy without having to attempt a real upload.
- * Run in browser: https://probook.xtec9.xyz/api/admin/upload-config
+ * Run in browser: https://probook.thestandard.co/api/admin/upload-config
  */
 export async function GET() {
   if (!(await requireConsole())) {

@@ -72,7 +72,7 @@ export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promi
   }
 
   const now = new Date()
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   // v1.243 — Producer ที่ออกแล้ว (users.active=false) ไม่ได้รับเมล: แยกไปรายงานให้คนตามแทน
   const inactiveUsers = await prisma.user.findMany({ where: { active: false }, select: { email: true } })
   const { active: byProducer, inactive: byInactive } = splitInactiveProducers(groupByProducer(rows), inactiveUsers.map(u => u.email))

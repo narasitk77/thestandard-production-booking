@@ -80,7 +80,7 @@ LARK_EXPORT_ENABLED=1
 **4.1 — Lark ต่อติดไหม, scope ครบไหม, แชร์แล้วหรือยัง**
 
 ```bash
-curl -s -H "x-lark-export-secret: $SECRET" 'https://probook.xtec9.xyz/api/internal/lark-export/preflight?write=1'
+curl -s -H "x-lark-export-secret: $SECRET" 'https://probook.thestandard.co/api/internal/lark-export/preflight?write=1'
 ```
 
 `write=1` จะอัปไฟล์ทดสอบเล็ก ๆ หนึ่งไฟล์ — **นี่เป็นวิธีเดียวที่พิสูจน์ว่าแชร์โฟลเดอร์
@@ -90,7 +90,7 @@ curl -s -H "x-lark-export-secret: $SECRET" 'https://probook.xtec9.xyz/api/intern
 **4.2 — จะส่งอะไรออกไปบ้าง (ยังไม่แตะ Lark เลย)**
 
 ```bash
-curl -s -X POST -H "x-lark-export-secret: $SECRET" 'https://probook.xtec9.xyz/api/internal/lark-export/run?dryRun=1'
+curl -s -X POST -H "x-lark-export-secret: $SECRET" 'https://probook.thestandard.co/api/internal/lark-export/run?dryRun=1'
 ```
 
 อ่าน `tables[]` — ทุกตารางพร้อมเหตุผลว่าเข้าหรือไม่เข้า และ `sizeBytes` = ขนาดไฟล์จริง
@@ -99,7 +99,7 @@ curl -s -X POST -H "x-lark-export-secret: $SECRET" 'https://probook.xtec9.xyz/ap
 **4.3 — รันจริงหนึ่งรอบ** (หลังตั้ง `LARK_EXPORT_ENABLED=1` แล้ว)
 
 ```bash
-curl -s -X POST -H "x-lark-export-secret: $SECRET" 'https://probook.xtec9.xyz/api/internal/lark-export/run'
+curl -s -X POST -H "x-lark-export-secret: $SECRET" 'https://probook.thestandard.co/api/internal/lark-export/run'
 ```
 
 ดูว่ามี `archiveOk: true` **และ** `fileToken` ไม่เป็น null — `code 0` จาก Lark แปลว่า

@@ -80,7 +80,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
-    const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+    const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
     const folderLines = folders.map(f => `• ${f.label} — ${f.fileCount} ไฟล์ · ${formatBytes(f.totalBytes)}\n  ${f.url}`).join('\n')
 
     let emailed = 0

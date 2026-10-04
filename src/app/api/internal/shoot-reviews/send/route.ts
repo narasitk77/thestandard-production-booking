@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
   const rosterRoleByEmail: Record<string, string> = {}
   for (const m of roster) if (m.email) rosterRoleByEmail[m.email.toLowerCase()] = m.role
 
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   const maxPerRun = reviewMaxBookingsPerRun()
   let invited = 0, mailed = 0, skippedExisting = 0, worked = 0, deferred = 0
   const errors: string[] = []

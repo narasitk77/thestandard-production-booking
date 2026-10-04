@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
   if (body?.demo === true) {
     const voice = body?.voice === 'crew' ? 'crew' : 'client'
     const raterRole = voice === 'crew' ? 'camera' : 'producer'
-    const appUrlDemo = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+    const appUrlDemo = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
     if (!isEmailConfigured()) {
       return NextResponse.json({ ok: true, demo: true, mailed: false, mailError: 'ระบบอีเมลยังไม่ได้ตั้งค่า' })
     }
@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
         },
       })
 
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   const url = `${appUrl}/review/${invite.token}`
 
   // v1.173.5 — `sendMail: true` posts the invite to the CALLER's own inbox, so

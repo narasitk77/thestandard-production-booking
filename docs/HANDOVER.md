@@ -68,7 +68,7 @@ Stack: Next.js 14.2 App Router · TypeScript · Prisma 5 → Postgres 16 · Next
 
 ## 3. ของจริงรันอยู่ยังไง
 
-- **URL**: `https://probook.xtec9.xyz` · หลัง nginx-proxy-manager (`npm-network`)
+- **URL**: `https://probook.thestandard.co` · หลัง nginx-proxy-manager (`npm-network`)
 - **Portainer**: `http://thestandard.fortiddns.com:9000` · endpoint id **2** · **stack 125** (`production-booking`) · compose path `docker-compose.portainer.yml`
 - **Image**: `ghcr.io/narasitk77/thestandard-production-booking:${IMAGE_TAG}` — **pin ด้วย `sha-<short>` เสมอ ไม่ใช่ `latest`** เพราะ `latest` ทำให้ "รันอยู่เวอร์ชันอะไร" ตอบไม่ได้ และถอยกลับไม่ได้ · `IMAGE_TAG` เป็น env ของ stack แก้ที่ Portainer แล้ว **Pull and redeploy** (เปิด Re-pull)
 - **CI**: push เข้า `main` → 2 workflow (`ci.yml` = lint + build, `docker-build.yml` = build + push GHCR tag `sha-<short>` / `<branch>` / `latest`) · **ต้องดูตัวที่สอง** — เคยมี CI เขียวแต่ Docker build แดงจนไม่มีอิมเมจ 3 ครั้ง (ดูข้อ 6.8)

@@ -2,7 +2,7 @@
 
 ระบบจองงานถ่ายทำสำหรับทีม Production Platform · **เวอร์ชัน 1.177**
 
-🔗 **ลิงก์เข้าใช้งาน:** [https://probook.xtec9.xyz](https://probook.xtec9.xyz)
+🔗 **ลิงก์เข้าใช้งาน:** [https://probook.thestandard.co](https://probook.thestandard.co)
 
 > เมนูที่คุณเห็นขึ้นกับบทบาทของคุณ ถ้าหัวข้อไหนในคู่มือไม่มีในเมนู แปลว่าหน้านั้นไม่ได้เปิดให้บทบาทของคุณ — ไม่ใช่ระบบเสีย
 
@@ -33,7 +33,7 @@
 
 ### ขั้นตอน
 
-1. เปิด [https://probook.xtec9.xyz](https://probook.xtec9.xyz)
+1. เปิด [https://probook.thestandard.co](https://probook.thestandard.co)
 2. ระบบจะพาไปหน้า **Sign in**
 3. กดปุ่ม **"Sign in with Google"**
 4. เลือกบัญชี `@thestandard.co` ของคุณ → กด Continue

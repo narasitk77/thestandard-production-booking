@@ -427,7 +427,7 @@ export async function sendAssignmentEmail(opts: {
 }) {
   // NEXTAUTH_URL is a normal runtime env (NEXT_PUBLIC_* gets inlined at build
   // time, so it can't reflect the real deployment URL). Prefer it.
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   const detailLink = opts.calendarUrl || `${appUrl}/dashboard/${opts.bookingId}`
 
   const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')
@@ -495,7 +495,7 @@ export async function sendBookingConfirmedEmail(opts: {
   senderEmail?: string | null
   calendarUrl?: string | null
 }) {
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   const detailLink = `${appUrl}/dashboard/${opts.bookingId}`
 
   const epList = opts.episodes.map(e => `  • ${e.episodeId} — ${e.title}`).join('\n')

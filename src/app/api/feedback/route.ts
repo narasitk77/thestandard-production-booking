@@ -81,7 +81,7 @@ Production Booking Feedback`
     // Best-effort from here on: the ticket already exists, so an email outage
     // must not make the user think their report vanished.
     try {
-      const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+      const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
       await sendEmail({
         to,
         subject: `[Feedback ${ref}] ${moodLabel} — ${session.email.split('@')[0]}`,

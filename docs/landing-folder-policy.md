@@ -66,7 +66,7 @@ Since v1.220 the prune reports these by NAME to Discord/Lark via
 Default policy is next-day-only. When a specific shoot needs its drop folder
 now — a big shoot the crew want to pre-stage, or a **past/completed** shoot whose
 folder was already pruned but still needs a late upload — an admin runs, in a
-logged-in `probook.xtec9.xyz` tab:
+logged-in `probook.thestandard.co` tab:
 
 ```js
 // create the landing folder for ONE booking (works for past shoots too) — the preferred tool

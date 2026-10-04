@@ -1,7 +1,19 @@
 # Operations Log — Production Booking
 
 A running journal of infrastructure events, fixes, and operator actions on
-the self-hosted Portainer deployment at `probook.xtec9.xyz`. Newest first.
+the self-hosted Portainer deployment at `probook.thestandard.co` (was `probook.xtec9.xyz`
+until 2026-10-01 — see the 2026-10-04 entry). Newest first.
+
+---
+
+## 2026-10-04 · ย้ายโดเมน `probook.xtec9.xyz` → `probook.thestandard.co` · ไล่ของที่ยังยิงโดเมนเก่า
+
+นัท: "จะเปลี่ยน URL เป็น probook.thestandard.co DB ยังเหมือนเดิมไหม" → DB เหมือนเดิม (Postgres อยู่ใน stack 125 เดียวกัน โดเมนเป็นแค่ประตูหน้าบ้าน ไม่มี migration)
+
+- **30 ก.ย.:** เพิ่ม redirect URI ของโดเมนใหม่ใน Google OAuth client (**เก็บของ xtec9 ไว้เป็นทางถอย** · ต้องเป็น `https://` Google ไม่รับ http นอก localhost) → แก้ stack env `NEXTAUTH_URL` **และ `NEXT_PUBLIC_APP_URL`** (ตัวหลังตั้งแยกไว้ ไม่ตามอัตโนมัติ) → redeploy แบบ env อย่างเดียว · ตรวจ `/api/auth/providers` ขึ้น callback โดเมนใหม่ + Google รับ redirect_uri (302 ไม่ใช่ 400)
+- **~1 ต.ค.:** xtec9 เริ่มตอบ 404 → Hermes 3 job ล้ม (worker-check ×2 · landing-cleanup · idfirst เงียบ 2 วันโดยดีไซน์) · แก้สคริปต์ + NAS agent ให้อ่าน `PROBOOK_BASE` / `PROBOOK_URL` จาก env → `probook.env` → default โดเมนใหม่ (**Hermes ไม่โหลด `probook.env` ให้สคริปต์** ค่าที่ใส่ในไฟล์ก่อนหน้านี้เลยไม่เคยมีผล)
+- **4 ต.ค. ตรวจซ้ำ "worker รู้ไหม":** worker ในคอนเทนเนอร์ไม่ใช้โดเมนสาธารณะ (ยิง `127.0.0.1:3000`) — พิสูจน์: xtec9 404 แต่ heartbeat ยังสด · CC scheduled-task สำเนา 3 ตัว (worker-check / landing-cleanup / idfirst) ที่ description เขียนว่า "ปิดแล้ว" **ยัง `enabled:true` และรัน LLM ซ้ำกับ Hermes ทุกรอบ** → ปิดจริง · อีเมล "ส่งขึ้น Drive ครบ" (`nas-sync.ts`) ฮาร์ดโค้ดลิงก์ `/admin` ของ xtec9 (404) → ใช้ `NEXTAUTH_URL` · fallback `'https://probook.xtec9.xyz'` 15 จุดใน `src/` + คู่มือผู้ใช้/README/`docs/mcp.md` สลับเป็นโดเมนใหม่ (ประวัติใน ops-log/CHANGELOG ไม่แก้)
+- **ค้าง:** Hermes `landing-cleanup` ล้มติดกัน 4 รอบ — dry-run ผ่านโดเมนใหม่ตอบ 504 ที่ 90 วิ (job นี้ SUPERSEDED โดย `landing-prune` ในคอนเทนเนอร์ ซึ่ง tick ปกติ · แยกไม่ได้ว่าเพราะโดเมนหรือ endpoint ช้า เพราะโดเมนเก่าปิดแล้วเทียบไม่ได้) · คนที่ต่อ MCP ด้วย URL เก่าต้องเพิ่ม connector ใหม่ · ลิงก์เก่าในเมล/Discord/Lark/ปฏิทินที่ส่งไปแล้วเปลี่ยนย้อนหลังไม่ได้ · ยังไม่ได้ตั้ง redirect หน้าเว็บ xtec9 → โดเมนใหม่ที่ Cloudflare
 
 ---
 

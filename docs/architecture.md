@@ -13,7 +13,7 @@ sheet. Replaces a Google Form + manual sheet entry, and by now also the
 equipment spreadsheets, the OT paperwork, the sound-mix requests and the
 switcher's live-job log.
 
-Production URL: `https://probook.xtec9.xyz`
+Production URL: `https://probook.thestandard.co`
 Repo: `narasitk77/thestandard-production-booking` — **PUBLIC on GitHub**
 (verified by unauthenticated API access, 2026-09-23).
 Deploy: self-hosted Portainer on `thestandard.fortiddns.com:9000`, stack 125

@@ -57,7 +57,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const show = bookingDisplayName({ projectName: booking.projectName, program: booking.program, episodes: booking.episodes })
     const code = booking.bookingCode || booking.id
     const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
-    const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+    const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
 
     let emailed = 0
     let emailError: string | null = null

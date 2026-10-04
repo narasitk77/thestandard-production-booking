@@ -106,7 +106,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   // Notify the other side. Best-effort — the thread is already saved.
   if (isEmailConfigured()) {
     try {
-      const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+      const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
       const ref = ticketRef(t.number)
       const to = admin ? t.reporterEmail : (process.env.FEEDBACK_EMAIL?.trim() || 'narasit.k@thestandard.co')
       const closed = status === 'RESOLVED' && t.status !== 'RESOLVED'

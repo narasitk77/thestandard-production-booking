@@ -237,7 +237,7 @@ export async function PATCH(
           const recipients = (process.env.PRODUCER_UPDATE_NOTIFY_EMAIL || 'narasit.k@thestandard.co')
             .split(',').map(s => ({ email: s.trim() })).filter(r => r.email)
           if (recipients.length > 0) {
-            const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+            const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
             const code = booking.bookingCode || booking.id
             const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
             const changeLines = [

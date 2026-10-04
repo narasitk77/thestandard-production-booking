@@ -1389,7 +1389,7 @@ export async function createResumableUploadSession(input: {
   mimeType: string
   size: number
   /**
-   * v1.80.1 — the browser's Origin (e.g. https://probook.xtec9.xyz). MUST be
+   * v1.80.1 — the browser's Origin (e.g. https://probook.thestandard.co). MUST be
    * registered here at session-init time or every chunk PUT fails in the
    * browser. Drive's CORS preflight always returns Access-Control-Allow-Origin,
    * but the ACTUAL chunk-PUT *response* only carries that header when the

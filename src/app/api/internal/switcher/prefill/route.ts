@@ -11,7 +11,7 @@
  * แถวที่สร้างจากที่นี่ **ไม่มี Production ID** โดยตั้งใจ — เลขออกตอนสวิตเชอร์
  * กดรับงานเท่านั้น ไม่งั้นหมายที่ไม่ได้เกิดขึ้นจริงจะกินเลขในลำดับไปเปล่า ๆ
  *
- *   curl -X POST https://probook.xtec9.xyz/api/internal/switcher/prefill \
+ *   curl -X POST https://probook.thestandard.co/api/internal/switcher/prefill \
  *     -H 'x-switcher-secret: <REMINDERS_SECRET>' -H 'content-type: application/json' \
  *     -d '{"dryRun":true,"jobs":[{"externalKey":"line:msg:123",
  *          "jobName":"ไลฟ์แถลงข่าว","workDate":"2026-08-29","outletCode":"NWS"}]}'

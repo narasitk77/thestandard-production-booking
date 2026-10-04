@@ -470,7 +470,7 @@ async function sendFootageReadyNotification(
   const code = b.bookingCode as string
   const show = bookingDisplayName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
   const shootDate = new Date(b.shootDate).toISOString().slice(0, 10)
-  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.xtec9.xyz'
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   const totalBytes = payload.folders.reduce((n, f) => n + f.totalBytes, 0)
   const folderLines = payload.folders.map(f => `• ${f.label} — ${f.fileCount} ไฟล์ · ${formatBytes(f.totalBytes)}\n  ${f.url}`).join('\n')
   const subject = `[Footage พร้อม] ${code} — ${show}`

@@ -2,7 +2,7 @@
 
 > ระบบ Booking การผลิต · Production ID auto-generation · Google Calendar sync · Drive footage pipeline · คลังอุปกรณ์ · OT
 
-**Live**: https://probook.xtec9.xyz (self-hosted Docker via Portainer)
+**Live**: https://probook.thestandard.co (self-hosted Docker via Portainer)
 **Version**: 1.211.0 · Next.js 14 · 695 tests passing
 
 ---
@@ -288,7 +288,7 @@ Prod ส่งผ่าน SMTP (ดู env ของ stack) · แอปยั�
 | Email | `nodemailer` (SMTP) · Gmail HTTPS API · Resend / SendGrid |
 | Tests | `node:test` ผ่าน `tsx` — **483 ผ่าน** (`npm test` รันอัตโนมัติก่อน build) |
 | Container | Docker (`node:20-alpine`) · docker-compose · Nginx |
-| Hosting | Self-hosted Docker via Portainer (https://probook.xtec9.xyz) |
+| Hosting | Self-hosted Docker via Portainer (https://probook.thestandard.co) |
 
 ## Outlets & Programs
 

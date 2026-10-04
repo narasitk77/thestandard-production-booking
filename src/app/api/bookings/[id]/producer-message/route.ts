@@ -65,7 +65,7 @@ export async function POST(
         const appUrl =
           process.env.NEXTAUTH_URL ||
           process.env.NEXT_PUBLIC_APP_URL ||
-          'https://probook.xtec9.xyz'
+          'https://probook.thestandard.co'
         const code = booking.bookingCode || booking.id
         const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
         const heading = type === 'time_change'

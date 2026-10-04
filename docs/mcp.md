@@ -1,7 +1,7 @@
 # MCP — สั่งงาน Production Booking ด้วย AI
 
 ตั้งแต่ v1.49.0 แอปมี **MCP server** (Model Context Protocol) ในตัวที่
-`https://probook.xtec9.xyz/api/mcp` — ทีมงานคนไหนก็ได้สามารถต่อ AI
+`https://probook.thestandard.co/api/mcp` — ทีมงานคนไหนก็ได้สามารถต่อ AI
 (Claude บนมือถือ/เว็บ, Claude Code, Claude Desktop หรือ MCP client อื่น)
 เข้ามาดูตารางถ่าย จองคิว และยกเลิกคิวด้วยภาษาคนได้เลย เช่น
 
@@ -27,12 +27,12 @@
 
 **claude.ai / Claude app (Custom Connector):**
 Settings → Connectors → Add custom connector
-- URL: `https://probook.xtec9.xyz/api/mcp`
+- URL: `https://probook.thestandard.co/api/mcp`
 - ใส่ header `Authorization: Bearer <MCP_API_KEY>` (ช่อง advanced/auth)
 
 **Claude Code:**
 ```bash
-claude mcp add --transport http probook https://probook.xtec9.xyz/api/mcp \
+claude mcp add --transport http probook https://probook.thestandard.co/api/mcp \
   --header "Authorization: Bearer <MCP_API_KEY>"
 ```
 
@@ -70,7 +70,7 @@ key แบบ read-only (`MCP_API_KEYS_READONLY`) เห็นเฉพาะแ
 
 ```bash
 KEY=<MCP_API_KEY>
-URL=https://probook.xtec9.xyz/api/mcp
+URL=https://probook.thestandard.co/api/mcp
 
 # initialize
 curl -s $URL -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \

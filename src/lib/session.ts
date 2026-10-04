@@ -7,7 +7,7 @@ import { hasConsoleAccess, positionGrantsOT, type Role } from './roles'
 // ADMIN. For trusted-LAN deploys and local/dev testing without OAuth set up.
 // Off by default; requires the exact string '1'. The startup banner (start.sh)
 // + the warn below make an accidental enable impossible to miss in logs.
-// NEVER set this on the public internet-facing prod (probook.xtec9.xyz).
+// NEVER set this on the public internet-facing prod (probook.thestandard.co).
 export const AUTH_DISABLED = process.env.AUTH_DISABLED === '1'
 const SEED_ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL || 'narasit.k@thestandard.co').toLowerCase()
 if (AUTH_DISABLED) {
