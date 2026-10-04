@@ -13,7 +13,7 @@
      (ข้ามทั้งก้อน = โค้ดเก่าไม่ได้คอลัมน์ของมัน)
    --check = ตรวจอย่างเดียว บอกผลแล้วออก (ไม่ backup ไม่ยิง)
    backup ใหม่ก่อนยิงทุกครั้ง · ล้าง SCHEMA_ACCEPT_DATA_LOSS ทุกครั้ง (ค่ายอมลบห้ามตามไปอิมเมจอื่น)
-exit: 0 สำเร็จ/ไม่มีอะไรให้ถอย · 1 ยกเลิก · 2 ใช้ผิด · 3 ไม่ครบใน 20 นาที · 4 ขึ้นแล้วแต่ schema ไม่ตามคาด · 5 ปฏิเสธ
+exit: 0 สำเร็จ/ไม่มีอะไรให้ถอย · 1 ยกเลิก/Portainer ปฏิเสธ redeploy · 2 ใช้ผิด · 3 ไม่ครบใน 20 นาที · 4 ขึ้นแล้วแต่ schema ไม่ตามคาด · 5 ปฏิเสธ
 """
 import json, os, re, sys, time, urllib.error, urllib.request
 
@@ -64,6 +64,40 @@ def db_container_backup():
     if info.get('Running') or info.get('ExitCode') not in (0,) or size < 100_000:
         raise RuntimeError(f"pg_dump ในคอนเทนเนอร์ db ไม่สำเร็จ (exit {info.get('ExitCode')}, {size} bytes)")
     return {'fileName': f'{path} (ในคอนเทนเนอร์ production-booking-db)', 'driveFileId': None, 'sizeBytes': size}
+
+def fire_redeploy(envs):
+    """ยิง PUT git/redeploy — Portainer *ตอบกลับมาเป็น error* = ปฏิเสธ (exit 1) ไม่ใช่ timeout
+
+    เดิม `except Exception` ตัวเดียวกลบทุกอย่างเป็น "ขาดตอนฝั่งเรา" (deploy.py เป็นแบบนี้จน
+    2026-10-04: PUT โดนปฏิเสธทันที แล้วเฝ้า stack ที่ไม่เปลี่ยน 20 นาทีโดยพิมพ์แค่ "HTTPError")
+    — ในสคริปต์ถอยกลับยิ่งเสียหนัก เพราะคนอ่านอยู่ตอนระบบพัง ·
+    502/503/504 = gateway ยอมแพ้แต่งานอาจเริ่มไปแล้ว · client ขาดเอง (timeout/ต่อไม่ติด) = ตามคาด →
+    สองแบบหลังคืนค่าปกติให้ลูปเฝ้าผลตัดสิน
+    """
+    try:
+        portainer('PUT', f'/api/stacks/{STACK}/git/redeploy?endpointId={EP}',
+                  {'env': envs, 'prune': False, 'pullImage': True,
+                   'repositoryReferenceName': 'refs/heads/main', 'repositoryAuthentication': False},
+                  timeout=150)
+        print('  PUT ตอบกลับแล้ว')
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', 'replace')[:800]
+        if e.code in (502, 503, 504):
+            print(f'  PUT ได้ HTTP {e.code} จาก gateway — งานอาจเริ่มแล้ว ไปเฝ้าผลแทน · {detail[:200]}')
+            return
+        print(f'  ❌ Portainer ปฏิเสธ redeploy: HTTP {e.code} — {detail}')
+        # ไม่สรุปว่า "ไม่มีอะไรเปลี่ยน" — 500 กลางทางอาจทิ้งของครึ่ง ๆ กลาง ๆ · พิมพ์ของจริงให้อ่านเอง
+        try:
+            from deploy import container_state
+            now = next((x['value'] for x in (portainer('GET', f'/api/stacks/{STACK}', timeout=30).get('Env') or [])
+                        if x['name'] == 'IMAGE_TAG'), None)
+            print(f"     ตอนนี้: stack IMAGE_TAG={now} · คอนเทนเนอร์={container_state()[0].split(':')[-1]}")
+        except Exception as e2:
+            print(f'     (อ่านสถานะปัจจุบันไม่ได้: {type(e2).__name__})')
+        print('     ดูสถานะข้างบนก่อน — ห้ามยิงซ้ำจนกว่าจะรู้สาเหตุ (exit 1)')
+        sys.exit(1)
+    except Exception as e:
+        print(f'  PUT ขาดตอนฝั่งเรา ({type(e).__name__}) — ไปเฝ้าผลแทน')
 
 def main():
     state = {}
@@ -141,14 +175,7 @@ def main():
     for e in envs:
         if e['name'] == 'IMAGE_TAG': e['value'] = tag
     print('ยิง redeploy — client มักขาดก่อน Portainer ทำเสร็จ ห้ามยิงซ้ำ')
-    try:
-        portainer('PUT', f'/api/stacks/{STACK}/git/redeploy?endpointId={EP}',
-                  {'env': envs, 'prune': False, 'pullImage': True,
-                   'repositoryReferenceName': 'refs/heads/main', 'repositoryAuthentication': False},
-                  timeout=150)
-        print('  PUT ตอบกลับแล้ว')
-    except Exception as e:
-        print(f'  PUT ขาดตอนฝั่งเรา ({type(e).__name__}) — ไปเฝ้าผลแทน')
+    fire_redeploy(envs)
 
     deadline = time.time() + 20 * 60
     while time.time() < deadline:

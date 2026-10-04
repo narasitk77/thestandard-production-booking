@@ -16,7 +16,7 @@ python3 scripts/ops/deploy.py <sha> > /tmp/deploy.log 2>&1; rc=$?; tail -30 /tmp
 ```
 
 **อ่านผลจาก exit code เสมอ** (v1.252) — `; tail` เปล่า ๆ คืน 0 ของ tail ทับ exit ของสคริปต์:
-0 สำเร็จ · 1 ยกเลิก · 2 ใช้ผิด · 3 ไม่ครบสามชั้นใน 20 นาที · **4 ขึ้นแล้วแต่ schema ไม่ลง** · **5 ปฏิเสธเพราะ schema** (ตัวเลขเดียวกันทั้ง deploy.py และ rollback.py)
+0 สำเร็จ · 1 ยกเลิก **หรือ Portainer ปฏิเสธ redeploy** (พิมพ์ HTTP code + body + สถานะจริงของ stack — ทั้ง deploy.py และ rollback.py · 502/503/504 ยังเฝ้าต่อเพราะงานอาจเริ่มแล้ว) · 2 ใช้ผิด · 3 ไม่ครบสามชั้นใน 20 นาที · **4 ขึ้นแล้วแต่ schema ไม่ลง** · **5 ปฏิเสธเพราะ schema** (ตัวเลขเดียวกันทั้ง deploy.py และ rollback.py)
 
 
 ## สั่งงาน
