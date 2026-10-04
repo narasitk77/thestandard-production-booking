@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { manageLandingFolders, pruneLandingToToday, ensureLandingForBooking, cancelledLandingText } from '@/lib/landing-lifecycle'
+import { manageLandingFolders, pruneLandingToToday, ensureLandingForBooking, cancelledLandingText, trashCancelledBookingFolders } from '@/lib/landing-lifecycle'
 import { alertOps } from '@/lib/ops-alert'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
@@ -199,7 +199,25 @@ export async function GET(request: NextRequest) {
 
   try {
     const r = await manageLandingFolders({ dryRun, createOffsetDays, createDays, keepPastDays })
-    const changed = r.created + r.removedPastEmpty
+    // v1.259 — cancelled bookings' own folders on the shared drives (box · staging · photo): empty → trash
+    // Its own try: a failure here must not cost the landing sweep its audit row and heartbeat — but it must be loud.
+    let cf: Awaited<ReturnType<typeof trashCancelledBookingFolders>>
+    try { cf = await trashCancelledBookingFolders({ dryRun }) }
+    catch (e: any) {
+      console.error('[landing] cancelled-folders step failed:', e?.message || e)
+      cf = { dryRun, trashed: [], keptWithFiles: [], skipped: [], errors: 1, actions: [`ERROR cancelled-folders step: ${e?.message || e}`] }
+      if (!dryRun && allowed.isWorker) await alertOps('landing-cancelled-step', 'ทิ้งโฟลเดอร์งานที่ยกเลิกไม่สำเร็จ — Production Booking', `ขั้นทิ้งโฟลเดอร์ของงานที่ยกเลิก (กล่อง/staging/รูป) ล้ม: ${e?.message || e}`)
+    }
+    r.cancelledWithFiles.push(...cf.keptWithFiles)
+    r.actions.push(...cf.actions)
+    if (!dryRun && (cf.trashed.length || cf.errors)) {
+      logAudit({
+        actorEmail: allowed.actor || 'landing-worker', action: 'drive.trash_cancelled_booking_folders',
+        entityType: 'Drive', entityId: 'cancelled-bookings',
+        changes: { trashed: cf.trashed.slice(0, 60), keptWithFiles: cf.keptWithFiles.length, skipped: cf.skipped.slice(0, 20), errors: cf.errors },
+      })
+    }
+    const changed = r.created + r.removedPastEmpty + cf.trashed.length
     if (!dryRun && (changed > 0 || r.createErrors > 0 || r.removeErrors > 0)) {
       logAudit({
         actorEmail: allowed.actor || 'landing-worker',
@@ -220,13 +238,14 @@ export async function GET(request: NextRequest) {
       try { await notifyChat(warn, 'footage') } catch (e: any) { console.error('[landing] cancelled-files notify failed (non-fatal):', e?.message || e) }
       await alertOps('landing-cancelled-files', 'ไฟล์ตกในโฟลเดอร์ drop ของงานที่ยกเลิก — Production Booking', warn)
     }
-    const worth = changed > 0 || r.createErrors > 0 || r.removeErrors > 0 || r.cancelledWithFiles.length > 0
+    const worth = changed > 0 || r.createErrors > 0 || r.removeErrors > 0 || cf.errors > 0 || r.cancelledWithFiles.length > 0
     if ((allowed.isWorker && worth) || forceReport) {
       const text = [
         ...(r.cancelledWithFiles.length ? [cancelledLandingText(r.cancelledWithFiles), ''] : []),
         `Landing lifecycle — ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''}`,
         `สร้างโฟลเดอร์งานล่วงหน้า ${r.createDays} วัน : ${r.created}${r.createErrors ? ` (error ${r.createErrors})` : ''}`,
         `ลบโฟลเดอร์ว่างที่จบแล้ว  : ${r.removedPastEmpty}${r.removeErrors ? ` (error ${r.removeErrors})` : ''}`,
+        `ทิ้งโฟลเดอร์ว่างของงานที่ยกเลิก (กล่อง/staging/รูป): ${cf.trashed.length}${cf.errors ? ` (error ${cf.errors})` : ''}`,
         `คงไว้ (ยังใหม่/มีไฟล์)    : ${r.keptRecent}`,
         `keepPastDays = ${r.keepPastDays}`,
         '',
@@ -235,7 +254,7 @@ export async function GET(request: NextRequest) {
       try { await sendEmail({ to: reportEmail(), subject: `[Landing] ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''} — สร้าง ${r.created} · ลบ ${r.removedPastEmpty}`, text, html: text.replace(/\n/g, '<br>') }) }
       catch (e: any) { console.error('[landing] report email failed (non-fatal):', e?.message || e) }
     }
-    return NextResponse.json(r)
+    return NextResponse.json({ ...r, cancelledFolders: cf })
   } catch (e: any) {
     console.error('GET /api/internal/landing/manage error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })

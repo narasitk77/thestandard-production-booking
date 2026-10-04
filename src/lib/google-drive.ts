@@ -1820,3 +1820,31 @@ export async function locateFileByName(name: string, excludeRootId: string): Pro
   }
   return null
 }
+
+/**
+ * v1.259 — every NON-folder item under `folderId`, Google-native files and shortcuts
+ * included (listFilesRecursive skips those — fine for counting footage, wrong for
+ * deciding a folder is empty enough to TRASH). Throws on any Drive error;
+ * `truncated` = stopped at `max`, which a trash decision must read as "not empty".
+ */
+export async function listEverythingUnder(folderId: string, max = 200): Promise<{ names: string[]; truncated: boolean }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveReadAuth() })
+  const names: string[] = []
+  const queue = [folderId]
+  while (queue.length && names.length < max) {
+    const id = queue.shift()!
+    let pageToken: string | undefined
+    do {
+      const res: { data: drive_v3.Schema$FileList } = await withDriveRetry(`list-all ${id}`, () => drive.files.list({
+        q: `'${id}' in parents and trashed = false`, fields: 'nextPageToken, files(id, name, mimeType)',
+        pageSize: 1000, pageToken, supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+      }))
+      for (const f of res.data.files ?? []) {
+        if (f.mimeType === FOLDER_MIME) { if (f.id) queue.push(f.id) }
+        else names.push(f.name || '')
+      }
+      pageToken = res.data.nextPageToken ?? undefined
+    } while (pageToken && names.length < max)
+  }
+  return { names, truncated: names.length >= max }
+}

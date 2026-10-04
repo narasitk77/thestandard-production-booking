@@ -24,15 +24,15 @@
 import { prisma } from './db'
 import {
   ensureFlatShootFolders, listChildFolders, listFilesRecursive, trashDriveItem, hasDriveCredentials,
-  findFoldersByCode, isFootageTreeFolder,
+  findFoldersByCode, isFootageTreeFolder, listEverythingUnder, getDriveItemState,
 } from './google-drive'
 import {
   landingBookingFolderName, buildEpisodeFolderName, episodeLeadUsesId, camerasToPreCreate,
-  hasOutletFolderMapping, isPhotoAlbumBooking,
+  hasOutletFolderMapping, isPhotoAlbumBooking, folderNameMatchesCode,
 } from './outlet-folders'
 import { rememberDriveLinks } from './drive-links'
 import { computeTypeDroppedId } from './id-migration'
-import { landingMayBeTrashed } from './reconciler/guards'
+import { landingMayBeTrashed, isShootMarkerFile, isFootageCheckReport } from './reconciler/guards'
 import { boxFootageState } from './landing-duplicates'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
@@ -90,15 +90,98 @@ export interface LandingLifecycleResult {
  * กฎ: ใบที่ยกเลิก **ว่าง = ทิ้งเลย** (ไม่มีฟุตเทจไหนจะมาลงที่นี่อย่างถูกต้อง · ยิ่งค้างยิ่งเป็นกับดัก) ·
  * **มีไฟล์ = ห้ามทิ้ง ต้องร้อง** (ระบบไม่ย้ายให้ และไม่รู้ว่าเป็นของใบไหน — ต้องคนย้าย)
  */
-export interface CancelledLanding { name: string; code: string; id: string }
+export type CancelledFolderKind = 'landing' | 'box' | 'staging' | 'photo'
+export interface CancelledLanding { name: string; code: string; id: string; kind?: CancelledFolderKind }
+
+const KIND_LABEL: Record<CancelledFolderKind, string> = {
+  landing: 'โฟลเดอร์ drop · Production Team', box: 'กล่องงาน · VIDEO', staging: '_SOUND-STAGING', photo: 'โฟลเดอร์รูป',
+}
 
 export function cancelledLandingText(list: CancelledLanding[]): string {
   if (!list.length) return ''
   return [
-    `🚨 มีไฟล์ตกอยู่ในโฟลเดอร์ drop ของงานที่ **ยกเลิกแล้ว** ${list.length} โฟลเดอร์ — ระบบไม่ย้ายให้ (น่าจะลงผิดโฟลเดอร์ตอนก็อปการ์ด)`,
-    ...list.slice(0, 8).map(c => `   • ${c.name} — https://drive.google.com/drive/folders/${c.id}`),
+    `🚨 มีไฟล์อยู่ในโฟลเดอร์ของงานที่ **ยกเลิกแล้ว** ${list.length} โฟลเดอร์ — ระบบไม่ย้ายและไม่ทิ้งให้ (ลงผิดโฟลเดอร์ หรือยกเลิกหลังถ่าย?)`,
+    ...list.slice(0, 8).map(c => `   • ${c.name}${c.kind ? ` (${KIND_LABEL[c.kind]})` : ''} — https://drive.google.com/drive/folders/${c.id}`),
     '   ดูว่าเป็นของงานไหน (ชื่อคลิป/วันที่ในชื่อไฟล์) แล้วย้ายเข้ากล่องของงานนั้น · ห้ามลบจนกว่าจะหาเจ้าของได้',
   ].join('\n')
+}
+
+const OS_JUNK = /^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i
+
+/**
+ * v1.259 — "nothing real inside" for TRASHING a cancelled booking's folder. Sees every
+ * file, Google Docs and shortcuts included (a note someone left must keep the folder);
+ * only our own stubs (_SHOOT*.txt, _FOOTAGE-CHECK) and OS junk don't count. A Drive
+ * error throws and a walk past 200 files reads as "not empty" — the caller keeps the folder.
+ */
+export async function cancelledFolderIsEmpty(folderId: string): Promise<boolean> {
+  const { names, truncated } = await listEverythingUnder(folderId, 200)
+  if (truncated) return false
+  return !names.some(n => !isShootMarkerFile(n) && !isFootageCheckReport(n) && !OS_JUNK.test(n.trim()))
+}
+
+export interface CancelledFoldersResult {
+  dryRun: boolean
+  trashed: Array<{ code: string; kind: CancelledFolderKind; name: string }>
+  keptWithFiles: CancelledLanding[]
+  skipped: Array<{ code: string; kind: CancelledFolderKind; reason: string }>
+  errors: number
+  actions: string[]
+}
+
+/**
+ * v1.259 — นัท 4 ต.ค. 2569: "อะไรที่ยกเลิกคิวไปก่อนถ่าย ให้ลบโฟลเดอร์จาก Production Team ด้วย และ Shared drive
+ * เพื่อไม่ให้สับสน" — กล่องงาน (VIDEO) · _SOUND-STAGING · โฟลเดอร์รูป ของทุกใบที่ CANCELLED (โฟลเดอร์ drop ใช้ sweep ด้านบน)
+ *
+ * ทิ้ง (ถังขยะ กู้ได้ ~30 วัน) เฉพาะเมื่อครบทุกข้อ: ยังไม่อยู่ในถัง · **ชื่อโฟลเดอร์เป็นของคิวนี้** (ไม่มีวันแตะกล่องโปรเจกต์
+ * AGN ที่ใช้ร่วม / โฟลเดอร์รายการ) · กล่องไม่ได้ผูกกับใบอื่น · **ว่างจริง** (ดู cancelledFolderIsEmpty) ·
+ * มีไฟล์ = ยกเลิกหลังถ่ายหรือของลงผิดที่ → เก็บ + รายงาน · อ่านไม่ได้ = เก็บ
+ * ใบที่กลับมายืนยันใหม่ภายหลัง: approve / folder-integrity สร้างกล่องใหม่ให้เอง (ของที่ทิ้งไปว่างอยู่แล้ว)
+ */
+export async function trashCancelledBookingFolders(opts: { dryRun?: boolean } = {}): Promise<CancelledFoldersResult> {
+  const dryRun = !!opts.dryRun
+  const res: CancelledFoldersResult = { dryRun, trashed: [], keptWithFiles: [], skipped: [], errors: 0, actions: [] }
+  const rows = await prisma.booking.findMany({
+    where: { status: 'CANCELLED', deletedAt: null, bookingCode: { not: null } },
+    select: { bookingCode: true, driveFolders: true },
+  })
+  for (const b of rows) {
+    const code = b.bookingCode as string
+    const df = (b.driveFolders || {}) as Record<string, unknown>
+    for (const kind of ['box', 'staging', 'photo'] as const) {
+      const id = df[kind]
+      if (typeof id !== 'string' || !id) continue
+      try {
+        const st = await getDriveItemState(id)
+        if (!st || st.trashed) continue // already gone
+        if (!folderNameMatchesCode(st.name, code)) {
+          res.skipped.push({ code, kind, reason: `ชื่อ "${st.name}" ไม่ใช่โฟลเดอร์ของคิวนี้ — ไม่แตะ` })
+          continue
+        }
+        if (kind === 'box') {
+          const sharing = await prisma.booking.count({ where: { deletedAt: null, driveFolders: { path: ['box'], equals: id } } })
+          if (sharing > 1) { res.skipped.push({ code, kind, reason: `กล่องผูกกับ ${sharing} ใบ — ไม่แตะ` }); continue }
+        }
+        if (!(await cancelledFolderIsEmpty(id))) {
+          res.keptWithFiles.push({ name: st.name, code, id, kind })
+          res.actions.push(`KEEP ${kind} "${st.name}" — งานยกเลิกแล้วแต่มีไฟล์`)
+          continue
+        }
+        // re-read right before the irreversible-ish step: a booking re-confirmed mid-run keeps its folder
+        if (!dryRun) {
+          const now = await prisma.booking.findFirst({ where: { bookingCode: code, deletedAt: null }, select: { status: true } })
+          if (now?.status !== 'CANCELLED') { res.skipped.push({ code, kind, reason: 'สถานะเปลี่ยนระหว่างรอบ — ไม่ทิ้ง' }); continue }
+        }
+        res.actions.push(`trash cancelled ${kind} "${st.name}"`)
+        if (!dryRun) await trashDriveItem(id)
+        res.trashed.push({ code, kind, name: st.name })
+      } catch (e: any) {
+        res.errors++
+        res.actions.push(`  ERROR ${kind} ${code}: ${e?.message || e} — ไม่ทิ้ง`)
+      }
+    }
+  }
+  return res
 }
 
 /**
@@ -234,9 +317,9 @@ export async function manageLandingFolders(
     // v1.258 — a CANCELLED booking's drop folder: empty → trash now (any date), files → keep + shout
     if (cancelled.has(code)) {
       let empty = false
-      try { empty = !(await hasRealFiles(f.id)) }
+      try { empty = await cancelledFolderIsEmpty(f.id) }
       catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR check "${f.name}": ${e?.message || e}`); continue }
-      if (!empty) { base.cancelledWithFiles.push({ name: f.name, code, id: f.id }); base.actions.push(`KEEP "${f.name}" — งานยกเลิกแล้วแต่มีไฟล์ (ลงผิดโฟลเดอร์?)`); continue }
+      if (!empty) { base.cancelledWithFiles.push({ name: f.name, code, id: f.id, kind: 'landing' }); base.actions.push(`KEEP "${f.name}" — งานยกเลิกแล้วแต่มีไฟล์ (ลงผิดโฟลเดอร์?)`); continue }
       base.actions.push(`trash cancelled-booking landing "${f.name}"`)
       if (!dryRun) {
         try { await trashDriveItem(f.id) } catch (e: any) { base.removeErrors++; base.actions.push(`  ERROR trash: ${e?.message || e}`); continue }
@@ -398,10 +481,10 @@ export async function pruneLandingToToday(
     // v1.258 — a CANCELLED booking's drop folder, whatever its date: empty → trash, files → keep + shout
     if (cancelled.has(code)) {
       let empty = false
-      try { empty = !(await hasRealFiles(f.id)) }
+      try { empty = await cancelledFolderIsEmpty(f.id) }
       catch (e: any) { base.errors++; base.actions.push(`ERROR check "${f.name}": ${e?.message || e}`); continue }
       if (!empty) {
-        base.cancelledWithFiles.push({ name: f.name, code, id: f.id })
+        base.cancelledWithFiles.push({ name: f.name, code, id: f.id, kind: 'landing' })
         base.keptWithFiles.push(f.name); base.keptWithFilesDetail.push({ name: f.name, id: f.id, code })
         continue
       }
