@@ -274,6 +274,16 @@ def main():
                    'repositoryReferenceName': 'refs/heads/main', 'repositoryAuthentication': False},
                   timeout=150)
         print('  PUT ตอบกลับแล้ว')
+    except urllib.error.HTTPError as e:
+        # 2026-10-04 — Portainer ANSWERED with an error: nothing is in flight. Waiting 20 min for a
+        # deploy that was refused (and printing only "HTTPError") hid the reason completely.
+        # 502/503/504 can still mean "work started, the gateway gave up" → keep watching for those.
+        detail = e.read().decode('utf-8', 'replace')[:800]
+        if e.code not in (502, 503, 504):
+            print(f'  ❌ Portainer ปฏิเสธ redeploy: HTTP {e.code} — {detail}')
+            print('     stack ไม่ถูกเปลี่ยน (ไม่มีอะไรค้าง) — แก้สาเหตุแล้วยิงใหม่ได้')
+            sys.exit(1)
+        print(f'  PUT ได้ HTTP {e.code} จาก gateway — งานอาจเริ่มแล้ว ไปเฝ้าผลแทน · {detail[:200]}')
     except Exception as e:
         print(f'  PUT ขาดตอนฝั่งเรา ({type(e).__name__}) — ตามคาด ไปเฝ้าผลแทน')
 
