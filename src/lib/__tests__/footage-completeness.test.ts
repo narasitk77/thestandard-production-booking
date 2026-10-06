@@ -170,3 +170,12 @@ test('v1.253.4: สำเนาใน Drive ("Copy of …S03.MP4") ไม่ใ�
   assert.deepEqual(sonyClipPart('สำเนาของ A003C107_260910BJS03.MP4'), { clip: 'A003C107_260910BJ', part: 'sub' })
   assert.deepEqual(pendingOriginals([m4('SUB', 'Copy of A003C107_260910BJS03.MP4')]), ['A003C107_260910BJ'], 'มีแต่สำเนา Sub ยังขาดต้นฉบับจริง')
 })
+
+test('v1.260: " (1) (1)" ที่ Drive/Cloud Sync ต่อท้ายตอนอัปซ้ำ = ไฟล์เดิม ทุกกฎตอบตรงกัน (รีวิว: เคส AGN-260930-01 ด่านว่าครบแต่เอกสารรายวันบอกขาดต้นฉบับ)', () => {
+  const x = (kind: 'Clip' | 'Sub', name: string) => ({ name, folderPath: ['EP.4', 'CAM-A', 'A025', kind] })
+  const files = [x('Clip', 'A025C002_260930SJ (1) (1) (1).MXF'), x('Clip', 'A025C002_260930SJM01.XML'), x('Sub', 'A025C002_260930SJS03.MP4')]
+  assert.deepEqual(sonyClipPart('A025C002_260930SJ (1) (1) (1).MXF'), { clip: 'A025C002_260930SJ', part: 'orig' })
+  assert.deepEqual(pendingOriginals(files), [], 'ต้นฉบับชื่อ "(1)" คือต้นฉบับ')
+  assert.deepEqual(missingSidecars(files), [])
+  assert.deepEqual(sonyClipPart('A025C002_260930SJ (1).MXF (1)'), null, 'ตัดเฉพาะหน้านามสกุล — ชื่อที่พังจริงไม่ถูกเดา')
+})

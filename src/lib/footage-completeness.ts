@@ -28,8 +28,10 @@ const CARD_TAIL = new Set(['XDROOT', 'M4ROOT', 'PRIVATE', 'CLIP', 'SUB'])
 /**
  * v1.253.4 — ชื่อที่ Drive ใส่ตอนกด "ทำสำเนา" (`Copy of X` / `สำเนาของ X`) คือไฟล์ X · เจอจริง AGN-260909-01:
  * Sub ถูกทำสำเนาในโฟลเดอร์ SUB เลยดูเหมือนมีคลิป "Copy of A003C107_…" ที่ไม่มีต้นฉบับ (ต้นฉบับอยู่ครบ)
+ * v1.260 — และ ` (1) (1)` ที่ Drive/Cloud Sync ต่อท้ายก่อนนามสกุลตอนอัปซ้ำ (`A025C002_260930SJ (1) (1) (1).MXF`) ก็คือไฟล์เดิม —
+ * ตัดที่นี่ที่เดียว ทุกกฎที่อ่านชื่อคลิป (MEDIAPRO · ต้นฉบับค้าง · ไฟล์ประกอบ · ด่าน prune) จึงตอบตรงกัน
  */
-export const baseName = (name: string) => name.replace(/^(?:Copy of |สำเนาของ )+/i, '')
+export const baseName = (name: string) => name.replace(/^(?:Copy of |สำเนาของ )+/i, '').replace(/(?: \(\d+\))+(?=\.[^.]*$)/, '')
 
 const lastFolder = (f: FootageFileLike) => (f.folderPath || []).slice(-1)[0]?.trim().toUpperCase() || ''
 

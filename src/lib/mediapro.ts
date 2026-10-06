@@ -40,6 +40,8 @@ export interface MediaproCheck {
   cards: number
   listed: number
   missing: Array<{ card: string; cardPath: string[]; file: string }>
+  /** v1.260 — listed, absent, and dated BEFORE the shoot: left on a card that was not formatted after an earlier shoot (not this booking's loss) */
+  stale: Array<{ card: string; file: string; date: string }>
   zero: Array<{ card: string; file: string; id?: string }>
   suspect: Array<{ card: string; file: string; ratio: number; id?: string }>
   /** Sony card roots with no MEDIAPRO.XML, and folders holding Sony originals no MEDIAPRO lists — cannot be verified */
@@ -73,6 +75,21 @@ export function parseMediapro(xml: string): MediaproMaterial[] {
 
 const up = (s: string) => s.trim().toUpperCase()
 const pathKey = (segs: string[]) => segs.map(up).join('/')
+/** YYMMDD in an FX6/FX3 clip name → YYYY-MM-DD (null for C0001-style names) */
+const clipDate = (name: string) => { const m = /^[A-Z]\d{3}[A-Z]\d{3}_(\d{2})(\d{2})(\d{2})/i.exec(name); return m ? `20${m[1]}-${m[2]}-${m[3]}` : null }
+/** a camera whose clock was reset stamps 2021-01-01 — older than a year before the shoot is not "an earlier shoot", it is unknown */
+const yearBefore = (day: string) => new Date(Date.parse(day) - 366 * 864e5).toISOString().slice(0, 10)
+
+export interface MediaproCheckOptions {
+  /**
+   * v1.260 — first shoot day (YYYY-MM-DD). A listed file that is absent AND whose clip name is dated before this day
+   * was left on an unformatted card by an earlier shoot (AGN-260713-02 was "missing" 416 files all dated 9 Jul,
+   * all sitting in TSS-TSL-260709-03's box) → `stale`, not `missing`. Clips dated inside or after the window stay
+   * `missing`. Without a date the rule is unchanged. Trade-off: a booking whose date is wrong hides a loss of
+   * earlier-dated clips from the gate — they still show in the daily Doc as "ข้ามคลิปก่อนวันถ่าย".
+   */
+  shootFrom?: string
+}
 
 /** การ์ด Sony ในกล่อง: โฟลเดอร์ XDROOT/M4ROOT · หรือโฟลเดอร์แม่ของ Clip ที่มีต้นฉบับชื่อกล้อง Sony (การ์ดที่ถูกก็อปแบบแบน) */
 export function sonyCardRoots(files: FileLike[]): string[][] {
@@ -89,7 +106,7 @@ export function sonyCardRoots(files: FileLike[]): string[][] {
   return [...roots.values()]
 }
 
-export function mediaproCheck(files: FileLike[], cards: MediaproCard[]): MediaproCheck {
+export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: MediaproCheckOptions = {}): MediaproCheck {
   const live = files.filter(f => !isQuarantined(f))
   const byPath = new Map<string, FileLike[]>()
   const byName = new Map<string, FileLike[]>()
@@ -106,26 +123,36 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[]): Mediapr
   const inScope = (f: FileLike, scope: string[]) => pathKey((f.folderPath || []).slice(0, scope.length)) === pathKey(scope)
   const biggest = (fs: FileLike[]) => fs.reduce<FileLike | null>((a, f) => (!a || (f.size || 0) > (a.size || 0) ? f : a), null)
 
-  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [] }
+  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [] }
   const seen = new Set<string>()
   const listedIn = new Map<string, string[][]>()
   const ratios: Array<{ key: string; card: string; file: string; ratio: number; id?: string }> = []
   for (const card of cards) {
     const where = card.folderPath.join('/')
     for (const mat of card.materials) {
-      for (const r of mat.files) {
+      const entries = mat.files.map(r => {
         const segs = r.split('/')
         const name = up(baseName(segs[segs.length - 1]))
         const scope = scopeOf(card.folderPath, name)
+        const hits = byPath.get(pathKey([...card.folderPath, ...segs.slice(0, -1), name]))
+          || (byName.get(name) || []).filter(f => inScope(f, scope))
+        return { r, name, scope, best: biggest(hits) }
+      })
+      // stale = the WHOLE clip is absent (a card left unformatted carries the earlier shoot's clips as a set);
+      // sidecars present with the original absent is a half-copied clip of THIS box, whatever the date says
+      const wholeClipAbsent = entries.every(e => !e.best)
+      for (const { r, name, scope, best } of entries) {
         const dedupe = `${pathKey(scope)}|${name}`
         listedIn.set(name, [...(listedIn.get(name) || []), scope])
         if (seen.has(dedupe)) continue
         seen.add(dedupe)
         res.listed++
-        const hits = byPath.get(pathKey([...card.folderPath, ...segs.slice(0, -1), name]))
-          || (byName.get(name) || []).filter(f => inScope(f, scope))
-        const best = biggest(hits)
-        if (!best) { res.missing.push({ card: where, cardPath: card.folderPath, file: r }); continue }
+        if (!best) {
+          const date = opts.shootFrom && wholeClipAbsent ? clipDate(name) : null
+          if (date && date < opts.shootFrom! && date >= yearBefore(opts.shootFrom!)) res.stale.push({ card: where, file: r, date })
+          else res.missing.push({ card: where, cardPath: card.folderPath, file: r })
+          continue
+        }
         if (!best.size) { res.zero.push({ card: where, file: r, id: best.id }); continue }
         if (r === mat.uri && mat.dur > 0) ratios.push({ key: `${mat.videoType}|${mat.fps}`, card: where, file: r, ratio: best.size / mat.dur, id: best.id })
       }
@@ -168,8 +195,13 @@ export function mediaproGapText(c: MediaproCheck): string {
     c.zero.length ? `0 ไบต์ ${c.zero.length} (${tail(c.zero)})` : '',
     c.suspect.length ? `น่าจะก็อปไม่จบ ${c.suspect.length} (${tail(c.suspect)})` : '',
     c.unverifiable.length ? `การ์ด Sony ไม่มี MEDIAPRO.XML ${c.unverifiable.length} การ์ด (${c.unverifiable.slice(0, 2).map(p => p.split('/').slice(-2).join('/')).join(', ')})` : '',
+    mediaproStaleText(c),
   ].filter(Boolean).join(' · ')
 }
+
+/** v1.260 — informational, never blocks: clips an unformatted card still listed from an earlier shoot. */
+export const mediaproStaleText = (c: MediaproCheck) =>
+  c.stale.length ? `ข้ามคลิปก่อนวันถ่าย ${c.stale.length} ไฟล์ (${[...new Set(c.stale.map(s => s.date))].sort().join(', ')} — น่าจะการ์ดไม่ได้ format · ถ้าวันถ่ายในใบผิด ไฟล์พวกนี้คือของที่ขาด)` : ''
 
 // ── Drive ────────────────────────────────────────────────────────────────────
 
@@ -191,7 +223,7 @@ export async function loadMediaproCards(files: DriveFile[]): Promise<MediaproCar
  * when every file the cards list is in place. Any error = not ok, with the reason —
  * a check that could not run must never read as "complete".
  */
-export async function mediaproGate(folderIds: string[]): Promise<{ ok: boolean; text: string; check: MediaproCheck | null }> {
+export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptions = {}): Promise<{ ok: boolean; text: string; check: MediaproCheck | null }> {
   try {
     if (!folderIds.length) return { ok: false, text: 'ไม่มีโฟลเดอร์ให้ตรวจ MEDIAPRO', check: null }
     const files: DriveFile[] = []
@@ -202,12 +234,12 @@ export async function mediaproGate(folderIds: string[]): Promise<{ ok: boolean; 
     }
     // A dead/empty folder walks to [] — that is "could not check", never "no Sony card, fine".
     if (!files.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) return { ok: false, text: 'โฟลเดอร์ที่ตรวจไม่มีไฟล์ (ว่างหรืออยู่ในถังขยะ) — ตรวจ MEDIAPRO ไม่ได้', check: null }
-    const check = mediaproCheck(files, await loadMediaproCards(files))
+    const check = mediaproCheck(files, await loadMediaproCards(files), opts)
     const ok = mediaproComplete(check)
     return {
       ok, check,
       text: ok
-        ? (check.cards ? `ครบตาม MEDIAPRO ${check.cards} การ์ด · ${check.listed} ไฟล์` : 'ไม่มีการ์ด Sony (ไม่มี MEDIAPRO ให้เทียบ)')
+        ? [check.cards ? `ครบตาม MEDIAPRO ${check.cards} การ์ด · ${check.listed - check.stale.length} ไฟล์` : 'ไม่มีการ์ด Sony (ไม่มี MEDIAPRO ให้เทียบ)', mediaproStaleText(check)].filter(Boolean).join(' · ')
         : mediaproGapText(check),
     }
   } catch (e: any) {

@@ -49,7 +49,7 @@ import {
   pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, hasUniqueClipName, type MediaPoolItem,
 } from './footage-completeness'
 import { parseDrpMediaPool } from './drp-mediapool'
-import { loadMediaproCards, mediaproCheck, type MediaproCheck } from './mediapro'
+import { loadMediaproCards, mediaproCheck, mediaproStaleText, type MediaproCheck } from './mediapro'
 import { folderNameMatchesCode } from './outlet-folders'
 import { isShootMarkerFile, lastShootDay } from './reconciler/guards'
 
@@ -439,6 +439,8 @@ export interface BoxCheck {
   doc: { action: DocAction; url: string | null; note?: string; id?: string | null; announced?: string | null }
   /** checks that could not run — never read as "passed" */
   errors: string[]
+  /** v1.260 — informational lines (also in the Doc): clips an unformatted card lists from an earlier shoot */
+  notes: string[]
 }
 
 export function issueKey(issues: FootageIssue[], waiting: boolean): string {
@@ -506,6 +508,8 @@ export interface CheckDocInput {
   stranded: StrandedSummary | null
   mediaPool: MediaPoolLine | null
   errors: string[]
+  /** v1.260 — informational lines that are not issues (clips an unformatted card lists from an earlier shoot) */
+  notes?: string[]
 }
 
 /**
@@ -545,6 +549,7 @@ export function renderCheckDoc(input: CheckDocInput, meta: { checkedAt: Date; ap
   out.push(`<p>${esc([c.projectId, c.projectName].filter(Boolean).join(' · '))}${c.projectId || c.projectName ? ' · ' : ''}ถ่าย ${esc(thaiDate(new Date(c.shootDate)))} · ${c.files} ไฟล์ ${esc(gb(c.bytes))}</p>`)
   out.push(`<h2>${esc(statusLine[c.state])}</h2>`)
   for (const e of c.errors) out.push(`<p>⚠️ ตรวจบางส่วนไม่ได้: ${esc(e)}</p>`)
+  for (const n of c.notes || []) out.push(`<p>ℹ️ ${esc(n)}</p>`)
 
   const stranded = c.issues.filter(i => i.kind === 'stranded-in-trash')
   if (stranded.length && c.stranded) {
@@ -794,10 +799,26 @@ async function checkBox(o: {
   const issues: FootageIssue[] = []
   let stranded: StrandedSummary | null = null
   let mediaPool: MediaPoolLine | null = null
+  const notes: string[] = []
   if (readable) {
     issues.push(...findIssues(o.code, files))
     try {
-      const mc = mediaproCheck(files, await loadMediaproCards(files))
+      // v1.260 — shootFrom: clips an unformatted card still lists from an earlier shoot are reported, not counted missing
+      const mc = mediaproCheck(files, await loadMediaproCards(files), { shootFrom: o.shootDate })
+      // sorted: Drive lists in no fixed order and the note goes into the Doc hash
+      const staleNames = [...new Set(mc.stale.map(s => s.file.split('/').pop() || ''))].filter(Boolean).sort()
+      if (staleNames.length) notes.push(`${mediaproStaleText(mc)} · ${staleNames.slice(0, 5).join(', ')}${staleNames.length > 5 ? ` …+${staleNames.length - 5}` : ''}`)
+      // "left by an earlier shoot" is an assumption — for the first ten unique (FX6) names, ask Drive whether such a
+      // file exists anywhere live; one that exists nowhere is reported as missing after all (hint says why).
+      for (const name of staleNames.filter(hasUniqueClipName).slice(0, 10)) {
+        try {
+          const w = await locateFileByName(name, o.boxId)
+          if (w) continue
+          const s = mc.stale.find(x => x.file.endsWith('/' + name) || x.file === name)!
+          issues.push({ bookingCode: o.code, kind: 'mediapro-missing', fileIds: [], group: { ep: s.card.split('/')[0] || '', cam: s.card.split('/')[1] || '' },
+            detail: `${s.card.split('/').slice(-3).join('/')} · ${s.file} — อยู่ใน MEDIAPRO.XML ของการ์ด (ลงวันที่ ${s.date} ก่อนวันถ่าย) และไม่พบไฟล์ชื่อนี้ที่ไหนบน Drive` })
+        } catch (e: any) { console.warn(`[footage-check] locate stale ${name} failed (hint only): ${e?.message || e}`) }
+      }
       // v1.258 — say WHERE a missing file went (a wrong drop folder, another box). Hint only:
       // a lookup that fails just leaves the line without a location — the issue itself stands.
       // Only names unique to one clip (FX6/FX3 reel+date): C0001 restarts on every card, so a
@@ -843,7 +864,7 @@ async function checkBox(o: {
   if (box && !box.trashed) {
     const { html, hash } = renderCheckDoc({
       bookingCode: o.code, projectId: o.projectId, projectName: o.projectName, shootDate: o.shootDate,
-      state, waiting, files: real.length, bytes, issues, rows: groupRows(files, issues), stranded, mediaPool, errors,
+      state, waiting, files: real.length, bytes, issues, rows: groupRows(files, issues), stranded, mediaPool, errors, notes,
     }, { checkedAt: o.now, appUrl: o.appUrl })
     doc = await syncCheckDoc({ boxId: o.boxId, html, hash, write: o.docs, now: o.now, blocked })
   }
@@ -851,7 +872,7 @@ async function checkBox(o: {
   return {
     bookingCode: o.code, projectId: o.projectId, shootDate: o.shootDate, boxId: o.boxId,
     state, waiting, files: real.length, bytes, counts, issues: issues.slice(0, 20),
-    stranded, mediaPool, issueKey: issueKey(issues, waiting), doc, errors,
+    stranded, mediaPool, issueKey: issueKey(issues, waiting), doc, errors, notes,
   }
 }
 

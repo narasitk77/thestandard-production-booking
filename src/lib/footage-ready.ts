@@ -394,7 +394,8 @@ export async function runFootageReadyScan(
         continue
       }
       const roots = [...new Set([...(boxState === 'alive' ? [box as string] : []), ...(await findFoldersByCode(code)).map(f => f.id)])]
-      const gate = await mediaproGate(roots)
+      // v1.260 — clips an unformatted card still lists from an earlier shoot do not hold the notice (they are named in the text)
+      const gate = await mediaproGate(roots, { shootFrom: new Date(b.shootDate).toISOString().slice(0, 10) })
       if (!gate.ok) {
         result.skipped.push({ code, reason: 'mediapro-incomplete', detail: gate.text })
         continue

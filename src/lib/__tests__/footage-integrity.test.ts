@@ -153,7 +153,7 @@ function box(over: Partial<BoxCheck> = {}): BoxCheck {
   return {
     bookingCode: 'AGN-1', projectId: null, shootDate: '2026-09-20', boxId: 'b', state: 'ok', waiting: false,
     files: 1, bytes: 1, counts: {}, issues: [], stranded: null, mediaPool: null, issueKey: 'k0',
-    doc: { action: 'unchanged', url: null, id: 'd', announced: 'k0' }, errors: [], ...over,
+    doc: { action: 'unchanged', url: null, id: 'd', announced: 'k0' }, errors: [], notes: [], ...over,
   }
 }
 

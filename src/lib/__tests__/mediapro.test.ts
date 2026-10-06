@@ -169,6 +169,54 @@ test('รีวิว: ต้นฉบับ Sony ที่ไม่มี MEDIA
   assert.match(mp.mediaproGapText(r), /การ์ด Sony ไม่มี MEDIAPRO\.XML 3 การ์ด/)
 })
 
+// ── v1.260 — จากการตรวจทั้งไดรฟ์ 4–6 ต.ค. 2569 (495 ใบ) ─────────────────────────
+
+test('v1.260: ชื่อที่ Drive ต่อท้าย " (1) (1)" ตอนอัปซ้ำ = ไฟล์เดิม (AGN-260930-01 มี A025C002_260930SJ (1) (1) (1).MXF md5 เดียวกับตัวที่ถูกทิ้ง แต่ถูกรายงานว่าขาด)', () => {
+  const root = ['EP.4', 'CAM-A', 'A025']
+  const files = card(root, 'A025C002_260930SJ').map((x: any) => x.name === 'A025C002_260930SJ.MXF' ? { ...x, name: 'A025C002_260930SJ (1) (1) (1).MXF' } : x)
+  const r = mp.mediaproCheck(files, [{ folderPath: root, materials: mp.parseMediapro(xml(material('A025C002_260930SJ'))) }])
+  assert.equal(mp.mediaproComplete(r), true, JSON.stringify(r.missing))
+  assert.deepEqual(r.unverifiable, [], 'ต้นฉบับชื่อ "(1)" ไม่ใช่คลิปที่ MEDIAPRO ไม่รู้จัก')
+})
+
+test('v1.260: การ์ดไม่ได้ format — คลิปวันก่อนหน้าที่ MEDIAPRO อ้างแต่ไม่ได้ก็อปมา (AGN-260713-02 "ขาด" 416 ไฟล์ของ 9 ก.ค. ที่อยู่ในกล่อง TSS-TSL-260709-03) = stale ไม่กั้น · คลิปวันถ่ายที่ขาดยังกั้น · ไม่บอกวันถ่าย = กฎเดิม · คลิปวันหลังไม่ถือเป็น stale', () => {
+  const root = ['EP01', 'CAM-A', 'M4ROOT']
+  const cards = [{ folderPath: root, materials: mp.parseMediapro(xml(material('B001R001_260709TQ'), material('A001R001_260713AB'))) }]
+  const files = card(root, 'A001R001_260713AB')
+  const r = mp.mediaproCheck(files, cards, { shootFrom: '2026-07-13' })
+  assert.deepEqual(r.missing, [])
+  assert.equal(r.stale.length, 4)
+  assert.equal(r.stale[0].date, '2026-07-09')
+  assert.equal(mp.mediaproComplete(r), true)
+  assert.match(mp.mediaproStaleText(r), /ข้ามคลิปก่อนวันถ่าย 4 ไฟล์ \(2026-07-09/)
+  const short = mp.mediaproCheck(files.filter((x: any) => x.name !== 'A001R001_260713AB.MXF'), cards, { shootFrom: '2026-07-13' })
+  assert.deepEqual(short.missing.map(x => x.file), ['Clip/A001R001_260713AB.MXF'])
+  assert.match(mp.mediaproGapText(short), /ขาด 1 ไฟล์ตาม MEDIAPRO.*ข้ามคลิปก่อนวันถ่าย 4/)
+  assert.equal(mp.mediaproCheck(files, cards).missing.length, 4, 'ไม่มีวันถ่าย → ขาดเหมือนเดิม')
+  const later = mp.mediaproCheck(files, [{ folderPath: root, materials: mp.parseMediapro(xml(material('A001R001_260713AB'), material('A002R001_260720ZZ'))) }], { shootFrom: '2026-07-13' })
+  assert.equal(later.missing.length, 4, 'คลิปลงวันหลังวันถ่ายที่หายไป = ขาดจริง')
+  assert.equal(later.stale.length, 0)
+  // รีวิว: คลิปวันก่อนที่ "ก็อปมาครึ่งเดียว" (มี Sub/XML แต่ไม่มีต้นฉบับ) เป็นของกล่องนี้ → ขาด ไม่ใช่ stale
+  const half = mp.mediaproCheck([...files, ...card(root, 'B001R001_260709TQ', 1, { skip: ['.MXF'] })], cards, { shootFrom: '2026-07-13' })
+  assert.deepEqual(half.missing.map(x => x.file), ['Clip/B001R001_260709TQ.MXF'])
+  assert.equal(half.stale.length, 0)
+  // รีวิว: นาฬิกากล้องรีเซ็ต (210101) ไม่ใช่ "งานก่อน" — เก่ากว่าหนึ่งปีก่อนวันถ่าย = ไม่รู้ = ขาด
+  const reset = mp.mediaproCheck(files, [{ folderPath: root, materials: mp.parseMediapro(xml(material('A003R004_210101EY'), material('A001R001_260713AB'))) }], { shootFrom: '2026-07-13' })
+  assert.equal(reset.missing.length, 4)
+  assert.equal(reset.stale.length, 0)
+})
+
+test('v1.260: gate ส่งวันถ่ายให้กฎ — คลิปวันก่อนบนการ์ดไม่กั้น "ไฟล์พร้อม" แต่บอกไว้ในข้อความ', async () => {
+  const root = ['EP01', 'CAM-A', 'M4ROOT']
+  const mpFile = f(root, 'MEDIAPRO.XML', 500)
+  xmls[mpFile.id] = xml(material('B001R001_260709TQ'), material('A001R001_260713AB'))
+  trees.box = [...card(root, 'A001R001_260713AB'), mpFile]
+  const r = await mp.mediaproGate(['box'], { shootFrom: '2026-07-13' })
+  assert.equal(r.ok, true, r.text)
+  assert.match(r.text, /ครบตาม MEDIAPRO 1 การ์ด · 4 ไฟล์ · ข้ามคลิปก่อนวันถ่าย 4 ไฟล์/)
+  assert.equal((await mp.mediaproGate(['box'])).ok, false, 'ไม่บอกวันถ่าย = กฎเดิม')
+})
+
 test('รีวิว: gate — กล่องว่าง/อยู่ในถังขยะ (เดินได้ไฟล์ 0 หรือมีแต่ _SHOOT.txt) = ตรวจไม่ได้ ไม่ใช่ "ไม่มีการ์ด Sony"', async () => {
   trees.dead = []
   const dead = await mp.mediaproGate(['dead'])

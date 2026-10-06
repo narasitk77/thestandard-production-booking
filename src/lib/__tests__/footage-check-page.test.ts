@@ -266,11 +266,31 @@ test('v1.254: การ์ด XDROOT ที่ไม่มี MEDIAPRO.XML ต�
   assert.equal(noIndex.state, 'issues')
   assert.equal(noIndex.counts['mediapro-absent'], 1)
 
-  rows = [booking(2)]
+  // clips are dated 1 Sep (…_260901…) — the shoot day, so a listed clip that is not there is MISSING
+  rows = [booking(2, { shootDate: new Date('2026-09-01') })]
   mediaproXml = indexFor('A001C001_260901AA', 'A001C002_260901BB')
   const short = (await fi.scanFootagePage({ now: NOW })).boxes[0]
   assert.equal(short.counts['mediapro-missing'], 2, 'MXF + M01.XML ของคลิปที่สอง')
   assert.match(short.issues.find(i => i.kind === 'mediapro-missing')!.detail, /A001C002_260901BB/)
+
+  // v1.260 — the same card index under a booking shot 20 Sep: the absent 1 Sep clip was left on an
+  // unformatted card by an earlier shoot (AGN-260713-02: 416 such "missing" files) → a note, not an issue
+  rows = [booking(3)]
+  mediaproXml = indexFor('A001C001_260901AA', 'A001C002_260901BB')
+  located = { 'A001C002_260901BB.MXF': 'Other show (NWS-X-260901-01)/EP01/CAM-A/XDROOT/Clip', 'A001C002_260901BBM01.XML': 'Other show (NWS-X-260901-01)/EP01/CAM-A/XDROOT/Clip' }
+  const stale = (await fi.scanFootagePage({ now: NOW, docs: true })).boxes[0]
+  assert.equal(stale.counts['mediapro-missing'], undefined)
+  assert.equal(stale.state, 'ok')
+  assert.equal(stale.notes.length, 1)
+  assert.match(writes[writes.length - 1].html, /ข้ามคลิปก่อนวันถ่าย 2 ไฟล์ \(2026-09-01 — น่าจะการ์ดไม่ได้ format[^)]*\) · A001C002_260901BB\.MXF, A001C002_260901BBM01\.XML/, 'เอกสารยังบอกชื่อไฟล์ที่ข้าม — ถ้าวันถ่ายในใบผิด คนอ่านยังเห็น')
+
+  // รีวิว: "เป็นของงานก่อน" คือข้อสันนิษฐาน — ถ้าชื่อนั้นไม่มีที่ไหนบน Drive เลย ก็กลับมาเป็น "ขาด" พร้อมเหตุผล
+  rows = [booking(4)]
+  mediaproXml = indexFor('A001C001_260901AA', 'A001C002_260901BB')
+  located = {}
+  const nowhere = (await fi.scanFootagePage({ now: NOW })).boxes[0]
+  assert.equal(nowhere.counts['mediapro-missing'], 2)
+  assert.match(nowhere.issues.find(i => i.kind === 'mediapro-missing')!.detail, /ลงวันที่ 2026-09-01 ก่อนวันถ่าย.*ไม่พบไฟล์ชื่อนี้ที่ไหนบน Drive/)
 })
 
 test('v1.258: ไฟล์ที่ MEDIAPRO บอกว่าขาด ถ้าเจอชื่อเดียวกันที่อื่นบน Drive → บอกว่าอยู่ไหน (เคส Osotspa → โฟลเดอร์ drop ของงานยกเลิก)', async () => {
