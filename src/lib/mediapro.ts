@@ -138,9 +138,10 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
           || (byName.get(name) || []).filter(f => inScope(f, scope))
         return { r, name, scope, best: biggest(hits) }
       })
-      // stale = the WHOLE clip is absent (a card left unformatted carries the earlier shoot's clips as a set);
-      // sidecars present with the original absent is a half-copied clip of THIS box, whatever the date says
-      const wholeClipAbsent = entries.every(e => !e.best)
+      // stale = none of the clip's MEDIA (original / Sub) is here. A Sub present with the original absent is a
+      // half-copied clip of THIS box, whatever the date says. Thumbnail/XML alone do not count: THMBNL is copied
+      // as a whole folder and carries the earlier shoot's JPGs along (TSS-ODK-260828-01 kept 46 thumbnails of 26 Aug).
+      const wholeClipAbsent = !entries.some(e => e.best && ['orig', 'sub'].includes(sonyClipPart(e.name)?.part || ''))
       for (const { r, name, scope, best } of entries) {
         const dedupe = `${pathKey(scope)}|${name}`
         listedIn.set(name, [...(listedIn.get(name) || []), scope])

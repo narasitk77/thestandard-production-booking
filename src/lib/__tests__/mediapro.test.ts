@@ -200,6 +200,10 @@ test('v1.260: การ์ดไม่ได้ format — คลิปวัน
   const half = mp.mediaproCheck([...files, ...card(root, 'B001R001_260709TQ', 1, { skip: ['.MXF'] })], cards, { shootFrom: '2026-07-13' })
   assert.deepEqual(half.missing.map(x => x.file), ['Clip/B001R001_260709TQ.MXF'])
   assert.equal(half.stale.length, 0)
+  // THMBNL ถูกก็อปทั้งโฟลเดอร์ติดภาพย่อของงานก่อนมาด้วย (TSS-ODK-260828-01: 46 JPG ของ 26 ส.ค.) — ภาพย่อ/XML อย่างเดียวไม่ใช่ "ก็อปครึ่งเดียว"
+  const thumbOnly = mp.mediaproCheck([...files, f([...root, 'Thmbnl'], 'B001R001_260709TQT01.JPG', 10)], cards, { shootFrom: '2026-07-13' })
+  assert.deepEqual(thumbOnly.missing, [])
+  assert.equal(thumbOnly.stale.length, 3, 'MXF + Sub + XML ของคลิปวันก่อน = stale · JPG ที่มีอยู่ไม่ถูกนับว่าขาด')
   // รีวิว: นาฬิกากล้องรีเซ็ต (210101) ไม่ใช่ "งานก่อน" — เก่ากว่าหนึ่งปีก่อนวันถ่าย = ไม่รู้ = ขาด
   const reset = mp.mediaproCheck(files, [{ folderPath: root, materials: mp.parseMediapro(xml(material('A003R004_210101EY'), material('A001R001_260713AB'))) }], { shootFrom: '2026-07-13' })
   assert.equal(reset.missing.length, 4)
