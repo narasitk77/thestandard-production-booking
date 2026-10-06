@@ -39,6 +39,7 @@ import { bookingShowName } from './display'
 import { getDriveLink, rememberDriveLinks } from './drive-links'
 import { noteResolve } from './id-first-metrics'
 import { isFolderAlive } from './google-drive'
+import { alertOps } from './ops-alert'
 
 // "Production Team" landing Shared Drive (NAS drop zone) — mirrors prep-folders.ts.
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
@@ -55,10 +56,21 @@ export interface VideoMergeResult {
   moved: number         // files moved into a box (or would-move in dryRun)
   movedFolders: number  // v1.127 — whole subfolders relocated in one call (contents uncounted)
   errors: number
-  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; skipped?: string }>
+  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; conflicts?: number; skipped?: string }>
 }
 
-type Stats = { seen: number; moved: number; movedFolders: number; dup: number; err: number }
+type Stats = { seen: number; moved: number; movedFolders: number; dup: number; err: number; conflicts: string[] }
+
+/**
+ * v1.261 — sync-storm guard. Two uploaders (NAS Cloud Sync + a crew member's Google
+ * Drive for desktop) pushing the same NAS folder into the landing drive create a
+ * same-name twin, then rename-fight forever: `XDROOT (1) (1) (1)…`, `Thmbnl (2) (1)…`,
+ * `A032C001_261006UM (1).MXF`. On 2026-10-05 the hourly merge fast-path-moved such a
+ * subtree WHOLE into NWS-KYM-261005-01's box (40 shells + a duplicate 28 GB MXF).
+ * Anything carrying the suffix — or any subtree containing one — stays in landing
+ * and is reported, so a human (or the storm ending) sorts it out before it lands.
+ */
+export const isConflictName = (name: string) => /(?: \(\d+\))+(?=(?:\.[^.]*)?$)/.test(name)
 
 /**
  * Recursively mirror-MOVE files from a landing subtree into the matching box
@@ -73,6 +85,7 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
       : new Set<string>()
     for (const f of files) {
       stats.seen++
+      if (isConflictName(f.name)) { stats.conflicts.push(f.name); continue } // v1.261 — sync-storm leftover, never land it
       if (have.has(`${f.name}|${f.size ?? ''}`)) { stats.dup++; continue } // already in box — leave in landing
       if (dryRun || !destId) { stats.moved++; continue }
       try { await moveFileToFolder(f.id, destId, srcId); stats.moved++ }
@@ -97,17 +110,26 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
     // were re-parented under the VIDEO 2026 box within the hour).
     // An empty subtree has nothing to merge, so skipping it is a pure no-op for
     // the merge and keeps the drop target intact.
-    if (await isLandingShell(s.id)) continue
+    // v1.261 — sync-storm guard: a conflict-named folder never moves; a clean folder
+    // that CONTAINS conflict names loses the whole-folder fast path and is mirrored
+    // per file instead, so the clean footage inside still lands while every
+    // "(1)" item is caught (and counted) at its own level and stays in landing.
+    if (isConflictName(s.name)) { stats.conflicts.push(s.name); continue }
+    const scan = await scanLanding(s.id)
+    if (scan.shell) continue
+    const dirty = scan.conflicts.length > 0
     let destSub: string | null = destId ? await findTwinFolder(destId, s.name) : null
     if (destId && !dryRun) {
-      if (destSub && await isFolderEmpty(destSub)) {
+      if (!dirty && destSub && await isFolderEmpty(destSub)) {
         // trash-BEFORE-move: if the trash fails we still have the twin and just
         // mirror into it; move-before-trash could leave two same-name folders.
         try { await trashDriveItem(destSub); destSub = null } catch { /* keep twin, mirror into it */ }
       }
       if (!destSub) {
-        try { await moveFileToFolder(s.id, destId, srcId); stats.movedFolders++; continue }
-        catch (e: any) { console.warn('[video-merge] folder move → per-file fallback:', code, s.name, e?.message || e) }
+        if (!dirty) {
+          try { await moveFileToFolder(s.id, destId, srcId); stats.movedFolders++; continue }
+          catch (e: any) { console.warn('[video-merge] folder move → per-file fallback:', code, s.name, e?.message || e) }
+        }
         destSub = await ensureFolderPath(destId, [s.name])
       }
     }
@@ -145,18 +167,23 @@ async function findTwinFolder(destId: string, name: string): Promise<string | nu
 }
 
 /**
- * v1.127 — true when the landing tree holds nothing but _SHOOT stubs and empty
- * folders (i.e. everything real has moved to the box). Depth-capped; anything
- * unexpected keeps the folder.
+ * v1.127 — `shell`: the landing tree holds nothing but _SHOOT stubs and empty
+ * folders (everything real has moved to the box). v1.261 — `conflicts`: names in
+ * the tree that carry a sync-conflict suffix (see isConflictName). One walk serves
+ * both. Depth-capped; anything deeper counts as "not a shell" and is left alone.
  */
-async function isLandingShell(folderId: string, depth = 0): Promise<boolean> {
-  if (depth > 4) return false
+async function scanLanding(folderId: string, depth = 0): Promise<{ shell: boolean; conflicts: string[] }> {
+  if (depth > 4) return { shell: false, conflicts: [] }
   const files = await listFilesInFolder(folderId)
-  if (files.some(f => !isShootInfo(f.name))) return false
+  const conflicts = files.map(f => f.name).filter(isConflictName)
+  let shell = !files.some(f => !isShootInfo(f.name))
   for (const s of await listChildFolders(folderId)) {
-    if (!(await isLandingShell(s.id, depth + 1))) return false
+    if (isConflictName(s.name)) conflicts.push(s.name)
+    const sub = await scanLanding(s.id, depth + 1)
+    conflicts.push(...sub.conflicts.map(n => `${s.name}/${n}`))
+    if (!sub.shell) shell = false
   }
-  return true
+  return { shell, conflicts }
 }
 
 /*
@@ -169,6 +196,16 @@ async function isLandingShell(folderId: string, depth = 0): Promise<boolean> {
  * ไว้เฉย ๆ มีแต่ความเสี่ยงว่าใครจะเผลอเปิด จึงตัดออกทั้งชุดก่อนยุบเข้า reconciler
  * (สัญญาความปลอดภัย §0: reconciler ห้ามลบเกินต้นแบบ — ต้นแบบจึงต้องไม่มีอันนี้)
  */
+
+/** v1.261 — a storm in a landing folder is an ops incident, not a counter: log + alertOps (6h throttle per booking). */
+async function reportConflicts(code: string, conflicts: string[]): Promise<void> {
+  if (!conflicts.length) return
+  const shown = conflicts.slice(0, 8).join('\n  ')
+  console.warn(`[video-merge] ${code}: ${conflicts.length} sync-conflict name(s) left in landing — not merged:\n  ${shown}`)
+  await alertOps(`sync-storm:${code}`, `⚠️ โฟลเดอร์ชื่อซ้ำ "(1)" ใน landing — ${code}`,
+    `video-merge ไม่ย้าย ${conflicts.length} รายการของ ${code} เพราะชื่อมีท้าย "(1)" จากซิงก์ชนกัน ` +
+    `(Cloud Sync ของ NAS กับ Drive for desktop อัปโฟลเดอร์เดียวกันพร้อมกัน) — ต้องเหลือตัวอัปตัวเดียวแล้วเก็บซากก่อน ของถึงจะเข้ากล่อง\n  ${shown}${conflicts.length > 8 ? `\n  … อีก ${conflicts.length - 8}` : ''}`)
+}
 
 export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
   const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, results: [] as VideoMergeResult['results'] }
@@ -254,10 +291,11 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // self-heal: remember what we just resolved so next time skips the walk.
       if (!opts.dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
-      const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
+      const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [] }
       await mirrorMove(flatId, destId, code, stats, !!opts.dryRun)
       base.landed += stats.seen; base.moved += stats.moved; base.movedFolders += stats.movedFolders; base.errors += stats.err
-      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, movedFolders: stats.movedFolders, dup: stats.dup, err: stats.err })
+      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, movedFolders: stats.movedFolders, dup: stats.dup, err: stats.err, conflicts: stats.conflicts.length })
+      if (!opts.dryRun) await reportConflicts(code, stats.conflicts)
     } catch (e: any) {
       base.errors++
       base.results.push({ bookingCode: code, skipped: `error: ${e?.message || String(e)}` })
@@ -293,13 +331,14 @@ export interface BookingVideoMergeResult {
   movedFolders: number
   dup: number
   err: number
+  conflicts: number       // v1.261 — sync-storm names left in landing (see isConflictName)
   boxFolderUrl?: string | null
 }
 
 /** MOVE this ONE booking's NAS landing footage into its VIDEO 2026 box. */
 export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: boolean } = {}): Promise<BookingVideoMergeResult> {
   const dryRun = !!opts.dryRun
-  const zero = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
+  const zero = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: 0 }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'ยังไม่ได้ตั้งค่า Drive', ...zero }
   const code = b.bookingCode
@@ -351,7 +390,8 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   noteResolve('video-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
   if (!dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
 
-  const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 }
+  const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [] }
   await mirrorMove(flatId, destId, code, stats, dryRun)
-  return { ...stats, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
+  if (!dryRun) await reportConflicts(code, stats.conflicts)
+  return { ...stats, conflicts: stats.conflicts.length, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
 }

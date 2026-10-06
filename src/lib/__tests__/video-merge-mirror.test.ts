@@ -35,7 +35,7 @@ mock.module('../google-drive', {
 let mirrorMove: typeof import('../video-merge').mirrorMove
 before(async () => { ({ mirrorMove } = await import('../video-merge')) })
 
-const noStats = () => ({ seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0 })
+const noStats = () => ({ seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [] as string[] })
 
 beforeEach(() => { drive = new FakeDrive() })
 
@@ -111,4 +111,35 @@ test('same filename but different size is treated as a new file', async () => {
 
   assert.equal(stats.dup, 0)
   assert.equal(stats.moved, 1)
+})
+
+// ── v1.261: a sync storm ("XDROOT (1) (1)", "Thmbnl (2) (1)") must never land in the box ──
+test('a landing subtree carrying sync-conflict names stays in landing and is reported', async () => {
+  const root = drive.mkFolder('root', null)
+  const landing = drive.mkFolder('Key Message · x (NWS-KYM-261005-01)', root)
+  const ep = drive.mkFolder('EP01 · x', landing)
+  const camB = drive.mkFolder('CAM-B', ep)
+  // the clean card: must still merge
+  const camA = drive.mkFolder('CAM-A', ep)
+  drive.mkFile('A001C001.MXF', drive.mkFolder('Clip', drive.mkFolder('XDROOT', camA)), 10)
+  // the storm: a clean-named XDROOT whose Thmbnl has conflict twins, plus shell siblings
+  const xd = drive.mkFolder('XDROOT', camB)
+  drive.mkFile('B001C001.MXF', drive.mkFolder('Clip', xd), 10)
+  drive.mkFile('B001C001T01.JPG', drive.mkFolder('Thmbnl (1) (1)', xd), 1)
+  drive.mkFile('SONYCARD.IND', drive.mkFolder('XDROOT (1) (2) (1)', camB), 0)
+  drive.mkFile('B001C001 (1).MXF', camB, 10)
+  const box = drive.mkFolder('box', root)
+
+  const stats = noStats()
+  await mirrorMove(landing, box, 'NWS-KYM-261005-01', stats, false)
+
+  // clean footage from BOTH cards landed (CAM-B per file, not as a whole folder)…
+  assert.ok(drive.filesUnder(box).includes('A001C001.MXF'))
+  assert.ok(drive.filesUnder(box).includes('B001C001.MXF'))
+  // …while every "(1)" item stayed behind in landing
+  assert.ok(!drive.filesUnder(box).includes('SONYCARD.IND'))
+  assert.ok(!drive.filesUnder(box).includes('B001C001 (1).MXF'))
+  assert.ok(!drive.filesUnder(box).includes('B001C001T01.JPG'))
+  assert.deepEqual(drive.childFolderNames(camB).sort(), ['XDROOT', 'XDROOT (1) (2) (1)'])
+  assert.deepEqual(stats.conflicts.sort(), ['B001C001 (1).MXF', 'Thmbnl (1) (1)', 'XDROOT (1) (2) (1)'])
 })
