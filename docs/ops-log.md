@@ -6,6 +6,24 @@ until 2026-10-01 — see the 2026-10-04 entry). Newest first.
 
 ---
 
+## 2026-10-06 (เย็น) · "พายุ (1) (1) (1)" = สองตัวอัปโฟลเดอร์ NAS เดียวกันพร้อมกัน · v1.261 DEPLOYED `sha-10e47df` (17:04)
+
+นัท: "ทำไมมีโฟลเดอร์ซ้ำซ้อนเยอะขนาดนี้" (NWS-KYM-261005-01 `CAM-B`: `XDROOT (1) (1)…`/`SONY (1) (2)…` 40 ตัว + MXF 28.6 GB สองสำเนา md5 เดียว) → "แก้เลย ใน NAS ก็เป็น"
+
+- **กลไก (พิสูจน์จาก lastModifyingUser/createdTime):** โฟลเดอร์เดียวกันขึ้น Production Team เป็น**คู่ในวินาทีเดียวกัน** ตัวหนึ่ง `it.admin@` (Synology Cloud Sync)
+  อีกตัว `napat.p@` (Google Drive for desktop บนเครื่องทีมงาน ซิงก์โฟลเดอร์ NAS/Production Team อยู่) · Drive ยอมชื่อซ้ำ ไคลเอนต์ซิงก์ไม่ยอม → ต่างฝ่ายต่างดาวน์โหลด
+  ตัวแปลกหน้าเป็น `X (1)` แล้วอัปกลับ → วนทุก ~10–25 วิ · เห็นสด ๆ 15:38–16:50: root ไดรฟ์ `EP01 · knd feat. เอิร์น (earn_shares) (1)…` 65 ตัว · `KND-KNF-261006-01/CAM-C/XDROOT/Thmbnl (n)` 70+ ตัว
+  · บน NAS ทุกไฟล์ในการ์ดมีคู่ `X (1).MXF` (20.8 GB ×2)
+- **ลบไม่หยุด:** trash 65 บน Drive + rm 15 บน NAS (เปลือกเปล่าทุกตัว ตรวจทีละตัว) → งอกกลับ 15 ตัวใน 3 นาที เพราะอีกไคลเอนต์ยังมี mirror ของตัวเอง
+  ⇒ หยุดได้ที่ต้นทางเท่านั้น: napat ปิด Drive for desktop (หรือลดสิทธิ์ napat.p บน Production Team เป็น Viewer ชั่วคราว — รอนัทสั่ง)
+- **probook ไม่ได้สร้างซาก แต่หอบเข้ากล่อง:** merge รายชั่วโมง fast path (v1.127) ย้าย `XDROOT (1)…` ทั้งก้อน · วันนี้ก่อน deploy ก็หอบ `KND-KNF-261006-01` CAM-B (SONY (n) 20 ตัว) + CAM-C (Thmbnl (n) 17) เข้ากล่องไปแล้ว
+- **v1.261** `isConflictName`/`scanLanding` ใน `video-merge.ts`: ชื่อ ` (n)` ซ้อนไม่ย้าย · โฟลเดอร์สะอาดที่มีซากข้างในเสีย fast path → ย้ายทีละไฟล์ (ของดีเข้ากล่อง ซากอยู่ landing) ·
+  `conflicts` ในผล + UI + `alertOps('sync-storm:<code>')` · เทส storm จริง · deploy ผ่าน deploy.py ครบสามชั้น 17:04 · schema in-sync
+- **เก็บกวาด (footage-check/audit-2026-10-06b/):** `fix.cjs` เพิ่ม `trashshell` (live walk ไม่มีไฟล์ >0 ไบต์) + retry 403 rate limit · `storm_plan.py <folder>` วางแผนจาก listing สด
+  (ซาก→trash เทียบ md5-twin · กลุ่มที่ไม่เหลือชื่อสะอาด → rename ตัวเก่าสุด) · KYM CAM-B 254 ops (Sub/MEDIAPRO ไม่เหลือตัวสะอาดเลย — rename `Sub (2) (1)`→`Sub`, `MEDIAPRO (1)…`→`MEDIAPRO.XML`)
+  · กับดัก: docker_exec 900 วิ → แผนใหญ่ได้ manifest 41/224 แถว ต้องแบ่ง chunk ≤30
+- **ทิ้งโดย napat 5 ต.ค. 13:35 (`CAM-B/XDROOT/Clip`) ที่ audit เช้านี้ untrash** = เขาลดสำเนาซ้ำถูกแล้ว (อีก XDROOT มี MXF md5 เดียวกันครบ) — กฎ "ทิ้งทั้งการ์ด" ของ audit มองไม่ออก
+
 ## 2026-10-06 · ตรวจทั้งไดรฟ์ 495 ใบ → กู้ฟุตเทจ ~1.1 TB จากถังขยะ · v1.260 DEPLOYED `sha-7bb045e` (15:03) · v1.260.1 DEPLOYED `sha-0eb7049` (15:22 · กฎ stale ไม่นับภาพย่อ — TSS-ODK-260828-01 ok + note 138 บนพรอด)
 
 นัท 4 ต.ค.: "ตรวจๆๆ อย่าให้พลาด ใช้เวลาคืนนี้ ตรวจให้หมด" → 6 ต.ค. "ตรวจและแก้" · รายงานเต็ม `footage-check/audit-2026-10-06/REPORT.md` · manifest ทุกการแก้ในโฟลเดอร์เดียวกัน
