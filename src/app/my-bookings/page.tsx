@@ -12,10 +12,13 @@ import { isValidQuRef } from '@/lib/qu-ref'
 import { producerEditMode, isBookingOwner } from '@/lib/producer-edit-access'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
+import { CameraMicTag } from '@/app/admin/_components/CameraMicTag'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
   isBlockShot?: boolean
+  cameraCount?: number | null
+  micCount?: number | null
   id: string
   shootDate: string
   shootEndDate?: string | null
@@ -318,6 +321,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
             {b.locationName && <> · {b.locationName}</>}
           </div>
           <div className="text-xs text-gray-400 truncate mt-0.5">Producer: {b.producer}</div>
+          <div className="mt-1"><CameraMicTag cameraCount={b.cameraCount} micCount={b.micCount} isBlockShot={b.isBlockShot} /></div>
           <CrewLine crew={b.assignedCrew} meEmail={meEmail} />
         </div>
         <div className="flex flex-col items-end gap-1">

@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed — My Bookings โชว์จำนวนกล้อง/ไมค์ในแต่ละแถว (7 ต.ค. 2569)
+
+นัท: "หน้านี้ของ My Booking โชว์รายละเอียด จำนวนกล้อง ไมค์ แบบในหน้าการ์ดอื่นๆ ด้วย" — แถวในหน้า `/my-bookings` ใช้ `CameraMicTag`
+ตัวเดียวกับคิวแอดมิน · การ์ดปฏิทิน · หน้ารายละเอียด (🎥 n · 🎙 n สีแดง · ไม่ระบุ = เตือนแดง · Block Shot = ป้ายม่วง) ใต้บรรทัด Producer
+· API `/api/bookings` ส่ง `cameraCount`/`micCount` มาอยู่แล้ว ไม่ต้องแก้ฝั่งเซิร์ฟเวอร์
+
 ### Fixed — video-merge ไม่พาซาก "(1) (1)" จากซิงก์ชนกันเข้ากล่องอีก (v1.261 · 6 ต.ค. 2569)
 
 นัท: "ทำไมมีโฟลเดอร์ซ้ำซ้อนเยอะขนาดนี้" (NWS-KYM-261005-01 `CAM-B` มี `XDROOT (1) (1)…`/`SONY (1) (2)…` 40 ตัว) →
