@@ -143,3 +143,108 @@ test('a landing subtree carrying sync-conflict names stays in landing and is rep
   assert.deepEqual(drive.childFolderNames(camB).sort(), ['XDROOT', 'XDROOT (1) (2) (1)'])
   assert.deepEqual(stats.conflicts.sort(), ['B001C001 (1).MXF', 'Thmbnl (1) (1)', 'XDROOT (1) (2) (1)'])
 })
+
+// ── v1.261.1: the hourly merge re-walked whole subtrees at every level ────────
+// Steady state: the footage is already in the box, so every landing subfolder
+// has a non-empty box twin. v1.261 still walked each subtree in full at every
+// level (CLIP below was listed 6×); the hourly run went from ~6 to 33–52 min
+// and the worker gave up at its 30-min timeout on every run. Here every level
+// holds a file, so the empty-shell check stops at each folder's own first file:
+// each folder is listed by that check and by the mirror itself, nothing more.
+test('a steady-state pass does not re-walk subtrees (every level holds a file)', async () => {
+  const root = drive.mkFolder('root', null)
+  const landing = drive.mkFolder('landing', root)
+  const box = drive.mkFolder('box', root)
+  const landingIds: string[] = []
+  let l = landing, b = box
+  for (const name of ['EP01 · x', 'CAM-A', 'A032', 'M4ROOT', 'CLIP']) {
+    l = drive.mkFolder(name, l); b = drive.mkFolder(name, b)
+    landingIds.push(l)
+    drive.mkFile(`${name}.bin`, l, 1); drive.mkFile(`${name}.bin`, b, 1) // already in box → stays
+  }
+  const listed = new Map<string, number>()
+  const realList = drive.listFilesInFolder
+  drive.listFilesInFolder = async (id: string) => { listed.set(id, (listed.get(id) ?? 0) + 1); return realList(id) }
+
+  const stats = noStats()
+  await mirrorMove(landing, box, 'X', stats, false)
+
+  assert.equal(stats.dup, 5)
+  for (const id of landingIds) assert.ok((listed.get(id) ?? 0) <= 2, `${id} listed ${listed.get(id)}×`)
+})
+
+// ── v1.261.1: a tree too deep to fully check for "(1)" names is not moved whole ──
+test('a landing subtree deeper than the conflict scan is mirrored, not moved whole', async () => {
+  const root = drive.mkFolder('root', null)
+  const landing = drive.mkFolder('landing', root)
+  const box = drive.mkFolder('box', root)
+  let l = landing
+  for (let i = 1; i <= 10; i++) l = drive.mkFolder(`L${i}`, l)
+  drive.mkFile('deep.mxf', l, 10)
+
+  const stats = noStats()
+  await mirrorMove(landing, box, 'X', stats, false)
+
+  assert.ok(drive.filesUnder(box).includes('deep.mxf'))  // footage still lands…
+  assert.deepEqual(drive.childFolderNames(landing), ['L1']) // …but L1 itself was not carried over unchecked
+  assert.equal(stats.movedFolders, 1)                      // the first fully-checked level moves whole
+})
+
+// ── v1.261.1: a folder left holding only empty "(1)" storm shells ─────────────
+// After the real card has merged, a storm leaves CAM-B with nothing but empty
+// "XDROOT (1) (1)" shells that keep regrowing. The shell check used to walk
+// every one of them each hourly run (~12 Drive calls per shell) and then call
+// CAM-B "empty", so the storm was never reported. It must be reported, stay in
+// landing, and cost no walk into the shells.
+test('a folder holding only empty "(1)" shells is reported, not walked', async () => {
+  const root = drive.mkFolder('root', null)
+  const landing = drive.mkFolder('landing', root)
+  const ep = drive.mkFolder('EP01 · x', landing)
+  const camB = drive.mkFolder('CAM-B', ep)
+  const shellIds: string[] = []
+  for (let i = 1; i <= 5; i++) {
+    const shell = drive.mkFolder(`XDROOT${' (1)'.repeat(i)}`, camB)
+    shellIds.push(shell)
+    for (const sub of ['Clip', 'Sub', 'Thmbnl']) shellIds.push(drive.mkFolder(sub, shell))
+  }
+  const box = drive.mkFolder('box', root)
+  const boxEp = drive.mkFolder('EP01 · x', box)
+  drive.mkFile('B001C001.MXF', drive.mkFolder('XDROOT', drive.mkFolder('CAM-B', boxEp)), 10) // merged earlier
+  const listed = new Set<string>()
+  const realFiles = drive.listFilesInFolder, realFolders = drive.listChildFolders
+  drive.listFilesInFolder = async (id: string) => { listed.add(id); return realFiles(id) }
+  drive.listChildFolders = async (id: string) => { listed.add(id); return realFolders(id) }
+
+  const stats = noStats()
+  await mirrorMove(landing, box, 'X', stats, false)
+
+  assert.equal(stats.conflicts.length, 5)                      // reported…
+  assert.equal(drive.childFolderNames(camB).length, 5)         // …left in landing…
+  assert.deepEqual(drive.filesUnder(box), ['B001C001.MXF'])    // …nothing new in the box
+  assert.deepEqual(shellIds.filter(id => listed.has(id)), [])  // …and no shell was walked
+})
+
+// ── v1.261.1: the empty box twin is re-checked right before it is trashed ─────
+// hasConflictInside runs between the first emptiness check and the trash; if
+// footage lands in the twin meanwhile, the twin must survive (mirror into it).
+test('a box twin that fills up during the conflict scan is not trashed', async () => {
+  const root = drive.mkFolder('root', null)
+  const landing = drive.mkFolder('landing', root)
+  const landCam = drive.mkFolder('CAM-A', landing)
+  drive.mkFile('A001.MXF', landCam, 10)
+  const box = drive.mkFolder('box', root)
+  const boxCam = drive.mkFolder('CAM-A', box) // empty prep skeleton
+  // the 2nd listing of the landing CAM-A is hasConflictInside's — land a file in the twin right then
+  let listings = 0
+  const realList = drive.listFilesInFolder
+  drive.listFilesInFolder = async (id: string) => {
+    if (id === landCam && ++listings === 2) drive.mkFile('arrived-meanwhile.MXF', boxCam, 10)
+    return realList(id)
+  }
+
+  await mirrorMove(landing, box, 'X', noStats(), false)
+
+  assert.deepEqual(drive.childFolderNames(box), ['CAM-A'])
+  assert.ok(drive.filesUnder(box).includes('arrived-meanwhile.MXF'))
+  assert.ok(drive.filesUnder(box).includes('A001.MXF'))
+})

@@ -115,23 +115,31 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
     // per file instead, so the clean footage inside still lands while every
     // "(1)" item is caught (and counted) at its own level and stays in landing.
     if (isConflictName(s.name)) { stats.conflicts.push(s.name); continue }
-    const scan = await scanLanding(s.id)
-    if (scan.shell) continue
-    const dirty = scan.conflicts.length > 0
+    if (await isLandingShell(s.id)) continue
     let destSub: string | null = destId ? await findTwinFolder(destId, s.name) : null
     if (destId && !dryRun) {
-      if (!dirty && destSub && await isFolderEmpty(destSub)) {
-        // trash-BEFORE-move: if the trash fails we still have the twin and just
-        // mirror into it; move-before-trash could leave two same-name folders.
-        try { await trashDriveItem(destSub); destSub = null } catch { /* keep twin, mirror into it */ }
-      }
-      if (!destSub) {
-        if (!dirty) {
+      // v1.261.1 — only the whole-folder fast path (box twin absent or an empty
+      // skeleton) needs to know the subtree is storm-free, so only walk it then.
+      // v1.261 walked every branch of each subtree at EVERY level of this
+      // recursion (v1.260's shell check follows one path to the first file):
+      // the hourly run went from ~6 min to 33–52 min and the worker gave up at
+      // its 30-min idle timeout on every run from 6 Oct 17:04 BKK on. The
+      // per-file path below catches conflict names at their own level anyway.
+      const twinEmpty = !!destSub && await isFolderEmpty(destSub)
+      if ((!destSub || twinEmpty) && !(await hasConflictInside(s.id))) {
+        // hasConflictInside can take a while — re-check the twin is STILL empty
+        // right before trashing it (something may have landed meanwhile).
+        if (destSub && await isFolderEmpty(destSub)) {
+          // trash-BEFORE-move: if the trash fails we still have the twin and just
+          // mirror into it; move-before-trash could leave two same-name folders.
+          try { await trashDriveItem(destSub); destSub = null } catch { /* keep twin, mirror into it */ }
+        }
+        if (!destSub) {
           try { await moveFileToFolder(s.id, destId, srcId); stats.movedFolders++; continue }
           catch (e: any) { console.warn('[video-merge] folder move → per-file fallback:', code, s.name, e?.message || e) }
         }
-        destSub = await ensureFolderPath(destId, [s.name])
       }
+      if (!destSub) destSub = await ensureFolderPath(destId, [s.name])
     }
     await mirrorMove(s.id, destSub, code, stats, dryRun)
   }
@@ -167,23 +175,47 @@ async function findTwinFolder(destId: string, name: string): Promise<string | nu
 }
 
 /**
- * v1.127 — `shell`: the landing tree holds nothing but _SHOOT stubs and empty
- * folders (everything real has moved to the box). v1.261 — `conflicts`: names in
- * the tree that carry a sync-conflict suffix (see isConflictName). One walk serves
- * both. Depth-capped; anything deeper counts as "not a shell" and is left alone.
+ * v1.127 — true when the landing tree holds nothing but _SHOOT stubs and empty
+ * folders (i.e. everything real has moved to the box). Depth-capped; anything
+ * unexpected keeps the folder. Stops at the first real file: mirrorMove calls
+ * this for every subfolder at every level, so it must not walk whole trees.
+ *
+ * v1.261.1 — a "(1)" sync-conflict child also makes it NOT a shell, without
+ * walking into it. A storm leaves hundreds of empty "XDROOT (1) (1)" shells
+ * that regrow while two uploaders fight; walking them cost ~12 Drive calls each
+ * per hourly run, and a folder holding only them was skipped as "empty" so the
+ * storm was never reported. Now mirrorMove descends and reports them.
  */
-async function scanLanding(folderId: string, depth = 0): Promise<{ shell: boolean; conflicts: string[] }> {
-  if (depth > 4) return { shell: false, conflicts: [] }
+async function isLandingShell(folderId: string, depth = 0): Promise<boolean> {
+  if (depth > 4) return false
   const files = await listFilesInFolder(folderId)
-  const conflicts = files.map(f => f.name).filter(isConflictName)
-  let shell = !files.some(f => !isShootInfo(f.name))
-  for (const s of await listChildFolders(folderId)) {
-    if (isConflictName(s.name)) conflicts.push(s.name)
-    const sub = await scanLanding(s.id, depth + 1)
-    conflicts.push(...sub.conflicts.map(n => `${s.name}/${n}`))
-    if (!sub.shell) shell = false
+  if (files.some(f => !isShootInfo(f.name))) return false
+  const subs = await listChildFolders(folderId)
+  if (subs.some(s => isConflictName(s.name))) return false
+  for (const s of subs) {
+    if (!(await isLandingShell(s.id, depth + 1))) return false
   }
-  return { shell, conflicts }
+  return true
+}
+
+// Real card trees reach ~7 levels below a landing subfolder
+// (AVCHD: EP/CAM/card/PRIVATE/AVCHD/BDMV/BACKUP).
+const CONFLICT_SCAN_DEPTH = 8
+
+/**
+ * v1.261.1 — does this landing subtree hold any sync-conflict name (see
+ * isConflictName)? Stops at the first one. A tree deeper than
+ * CONFLICT_SCAN_DEPTH counts as dirty: it was not fully checked, so it loses
+ * the whole-folder fast path and is mirrored per file, which checks every level
+ * itself. (v1.261 counted the unchecked depth as clean.)
+ */
+async function hasConflictInside(folderId: string, depth = 0): Promise<boolean> {
+  if (depth > CONFLICT_SCAN_DEPTH) return true
+  if ((await listFilesInFolder(folderId)).some(f => isConflictName(f.name))) return true
+  const subs = await listChildFolders(folderId)
+  if (subs.some(s => isConflictName(s.name))) return true
+  for (const s of subs) if (await hasConflictInside(s.id, depth + 1)) return true
+  return false
 }
 
 /*
