@@ -29,6 +29,9 @@ from datetime import datetime, timedelta, timezone
 
 ENV_FILE = os.path.expanduser("~/.hermes/scripts/probook.env")
 STATE = os.path.expanduser("~/.hermes/state/probook/notify-relay.json")
+OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-notify-relay.json")
+HERMES_JOBS = os.path.expanduser("~/.hermes/cron/jobs.json")
+JOB_NAME = "probook-notify-relay"
 FIRST_RUN_BACKFILL_H = 24
 NAS_STALE_ALERT_MIN = 120
 NAS_ALERT_EVERY_S = 12 * 3600
@@ -36,7 +39,6 @@ ERROR_ALERT_EVERY_S = 6 * 3600
 MAX_CHARS = 1800          # one Discord message
 MAX_PAGES = 5
 OVERLAP_MIN = 15        # re-read this far behind the cursor (late-committing audit rows)
-DELIVERED_KEEP_H = 48   # remember delivered ids this long (>> OVERLAP_MIN)
 
 
 def env_val(key, path=ENV_FILE):
@@ -63,6 +65,46 @@ def write_state(st):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(st, f, ensure_ascii=False)
     os.replace(tmp, STATE)  # never a half-written cursor
+
+
+def _delivery_error(job_name=JOB_NAME):
+    """last_delivery_error of this Hermes job (None = the previous message arrived, or unreadable).
+    Same OUTBOX pattern as probook-worker-check.py: Discord delivery happens in Hermes AFTER this script
+    exits and Hermes does not retry, so the script itself re-sends what did not arrive."""
+    try:
+        raw = json.load(open(HERMES_JOBS, encoding="utf-8"))
+    except Exception:
+        return None
+    jobs = raw if isinstance(raw, list) else raw.get("jobs", raw)
+    jobs = list(jobs.values()) if isinstance(jobs, dict) else jobs
+    for j in jobs if isinstance(jobs, list) else []:
+        if isinstance(j, dict) and j.get("name") == job_name:
+            return j.get("last_delivery_error")
+    return None
+
+
+def undelivered():
+    """text of the previous run that Hermes failed to post ("" = nothing pending)"""
+    if not _delivery_error():
+        try:
+            os.remove(OUTBOX)
+        except FileNotFoundError:
+            pass
+        return ""
+    try:
+        saved = json.load(open(OUTBOX, encoding="utf-8"))
+    except Exception:
+        return ""
+    return f"📮 ส่งซ้ำ — ข้อความรอบ {saved.get('runAt', 'ก่อนหน้า')} ส่งไม่ออก\n{saved.get('text', '')}" if saved.get("text") else ""
+
+
+def remember(text):
+    if not text:
+        return
+    os.makedirs(os.path.dirname(OUTBOX), exist_ok=True)
+    with open(OUTBOX + ".tmp", "w", encoding="utf-8") as f:
+        json.dump({"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text}, f, ensure_ascii=False)
+    os.replace(OUTBOX + ".tmp", OUTBOX)
 
 
 def net_down():
@@ -161,11 +203,15 @@ def run(now=None, fetcher=fetch):
         st["cursor"] = max(cursor, send[-1]["at"]) if "cursor" in st else send[-1]["at"]
     elif "cursor" not in st:
         st["cursor"] = cursor  # first run with nothing to say: start from the backfill point
-    keep_after = (now - timedelta(hours=DELIVERED_KEEP_H)).isoformat()
+    # keep every id the NEXT run can re-read (cursor − overlap, with a margin) — pruning by wall-clock age
+    # re-posted the last notice every 5 min once a quiet spell outlasted the keep period
+    keep_after = (datetime.fromisoformat(st["cursor"].replace("Z", "+00:00")) - timedelta(minutes=OVERLAP_MIN + 5)).isoformat()
     st["delivered"] = {k: v for k, v in delivered.items() if v >= keep_after}
     st.pop("seenAtCursor", None)
 
-    if nas and nas.get("stale") and (nas.get("ageMinutes") is None or nas["ageMinutes"] >= NAS_STALE_ALERT_MIN):
+    if nas and nas.get("error"):
+        pass  # the server could not read its NAS state this time — not evidence either way
+    elif nas and nas.get("stale") and (nas.get("ageMinutes") is None or nas["ageMinutes"] >= NAS_STALE_ALERT_MIN):
         if time.time() - st.get("nasAlertAt", 0) > NAS_ALERT_EVERY_S:
             st["nasAlertAt"] = time.time()
             age = f"{nas['ageMinutes'] // 60} ชม." if nas.get("ageMinutes") is not None else "ไม่เคยมีข้อมูล"
@@ -216,7 +262,10 @@ def selftest():
     assert "ตัวสแกน NAS เงียบ 2088 ชม." in run(now, stale)
     assert run(now, stale) == ""
     # many events → as many as fit now, the rest NEXT run (never summarised away)
-    many = lambda *a: {"events": [ev(i, f"2026-10-09T03:{i:02d}:00Z") for i in range(10, 60)], "more": False, "nas": {"stale": False}}
+    def many(base, secret, since):  # honours `since` like the real feed (at >= since)
+        cut = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        evs = [ev(i, f"2026-10-09T03:{i:02d}:00Z") for i in range(10, 60)]
+        return {"events": [e for e in evs if datetime.fromisoformat(e["at"].replace("Z", "+00:00")) >= cut], "more": False, "nas": {"stale": False}}
     got, rounds = set(), 0
     while rounds < 20:
         rounds += 1
@@ -228,9 +277,23 @@ def selftest():
     assert got == {f"NWS-KYM-26100{i}-01" for i in range(10, 60)}, sorted(got)[:5]
     assert rounds > 2, "should have needed several messages"
     # a row that commits late with an EARLIER timestamp than the cursor is still delivered (overlap window)
-    late = lambda *a: {"events": [ev(99, "2026-10-09T03:50:00Z")], "more": False, "nas": {"stale": False}}
+    def late(base, secret, since):
+        e = ev(99, "2026-10-09T03:50:00Z")
+        return {"events": [e] if e["at"] >= since.replace("+00:00", "Z") else [], "more": False, "nas": {"stale": False}}
     assert "NWS-KYM-2610099-01" in run(now, late)
     assert run(now, late) == ""
+    # a quiet week later the last notice is NOT posted again
+    later = now + timedelta(days=7)
+    assert run(later, late) == "", "re-sent an old notice after a quiet spell"
+    assert run(later + timedelta(minutes=5), late) == ""
+    # outbox: Hermes failed to deliver → next run re-sends; delivered → cleared
+    global OUTBOX, HERMES_JOBS
+    OUTBOX, HERMES_JOBS = os.path.join(d, "ob.json"), os.path.join(d, "jobs.json")
+    remember("📣 ฟุตเทจพร้อม · X")
+    json.dump({"jobs": [{"name": JOB_NAME, "last_delivery_error": "DNS"}]}, open(HERMES_JOBS, "w"))
+    assert undelivered().endswith("📣 ฟุตเทจพร้อม · X")
+    json.dump({"jobs": [{"name": JOB_NAME, "last_delivery_error": None}]}, open(HERMES_JOBS, "w"))
+    assert undelivered() == "" and not os.path.exists(OUTBOX)
     print("selftest ok")
 
 
@@ -238,6 +301,10 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
     else:
+        again = undelivered()
         msg = run()
         if msg:
-            print(msg)
+            remember(msg)
+        out = "\n\n".join(x for x in (again, msg) if x)
+        if out:
+            print(out)

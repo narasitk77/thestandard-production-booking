@@ -42,7 +42,7 @@ import { notifyChatDetailed, notifyEmailDigest } from './notify'
 import { getCachedFootagePayload, type CachedFootagePayload, type BookingForFootagePayload } from './footage-folders'
 import { isPhotoAlbumBooking } from './outlet-folders'
 import { isShootOver } from './shoot-window'
-import { latestNasState } from './nas-sync'
+import { latestNasState, nasManifestAge } from './nas-sync'
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
@@ -309,7 +309,11 @@ export async function runFootageReadyScan(
   const uploading = new Set(freshInFlight.map(u => u.bookingId))
 
   // Gate (d): NAS queue state, one read for the whole sweep.
-  const nasStatuses = (await latestNasState().catch(() => ({ statuses: {} as Record<string, any> }))).statuses || {}
+  // v1.262.1 — only while the NAS picture is fresh: a dead Mac agent leaves its last "still sending"
+  // forever, which held a booking's notice silently (review of v1.262). Stale = gate off; the operator
+  // hears about the silent scanner from the relay instead.
+  const nasState = await latestNasState().catch(() => ({ manifest: null, statuses: {} as Record<string, any> }))
+  const nasStatuses = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? (nasState.statuses || {}) : {}
 
   const eligible: CandidateRow[] = []
   for (const b of rows) {

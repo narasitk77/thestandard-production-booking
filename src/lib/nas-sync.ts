@@ -165,16 +165,24 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
   const emailOk = isEmailConfigured() && !!reportEmailTo()
   const report = await buildNasReport(manifest, { statuses })
 
+  // v1.262.1 — one state per Production ID, so sum every NAS folder carrying that ID first. Two folders
+  // with the same ID (a re-dumped card, "X (1)") used to flip the state every manifest: one still
+  // sending set lastPending>0, the empty one then "drained" it → a false ✅ every 10 minutes.
+  const byCode = new Map<string, { name: string; nasPending: number }>()
   for (const f of report.folders) {
     if (!f.code) continue
-    const p = statuses[f.code] || {}
+    const cur = byCode.get(f.code)
+    byCode.set(f.code, cur ? { name: `${cur.name} + ${f.name}`, nasPending: cur.nasPending + f.nasPending } : { name: f.name, nasPending: f.nasPending })
+  }
+  for (const [code, f] of byCode) {
+    const p = statuses[code] || {}
     const maxSeen = Math.max(p.maxSeen || 0, f.nasPending)
     // Transition: queue had files, now drained → the sync shipped everything.
     if ((p.lastPending || 0) > 0 && f.nasPending === 0) {
       let driveNote = ''
       let driveCount: { files: number; bytes: number } | null = null
       try {
-        driveCount = await countDriveFilesByCode(f.code)
+        driveCount = await countDriveFilesByCode(code)
         driveNote = `\nบน Drive ตอนนี้: ${driveCount.files} ไฟล์ (${fmt(driveCount.bytes)})`
       } catch { /* best-effort */ }
       if (emailOk) {
@@ -191,12 +199,12 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
       // v1.262 — a durable record of the drain: the Hermes relay reads these to tell the operator's
       // Discord room (chat + email above are best-effort and the email is a self-send that never lands)
       await logAudit({
-        actorEmail: 'nas-sync', action: 'nas.folder_drained', entityType: 'NasFolder', entityId: f.name, bookingCode: f.code,
+        actorEmail: 'nas-sync', action: 'nas.folder_drained', entityType: 'NasFolder', entityId: f.name, bookingCode: code,
         changes: { folder: f.name, ...(driveCount ? { driveFiles: driveCount.files, driveBytes: driveCount.bytes } : {}) },
       })
-      statuses[f.code] = { ...p, lastPending: 0, maxSeen, drainedAt: new Date().toISOString() }
+      statuses[code] = { ...p, lastPending: 0, maxSeen, drainedAt: new Date().toISOString() }
     } else {
-      statuses[f.code] = { ...p, lastPending: f.nasPending, maxSeen }
+      statuses[code] = { ...p, lastPending: f.nasPending, maxSeen }
     }
   }
 

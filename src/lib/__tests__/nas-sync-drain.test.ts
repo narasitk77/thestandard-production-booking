@@ -13,7 +13,7 @@ mock.module('../db', {
     prisma: {
       nasSyncState: {
         findUnique: async () => (prevStatus ? { status: prevStatus } : null),
-        upsert: async () => ({}),
+        upsert: async ({ update }: any) => { prevStatus = update.status; return {} },  // state carries to the next manifest
       },
       booking: { findMany: async () => [] },
     },
@@ -54,6 +54,16 @@ test('คิว NAS ระบายหมด → บันทึก nas.folder_d
   prevStatus = { folders: { 'NWS-KYM-261009-01': { lastPending: 3, maxSeen: 3 } } }
   await nas.ingestNasManifest({ at: new Date().toISOString(), folders: [folder(2)] })
   assert.equal(audits.length, 0, 'ยังส่งไม่ครบ ไม่ใช่ข่าว')
+})
+
+test('v1.262.1 รีวิว: สองโฟลเดอร์บน NAS รหัสเดียวกัน (การ์ดดัมพ์ซ้ำ "X (1)") — ตัวหนึ่งยังส่งอยู่ = ยังไม่ครบ ไม่ประกาศซ้ำทุก 10 นาที', async () => {
+  const dup = { ...folder(0), name: 'Key Message · ทดสอบ (NWS-KYM-261009-01) (1)' }
+  prevStatus = { folders: { 'NWS-KYM-261009-01': { lastPending: 3, maxSeen: 3 } } }
+  for (let i = 0; i < 3; i++) await nas.ingestNasManifest({ at: new Date().toISOString(), folders: [folder(2), dup] })
+  assert.equal(audits.length, 0, 'ยังมีไฟล์ค้างในโฟลเดอร์หนึ่ง — ไม่ใช่ข่าว')
+  assert.equal(chats.length, 0)
+  await nas.ingestNasManifest({ at: new Date().toISOString(), folders: [folder(0), dup] })
+  assert.equal(audits.length, 1, 'ระบายหมดทั้งสองโฟลเดอร์ = ประกาศครั้งเดียว')
 })
 
 test('อายุ manifest: ไม่มี/อ่านไม่ได้ = เก่า · 30 นาที = สด · 90 นาที = เก่า · ปรับเพดานได้', () => {

@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   if (!Number.isFinite(since.getTime())) {
     return NextResponse.json({ error: 'since=<ISO timestamp> required' }, { status: 400 })
   }
-  const limit = Math.min(Math.max(Number(sp.get('limit')) || 50, 1), 200)
+  const limit = Math.min(Math.max(Math.floor(Number(sp.get('limit'))) || 50, 1), 200)
 
   try {
     // gte + asc + take: a relay that advances its cursor to the last `at` it got never skips a row
@@ -45,12 +45,14 @@ export async function GET(request: NextRequest) {
       where: { action: { in: [...ACTIONS] }, at: { gte: since } },
       orderBy: [{ at: 'asc' }, { id: 'asc' }],
       take: limit,
-      select: { id: true, at: true, action: true, actorEmail: true, bookingCode: true, changes: true },
+      select: { id: true, at: true, action: true, actorEmail: true, entityId: true, bookingCode: true, changes: true },
     })
+    // booking.* rows carry the booking id (survives a regenerated Production ID); NAS rows only the code
+    const ids = [...new Set(rows.filter(r => r.action !== 'nas.folder_drained').map(r => r.entityId).filter((v): v is string => !!v))]
     const codes = [...new Set(rows.map(r => r.bookingCode).filter((c): c is string => !!c))]
-    const bookings = codes.length
+    const bookings = ids.length || codes.length
       ? await prisma.booking.findMany({
-          where: { bookingCode: { in: codes } },
+          where: { OR: [{ id: { in: ids } }, { bookingCode: { in: codes } }] },
           select: {
             id: true, bookingCode: true, projectName: true, driveFolders: true,
             program: { select: { name: true } },
@@ -58,12 +60,13 @@ export async function GET(request: NextRequest) {
           },
         })
       : []
-    const byCode = new Map(bookings.map(b => [b.bookingCode!, b]))
+    const byId = new Map(bookings.map(b => [b.id, b]))
+    const byCode = new Map(bookings.filter(b => b.bookingCode).map(b => [b.bookingCode!, b]))
     const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
 
     const events = rows.map(r => {
       const c = (r.changes || {}) as Record<string, any>
-      const b = r.bookingCode ? byCode.get(r.bookingCode) : undefined
+      const b = (r.action !== 'nas.folder_drained' && r.entityId ? byId.get(r.entityId) : undefined) ?? (r.bookingCode ? byCode.get(r.bookingCode) : undefined)
       const box = typeof (b?.driveFolders as any)?.box === 'string' ? (b!.driveFolders as any).box as string : null
       const recipients = Array.isArray(c.recipients) ? c.recipients.filter((x: unknown) => typeof x === 'string' && x.includes('@')) : []
       return {
@@ -83,13 +86,15 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const { manifest } = await latestNasState()
-    return NextResponse.json({
-      now: new Date().toISOString(),
-      events,
-      more: rows.length === limit,
-      nas: { manifestAt: manifest?.at ?? null, ...nasManifestAge(manifest?.at) },
-    })
+    // the NAS part must not take the footage events down with it — and an unreadable NAS state is said, not hidden
+    let nas: Record<string, unknown>
+    try {
+      const { manifest } = await latestNasState()
+      nas = { manifestAt: manifest?.at ?? null, ...nasManifestAge(manifest?.at) }
+    } catch (e: any) {
+      nas = { manifestAt: null, ageMinutes: null, stale: null, error: e?.message || String(e) }
+    }
+    return NextResponse.json({ now: new Date().toISOString(), events, more: rows.length === limit, nas })
   } catch (e: any) {
     console.error('[notify-feed] error:', e?.message || e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
