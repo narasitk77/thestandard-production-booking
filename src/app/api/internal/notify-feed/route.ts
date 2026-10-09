@@ -19,10 +19,10 @@ export const dynamic = 'force-dynamic'
  * the team while the operator heard none and concluded the worker was gone.
  *
  * Sources are the audit rows the senders already write (a record of what WAS sent, not intent):
- *   booking.auto_notified_ready · booking.notified_ready (📣 by hand) · nas.folder_drained (v1.262)
+ *   booking.auto_notified_ready · booking.notified_ready (📣 by hand) · nas.folder_drained (v1.262) · ops.alert (v1.263)
  * plus how old the NAS picture is, so a silent NAS scanner is visible from the same call.
  */
-const ACTIONS = ['booking.auto_notified_ready', 'booking.notified_ready', 'nas.folder_drained'] as const
+const ACTIONS = ['booking.auto_notified_ready', 'booking.notified_ready', 'nas.folder_drained', 'ops.alert'] as const
 
 export async function GET(request: NextRequest) {
   const allowed =
@@ -47,8 +47,9 @@ export async function GET(request: NextRequest) {
       take: limit,
       select: { id: true, at: true, action: true, actorEmail: true, entityId: true, bookingCode: true, changes: true },
     })
-    // booking.* rows carry the booking id (survives a regenerated Production ID); NAS rows only the code
-    const ids = [...new Set(rows.filter(r => r.action !== 'nas.folder_drained').map(r => r.entityId).filter((v): v is string => !!v))]
+    // booking.* rows carry the booking id (survives a regenerated Production ID); NAS rows only the code;
+    // ops.alert rows carry the alert key (v1.263) — never a booking id
+    const ids = [...new Set(rows.filter(r => r.action.startsWith('booking.')).map(r => r.entityId).filter((v): v is string => !!v))]
     const codes = [...new Set(rows.map(r => r.bookingCode).filter((c): c is string => !!c))]
     const bookings = ids.length || codes.length
       ? await prisma.booking.findMany({
@@ -66,15 +67,19 @@ export async function GET(request: NextRequest) {
 
     const events = rows.map(r => {
       const c = (r.changes || {}) as Record<string, any>
-      const b = (r.action !== 'nas.folder_drained' && r.entityId ? byId.get(r.entityId) : undefined) ?? (r.bookingCode ? byCode.get(r.bookingCode) : undefined)
+      const b = (r.action.startsWith('booking.') && r.entityId ? byId.get(r.entityId) : undefined) ?? (r.bookingCode ? byCode.get(r.bookingCode) : undefined)
+      const ops = r.action === 'ops.alert'
       const box = typeof (b?.driveFolders as any)?.box === 'string' ? (b!.driveFolders as any).box as string : null
       const recipients = Array.isArray(c.recipients) ? c.recipients.filter((x: unknown) => typeof x === 'string' && x.includes('@')) : []
       return {
         id: r.id,
         at: r.at.toISOString(),
-        kind: r.action === 'nas.folder_drained' ? 'nas-drained' : r.action === 'booking.notified_ready' ? 'footage-ready-manual' : 'footage-ready',
-        code: r.bookingCode,
-        title: b ? bookingDisplayName({ projectName: b.projectName, program: b.program, episodes: b.episodes }) : (c.folder ?? null),
+        kind: ops ? 'ops-alert' : r.action === 'nas.folder_drained' ? 'nas-drained' : r.action === 'booking.notified_ready' ? 'footage-ready-manual' : 'footage-ready',
+        code: ops ? r.entityId : r.bookingCode,
+        title: ops ? (c.subject ?? null) : b ? bookingDisplayName({ projectName: b.projectName, program: b.program, episodes: b.episodes }) : (c.folder ?? null),
+        text: ops && typeof c.text === 'string' ? c.text : null,
+        // ops only: did the email leg actually go out (the relay must not say "ดูเมล" when it did not)
+        emailed: ops ? c.email === true : null,
         files: typeof c.fileCount === 'number' ? c.fileCount : typeof c.driveFiles === 'number' ? c.driveFiles : null,
         bytes: typeof c.driveBytes === 'number' ? c.driveBytes : null,
         people: recipients.length,

@@ -5,6 +5,8 @@ Posts what the operator wants to HEAR, from /api/internal/notify-feed:
   📣 ฟุตเทจพร้อม  — every footage-ready notice probook sent to a team (auto or 📣 by hand)
   ✅ NAS ส่งครบ    — a NAS queue drained (the Mac agent's manifest)
   ⚠️ NAS เงียบ     — the NAS picture is older than 2 h (once per 12 h while it stays silent)
+  ⚠️ ops          — every alertOps() the app raised (sync storm, stale worker, …) — v1.263, nobody else
+                    hears these: the app's own ops Discord room (DISCORD_OPS_WEBHOOK_URL) is not set
 Prints NOTHING when there is nothing new (Hermes then sends nothing).
 
 Why (นัท 9 ต.ค. 2569 "ไม่มีแจ้งเตือนเมื่อฟุตเทจพร้อมมานานแล้ว"): the team got 31 notices in 14 days by
@@ -142,8 +144,41 @@ def gb(b):
     return f"{b / 1024 ** 3:.1f} GB" if b else ""
 
 
+OPS_LINES, OPS_CHARS, OPS_LINE_CHARS = 6, 700, 300
+KNOWN = {"footage-ready", "footage-ready-manual", "nas-drained", "ops-alert"}
+
+
+def quiet(t):
+    """App text (Drive file names, exception messages) must not ping the room: @everyone / @here / <@id>."""
+    return (t or "").replace("@", "@\u200b")
+
+
+def ops_line(e):
+    """Subject + whole lines while they fit; anything left out is SAID, with where to read the rest."""
+    lines = [l.rstrip() for l in quiet(e.get("text")).splitlines() if l.strip()]
+    shown, used, cut = [], 0, False
+    for l in lines:
+        if len(l) > OPS_LINE_CHARS:
+            l, cut = l[:OPS_LINE_CHARS] + "…", True
+        if len(shown) >= OPS_LINES or (shown and used + len(l) > OPS_CHARS):
+            break
+        shown.append(l)
+        used += len(l)
+    hidden = len(lines) - len(shown)
+    where = "ดูเมล" if e.get("emailed") else "เมลไม่ได้ส่ง — ข้อความเต็มอยู่ใน audit log (ops.alert)"
+    tail = ""
+    if hidden or cut:
+        tail = f"\n   … " + (f"อีก {hidden} บรรทัด" if hidden else "บางบรรทัดถูกตัด") + f" ({where})"
+    head = f"⚠️ ops · {quiet(e.get('title')) or e.get('code') or '?'}"
+    return head + "".join("\n   " + l for l in shown) + tail
+
+
 def line_for(e):
     code, title = e.get("code") or "?", e.get("title") or ""
+    if e["kind"] == "ops-alert":
+        return ops_line(e)
+    if e["kind"] not in KNOWN:  # a newer feed than this relay: say it, never dress it up as footage-ready
+        return f"❔ {e['kind']} · {quiet(title) or code} (relay ยังไม่รู้จักชนิดนี้ — อัปเดต probook-notify-relay.py)"
     head = f"{code} — {title}" if title else code
     if e["kind"] == "nas-drained":
         size = f" ({gb(e['bytes'])})" if e.get("bytes") else ""
@@ -310,6 +345,32 @@ def selftest():
     assert undelivered().endswith("📣 ฟุตเทจพร้อม · X")
     json.dump({"jobs": [{"name": JOB_NAME, "last_delivery_error": None}]}, open(HERMES_JOBS, "w"))
     assert undelivered() == "" and not os.path.exists(OUTBOX)
+    # v1.263 ops alert: subject + whole lines while they fit · what is left out is SAID, with where to read it
+    ops = ev(7, "2026-10-09T05:00:00Z", "ops-alert", code="sync-storm:POP-PIV-261007-02", title="⚠️ โฟลเดอร์ชื่อซ้ำ \"(1)\" ใน landing — POP-PIV-261007-02",
+             text="\n".join(f"บรรทัด {i}" for i in range(1, 12)), emailed=True)
+    line = line_for(ops)
+    assert line.startswith("⚠️ ops · ⚠️ โฟลเดอร์ชื่อซ้ำ"), line
+    assert line.splitlines()[1:7] == [f"   บรรทัด {i}" for i in range(1, 7)], line
+    assert line.endswith("… อีก 5 บรรทัด (ดูเมล)"), line
+    assert "audit log" in line_for({**ops, "emailed": False}), "no email went out → must not point to the inbox"
+    assert line_for({**ops, "title": None, "text": ""}) == "⚠️ ops · sync-storm:POP-PIV-261007-02"
+    # one long list line: cut WITH a marker and said, never silently (footage-stranded joins boxes on one line)
+    long1 = line_for({**ops, "text": " · ".join(f"BOX-{i:02d}" for i in range(80))})
+    assert "…\n" in long1 and long1.endswith("บางบรรทัดถูกตัด (ดูเมล)") and len(long1) < 600, long1
+    # the char budget stops at a WHOLE line and counts what it left out
+    wide = line_for({**ops, "text": "\n".join("y" * 250 for _ in range(6))})
+    assert "อีก 4 บรรทัด" in wide and len(wide) < 1000, wide
+    # app text never pings the room
+    assert "@\u200beveryone" in line_for({**ops, "text": "@everyone ไฟล์หาย"})
+    # an unknown kind from a newer feed is SAID, never posted as footage-ready
+    assert line_for(ev(8, "2026-10-09T05:00:00Z", "new-thing")).startswith("❔ new-thing"), "unknown kind"
+    # ops rows travel through run() with footage rows, in order, and are not posted twice
+    def mixed(base, secret, since):
+        evs = [{**ev(40, "2026-10-09T06:00:00Z"), "id": "f40"}, {**ops, "id": "o41", "at": "2026-10-09T06:01:00Z"}]  # fresh ids: e40 was delivered above
+        return {"events": [x for x in evs if x["at"] >= since.replace("+00:00", "Z")], "more": False, "nas": {"stale": False}}
+    out = run(now + timedelta(hours=1), mixed)
+    assert out.index("📣 ฟุตเทจพร้อม · NWS-KYM-2610040-01") < out.index("⚠️ ops · "), out
+    assert run(now + timedelta(hours=1, minutes=5), mixed) == ""
     # a corrupt state file is moved aside and SAID, not silently reset
     open(STATE, "w").write("{not json")
     msg = run(now, lambda *a: {"events": [], "more": False, "nas": {"stale": False}})

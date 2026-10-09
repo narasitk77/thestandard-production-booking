@@ -29,6 +29,10 @@ mock.module('../email', {
   },
 })
 
+// v1.263 — แถว audit 'ops.alert' ที่ relay ของ Hermes อ่าน
+const audits: any[] = []
+mock.module('../audit', { namedExports: { logAudit: async (a: any) => { audits.push(a) } } })
+
 let notify: typeof import('../notify')
 let ops: typeof import('../ops-alert')
 before(async () => {
@@ -142,14 +146,20 @@ test('alertOps: ส่งครั้งแรก · ซ้ำในหน้า
   const hook = await webhook()
   try {
     await withEnv({ ...OFF, DISCORD_OPS_WEBHOOK_URL: hook.url }, async () => {
+      audits.length = 0
       const first = await ops.alertOps('t-throttle', 'subj', 'ซิงก์ล้ม MIX-001')
       assert.deepEqual(first, { attempted: true, delivered: true, discord: true, lark: false, email: false })
+      assert.equal(audits.length, 1, 'v1.263: ลองส่ง = มีแถวให้ relay อ่าน')
+      assert.equal(audits[0].action, 'ops.alert')
+      assert.equal(audits[0].entityId, 't-throttle')
+      assert.deepEqual(audits[0].changes, { subject: 'subj', text: 'ซิงก์ล้ม MIX-001', discord: true, lark: false, email: false })
       assert.equal(hook.got.length, 1)
       assert.match(rows.get('alert:t-throttle')!.note!, /discord=true lark=false email=false/)
 
       const again = await ops.alertOps('t-throttle', 'subj', 'ซิงก์ล้ม MIX-001')
       assert.equal(again.attempted, false)
       assert.equal(hook.got.length, 1, 'อยู่ในหน้าต่าง 6 ชม. ต้องไม่ยิงซ้ำ')
+      assert.equal(audits.length, 1, 'throttle = ไม่มีแถวใหม่ (relay ไม่ส่งซ้ำ)')
 
       // key อื่นไม่โดน throttle ของ key นี้
       assert.equal((await ops.alertOps('t-other', 'subj', 'อีกเรื่อง')).delivered, true)
@@ -161,6 +171,17 @@ test('alertOps: ส่งครั้งแรก · ซ้ำในหน้า
   } finally {
     await hook.close()
   }
+})
+
+test('v1.263: ข้อความยาวถูกตัดทีละตัวอักษร (ไม่ตัดกลางอีโมจิ) และบอกว่าตัด', async () => {
+  rows.clear(); audits.length = 0
+  await withEnv({ ...OFF }, async () => {
+    await ops.alertOps('t-long', 'subj', '🎬'.repeat(4001))
+  })
+  const t: string = audits[0].changes.text
+  assert.match(t, /…\[ตัดที่ 4000 ตัวอักษร จาก 4001\]$/)
+  assert.equal(Array.from(t.split('\n')[0]).length, 4000)
+  assert.doesNotMatch(t, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/, 'ห้ามมี surrogate เดี่ยว (jsonb ปฏิเสธ = แถวหาย)')
 })
 
 test('alertOps: ไม่มีช่องไหนถึง = รายงานตามจริง (delivered false) แต่ยังประทับ throttle ไม่วนยิงทุกรอบ', async () => {

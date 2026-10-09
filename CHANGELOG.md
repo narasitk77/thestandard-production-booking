@@ -7,6 +7,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added — คำเตือน ops เข้าห้อง Discord ของนัท (v1.263.0 · 9 ต.ค. 2569)
+
+นัท: "เอา ops เข้า Discord ด้วย" — คำเตือน ops (พายุซิงก์ · worker หยุด · ไฟล์ตกใน drop งานยกเลิก · ตรวจฟุตเทจไม่ครบ ·
+ซิงก์ปฏิทินมิกซ์ล้ม) เดิมไม่มีห้อง Discord รับ (`DISCORD_OPS_WEBHOOK_URL` ไม่ได้ตั้ง · ห้อง Ohm รับแค่ footage)
+- `alertOps()` เขียนแถว audit `ops.alert` (key · หัวเรื่อง · ข้อความ ≤2000 ตัว · ผลรายช่อง) ทุกครั้งที่ลองส่ง — throttle 6 ชม./key เดิม
+- `/api/internal/notify-feed` ส่งแถว `ops.alert` เป็น event `kind: 'ops-alert'` (`code` = key, `title` = หัวเรื่อง, `text`)
+  · แถว ops ไม่ถูกเอา key ไปค้นเป็น booking id (ค้นด้วย entityId เฉพาะ `booking.*`)
+- relay ของ Hermes (`probook-notify-relay`) โพสต์ "⚠️ ops · <หัวเรื่อง>" + ข้อความ 6 บรรทัดแรกเข้าห้องเดียวกับ "ฟุตเทจพร้อม"
+- เทสใหม่ `notify-feed.test.ts` ล็อกการแปลงแถว audit → event (ไม่เคยมีเทสมาก่อน) · `ops-alert.test.ts` ล็อกว่า throttle = ไม่มีแถวใหม่
+- **ลำดับติดตั้ง: relay ก่อนแอป** — relay v1.262 ไม่รู้จัก `ops-alert` จะโพสต์เป็น "📣 ฟุตเทจพร้อม" ปลอมแล้วนับว่าส่งแล้ว
+  (รีวิวจับได้) · relay ใหม่: ชนิดที่ไม่รู้จักขึ้น "❔ <kind>" ไม่แต่งเป็น footage-ready
+- รีวิว adversarial (13 agents) แก้ก่อนขึ้น: ตัดข้อความทีละ code point (ตัดกลางอีโมจิ = jsonb ปฏิเสธ = แถวหาย) + ป้าย "…[ตัดที่ 4000]" ·
+  feed บอก `emailed` → relay เขียน "(ดูเมล)" เฉพาะเมื่อเมลออกจริง · บรรทัดยาวถูกตัดพร้อม "…" และบอกว่าตัด · `@` ในข้อความไม่ ping ห้อง
+  · เทส mutation 5 จุดของ relay ถูกจับหมด
+- ไม่ต้องตั้งค่าอะไรบน stack · ไม่แตะห้อง Ohm
+
 ### Fixed — สำเนาเมลของนัทกลับมา: v1.248 ตัดทิ้งเพราะเชื่อผิดว่า "Gmail ไม่ส่งเมลหาตัวเอง" (v1.262.2 · 9 ต.ค. 2569)
 
 นัท: "มันเปิดหมดแล้วนี่ เมื่อก่อนก็ทำได้" — ถูก · Inbox นัทมี "[Footage พร้อม]" ที่ส่ง narasit.k@ → narasit.k@

@@ -18,8 +18,10 @@
 // - ส่งไม่ถึงช่องไหนเลย = console.error ดัง ๆ · ไม่ throw ไม่ว่ากรณีใด (การเตือนต้องไม่ล้มงานหลัก)
 import { prisma } from './db'
 import { notifyChatDetailed, notifyEmailDigest } from './notify'
+import { logAudit } from './audit'
 
 export const OPS_ALERT_EVERY_MS = 6 * 3_600_000
+const OPS_AUDIT_TEXT_MAX = 4000
 
 export interface OpsAlertResult {
   /** ลองส่งรอบนี้ไหม (false = ยังอยู่ในหน้าต่าง throttle) */
@@ -58,6 +60,13 @@ export async function alertOps(key: string, subject: string, text: string, every
   } catch (e: any) {
     console.warn(`[ops-alert] ${key}: บันทึก throttle ไม่ได้:`, e?.message || e)
   }
+  // v1.263 — บันทึกถาวรทุกครั้งที่ลองส่ง (ผ่าน throttle แล้ว): relay ของ Hermes อ่านแถวนี้ผ่าน
+  // /api/internal/notify-feed ไปส่งห้อง Discord ของนัท · logAudit ไม่ throw
+  // ตัดทีละ code point (slice ธรรมดาตัดกลางอีโมจิ → jsonb ปฏิเสธ surrogate เดี่ยว = แถวหาย) · ตัดแล้วต้องบอก
+  const cps = Array.from(text)
+  const stored = cps.length > OPS_AUDIT_TEXT_MAX ? cps.slice(0, OPS_AUDIT_TEXT_MAX).join('') + `\n…[ตัดที่ ${OPS_AUDIT_TEXT_MAX} ตัวอักษร จาก ${cps.length}]` : text
+  await logAudit({ actorEmail: 'ops-alert', action: 'ops.alert', entityType: 'OpsAlert', entityId: key,
+    changes: { subject, text: stored, ...channels } })
   if (!delivered) {
     console.error(`[ops-alert] ${key}: เตือนไม่ถึงช่องไหนเลย — ตั้ง DISCORD_OPS_WEBHOOK_URL / LARK_WEBHOOK_URL`
       + ' / REMINDER_ADMIN_EMAIL หรือเช็ก SMTP · ข้อความ: ' + subject)
