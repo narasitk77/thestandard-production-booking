@@ -2,8 +2,8 @@
 //
 // WHY THIS FILE EXISTS. เดิมทุกที่ที่ต้องเตือน ops เขียน throttle + ยิงช่องทางเอง (heartbeat.ts,
 // mix-calendar route) และตรวจพรอด 29 ก.ย. 2569 พบว่า **ไม่มีช่องไหนถึงคนเลย**: Lark ไม่ได้ตั้ง ·
-// Discord ทิ้ง 'ops' (ห้องทีมเป็น footage-only ตามที่ตกลงไว้) · digest ส่งหาบัญชี SMTP ตัวเอง
-// ซึ่ง Gmail ไม่ส่ง แต่เคยคืน true → ระบบบันทึกว่า "เตือนแล้ว" (bug class 1 รอบที่สาม)
+// Discord ทิ้ง 'ops' (ห้องทีมเป็น footage-only ตามที่ตกลงไว้)
+// (v1.248 เคยเชื่อว่าเมล digest หาบัญชี SMTP ตัวเองไม่ถึงด้วย — ผิด: Gmail เอาเข้า Inbox · แก้ v1.262.2)
 //
 // ฟีเจอร์ใหม่ที่ต้องเตือนเมื่อพัง → `alertOps(key, subject, text)` อย่างเดียว ไม่ต้องเขียน throttle
 // หรือเลือกช่องทางเอง · ช่องทางอยู่ใน notify.ts ที่เดียว (ห้อง Discord ops แยก
@@ -60,7 +60,7 @@ export async function alertOps(key: string, subject: string, text: string, every
   }
   if (!delivered) {
     console.error(`[ops-alert] ${key}: เตือนไม่ถึงช่องไหนเลย — ตั้ง DISCORD_OPS_WEBHOOK_URL / LARK_WEBHOOK_URL`
-      + ' หรือ REMINDER_ADMIN_EMAIL ที่ไม่ใช่บัญชีผู้ส่ง · ข้อความ: ' + subject)
+      + ' / REMINDER_ADMIN_EMAIL หรือเช็ก SMTP · ข้อความ: ' + subject)
   }
   return { attempted: true, delivered, ...channels }
 }

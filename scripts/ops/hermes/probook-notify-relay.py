@@ -8,8 +8,8 @@ Posts what the operator wants to HEAR, from /api/internal/notify-feed:
 Prints NOTHING when there is nothing new (Hermes then sends nothing).
 
 Why (นัท 9 ต.ค. 2569 "ไม่มีแจ้งเตือนเมื่อฟุตเทจพร้อมมานานแล้ว"): the team got 31 notices in 14 days by
-email + the "Ohm" Discord room, but the operator's own copy was a Gmail self-send (From = To) that never
-landed — and the NAS "ส่งครบ" notice had been dead for 87 days. A record the server wrote is not a
+email + the "Ohm" Discord room, but the operator's own email copy had been cut since v1.248 (on the false
+belief that Gmail drops self-sends; restored v1.262.2) — and the NAS "ส่งครบ" notice had been dead for 87 days. A record the server wrote is not a
 message anyone read; this relay reads the records and delivers them where Nat actually looks.
 
 At-least-once, never silent-skip: the cursor advances only past events this run printed. A failed fetch

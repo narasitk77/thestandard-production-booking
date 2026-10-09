@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
       discordOps: Boolean(process.env.DISCORD_OPS_WEBHOOK_URL?.trim()),
       lark: Boolean(process.env.LARK_WEBHOOK_URL?.trim()),
       larkSigned: Boolean(process.env.LARK_WEBHOOK_SECRET?.trim()),
-      // v1.248 — digest มีผู้รับที่ส่งถึงได้จริงไหม (false = ผู้รับคือบัญชีที่ใช้ส่งเอง/ไม่ได้ตั้ง) · ไม่ยิงเมลในเทสนี้
+      // digest มีที่อยู่ผู้รับตั้งไว้ไหม (false = ไม่ได้ตั้ง REMINDER_ADMIN_EMAIL/EMAIL_FROM) · ไม่ยิงเมลในเทสนี้ — true ไม่ได้แปลว่าส่งถึง
       emailDigest: digestRecipients().length > 0,
     },
     scope: {

@@ -14,7 +14,6 @@
 // function (notifyLine) wired into reminders.ts — nothing else changes.
 import { createHmac } from 'crypto'
 import { sendEmail, isEmailConfigured } from './email'
-import { dropSender } from './email-list'
 
 /**
  * v1.152.2 — Discord carries FOOTAGE news only (ops decision 2026-07-23:
@@ -198,31 +197,22 @@ export async function notifyChatDetailed(
 }
 
 /**
- * v1.248 — ผู้รับ digest ที่ส่งถึงได้จริง · ว่าง = ไม่มีใครได้รับ
+ * ผู้รับ digest (REMINDER_ADMIN_EMAIL, คั่นด้วย `,`) · ว่าง = ไม่มีใครได้รับ
  *
- * ตัดบัญชีที่ใช้ส่งออกด้วยกฎเดียวกับคิวมิกซ์ (`dropSender`): Gmail ไม่ส่งเมลหาบัญชีตัวเอง
- * พรอดตั้ง `REMINDER_ADMIN_EMAIL` = `SMTP_USER` มาตลอด → digest ทุกฉบับหายเงียบ แต่ฟังก์ชันนี้
- * เคยคืน true → footage-ready/reminders/เตือน ops บันทึกว่า "ส่งแล้ว" (bug class 1)
+ * v1.262.2 — เลิกตัดบัญชีผู้ส่งออก: v1.248 ตัดเพราะเชื่อว่า "Gmail ไม่ส่งเมลหาบัญชีตัวเอง" ซึ่งไม่จริง
+ * Inbox นัทมี "[Footage พร้อม]" ที่ส่ง narasit.k@ → narasit.k@ ติดป้าย INBOX+UNREAD ถึง 30 ก.ย. 02:51
+ * แล้วหายไปตั้งแต่ v1.248 ขึ้น (deploy 29 ก.ย. 21:37) — ตัวกรองนั่นเองที่ทำให้ operator ไม่ได้ยิน 10 วัน
  */
 export function digestRecipients(): string[] {
   const to = process.env.REMINDER_ADMIN_EMAIL?.trim() || process.env.EMAIL_FROM?.trim() || ''
-  return dropSender(to.split(','), process.env.SMTP_USER || process.env.EMAIL_FROM)
+  return [...new Set(to.split(',').map(s => s.trim().toLowerCase()).filter(Boolean))]
 }
-
-let warnedSelfDigest = false
 
 /** Send the daily digest email to REMINDER_ADMIN_EMAIL. Best-effort. */
 export async function notifyEmailDigest(subject: string, text: string): Promise<boolean> {
   if (!(process.env.REMINDER_ADMIN_EMAIL?.trim() || process.env.EMAIL_FROM?.trim())) return false
   const to = digestRecipients()
-  if (to.length === 0) {
-    // ไม่ส่ง + คืน false: ส่งไปก็ไม่มีใครได้รับ · เตือนครั้งเดียวต่อโปรเซส ไม่ท่วม log (dead-man เรียกทุก 10 นาที)
-    if (!warnedSelfDigest) {
-      warnedSelfDigest = true
-      console.warn('[notify] email digest ไม่ส่ง — ผู้รับ (REMINDER_ADMIN_EMAIL) คือบัญชีที่ใช้ส่งเอง Gmail ไม่ส่งเมลหาตัวเอง · ตั้งเป็นกล่องอื่นถ้าอยากได้ทางอีเมล')
-    }
-    return false
-  }
+  if (to.length === 0) return false
   if (!isEmailConfigured()) {
     console.warn('[notify] email digest skipped — no non-interactive email provider configured (SMTP/Resend/SendGrid).')
     return false

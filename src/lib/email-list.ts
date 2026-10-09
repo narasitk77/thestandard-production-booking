@@ -29,11 +29,9 @@ export function cleanEmailList(value: unknown): string[] {
 /**
  * ตัดที่อยู่ผู้ส่งออกจากรายชื่อผู้รับ + ตัดตัวซ้ำ (lowercase — ใช้ตอนส่ง ไม่ใช่ตอนเก็บ)
  *
- * ไม่ใช่การขัดเงา: เมลที่ส่งจากบัญชี Gmail เดียวกับผู้รับจะหายเงียบ ฉะนั้นการปล่อย
- * ให้ผู้ส่งอยู่ในลิสต์ = สร้างผู้รับที่ไม่มีวันได้รับ แล้วบันทึกว่า "ส่งแล้ว"
- *
- * v1.248 — ย้ายมาจาก mix-notify.ts เพราะ notifyEmailDigest (notify.ts) ต้องใช้กฎเดียวกัน
- * (digest ของ ops ส่งหาบัญชี SMTP ตัวเองมาตลอด = ไม่มีใครได้รับ แต่คืน true)
+ * ⚠️ เหตุผลเดิม ("เมลที่ส่งจากบัญชี Gmail เดียวกับผู้รับจะหายเงียบ") ผิด — 9 ต.ค. 2569 Inbox นัทมีเมล
+ * narasit.k@ → narasit.k@ ติดป้าย INBOX ครบ · digest เลิกใช้ฟังก์ชันนี้แล้ว (v1.262.2) · เหลือแค่คิวมิกซ์
+ * ที่ยังตัดผู้ส่ง — ถ้า narasit.k@ เป็นคนขอ/คนรับงานมิกซ์ จะไม่ได้เมลฉบับนั้น (ดู mix-notify.ts)
  */
 export function dropSender(recipients: string[], sender: string | undefined): string[] {
   const from = (sender || '').toLowerCase().replace(/^.*<|>.*$/g, '').trim()

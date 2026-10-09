@@ -197,7 +197,7 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
       // is configured and never throws.
       await notifyChat(`✅ ซิงค์ขึ้น Drive ครบ: ${f.name} — คิว NAS ระบายหมดแล้ว${driveNote.replace('\n', ' · ')}`)
       // v1.262 — a durable record of the drain: the Hermes relay reads these to tell the operator's
-      // Discord room (chat + email above are best-effort and the email is a self-send that never lands)
+      // Discord room (chat + email above are best-effort)
       await logAudit({
         actorEmail: 'nas-sync', action: 'nas.folder_drained', entityType: 'NasFolder', entityId: f.name, bookingCode: code,
         changes: { folder: f.name, ...(driveCount ? { driveFiles: driveCount.files, driveBytes: driveCount.bytes } : {}) },

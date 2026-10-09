@@ -21,8 +21,8 @@ _v1.233.1 · 2026-09-23 · อ่านคู่กับ `docs/architecture.md`
 worker ติ๊กทุก 30 นาที, `errors=0`, SMTP ตอบ `235 Accepted`, และ audit 30 วันมี **85 แถวที่มี
 `admin-digest` อยู่ใน `recipients` และ `emailError=null` ทุกแถว** ความจริงคือค่า boolean ที่
 `notifyEmailDigest()` / `notifyDiscord()` คืนมา **ถูกทิ้งทั้งคู่** — `'admin-digest'` ถูกต่อเข้า
-`recipients` จากตัวแปร "ตั้งใจจะส่ง" ล้วน ๆ และ Gmail ส่งเมลจากบัญชีหนึ่งไปหาบัญชีเดียวกันไม่ได้
-(`EMAIL_FROM` = `REMINDER_ADMIN_EMAIL` = `SMTP_USER`) เมลจึงไม่เคยโผล่ทั้ง Inbox และ Sent
+`recipients` จากตัวแปร "ตั้งใจจะส่ง" ล้วน ๆ · ตอนนั้นสรุปต่อว่า "Gmail ส่งเมลจากบัญชีหนึ่งไปหาบัญชีเดียวกันไม่ได้"
+(⚠️ v1.262.2 ตรวจ 9 ต.ค. 2569: ข้อนี้ผิด — เมลหาบัญชีตัวเองเข้า Inbox ได้) — Inbox นัทมีเมล narasit.k@ → narasit.k@ ติดป้าย INBOX จนถึง 30 ก.ย.
 
 ก่อนหน้านั้น 5 สัปดาห์เป็นบั๊กพี่น้องกัน: `FOOTAGE_READY_AUDIENCE=admin` ทำให้ **103 การแจ้งเตือน**
 เข้า digest ของ operator คนเดียว ไม่มีคนในกองได้รับสักใบ
@@ -35,9 +35,11 @@ worker ติ๊กทุก 30 นาที, `errors=0`, SMTP ตอบ `235 Ac
 `:520-523` (`ADMIN_DIGEST` เข้ารายชื่อเฉพาะเมื่อส่งผ่านจริง) · `operatorChannels {digestOk, discordOk, larkOk}`
 
 **รอบที่สาม (v1.248, 2026-09-29):** ช่อง `'ops'` ทั้งหมด (dead-man ของทุก worker · reminders ·
-ซิงก์ปฏิทินมิกซ์) ไม่ถึงใครบนพรอด — Lark ว่าง · Discord ทิ้ง `'ops'` · digest ส่งหาบัญชีผู้ส่งเองแต่คืน `true`
-→ `src/lib/ops-alert.ts` (`alertOps` จุดเดียว คืนผลรายช่อง) · `notify.ts` `digestRecipients()` ตัดผู้ส่ง
-(ผู้รับ 0 = ไม่ส่ง + `false`) · `DISCORD_OPS_WEBHOOK_URL` ห้อง ops แยก
+ซิงก์ปฏิทินมิกซ์) ไม่ถึงใครบนพรอด — Lark ว่าง · Discord ทิ้ง `'ops'`
+→ `src/lib/ops-alert.ts` (`alertOps` จุดเดียว คืนผลรายช่อง) · `DISCORD_OPS_WEBHOOK_URL` ห้อง ops แยก
+· v1.248 ยังให้ `digestRecipients()` ตัดบัญชีผู้ส่งทิ้ง (เชื่อว่าเมลหาตัวเองไม่ถึง) **ซึ่งกลายเป็นบั๊กรอบที่สี่**:
+สำเนาเมลของ operator ทุกฉบับหายเงียบ 29 ก.ย.–9 ต.ค. · แก้ v1.262.2 · บทเรียน: ข้อสรุปเรื่อง "ใครได้รับ"
+ต้องพิสูจน์ที่กล่องปลายทางจริงก่อนเขียนโค้ดตัดผู้รับ
 
 ---
 

@@ -435,8 +435,8 @@ export async function runFootageReadyScan(
           emailError: sent.error,
           forced: forced.length > 0 || undefined,
           // v1.186 — ผลจริงของช่องทาง operator: ตอบคำถาม "เขาได้ยินไหม" ได้จาก audit
-          // โดยไม่ต้องเดา (Discord คือช่องทางของ operator ตามที่ตกลง 2026-08-21 —
-          // เมล digest ส่งหาตัวเองผ่าน Gmail SMTP บัญชีเดียวกัน จึงไม่เข้า Inbox)
+          // โดยไม่ต้องเดา (Discord คือช่องทางของ operator ตามที่ตกลง 2026-08-21 · เมล digest
+          // ส่งหาตัวเองผ่าน Gmail SMTP บัญชีเดียวกันเข้า Inbox ได้จริง — v1.248–v1.262.1 ตัดทิ้งเพราะเชื่อผิด)
           operatorChannels: sent.operatorChannels,
         },
       })
@@ -468,6 +468,8 @@ async function sendFootageReadyNotification(
    * ไม่ได้เมลเลยแม้ฉบับเดียว (เมล digest เป็น From=To=อีเมลเดียวกัน ส่งผ่าน Gmail
    * SMTP ของบัญชีตัวเอง จึงไม่เข้า Inbox) — บันทึกที่รายงานไม่ตรงของจริงทำให้
    * ทั้ง /stats และคนอ่านสรุปผิดว่า "แจ้งแล้ว"
+   * ⚠️ 9 ต.ค. 2569: ข้อสรุป "เมลหาตัวเองไม่เข้า Inbox" ผิด — Inbox นัทมีเมลพวกนี้ (ป้าย INBOX) ถึง 30 ก.ย.
+   * กฎ "บันทึกผลจริง ไม่ใช่เจตนา" ยังถูก · ดู digestRecipients() v1.262.2
    */
   operatorChannels: { digestOk: boolean; discordOk: boolean; larkOk: boolean }
   error: string | null

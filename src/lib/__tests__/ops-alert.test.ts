@@ -1,7 +1,7 @@
-// v1.248 — ช่องเตือน ops: ห้อง Discord แยก · digest ที่ส่งหาตัวเองไม่นับว่าส่ง · alertOps ที่เดียว
+// v1.248 — ช่องเตือน ops: ห้อง Discord แยก · alertOps ที่เดียว
+// v1.262.2 — digest ถึงบัญชีที่ใช้ส่งเองได้จริง (Gmail เอาเข้า Inbox) — v1.248 เชื่อผิดว่าไม่ถึงแล้วตัดทิ้ง
 //
-// ตรวจพรอด 29 ก.ย. 2569: เตือน ops ในแอปไม่ถึงใครเลย (Lark ว่าง · Discord ทิ้ง 'ops' ·
-// digest ส่งหาบัญชี SMTP ตัวเองแต่คืน true) เทสนี้ล็อกสามอย่างที่ทำให้มันถึงคนและพูดความจริง
+// ตรวจพรอด 29 ก.ย. 2569: เตือน ops ในแอปไม่ถึงใครเลย (Lark ว่าง · Discord ทิ้ง 'ops')
 import { test, mock, before } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -106,27 +106,35 @@ test('ไม่ตั้งห้อง ops = พฤติกรรมเดิ�
   }
 })
 
-test('digest ที่ผู้รับคือบัญชีที่ใช้ส่ง = ไม่ส่ง และคืน false (ค่าของพรอด 29 ก.ย. 2569)', async () => {
+test('v1.262.2: digest ถึงบัญชีที่ใช้ส่งเอง = ส่ง (ค่าของพรอด: REMINDER_ADMIN_EMAIL = SMTP_USER = narasit.k@)', async () => {
+  // หลักฐาน 9 ต.ค. 2569: Inbox นัทมี "[Footage พร้อม]" ที่ narasit.k@ ส่งหา narasit.k@ ป้าย INBOX+UNREAD
+  // จนถึง 30 ก.ย. — หายไปเพราะ v1.248 ตัดผู้ส่งออกจากลิสต์ ไม่ใช่เพราะ Gmail
   mailed.length = 0
   await withEnv({ ...OFF, SMTP_USER: 'ops@x.co', REMINDER_ADMIN_EMAIL: 'OPS@x.co ' }, async () => {
+    assert.deepEqual(notify.digestRecipients(), ['ops@x.co'])
+    assert.equal(await notify.notifyEmailDigest('s', 't'), true)
+  })
+  // ไม่มี REMINDER_ADMIN_EMAIL → fallback EMAIL_FROM
+  await withEnv({ ...OFF, SMTP_USER: 'ops@x.co', EMAIL_FROM: 'ops@x.co' }, async () => {
+    assert.equal(await notify.notifyEmailDigest('s', 't'), true)
+  })
+  assert.equal(mailed.length, 2)
+  assert.deepEqual(mailed[0].to, ['ops@x.co'])
+  assert.deepEqual(mailed[1].to, ['ops@x.co'], 'fallback EMAIL_FROM ก็ต้องส่งถึงที่อยู่นั้น')
+})
+
+test('digest หลายกล่อง = ส่งครบทุกกล่อง ตัดตัวซ้ำ · ลิสต์ว่าง = ไม่ส่งและคืน false', async () => {
+  mailed.length = 0
+  await withEnv({ ...OFF, SMTP_USER: 'ops@x.co', REMINDER_ADMIN_EMAIL: 'ops@x.co, boss@x.co, BOSS@x.co' }, async () => {
+    assert.deepEqual(notify.digestRecipients(), ['ops@x.co', 'boss@x.co'])
+    assert.equal(await notify.notifyEmailDigest('s', 't'), true)
+  })
+  await withEnv({ ...OFF, SMTP_USER: 'ops@x.co', REMINDER_ADMIN_EMAIL: ' , ' }, async () => {
     assert.deepEqual(notify.digestRecipients(), [])
     assert.equal(await notify.notifyEmailDigest('s', 't'), false)
   })
-  // ไม่มี REMINDER_ADMIN_EMAIL → fallback EMAIL_FROM ซึ่งก็คือผู้ส่ง = ไม่มีใครได้รับเหมือนกัน
-  await withEnv({ ...OFF, SMTP_USER: 'ops@x.co', EMAIL_FROM: 'ops@x.co' }, async () => {
-    assert.equal(await notify.notifyEmailDigest('s', 't'), false)
-  })
-  assert.equal(mailed.length, 0, 'ต้องไม่ยิงเมลที่รู้อยู่แล้วว่าไม่มีใครได้รับ')
-})
-
-test('digest ถึงกล่องอื่น = ส่งจริงและคืน true · ตัดเฉพาะตัวผู้ส่งออกจากลิสต์', async () => {
-  mailed.length = 0
-  await withEnv({ ...OFF, SMTP_USER: 'ops@x.co', REMINDER_ADMIN_EMAIL: 'ops@x.co, boss@x.co' }, async () => {
-    assert.deepEqual(notify.digestRecipients(), ['boss@x.co'])
-    assert.equal(await notify.notifyEmailDigest('s', 't'), true)
-  })
   assert.equal(mailed.length, 1)
-  assert.deepEqual(mailed[0].to, ['boss@x.co'])
+  assert.deepEqual(mailed[0].to, ['ops@x.co', 'boss@x.co'])
 })
 
 test('alertOps: ส่งครั้งแรก · ซ้ำในหน้าต่าง throttle ไม่ส่ง · พ้นหน้าต่างส่งอีก', async () => {
@@ -157,7 +165,8 @@ test('alertOps: ส่งครั้งแรก · ซ้ำในหน้า
 
 test('alertOps: ไม่มีช่องไหนถึง = รายงานตามจริง (delivered false) แต่ยังประทับ throttle ไม่วนยิงทุกรอบ', async () => {
   rows.clear()
-  await withEnv({ ...OFF, SMTP_USER: 'ops@x.co', REMINDER_ADMIN_EMAIL: 'ops@x.co' }, async () => {
+  // ไม่มีห้อง Discord/Lark และไม่มีผู้รับ digest (v1.262.2: เมลหาบัญชีผู้ส่งเองนับว่าถึงแล้ว จึงไม่ใช่ฉาก "ไม่ถึงใคร")
+  await withEnv({ ...OFF, SMTP_USER: 'ops@x.co' }, async () => {
     const r = await ops.alertOps('t-mute', 'subj', 'worker ตาย')
     assert.deepEqual(r, { attempted: true, delivered: false, discord: false, lark: false, email: false })
     assert.ok(rows.get('alert:t-mute'), 'ต้องประทับ — dead-man เรียกทุก 10 นาที ไม่งั้น log ท่วม')

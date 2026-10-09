@@ -229,6 +229,7 @@ test('waiting bookings alone never alert — that is the system working', () => 
 // recipients และ emailError = null → /stats รายงานว่า operator ได้รับทุกครั้ง
 // ขณะที่เจ้าตัวไม่ได้เมลเลยแม้ฉบับเดียว เพราะ digest เป็น From=To=อีเมลเดียวกัน
 // ส่งผ่าน Gmail SMTP ของบัญชีตัวเอง จึงไม่เข้า Inbox
+// (⚠️ 9 ต.ค. 2569: ข้อสรุปเรื่อง Inbox ผิด — เมลหาตัวเองเข้า Inbox ได้ · ความหมายของ summarizeSends ข้างล่างไม่เปลี่ยน)
 //
 // v1.186 จึงใส่ ADMIN_DIGEST เฉพาะเมื่อ notifyEmailDigest คืน true เท่านั้น เทสนี้
 // ล็อกความหมายของ summarizeSends ไว้ว่า "แถวที่ไม่มี ADMIN_DIGEST = operator ไม่ได้ยิน"

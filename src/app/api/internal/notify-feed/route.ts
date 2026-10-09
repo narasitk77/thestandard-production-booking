@@ -14,9 +14,9 @@ export const dynamic = 'force-dynamic'
  * (Hermes posts them into the Discord room Nat reads). Read-only.
  *
  * Why a feed and not another push: footage-ready already pushes (team email + the "Ohm" Discord
- * webhook) but the operator's own copy has been a Gmail self-send since day one — From = To =
- * narasit.k@ via his own SMTP — which never lands, and since v1.248 is not even attempted. 31 notices
- * in 14 days reached the team while the operator heard none and concluded the worker was gone.
+ * webhook) but the operator's own copy (a Gmail self-send, From = To = narasit.k@) was cut by v1.248 on
+ * the false belief that self-sends never land — they do (fixed v1.262.2). 31 notices in 14 days reached
+ * the team while the operator heard none and concluded the worker was gone.
  *
  * Sources are the audit rows the senders already write (a record of what WAS sent, not intent):
  *   booking.auto_notified_ready · booking.notified_ready (📣 by hand) · nas.folder_drained (v1.262)
