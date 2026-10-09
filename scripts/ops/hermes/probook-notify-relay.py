@@ -52,10 +52,24 @@ def env_val(key, path=ENV_FILE):
     return os.environ.get(key, "")
 
 
+STATE_NOTE = []   # set by read_state when the state file had to be reset — printed by run()
+
+
 def read_state():
+    """{} only when the file does not exist yet. A corrupt/unreadable file is moved aside and SAID:
+    resetting silently would re-backfill 24 h and skip anything older without telling anyone."""
     try:
         return json.load(open(STATE, encoding="utf-8"))
-    except Exception:
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        bad = f"{STATE}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
+        try:
+            os.replace(STATE, bad)
+        except Exception:
+            pass
+        STATE_NOTE.append(f"⚠️ relay: state อ่านไม่ได้ ({type(e).__name__}) — ย้ายไป {os.path.basename(bad)} แล้วเริ่มนับจาก 24 ชม.ก่อน"
+                          " · ถ้า relay หยุดไปนานกว่านั้น ใบที่เก่ากว่าต้องดูใน probook เอง")
         return {}
 
 
@@ -221,6 +235,8 @@ def run(now=None, fetcher=fetch):
         st.pop("nasAlertAt", None)
 
     write_state(st)
+    if STATE_NOTE:
+        out.insert(0, STATE_NOTE.pop())
     return "\n".join(out)
 
 
@@ -294,6 +310,11 @@ def selftest():
     assert undelivered().endswith("📣 ฟุตเทจพร้อม · X")
     json.dump({"jobs": [{"name": JOB_NAME, "last_delivery_error": None}]}, open(HERMES_JOBS, "w"))
     assert undelivered() == "" and not os.path.exists(OUTBOX)
+    # a corrupt state file is moved aside and SAID, not silently reset
+    open(STATE, "w").write("{not json")
+    msg = run(now, lambda *a: {"events": [], "more": False, "nas": {"stale": False}})
+    assert msg.startswith("⚠️ relay: state อ่านไม่ได้"), msg
+    assert any(f.startswith("s.json.bad-") for f in os.listdir(d))
     print("selftest ok")
 
 

@@ -49,44 +49,62 @@ def log(msg):
     print(f"[nas-agent] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}", flush=True)
 
 
-def scan(mount):
-    """-> list of {name, files:[{p,size}]} — same shape the bash agent sent (server code unchanged)."""
+def scan(mount, errors=None):
+    """-> list of {name, files:[{p,size}]} — same shape the bash agent sent (server code unchanged).
+    A top-level folder that cannot be read completely is LEFT OUT (the server only judges folders it is
+    shown, so an omitted folder can never be announced as drained) and recorded in `errors`; the rest of
+    the share still reports. Pass errors=None to raise instead (selftest)."""
     folders = []
     for entry in sorted(os.listdir(mount)):  # PermissionError here = macOS (TCC) block — caller reports it
         top = os.path.join(mount, entry)
         if entry.startswith(SKIP_DIRS_PREFIX) or not os.path.isdir(top):
             continue
         files = []
-        # os.walk swallows unreadable subfolders by default — a half-blocked scan would read as "queue
-        # empty" and announce a drain that did not happen. Raise instead; main() turns it into a FAIL.
-        def boom(err):
-            raise err
-        for root, dirs, names in os.walk(top, onerror=boom):
-            dirs[:] = [d for d in dirs if not d.startswith(SKIP_DIRS_PREFIX)]
-            for n in names:
-                if n.startswith('.') or n.startswith('._') or n == 'Thumbs.db':
-                    continue
-                fp = os.path.join(root, n)
-                try:
-                    size = os.path.getsize(fp)
-                except OSError:
-                    continue
-                files.append({'p': os.path.relpath(fp, top).replace(os.sep, '/'), 'size': size})
-                if len(files) >= MAX_FILES_PER_FOLDER:
-                    break
+        try:
+            folders.append({'name': entry, 'files': walk_folder(top)})
+        except OSError as e:
+            if errors is None:
+                raise
+            errors.append(f'{entry}: {e}')
+    return folders
+
+
+def walk_folder(top):
+    files = []
+    # os.walk swallows unreadable subfolders by default — a half-blocked scan would read as "queue
+    # empty" and announce a drain that did not happen. Raise instead; main() turns it into a FAIL.
+    def boom(err):
+        raise err
+    for root, dirs, names in os.walk(top, onerror=boom):
+        dirs[:] = [d for d in dirs if not d.startswith(SKIP_DIRS_PREFIX)]
+        for n in names:
+            if n.startswith('.') or n.startswith('._') or n == 'Thumbs.db':
+                continue
+            fp = os.path.join(root, n)
+            try:
+                size = os.path.getsize(fp)
+            except OSError:
+                continue
+            files.append({'p': os.path.relpath(fp, top).replace(os.sep, '/'), 'size': size})
             if len(files) >= MAX_FILES_PER_FOLDER:
                 break
-        folders.append({'name': entry, 'files': files})
-    return folders
+        if len(files) >= MAX_FILES_PER_FOLDER:
+            break
+    return files
+
+
+def is_mounted(path):
+    return os.path.ismount(path)
 
 
 def ensure_mounted(mount, smb_url):
     """-> None when mounted, else a reason string. Mounting uses the Keychain item macOS already has."""
-    if os.path.isdir(mount):
+    # ismount, not isdir: a leftover empty /Volumes folder would scan as "NAS has nothing queued"
+    if is_mounted(mount):
         return None
     try:
         r = subprocess.run(['osascript', '-e', f'mount volume "{smb_url}"'], capture_output=True, text=True, timeout=60)
-        if os.path.isdir(mount):
+        if is_mounted(mount):
             log(f'mounted {smb_url}')
             return None
         return f'mount failed ({(r.stderr or r.stdout).strip()[:160] or "no output"})'
@@ -118,12 +136,10 @@ def main():
     if why:
         log(f'FAIL {mount} not mounted — {why}')
         return 2
+    errors = []
     try:
-        folders = scan(mount)
-    except PermissionError as e:
-        if os.path.realpath(getattr(e, 'filename', '') or mount) != os.path.realpath(mount):
-            log(f'FAIL cannot read {e.filename} — not sending a partial manifest (it would look like a drained queue)')
-            return 5
+        folders = scan(mount, errors)
+    except PermissionError:
         log(f'FAIL macOS blocked reading {mount} — give Full Disk Access to {os.path.realpath(sys.executable)} '
             '(System Settings › Privacy & Security › Full Disk Access)')
         return 3
@@ -138,7 +154,9 @@ def main():
         log(f'FAIL POST → {status} {body[:160]}')
         return 4
     log(f'ok {len(folders)} folders · {files} files queued on NAS → {status}')
-    return 0
+    for err in errors:
+        log(f'FAIL left out (unreadable, never judged as drained): {err[:200]}')
+    return 5 if errors else 0
 
 
 def selftest():
@@ -152,17 +170,26 @@ def selftest():
         open(os.path.join(d, 'loose.txt'), 'w').write('not a folder')
         got = scan(d)
         assert got == [{'name': 'Show (NWS-ABC-261009-01)', 'files': [{'p': 'CAM-A/A001.MXF', 'size': 10}]}], got
+        globals()['is_mounted'] = lambda p: True   # pretend the share is mounted
         assert ensure_mounted(d, 'smb://unused') is None
-        # an unreadable subfolder must fail the scan, not shrink it
+        globals()['is_mounted'] = lambda p: os.path.ismount(p)
+        # an unreadable subfolder: that FOLDER is left out and reported, the others still report
+        os.makedirs(os.path.join(d, 'Other (NWS-ABC-261009-02)'))
         locked = os.path.join(d, 'Show (NWS-ABC-261009-01)', 'CAM-B')
         os.makedirs(locked); os.chmod(locked, 0)
         try:
-            scan(d)
-            raise AssertionError('unreadable subfolder was skipped silently')
-        except PermissionError:
-            pass
+            errs = []
+            got = scan(d, errs)
+            assert [f['name'] for f in got] == ['Other (NWS-ABC-261009-02)'], got
+            assert len(errs) == 1 and errs[0].startswith('Show (NWS-ABC-261009-01)'), errs
+            try:
+                scan(d)
+                raise AssertionError('strict scan skipped an unreadable subfolder')
+            except PermissionError:
+                pass
         finally:
             os.chmod(locked, 0o755)
+        assert not is_mounted(d), 'a plain folder is not a mount point'
         assert load_env('/nonexistent/env') == {}
     print('selftest ok')
     return 0
