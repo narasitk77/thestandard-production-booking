@@ -6,6 +6,28 @@ until 2026-10-01 — see the 2026-10-04 entry). Newest first.
 
 ---
 
+## 2026-10-09 · แจ้ง "ฟุตเทจพร้อม" + "NAS ส่งครบ" กลับมาถึงนัท · v1.262.1 DEPLOYED `sha-dcaf140` (~15:00) · relay Hermes + NAS agent ใหม่
+
+นัท: "ไม่มีแจ้งเตือนเมื่อฟุตเทจพร้อมมานานแล้วนะ เอากลับมาด้วย ซ่อมให้ดีเหมือนเดิม worker ก็ไม่มีแล้ว" → เลือก: ทั้งสองเส้น · ปลายทาง Discord ห้อง Hermes + ห้อง Ohm + อีเมล Inbox
+
+- **ไม่ใช่ worker ตาย:** `footage-ready` เต้นทุก 30 นาที ส่งทีม 31 ครั้งใน 14 วัน + ห้อง Discord "Ohm" (webhook ช่อง 1516833315561144341) ได้ทุกใบ
+  แต่ **สำเนาของนัทคือเมลหาตัวเอง** (From = To = narasit.k@ ผ่าน SMTP บัญชีเดียวกัน) ไม่เคยเข้า Inbox และหยุดส่งเลยตั้งแต่ v1.248 (`digestOk=false` ตั้งแต่ 30 ก.ย. 00:02)
+  · หน้า health มี worker `footage` (Footage sync) ปิดมา 99 วัน — นั่นคือ sync ชีท ไม่ใช่ตัวแจ้ง (ที่ทำให้ดูเหมือน "worker หาย")
+- **NAS ส่งครบ ตายจริง 87 วัน** (manifest ล่าสุด 14 ก.ค.): แชร์ `smb://192.168.21.220/production team` ไม่ได้ mount → `not mounted — skip` exit 0
+  และตอน mount แล้ว macOS บล็อก bash ของ launchd (`Operation not permitted`) · NAS ถึงได้จากเครื่องนี้ (LAN ออฟฟิศ) แต่**ไม่ถึงจาก container พรอด** → ต้องสแกนจากเครื่องนี้
+- **ทำ:** mount แชร์ด้วย Keychain (`osascript mount volume`) · agent ใหม่ `~/.probook/nas_manifest_agent.py` รันด้วย `~/.local/opt/python-3.11/bin/python3.11` ตรง ๆ
+  (plist สำรอง `.bak-<ts>`) — **ไม่ต้องให้ Full Disk Access** · รอบแรก 14:44 `ok 16 folders · 637 files queued on NAS → 200` (ครั้งแรกตั้งแต่ 14 ก.ค.)
+  · app v1.262/.1: `/api/internal/notify-feed` + `nas.folder_drained` audit + แถบแดง NAS เก่า + รวมคิว NAS ต่อรหัส + ด่าน (d) ไม่เชื่อ NAS เก่า
+  · Hermes job `probook-notify-relay` (id `49d8e2054fa0`, ทุก 5 นาที, `--no-agent`, deliver `discord:1536651002667601980`) — รอบแรก 15:00 ส่ง 5 ใบของ 24 ชม.ล่าสุดถึงห้องแล้ว (`last_delivery_error: None`)
+- **รีวิว adversarial** (4 มุม · ผู้หักล้าง 3 คน/ข้อ · 46 agents) วิ่งระหว่างรอ CI → ยืนยัน 2 high ใน relay (ส่งซ้ำไม่จบหลังเงียบ 48 ชม. · นับว่าส่งก่อน Hermes ส่งจริง)
+  → แก้เป็น v1.262.1 ก่อนขึ้นพรอด (v1.262 ไม่เคยขึ้น) + agent/relay อีก 3 ข้อ (`36a4061`, ฝั่งเครื่องนี้ ไม่ต้อง deploy)
+- **build ในเครื่องนี้ล้มที่ `/api/me`** = `.env.local` มี `AUTH_DISABLED=1` → prerender วิ่งหา DB local · ไม่ใช่โค้ด · gate ในเครื่องใช้ `AUTH_DISABLED=0 npm run build`
+- **ค้าง:** อีเมลเข้า Inbox นัท ต้องมีผู้ส่งที่ไม่ใช่ narasit.k@ หรือเปิด scope `gmail.insert` ให้ service account ใน Admin console (DWD ตอนนี้ = Drive + Calendar เท่านั้น)
+  · **POP-PIV-261007-02 ถูกแจ้ง "พร้อม" เมื่อวาน 22:13 ทั้งที่ NAS ยังค้าง 610 ไฟล์** (ตอนนั้นไม่มีข้อมูล NAS ให้ด่าน (d) ดู) · คิว NAS ไม่ขยับ 637 → 637
+    น่าจะเพราะ it.admin@ (Cloud Sync) อัป 794 GB ใน 18 ชม. ชนเพดาน 750 GB/วัน จากพายุซิงก์ · แถว audit ยังเป็น best-effort (insert ล้ม = relay ไม่รู้)
+
+---
+
 ## 2026-10-07 · My Bookings โชว์กล้อง/ไมค์ DEPLOYED `sha-6a704ff` (13:19) · deploy ติด backup เพราะ `narasit.k@` ชนโควตาอัป Drive
 
 - นัท: "หน้านี้ของ My Booking โชว์รายละเอียด จำนวนกล้อง ไมค์ แบบในหน้าการ์ดอื่นๆ ด้วย" → แถวใช้ `CameraMicTag` ตัวเดียวกับคิวแอดมิน/ปฏิทิน (API ส่งค่ามาอยู่แล้ว)
