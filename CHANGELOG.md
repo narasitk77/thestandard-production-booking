@@ -7,6 +7,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed — แจ้ง "ฟุตเทจพร้อม" + "NAS ส่งขึ้น Drive ครบ" กลับมาถึงนัท (v1.262 · 9 ต.ค. 2569)
+
+นัท: "ไม่มีแจ้งเตือนเมื่อฟุตเทจพร้อมมานานแล้วนะ เอากลับมาด้วย ซ่อมให้ดีเหมือนเดิม worker ก็ไม่มีแล้ว" · ปลายทางที่นัทเลือก:
+Discord ห้องเดียวกับ Hermes + ห้อง "Ohm" เดิม + อีเมลเข้า Inbox
+
+ตรวจแล้วมีสองเส้นที่เงียบจริง (ไม่ใช่ worker ตาย — `footage-ready` เต้นทุก 30 นาที):
+- **ฟุตเทจพร้อมรายใบ:** ทีมได้เมล 31 ครั้งใน 14 วัน + ห้อง Discord "Ohm" ได้ทุกใบ แต่ **สำเนาของนัทเป็นเมลส่งหาตัวเอง**
+  (From = To = `narasit.k@` ผ่าน SMTP บัญชีเดียวกัน) Gmail ไม่เอาเข้า Inbox มาตั้งแต่แรก และตั้งแต่ v1.248 (30 ก.ย.) ไม่ส่งด้วยซ้ำ
+- **NAS ส่งครบ:** ตัวสแกน NAS (launchd บนเครื่องนัท) เงียบ **87 วัน** (14 ก.ค. → 9 ต.ค.) — แชร์ไม่ได้ mount (`not mounted — skip` แล้ว
+  exit 0 = launchd เห็นว่าสำเร็จ) และตอน mount แล้ว macOS บล็อก bash ของ launchd อ่าน network volume (`Operation not permitted`)
+  · หน้า NAS ยังเรนเดอร์ manifest 14 ก.ค. เหมือนของสด
+
+แก้:
+- **`GET /api/internal/notify-feed?since=`** (ใหม่ · อ่านอย่างเดียว · secret เดียวกับ footage-ready/stats) — เหตุการณ์ที่ส่งไปจริงจาก audit
+  (`booking.auto_notified_ready` · `booking.notified_ready` · `nas.folder_drained`) + อายุข้อมูล NAS · ให้ตัวส่งต่อนอกแอปอ่าน
+- **`scripts/ops/hermes/probook-notify-relay.py`** — งาน Hermes `--no-agent` ทุก 5 นาที โพสต์เข้าห้อง Discord ที่นัทอ่าน: 📣 ฟุตเทจพร้อม
+  · ✅ NAS ส่งครบ · ⚠️ ตัวสแกน NAS เงียบ > 2 ชม. (ทุก 12 ชม.) · cursor เลื่อนเฉพาะเมื่อพิมพ์ออกแล้ว (ดึงไม่ได้ = เตือนบรรทัดเดียว
+  ทุก 6 ชม. ไม่ข้ามเงียบ) · เครื่องออฟไลน์ = ไม่พูด แล้วตามเก็บรอบหน้า · ข้อความยาวเกินถูกย่อพร้อมบอกว่า "และอีก N รายการ"
+- **คิว NAS ระบายหมด → `logAudit('nas.folder_drained')`** (พร้อมจำนวนไฟล์บน Drive) — เดิมมีแค่เมลหาตัวเอง + แชต ไม่มีบันทึกให้ใครตามอ่าน
+- **`nasManifestAge()`** (เพดาน `NAS_MANIFEST_STALE_MINUTES` ค่าเริ่ม 60) · `nas-sync-report` ส่ง `stale/ageMinutes` · แผง NAS ขึ้นแถบแดง
+  "ข้อมูล NAS เก่า N ชม." แทนการโชว์ตารางเก่าเหมือนของสด
+- **`scripts/nas_manifest_agent.py`** แทน `nas-manifest-agent.sh`: ไม่ได้ mount → mount เองด้วย `osascript mount volume` (รหัสจาก Keychain ไม่เก็บในสคริปต์)
+  · macOS บล็อก → exit 3 พร้อมบอกว่าต้องให้ Full Disk Access กับ python ตัวไหน · ล้มทุกแบบ = exit ≠ 0 + บรรทัด `FAIL` · manifest รูปเดิม (server ไม่ต้องแก้)
+- **ยังไม่ได้:** อีเมลเข้า Inbox นัท — ต้องมีผู้ส่งที่ไม่ใช่ `narasit.k@` (กล่องจดหมายของระบบเอง) หรือเปิด scope `gmail.insert` ให้ service account
+  (ตอนนี้ DWD อนุญาตแค่ Drive + Calendar) · ห้อง "Ohm" ได้ข้อความอยู่แล้ว ไม่ต้องแก้
+- เทสต์: `nas-sync-drain.test.ts` (บันทึกตอนระบายหมด/ไม่บันทึกตอนยังค้าง · อายุ manifest) + selftest ของ relay และ agent
+
 ### Changed — My Bookings โชว์จำนวนกล้อง/ไมค์ในแต่ละแถว (7 ต.ค. 2569)
 
 นัท: "หน้านี้ของ My Booking โชว์รายละเอียด จำนวนกล้อง ไมค์ แบบในหน้าการ์ดอื่นๆ ด้วย" — แถวในหน้า `/my-bookings` ใช้ `CameraMicTag`

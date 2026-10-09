@@ -490,11 +490,13 @@ services:
       MCP_ACTOR_EMAIL: ${MCP_ACTOR_EMAIL:-}
 
       # v1.111 — NAS ↔ Production Team sync verification. The Mac agent
-      # (scripts/nas-manifest-agent.sh) POSTs NAS manifests with x-nas-secret;
+      # (scripts/nas_manifest_agent.py since v1.262) POSTs NAS manifests with x-nas-secret;
       # sync-complete + daily digest emails go to NAS_REPORT_EMAIL
       # (falls back to REMINDER_ADMIN_EMAIL).
       NAS_MANIFEST_SECRET: ${NAS_MANIFEST_SECRET:-}
       NAS_REPORT_EMAIL: ${NAS_REPORT_EMAIL:-}
+      # v1.262 — a manifest older than this (minutes) is reported as stale, never as live
+      NAS_MANIFEST_STALE_MINUTES: ${NAS_MANIFEST_STALE_MINUTES:-60}
 
       # (Wasabi fully removed — v1.130 dropped the env vars, v1.146 dropped the DB columns.)
 

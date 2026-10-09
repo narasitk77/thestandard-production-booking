@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
-import { buildNasReport, latestNasState, verifyNasMirror } from '@/lib/nas-sync'
+import { buildNasReport, nasManifestAge, latestNasState, verifyNasMirror } from '@/lib/nas-sync'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -33,7 +33,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: true, nasAt: manifest.at ?? null, ...mirror })
     }
     const report = await buildNasReport(manifest, { withDriveCounts: true, statuses })
-    return NextResponse.json({ ok: true, ...report })
+    // v1.262 — a stale manifest is shown WITH its age, never as a live picture
+    return NextResponse.json({ ok: true, ...report, ...nasManifestAge(manifest.at) })
   } catch (e: any) {
     console.error('GET /api/admin/nas-sync-report error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })

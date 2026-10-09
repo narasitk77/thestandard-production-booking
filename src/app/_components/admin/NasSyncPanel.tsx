@@ -24,7 +24,7 @@ const fmt = (b: number) => b >= GB ? `${(b / GB).toFixed(1)} GB` : `${Math.round
 
 export default function NasSyncPanel() {
   const [loading, setLoading] = useState(false)
-  const [report, setReport] = useState<{ nasAt: string | null; folders: FolderRow[]; sendingCount: number; sentCount: number } | null>(null)
+  const [report, setReport] = useState<{ nasAt: string | null; folders: FolderRow[]; sendingCount: number; sentCount: number; stale?: boolean; ageMinutes?: number | null } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
 
   const check = async () => {
@@ -53,6 +53,12 @@ export default function NasSyncPanel() {
       {msg && <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">{msg}</div>}
       {report && (
         <>
+          {report.stale && (
+            <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded p-2">
+              ⚠️ ข้อมูล NAS เก่า {report.ageMinutes != null ? `${Math.round(report.ageMinutes / 60)} ชม.` : ''} — ตัวสแกน NAS บนเครื่อง admin ไม่ได้ส่งข้อมูลมา ตารางนี้ไม่ใช่สถานะปัจจุบัน
+              (ดู /tmp/probook-nas-agent.log บนเครื่องนั้น)
+            </div>
+          )}
           <div className="text-[11px] text-gray-500">
             ข้อมูล NAS ล่าสุด: {report.nasAt ? new Date(report.nasAt).toLocaleString('th-TH') : '—'} · 🔄 กำลังส่ง <b>{report.sendingCount}</b> · ✅ ส่งครบ <b>{report.sentCount}</b> / {report.folders.length}
           </div>

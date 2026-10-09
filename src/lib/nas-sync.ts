@@ -18,6 +18,7 @@
 import { prisma } from './db'
 import { sendEmail, isEmailConfigured } from './email'
 import { notifyChat } from './notify'
+import { logAudit } from './audit'
 import { findFoldersByCode, listFilesRecursive, findChildFolder, SOUND_STAGING_DIR, listSoundStagingTree } from './google-drive'
 
 const IGNORE_RE = /^_SHOOT\b.*\.txt$/i
@@ -171,9 +172,10 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
     // Transition: queue had files, now drained → the sync shipped everything.
     if ((p.lastPending || 0) > 0 && f.nasPending === 0) {
       let driveNote = ''
+      let driveCount: { files: number; bytes: number } | null = null
       try {
-        const c = await countDriveFilesByCode(f.code)
-        driveNote = `\nบน Drive ตอนนี้: ${c.files} ไฟล์ (${fmt(c.bytes)})`
+        driveCount = await countDriveFilesByCode(f.code)
+        driveNote = `\nบน Drive ตอนนี้: ${driveCount.files} ไฟล์ (${fmt(driveCount.bytes)})`
       } catch { /* best-effort */ }
       if (emailOk) {
         await sendEmail({
@@ -186,6 +188,12 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
       // email. Independent of emailOk; notifyChat no-ops when no chat webhook
       // is configured and never throws.
       await notifyChat(`✅ ซิงค์ขึ้น Drive ครบ: ${f.name} — คิว NAS ระบายหมดแล้ว${driveNote.replace('\n', ' · ')}`)
+      // v1.262 — a durable record of the drain: the Hermes relay reads these to tell the operator's
+      // Discord room (chat + email above are best-effort and the email is a self-send that never lands)
+      await logAudit({
+        actorEmail: 'nas-sync', action: 'nas.folder_drained', entityType: 'NasFolder', entityId: f.name, bookingCode: f.code,
+        changes: { folder: f.name, ...(driveCount ? { driveFiles: driveCount.files, driveBytes: driveCount.bytes } : {}) },
+      })
       statuses[f.code] = { ...p, lastPending: 0, maxSeen, drainedAt: new Date().toISOString() }
     } else {
       statuses[f.code] = { ...p, lastPending: f.nasPending, maxSeen }
@@ -215,6 +223,19 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
 }
 
 /** Latest stored manifest + statuses (for the admin button). */
+/**
+ * v1.262 — how old the NAS picture is. The Mac agent pushes every 10 min; for 87 days (14 Jul → 9 Oct 2026)
+ * it pushed nothing while the panel kept rendering the 14 Jul manifest as if it were live. Older than
+ * NAS_MANIFEST_STALE_MINUTES (default 60) = stale: say so, never present it as current.
+ */
+export function nasManifestAge(at: string | null | undefined, now = new Date()): { ageMinutes: number | null; stale: boolean } {
+  const t = at ? Date.parse(at) : NaN
+  if (!Number.isFinite(t)) return { ageMinutes: null, stale: true }
+  const limit = Number(process.env.NAS_MANIFEST_STALE_MINUTES) > 0 ? Number(process.env.NAS_MANIFEST_STALE_MINUTES) : 60
+  const ageMinutes = Math.max(0, Math.round((now.getTime() - t) / 60_000))
+  return { ageMinutes, stale: ageMinutes > limit }
+}
+
 export async function latestNasState(): Promise<{ manifest: NasManifest | null; statuses: any }> {
   const row = await prisma.nasSyncState.findUnique({ where: { key: 'latest' } })
   return { manifest: (row?.manifest as unknown as NasManifest) || null, statuses: ((row?.status as any) || {}).folders || {} }
