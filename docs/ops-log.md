@@ -6,6 +6,19 @@ until 2026-10-01 — see the 2026-10-04 entry). Newest first.
 
 ---
 
+## 2026-10-10 · v1.263.0 DEPLOYED `sha-7c137fe` (00:24) · `_FOOTAGE-CHECK` 281 ฉบับเปลี่ยนเป็นโดเมนใหม่
+
+- **โดเมนเก่าในเอกสาร** (คุณปุ๊ก/PMDC 9 ต.ค.): `_FOOTAGE-CHECK` 450 ฉบับ · 281 ฉบับที่ backfill 30 ก.ย. (งานถ่าย 18 มิ.ย.–31 ส.ค., COMPLETED ทั้งหมด)
+  ยังพิมพ์ `probook.xtec9.xyz` ท้ายเอกสาร และ worker ไม่เขียนใหม่เพราะเกิน 30 วัน · **ไม่ต้องแก้โค้ด**: ลิงก์ท้ายเอกสารอยู่ใน hash ของ
+  `renderCheckDoc` → hash ไม่ตรง → `footage-integrity/run?codes=…&docs=1` (codes ข้ามหน้าต่าง 30 วัน) เขียนใหม่ด้วย NEXTAUTH_URL ปัจจุบัน ·
+  appProperties ถูก merge (เครื่องหมาย announced อยู่ครบ ไม่แจ้งแชตซ้ำ) · dry-run 281/281 `would-update` → apply 276 `updated` + 5 `unchanged`
+  (เขียนไปแล้วในรอบที่คำตอบหายระหว่างคอนเทนเนอร์รีสตาร์ต) → **สแกนซ้ำ 450 ฉบับ เหลือโดเมนเก่า 0** · สคริปต์ resumable:
+  `footage-check/footage-check-domain-2026-10-09/rewrite_old_domain_docs.py`
+- **v1.263.0** (ops alert → Discord ผ่าน Hermes relay; relay ติดตั้งก่อนแล้วตามลำดับ) · รอบแรก 22:29 PUT สร้างคอนเทนเนอร์ `sha-7c137fe` ได้ (22:33)
+  แต่ **ไม่เขียน IMAGE_TAG/ConfigHash ลง stack** (UpdateDate ค้างที่ 21:14 ของรอบก่อน) → deploy.py exit 3 · พรอดรันของใหม่แต่ stack จำของเก่า =
+  กด Update stack ครั้งหน้าจะถอยเงียบ ๆ · ตรวจ 00:21 ไม่มี deploy ค้าง + docker events 0 ใน 60 นาที → ยิงซ้ำ (idempotent) 00:23 → ครบสามชั้น 00:24
+  · บทเรียน: exit 3 ที่ `cont=ใหม่ http=200 stack=เก่า` = PUT จบไม่ครบ ต้องยิงซ้ำหลังยืนยันว่าเงียบแล้ว ไม่ใช่ปล่อยไว้
+
 ## 2026-10-09 (ค่ำ) · v1.262.2 DEPLOYED `sha-a9095ff` (~21:10) — สำเนาเมลของนัทกลับมา: "Gmail ไม่ส่งเมลหาตัวเอง" เป็นความเชื่อผิด
 
 นัท: "มันเปิดหมดแล้วนี่ เมื่อก่อนก็ทำได้" — ถูก · ค้นใน Gmail นัท (`subject:"Footage พร้อม" to:narasit.k@`):
