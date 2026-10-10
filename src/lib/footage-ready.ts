@@ -107,15 +107,20 @@ export function isInternalEmail(email: string, domains: string[] = footageReadyI
  * v1.264 — Co-Producer เข้ารายชื่อด้วย (นัท 11 ต.ค. 2569 "เพิ่ม Co-Producer เข้ารายชื่อแจ้งฟุตเทจพร้อมด้วย"):
  * TSS มี phoemsiri.p@ เป็น Co-Producer 32/52 ใบ แต่ได้แจ้งแค่ใบที่ตัวเองเป็นคนสร้าง (11 ใบ) · ปุ่ม 📣 แจ้งมือ
  * (notify-ready route) ใช้ฟังก์ชันนี้ด้วย — กฎ "ใครได้แจ้ง" อยู่ที่เดียว
+ *
+ * v1.264 — คนที่ปิดบัญชีแล้ว (users.active=false) ไม่ได้เมล และถูกคืนใน `inactive` ให้ผู้เรียกบันทึก (ไม่ตัดเงียบ):
+ * แก้ว (phoemsiri.p@) ออก 28 ก.ย. แต่ยังเป็นคนสร้างใบ → 9 ต.ค. เมลเด้ง 550 5.1.1 ขณะที่ audit นับว่าส่งถึง
+ * (SMTP รับไว้ก่อนแล้วค่อยตีกลับ) — กฎเดียวกับ QU reminder v1.243
  */
 export function footageReadyRecipients(
   audience: FootageReadyAudience,
   b: { producerEmail?: string | null; coProducerEmail?: string | null; createdByEmail?: string | null; assignedEmails?: string[] | null },
   adminEmail?: string | null,
-): { people: string[]; digest: boolean } {
+  inactiveEmails: Iterable<string> = [],
+): { people: string[]; digest: boolean; inactive: string[] } {
   const clean = (v: unknown) => (typeof v === 'string' ? v.trim().toLowerCase() : '')
   const admin = clean(adminEmail)
-  if (audience === 'admin') return { people: [], digest: true }
+  if (audience === 'admin') return { people: [], digest: true, inactive: [] }
 
   const raw =
     audience === 'everyone' || audience === 'team'
@@ -123,7 +128,15 @@ export function footageReadyRecipients(
       : [b.producerEmail, b.coProducerEmail]
   let people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@'))))
   if (audience === 'team') people = people.filter(e => isInternalEmail(e))
-  return { people, digest: !!admin && !people.includes(admin) }
+  const gone = new Set(Array.from(inactiveEmails, clean))
+  const inactive = people.filter(e => gone.has(e))
+  people = people.filter(e => !gone.has(e))
+  return { people, digest: !!admin && !people.includes(admin), inactive }
+}
+
+/** อีเมลของผู้ใช้ที่ปิดบัญชีแล้ว — ใส่เป็นอาร์กิวเมนต์ที่ 4 ของ footageReadyRecipients */
+export async function inactiveUserEmails(): Promise<string[]> {
+  return (await prisma.user.findMany({ where: { active: false }, select: { email: true } })).map(u => u.email)
 }
 
 // ── Pure settle logic (unit-tested) ────────────────────────────────────────
@@ -264,6 +277,7 @@ export async function runFootageReadyScan(
     dryRun, forced, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
     notified: [], settling: [], skipped: [], errors: [],
   }
+  let inactive: string[] | undefined // v1.264 — users.active=false, read once per scan and only when a notice goes out
 
   const rows = await prisma.booking.findMany({
     where: {
@@ -415,7 +429,8 @@ export async function runFootageReadyScan(
         continue
       }
 
-      const sent = await sendFootageReadyNotification(b, payload, audience, gate.text)
+      inactive ??= await inactiveUserEmails()
+      const sent = await sendFootageReadyNotification(b, payload, audience, gate.text, inactive)
       if (!sent.delivered) {
         result.errors.push({ code, error: sent.error || 'no delivery channel succeeded' })
         continue // no stamp — retried next sweep
@@ -434,6 +449,7 @@ export async function runFootageReadyScan(
         changes: {
           audience,
           recipients: sent.recipients,
+          ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
           folderCount: payload.folders.length,
           fileCount: payload.fileCount,
           mediapro: gate.text,
@@ -461,9 +477,12 @@ async function sendFootageReadyNotification(
   payload: CachedFootagePayload,
   audience: FootageReadyAudience,
   verified: string,
+  inactiveEmails: string[],
 ): Promise<{
   delivered: boolean
   recipients: string[]
+  /** v1.264 — คนในใบที่ปิดบัญชีแล้ว ไม่ได้ส่ง (บันทึกลง audit) */
+  skippedInactive: string[]
   /**
    * v1.186 — ผลจริงของช่องทางฝั่ง operator (ไม่ใช่ "เจตนาว่าจะส่ง")
    *
@@ -508,27 +527,32 @@ THE STANDARD Production Booking`
       delivered: emailOk || chatOk,
       // ใส่ ADMIN_DIGEST เฉพาะเมื่อส่งผ่านจริง — ไม่ใช่เพราะ "ตั้งใจจะส่ง"
       recipients: emailOk ? [ADMIN_DIGEST] : [],
+      skippedInactive: [],
       operatorChannels: { digestOk: emailOk, discordOk, larkOk },
       error: emailOk || chatOk ? null : 'admin digest + chat (discord/lark) both unavailable',
     }
   }
 
-  const { people: recipients, digest: alsoDigest } = footageReadyRecipients(
+  const { people: recipients, digest: alsoDigest, inactive: skippedInactive } = footageReadyRecipients(
     audience,
     b,
     process.env.REMINDER_ADMIN_EMAIL || process.env.EMAIL_FROM,
+    inactiveEmails,
   )
 
   if (recipients.length === 0) {
     // No producer email — tell the admin instead of retrying forever.
     // Caller stamps readyNotifiedAt, so this warns exactly once per booking.
-    const warned = await notifyEmailDigest(`⚠️ ${subject} — ไม่มีอีเมล producer`, `${code} footage พร้อมแล้ว แต่ booking ไม่มี producerEmail ให้แจ้ง\n\n${text}`)
-    const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`⚠️ ${discordLine} — ไม่มีอีเมล producer ให้แจ้ง`)
+    // v1.264 — ทุกคนในใบปิดบัญชีแล้ว = บอกชื่อ (ต้องหาคนรับงานแทน) ไม่ใช่ "ไม่มีอีเมล"
+    const why = skippedInactive.length ? `คนในใบออกไปแล้วทั้งหมด (${skippedInactive.join(', ')})` : 'booking ไม่มี producerEmail ให้แจ้ง'
+    const warned = await notifyEmailDigest(`⚠️ ${subject} — ไม่มีคนในทีมให้แจ้ง`, `${code} footage พร้อมแล้ว แต่${why}\n\n${text}`)
+    const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`⚠️ ${discordLine} — ไม่มีคนในทีมให้แจ้ง: ${why}`)
     return {
       delivered: warned || chatOk,
       recipients: [],
+      skippedInactive,
       operatorChannels: { digestOk: warned, discordOk, larkOk },
-      error: 'no producer email',
+      error: skippedInactive.length ? 'all team members inactive' : 'no producer email',
     }
   }
 
@@ -560,6 +584,7 @@ THE STANDARD Production Booking`
     // v1.186 — ADMIN_DIGEST เข้ารายชื่อเฉพาะเมื่อส่งผ่านจริง (เดิมใส่ตาม alsoDigest
     // ล้วน ๆ ทำให้ /stats นับว่า operator ได้รับ ทั้งที่ไม่เคยได้)
     recipients: digestOk ? [...recipients, ADMIN_DIGEST] : recipients,
+    skippedInactive,
     operatorChannels: { digestOk, discordOk, larkOk },
     error,
   }

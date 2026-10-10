@@ -6,7 +6,7 @@ import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { formatBytes } from '@/lib/footage-report'
 import { getCachedFootagePayload } from '@/lib/footage-folders'
 import { bookingDisplayName } from '@/lib/display'
-import { footageReadyRecipients } from '@/lib/footage-ready'
+import { footageReadyRecipients, inactiveUserEmails } from '@/lib/footage-ready'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // resolving footage folders does a recursive Drive walk
@@ -55,8 +55,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     // Everyone on the booking (same rule as the auto notice — v1.264 adds the Co-Producer), plus the
     // sender (CC self). De-dupe case-insensitively; keep only address-like entries.
+    const team = footageReadyRecipients('everyone', booking, null, await inactiveUserEmails())
+    const skippedInactive = team.inactive // v1.264 — คนที่ออกไปแล้วไม่ได้เมล (บอกใน preview + audit)
     const recipients = Array.from(new Set(
-      [...footageReadyRecipients('everyone', booking).people, session.email]
+      [...team.people, session.email]
         .filter(Boolean).map(e => e!.trim().toLowerCase()).filter(e => e.includes('@')),
     ))
 
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     if (preview) {
-      return NextResponse.json({ preview: true, recipients, folderCount: folders.length, fileCount, emailConfigured: isEmailConfigured() })
+      return NextResponse.json({ preview: true, recipients, skippedInactive, folderCount: folders.length, fileCount, emailConfigured: isEmailConfigured() })
     }
 
     const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)
@@ -124,7 +126,7 @@ THE STANDARD Production Booking`
       entityType: 'Booking',
       entityId: booking.id,
       bookingCode: booking.bookingCode,
-      changes: { recipients, folderCount: folders.length, fileCount, emailError },
+      changes: { recipients, ...(skippedInactive.length ? { skippedInactive } : {}), folderCount: folders.length, fileCount, emailError },
     })
 
     return NextResponse.json({

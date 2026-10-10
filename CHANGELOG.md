@@ -15,6 +15,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ปุ่ม 📣 แจ้งมือ (`/api/bookings/[id]/notify-ready`) เลิกมีรายชื่อของตัวเอง → ใช้ `footageReadyRecipients('everyone')` + ผู้กด
   (กฎ "ใครได้แจ้ง" เคยซ้ำ 2 ที่ — แก้ที่เดียวแล้วอีกที่ไม่ตาม)
 - เทสล็อก: Co-Producer ได้ทุก audience ยกเว้น admin · ซ้ำกับคนสร้าง/producer = ไม่ได้เมลซ้ำ · ไม่มี Co-Producer = รายชื่อเดิม
+- **คนที่ปิดบัญชีแล้ว (users.active=false) ไม่ได้เมล** และถูกบันทึกใน audit เป็น `skippedInactive` (ไม่ตัดเงียบ) — ตรวจระบบ 10 ต.ค. พบ
+  แก้ว (phoemsiri.p@ ออก 28 ก.ย.) ยังได้แจ้งในฐานะคนสร้างใบ → 9 ต.ค. เมลเด้ง 550 5.1.1 แต่ audit นับว่าส่งถึง · ทุกคนในใบออกแล้ว =
+  เตือนแอดมินพร้อมชื่อ (ต้องหาคนรับงานแทน) · ปุ่ม 📣 แสดง `skippedInactive` ใน preview · กฎเดียวกับ QU reminder v1.243
+  · ข้อจำกัด: บัญชีที่ตายแล้วแต่ยัง active=true ในระบบ (phantawat.s@) ยังได้เมลจนกว่าจะ offboard
 
 ### Added — คำเตือน ops เข้าห้อง Discord ของนัท (v1.263.0 · 9 ต.ค. 2569)
 

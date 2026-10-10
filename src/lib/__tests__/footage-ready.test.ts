@@ -74,7 +74,7 @@ const BK = {
 
 test('audience=admin: digest only, nobody on the team is mailed', () => {
   const r = footageReadyRecipients('admin', BK, ADMIN)
-  assert.deepEqual(r, { people: [], digest: true })
+  assert.deepEqual(r, { people: [], digest: true, inactive: [] })
 })
 
 test('audience=producer: the producer, plus the admin digest alongside', () => {
@@ -106,6 +106,19 @@ test('v1.264: Co-Producer ได้แจ้งด้วยทุก audience �
   assert.deepEqual(footageReadyRecipients('team', { ...withCo, createdByEmail: 'phoemsiri.p@thestandard.co' }, ADMIN).people.filter(e => e.startsWith('phoemsiri')), ['phoemsiri.p@thestandard.co'])
   // ไม่มี Co-Producer (null / em-dash) = เหมือนเดิม
   assert.deepEqual(footageReadyRecipients('team', { ...BK, coProducerEmail: '—' }, ADMIN).people, footageReadyRecipients('team', BK, ADMIN).people)
+})
+
+test('v1.264: คนที่ปิดบัญชีแล้วไม่ได้เมล และถูกคืนชื่อให้บันทึก (แก้ว ออก 28 ก.ย. → เมลเด้ง 9 ต.ค.)', () => {
+  const b = { ...BK, coProducerEmail: 'phoemsiri.p@thestandard.co', createdByEmail: 'Phoemsiri.P@thestandard.co' }
+  const r = footageReadyRecipients('team', b, ADMIN, ['PHOEMSIRI.P@thestandard.co '])
+  assert.ok(!r.people.includes('phoemsiri.p@thestandard.co'), 'ไม่ส่งหาบัญชีที่ปิดแล้ว')
+  assert.deepEqual(r.inactive, ['phoemsiri.p@thestandard.co'], 'คืนชื่อครั้งเดียว ให้ผู้เรียกบันทึก ไม่ตัดเงียบ')
+  assert.deepEqual(r.people, ['prae@thestandard.co', 'video@thestandard.co', 'sound@thestandard.co'])
+  // ไม่ส่งรายชื่อ inactive มา = พฤติกรรมเดิม
+  assert.deepEqual(footageReadyRecipients('team', b, ADMIN).inactive, [])
+  // ทุกคนในใบออกไปแล้ว → people ว่าง (ผู้เรียกไปทางเตือนแอดมิน)
+  const all = footageReadyRecipients('producer', { producerEmail: 'gone@thestandard.co' }, ADMIN, ['gone@thestandard.co'])
+  assert.deepEqual(all, { people: [], digest: true, inactive: ['gone@thestandard.co'] })
 })
 
 test('admin already on the booking: no digest, so he is not mailed twice', () => {
