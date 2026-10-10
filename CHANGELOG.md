@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added — Co-Producer ได้แจ้ง "ฟุตเทจพร้อม" ด้วย (v1.264.0 · 11 ต.ค. 2569)
+
+นัท: "เพิ่ม Co-Producer เข้ารายชื่อแจ้งฟุตเทจพร้อมด้วย" — ต้นเรื่อง TSS บอกว่าไม่ได้แจ้งมานาน: phoemsiri.p@ เป็น Co-Producer
+32/52 ใบของ TSS (75 วัน) แต่ได้แจ้งเฉพาะ 11 ใบที่ตัวเองเป็นคนสร้าง เพราะรายชื่อ = producer + คนสร้าง + ทีมที่จ่ายงาน (ไม่มี Co-Producer)
+- `footageReadyRecipients()` ใส่ `coProducerEmail` ต่อจาก producer ทุก audience ที่ไม่ใช่ admin (team ยังตัดอีเมลนอกองค์กรเหมือนเดิม)
+- ปุ่ม 📣 แจ้งมือ (`/api/bookings/[id]/notify-ready`) เลิกมีรายชื่อของตัวเอง → ใช้ `footageReadyRecipients('everyone')` + ผู้กด
+  (กฎ "ใครได้แจ้ง" เคยซ้ำ 2 ที่ — แก้ที่เดียวแล้วอีกที่ไม่ตาม)
+- เทสล็อก: Co-Producer ได้ทุก audience ยกเว้น admin · ซ้ำกับคนสร้าง/producer = ไม่ได้เมลซ้ำ · ไม่มี Co-Producer = รายชื่อเดิม
+
 ### Added — คำเตือน ops เข้าห้อง Discord ของนัท (v1.263.0 · 9 ต.ค. 2569)
 
 นัท: "เอา ops เข้า Discord ด้วย" — คำเตือน ops (พายุซิงก์ · worker หยุด · ไฟล์ตกใน drop งานยกเลิก · ตรวจฟุตเทจไม่ครบ ·

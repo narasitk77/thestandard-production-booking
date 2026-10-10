@@ -103,10 +103,14 @@ export function isInternalEmail(email: string, domains: string[] = footageReadyI
  *            address, so the caller must never put them in a shared To:)
  *   digest — send the admin digest as well; suppressed when the admin is already
  *            a named recipient so nobody is mailed the same thing twice
+ *
+ * v1.264 — Co-Producer เข้ารายชื่อด้วย (นัท 11 ต.ค. 2569 "เพิ่ม Co-Producer เข้ารายชื่อแจ้งฟุตเทจพร้อมด้วย"):
+ * TSS มี phoemsiri.p@ เป็น Co-Producer 32/52 ใบ แต่ได้แจ้งแค่ใบที่ตัวเองเป็นคนสร้าง (11 ใบ) · ปุ่ม 📣 แจ้งมือ
+ * (notify-ready route) ใช้ฟังก์ชันนี้ด้วย — กฎ "ใครได้แจ้ง" อยู่ที่เดียว
  */
 export function footageReadyRecipients(
   audience: FootageReadyAudience,
-  b: { producerEmail?: string | null; createdByEmail?: string | null; assignedEmails?: string[] | null },
+  b: { producerEmail?: string | null; coProducerEmail?: string | null; createdByEmail?: string | null; assignedEmails?: string[] | null },
   adminEmail?: string | null,
 ): { people: string[]; digest: boolean } {
   const clean = (v: unknown) => (typeof v === 'string' ? v.trim().toLowerCase() : '')
@@ -115,8 +119,8 @@ export function footageReadyRecipients(
 
   const raw =
     audience === 'everyone' || audience === 'team'
-      ? [b.producerEmail, b.createdByEmail, ...(b.assignedEmails || [])]
-      : [b.producerEmail]
+      ? [b.producerEmail, b.coProducerEmail, b.createdByEmail, ...(b.assignedEmails || [])]
+      : [b.producerEmail, b.coProducerEmail]
   let people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@'))))
   if (audience === 'team') people = people.filter(e => isInternalEmail(e))
   return { people, digest: !!admin && !people.includes(admin) }
@@ -237,6 +241,7 @@ type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
   readySnapshot: unknown
   producer: string
   producerEmail: string | null
+  coProducerEmail: string | null
   createdByEmail: string | null
   assignedEmails: string[]
   outlet: { code: string; name: string }
@@ -281,7 +286,7 @@ export async function runFootageReadyScan(
     select: {
       id: true, bookingCode: true, status: true, driveFolders: true,
       projectId: true, projectName: true, category: true, crewRequired: true,
-      producer: true, producerEmail: true, createdByEmail: true, assignedEmails: true,
+      producer: true, producerEmail: true, coProducerEmail: true, createdByEmail: true, assignedEmails: true,
       callTime: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
       readySnapshot: true, readyCheckedAt: true,
       outlet: { select: { code: true, name: true } },

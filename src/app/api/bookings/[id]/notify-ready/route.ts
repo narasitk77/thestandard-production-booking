@@ -6,6 +6,7 @@ import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { formatBytes } from '@/lib/footage-report'
 import { getCachedFootagePayload } from '@/lib/footage-folders'
 import { bookingDisplayName } from '@/lib/display'
+import { footageReadyRecipients } from '@/lib/footage-ready'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // resolving footage folders does a recursive Drive walk
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       where: { id: params.id },
       select: {
         id: true, driveFolders: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true,
-        assignedEmails: true, createdByEmail: true, producer: true, producerEmail: true,
+        assignedEmails: true, createdByEmail: true, producer: true, producerEmail: true, coProducerEmail: true,
         projectId: true, projectName: true, category: true, callTime: true, shootDate: true,
         outlet: { select: { code: true, name: true } },
         program: { select: { name: true } },
@@ -52,10 +53,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ error: 'คุณไม่ได้รับมอบหมายงานนี้', code: check.reason ?? 'FORBIDDEN' }, { status: 403 })
     }
 
-    // Everyone on the booking: producer + assigned crew + creator, plus the sender
-    // (CC self). De-dupe case-insensitively; keep only address-like entries.
+    // Everyone on the booking (same rule as the auto notice — v1.264 adds the Co-Producer), plus the
+    // sender (CC self). De-dupe case-insensitively; keep only address-like entries.
     const recipients = Array.from(new Set(
-      [booking.producerEmail, booking.createdByEmail, ...(booking.assignedEmails || []), session.email]
+      [...footageReadyRecipients('everyone', booking).people, session.email]
         .filter(Boolean).map(e => e!.trim().toLowerCase()).filter(e => e.includes('@')),
     ))
 

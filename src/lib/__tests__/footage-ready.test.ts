@@ -95,6 +95,19 @@ test('audience=everyone: producer + creator + crew, freelancers included', () =>
   assert.equal(r.digest, true)
 })
 
+test('v1.264: Co-Producer ได้แจ้งด้วยทุก audience ที่ไม่ใช่ admin (TSS: phoemsiri.p@ เป็น Co-Producer 32/52 ใบ)', () => {
+  const withCo = { ...BK, coProducerEmail: ' Phoemsiri.P@thestandard.co ' }
+  assert.deepEqual(footageReadyRecipients('team', withCo, ADMIN).people, [
+    'prae@thestandard.co', 'phoemsiri.p@thestandard.co', 'coordinator@thestandard.co', 'video@thestandard.co', 'sound@thestandard.co',
+  ], 'team: Co-Producer ต่อจาก producer · freelancer ภายนอกถูกตัดเหมือนเดิม')
+  assert.deepEqual(footageReadyRecipients('producer', withCo, ADMIN).people, ['prae@thestandard.co', 'phoemsiri.p@thestandard.co'])
+  assert.deepEqual(footageReadyRecipients('admin', withCo, ADMIN).people, [])
+  // Co-Producer = producer หรือเป็นคนสร้างใบเอง → ไม่ได้เมลซ้ำ
+  assert.deepEqual(footageReadyRecipients('team', { ...withCo, createdByEmail: 'phoemsiri.p@thestandard.co' }, ADMIN).people.filter(e => e.startsWith('phoemsiri')), ['phoemsiri.p@thestandard.co'])
+  // ไม่มี Co-Producer (null / em-dash) = เหมือนเดิม
+  assert.deepEqual(footageReadyRecipients('team', { ...BK, coProducerEmail: '—' }, ADMIN).people, footageReadyRecipients('team', BK, ADMIN).people)
+})
+
 test('admin already on the booking: no digest, so he is not mailed twice', () => {
   const r = footageReadyRecipients('everyone', { ...BK, producerEmail: ADMIN }, ADMIN)
   assert.ok(r.people.includes(ADMIN))
