@@ -69,6 +69,36 @@ test('ไฟล์ที่ย้ายไปโฟลเดอร์อื่�
   assert.equal(r.listed, 4, 'สองสำเนาของ MEDIAPRO เดียวกัน = ไฟล์ชุดเดียว')
 })
 
+test('v1.267: โฟลเดอร์ EP ที่ก็อปคลิปออกจากการ์ดที่ครบ (md5 ตรงทุกไฟล์) = ผ่าน · ไฟล์เดียวไม่ตรง = ยังตรวจไม่ได้ (เคส WLT-NGI-261009-01)', () => {
+  const root = ['ALL', 'CAM A', 'XDROOT']
+  const clip = 'C038C001_261009XF'
+  const cards = [{ folderPath: root, materials: mp.parseMediapro(xml(material(clip))) }]
+  const orig = card(root, clip)
+  // the team's per-EP copy: same bytes (md5), no MEDIAPRO, no XDROOT
+  const twin = (path: string[], name: string, md5: string, size = 1000) => ({ ...f(path, name, size), md5 })
+  const md5Of = (name: string) => orig.find((x: any) => x.name === name)!.md5
+  const ep = ['EP01 · วางแผนการเงิน', 'CAM-A']
+  const copy = [twin([...ep, 'Clip'], `${clip}.MXF`, md5Of(`${clip}.MXF`), 1_000_000), twin([...ep, 'Clip'], `${clip}M01.XML`, md5Of(`${clip}M01.XML`), 10), twin([...ep, 'Sub'], `${clip}S03.MP4`, md5Of(`${clip}S03.MP4`), 500)]
+  const ok = mp.mediaproCheck([...orig, ...copy], cards)
+  assert.equal(mp.mediaproComplete(ok), true, mp.mediaproGapText(ok))
+  assert.deepEqual(ok.twinCopies, [ep.join('/')])
+  // one file of the copy differs (a half-copied MXF) → the folder is NOT a copy, still unverifiable
+  const bad = mp.mediaproCheck([...orig, ...copy.slice(1), twin([...ep, 'Clip'], `${clip}.MXF`, 'different', 400_000)], cards)
+  assert.equal(mp.mediaproComplete(bad), false)
+  assert.deepEqual(bad.unverifiable, [ep.join('/')])
+  assert.deepEqual(bad.twinCopies, [])
+  // review v1.267: a 0-byte clip in the copy is NOT skipped — the folder stays unverifiable
+  const zero = mp.mediaproCheck([...orig, ...copy, twin([...ep, 'Clip'], 'C038C002_261009XF.MXF', 'd41d8cd98f00b204e9800998ecf8427e', 0)], cards)
+  assert.deepEqual(zero.twinCopies, [])
+  assert.deepEqual(zero.unverifiable, [ep.join('/')])
+  // review v1.267: a clip MOVED out of the card (the only copy, found by name) is not "a copy of itself"
+  const moved = mp.mediaproCheck([...orig.filter((x: any) => !x.name.endsWith('.MXF')), copy[0]], cards)
+  assert.deepEqual(moved.twinCopies, [], 'ไฟล์เดียวที่มีในกล่อง จับคู่กับตัวเองไม่ได้')
+  // a card folder with no md5 at all (cannot prove) stays unverifiable
+  const nomd5 = mp.mediaproCheck([...orig, ...copy.map((x: any) => ({ ...x, md5: null }))], cards)
+  assert.deepEqual(nomd5.unverifiable, [ep.join('/')])
+})
+
 test('M4ROOT C0001 สองการ์ดกล้องเดียวกัน — C0001 ของการ์ด 1 ไม่ทำให้การ์ด 2 ดูครบ', () => {
   const c1 = ['EP01', 'CAM-A', 'Card 1', 'PRIVATE', 'M4ROOT']
   const c2 = ['EP01', 'CAM-A', 'Card 2', 'PRIVATE', 'M4ROOT']

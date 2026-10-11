@@ -49,8 +49,69 @@ import { bookingDisplayName } from './display'
 import { ADMIN_DIGEST } from './footage-ready-health'
 import { mediaproGate } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
+import { isQuarantined, sonyClipPart, type FootageFileLike } from './footage-completeness'
 
 const DAY = 86_400_000
+
+// ── Camera coverage (v1.267) ────────────────────────────────────────────────
+// ตรวจระบบ 11 ต.ค. 2569: AGN-261007-01 กับ POD-OPR-261007-01 ถูกแจ้ง "พร้อม" ตอนกล่องมีแต่ไฟล์เสียง (เมลเขียนเองว่า
+// "ไม่มีการ์ด Sony") และ TSS-TSS-261009-01 ถูกแจ้งตอน CAM-C ยังไม่มีไฟล์ภาพเลย (มาถึงอีก 13 ชม.) — ด่าน MEDIAPRO
+// มองไม่เห็นกล้องที่ยังไม่มีอะไรบน Drive และด่าน NAS ปิดเมื่อตัวสแกนเงียบ จึงไม่มีอะไรกัน
+const VIDEO_EXT = /\.(mxf|mp4|mov|braw|r3d|crm|mts|m2ts|avi|mkv|insv)$/i
+// "CAM-A", "CAM B", "CAM1", "CAM A-1" (card A-1 of camera A), "CAM-C (1)" (sync-storm twin of CAM-C)
+const CAM_DIR = /^CAM[\s._-]*([A-Z]|\d{1,2})(?:[\s._-]*\d{1,2})?$/i
+// extra cameras / other media that are not one of the booked CAM slots — video here neither counts nor blinds the count
+const EXTRA_DIR = /^(DRONE|ACTION[\s._-]*CAM|GOPRO|INSTA\d*|DCIM|AUDIO|SOUND|PHOTO|BTS)\b/i
+const stripDup = (s: string) => s.trim().replace(/(?:\s*\(\d+\))+$/, '')
+
+/**
+ * วันสุดท้ายที่ยังรอกล้องได้ — คิดจากหน้าต่างแจ้งอัตโนมัติจริง (review v1.267: ค่าคงที่ 48 ชม. ทำให้เตือนก่อนกล้องชุดสุดท้าย
+ * มาไม่กี่ชั่วโมง และถ้า LOOKBACK=3 ตามค่าตั้งต้น การรอจะจบพร้อมหน้าต่างพอดี = หลุดเงียบ): shootDate เป็น @db.Date (00:00Z)
+ * และหน้าต่างคือ shootDate ≥ now−lookback → รอได้ถึง วันถ่ายวันสุดท้าย + lookback − settle − 1 ชม. แล้วยังเหลือรอบส่งก่อนหน้าต่างปิด
+ */
+export function cameraWaitUntil(shootEnd: Date, lookbackDays: number, settleMs: number): number {
+  return new Date(shootEnd).getTime() + lookbackDays * DAY - settleMs - 3_600_000
+}
+
+export interface CameraCoverage {
+  /** video originals found (Sony proxies `…S03.MP4` are not originals) */
+  video: number
+  /** camera folders (CAM-A, CAM B, …) holding at least one video original */
+  cams: string[]
+  /** some video sits outside any CAM-x folder → cameras cannot be counted (only "no video at all" is judged) */
+  uncounted: boolean
+  /** empty = complete; otherwise one Thai line saying what is short */
+  gap: string
+}
+
+export function cameraCoverage(
+  files: FootageFileLike[],
+  b: { cameraCount?: number | null; crewRequired?: string[] | null },
+  /** folders that are byte-identical copies of another card (MEDIAPRO twinCopies) — a copy is not a second camera */
+  copyDirs: string[] = [],
+): CameraCoverage {
+  const cams = new Set<string>()
+  let video = 0
+  let uncounted = false
+  const copies = copyDirs.map(d => d.toUpperCase())
+  for (const f of files) {
+    if (isQuarantined(f) || !VIDEO_EXT.test(f.name) || sonyClipPart(f.name)?.part === 'sub') continue
+    video++
+    const path = f.folderPath || []
+    const joined = path.join('/').toUpperCase()
+    if (copies.some(d => joined === d || joined.startsWith(d + '/'))) continue
+    const cam = path.map(s => CAM_DIR.exec(stripDup(s))).find(Boolean)
+    if (cam) cams.add(`CAM-${cam[1].toUpperCase()}`)
+    else if (!path.some(s => EXTRA_DIR.test(s.trim()))) uncounted = true
+  }
+  const expected = b.cameraCount || 0
+  const expectVideo = expected > 0 || (b.crewRequired || []).some(r => /video|camera|กล้อง|ช่างภาพ/i.test(r))
+  const list = [...cams].sort()
+  let gap = ''
+  if (expectVideo && video === 0) gap = 'ยังไม่มีไฟล์ภาพจากกล้องเลย (มีแต่ไฟล์อื่น เช่น เสียง)'
+  else if (!uncounted && expected > 0 && cams.size < expected) gap = `มีไฟล์ภาพ ${cams.size}/${expected} กล้อง (${list.join(', ') || '—'})`
+  return { video, cams: list, uncounted, gap }
+}
 
 function envInt(name: string, fallback: number): number {
   const n = Number(process.env[name])
@@ -107,6 +168,7 @@ export function isInternalEmail(email: string, domains: string[] = footageReadyI
  * v1.264 — Co-Producer เข้ารายชื่อด้วย (นัท 11 ต.ค. 2569 "เพิ่ม Co-Producer เข้ารายชื่อแจ้งฟุตเทจพร้อมด้วย"):
  * TSS มี phoemsiri.p@ เป็น Co-Producer 32/52 ใบ แต่ได้แจ้งแค่ใบที่ตัวเองเป็นคนสร้าง (11 ใบ) · ปุ่ม 📣 แจ้งมือ
  * (notify-ready route) ใช้ฟังก์ชันนี้ด้วย — กฎ "ใครได้แจ้ง" อยู่ที่เดียว
+ * v1.267 — ผู้กำกับ 1–3 (AGN) ด้วย: ตรวจระบบ 11 ต.ค. พบ worased.p@/tanapak.i@/panyapohn.s@ พลาด 12 ฉบับ (audience team/everyone)
  *
  * v1.264 — คนที่ปิดบัญชีแล้ว (users.active=false) ไม่ได้เมล และถูกคืนใน `inactive` ให้ผู้เรียกบันทึก (ไม่ตัดเงียบ):
  * แก้ว (phoemsiri.p@) ออก 28 ก.ย. แต่ยังเป็นคนสร้างใบ → 9 ต.ค. เมลเด้ง 550 5.1.1 ขณะที่ audit นับว่าส่งถึง
@@ -114,7 +176,10 @@ export function isInternalEmail(email: string, domains: string[] = footageReadyI
  */
 export function footageReadyRecipients(
   audience: FootageReadyAudience,
-  b: { producerEmail?: string | null; coProducerEmail?: string | null; createdByEmail?: string | null; assignedEmails?: string[] | null },
+  b: {
+    producerEmail?: string | null; coProducerEmail?: string | null; createdByEmail?: string | null; assignedEmails?: string[] | null
+    directorEmail?: string | null; director2Email?: string | null; director3Email?: string | null
+  },
   adminEmail?: string | null,
   inactiveEmails: Iterable<string> = [],
 ): { people: string[]; digest: boolean; inactive: string[] } {
@@ -124,7 +189,7 @@ export function footageReadyRecipients(
 
   const raw =
     audience === 'everyone' || audience === 'team'
-      ? [b.producerEmail, b.coProducerEmail, b.createdByEmail, ...(b.assignedEmails || [])]
+      ? [b.producerEmail, b.coProducerEmail, b.directorEmail, b.director2Email, b.director3Email, b.createdByEmail, ...(b.assignedEmails || [])]
       : [b.producerEmail, b.coProducerEmail]
   let people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@'))))
   if (audience === 'team') people = people.filter(e => isInternalEmail(e))
@@ -255,6 +320,11 @@ type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
   producer: string
   producerEmail: string | null
   coProducerEmail: string | null
+  cameraCount: number | null
+  crewRequired: string[]
+  directorEmail: string | null
+  director2Email: string | null
+  director3Email: string | null
   createdByEmail: string | null
   assignedEmails: string[]
   outlet: { code: string; name: string }
@@ -315,6 +385,7 @@ export async function runFootageReadyScan(
       id: true, bookingCode: true, status: true, driveFolders: true,
       projectId: true, projectName: true, category: true, crewRequired: true,
       producer: true, producerEmail: true, coProducerEmail: true, createdByEmail: true, assignedEmails: true,
+      directorEmail: true, director2Email: true, director3Email: true, cameraCount: true,
       callTime: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
       readySnapshot: true, readyCheckedAt: true,
       outlet: { select: { code: true, name: true } },
@@ -433,6 +504,17 @@ export async function runFootageReadyScan(
         result.skipped.push({ code, reason: 'mediapro-incomplete', detail: gate.text })
         continue
       }
+      // v1.267 — a camera booked but not on Drive yet (or audio only): wait, then send WITH the warning (never age out silently)
+      let verified = gate.text
+      const cov = cameraCoverage(gate.files || [], b, gate.check?.twinCopies)
+      if (cov.gap) {
+        const waitUntil = cameraWaitUntil(b.shootEndDate || b.shootDate, lookbackDays, settleMs)
+        if (forced.length === 0 && now.getTime() < waitUntil) {
+          result.skipped.push({ code, reason: 'camera-incomplete', detail: `${cov.gap} — รอถึง ${new Date(waitUntil).toISOString().slice(0, 16)}Z` })
+          continue
+        }
+        verified = `${gate.text} · ⚠️ ${cov.gap}`
+      }
 
       if (dryRun) {
         result.notified.push(code) // would notify
@@ -440,7 +522,7 @@ export async function runFootageReadyScan(
       }
 
       inactive ??= await inactiveUserEmails()
-      const sent = await sendFootageReadyNotification(b, payload, audience, gate.text, inactive)
+      const sent = await sendFootageReadyNotification(b, payload, audience, verified, inactive)
       if (!sent.delivered) {
         result.errors.push({ code, error: sent.error || 'no delivery channel succeeded' })
         continue // no stamp — retried next sweep
@@ -462,7 +544,7 @@ export async function runFootageReadyScan(
           ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
           folderCount: payload.folders.length,
           fileCount: payload.fileCount,
-          mediapro: gate.text,
+          mediapro: verified,
           emailError: sent.error,
           forced: forced.length > 0 || undefined,
           // v1.186 — ผลจริงของช่องทาง operator: ตอบคำถาม "เขาได้ยินไหม" ได้จาก audit

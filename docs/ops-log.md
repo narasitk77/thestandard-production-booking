@@ -6,6 +6,17 @@ until 2026-10-01 — see the 2026-10-04 entry). Newest first.
 
 ---
 
+## 2026-10-11 (ค่ำ) · offboard phantawat.s@ → ฝัน (atisthan.k@) · v1.267.0 ด่านกล้อง + ผู้กำกับ + สำเนาการ์ด (รอ deploy)
+
+นัท: "phantawat ของ POD ออกแล้ว โยนให้ Atisthan ได้เลย ตอนนี้ไม่มีใครใหม่" · "ไม่ต้องแจ้งย้อนหลัง ทำสิ่งที่ต้องทำไป"
+- **offboard.py** (`offboard-2026-10-11-55deeebc`, 22:01): POD-8MH-261012-01 (ถ่าย 12 ต.ค.) producer ใหญ่ → ฝัน · `users.active=false` · post-check ตรง
+  · ปฏิทิน reconcile 22:05 ถอด phantawat ใส่ atisthan.k@ แล้ว · ห้อง Pod 12 ยังถือไว้โดย BK-0183 ที่ phantawat จองเองในระบบห้อง (ไม่ใช่ probook)
+  · โค้ด: มีแค่แถว seed ใน outlet-producers.ts (เก็บไว้ตาม runbook) · ค้าง: ชีท Producer Dashboard คอลัมน์ PD ของใบนี้ (แอปไม่ซิงก์ช่อง producer)
+- **ไม่แจ้งย้อนหลัง** 4 ใบที่หลุดหน้าต่าง (นัทสั่ง)
+- **v1.267.0** ดู CHANGELOG — กล้องยังไม่มา/มีแต่เสียง = รอแล้วค่อยแจ้งพร้อมคำเตือน · ผู้กำกับ 1–3 ได้แจ้ง · สำเนาการ์ด md5 ตรงผ่าน MEDIAPRO (WLT-NGI-261009-01)
+
+---
+
 ## 2026-10-11 · ตรวจทั้งระบบ (read-only, 10 agents) + v1.264.0 Co-Producer + ตัดบัญชีที่ปิดแล้ว · Hermes ปิดหัว "Cronjob Response"
 
 นัท: "เมื่อคืนกูไม่เห็นนะ" / "TSS เขาบอกไม่ได้มานานแล้ว จริงไหม" / "วันนี้ตรวจทั้งระบบไปเลย"

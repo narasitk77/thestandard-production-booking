@@ -34,6 +34,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       select: {
         id: true, driveFolders: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true,
         assignedEmails: true, createdByEmail: true, producer: true, producerEmail: true, coProducerEmail: true,
+        directorEmail: true, director2Email: true, director3Email: true,
         projectId: true, projectName: true, category: true, callTime: true, shootDate: true,
         outlet: { select: { code: true, name: true } },
         program: { select: { name: true } },

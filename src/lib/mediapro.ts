@@ -47,9 +47,15 @@ export interface MediaproCheck {
   /** Sony card roots with no MEDIAPRO.XML, and folders holding Sony originals no MEDIAPRO lists — cannot be verified */
   unverifiable: string[]
   unverifiablePaths: string[][]
+  /**
+   * v1.267 — card folders with no MEDIAPRO whose every Sony clip file is a byte-identical (md5) copy of a file a
+   * MEDIAPRO-listed card already holds: the team copied a card's clips out per EP (WLT-NGI-261009-01 · EP01/CAM-A
+   * 12/12 files = ALL/CAM A/XDROOT). Nothing in them can be missing that the listed card would not report → passes.
+   */
+  twinCopies: string[]
 }
 
-type FileLike = FootageFileLike & { size?: number | null; id?: string }
+type FileLike = FootageFileLike & { size?: number | null; id?: string; md5?: string | null }
 
 export const isMediaproFile = (name: string) => /^MEDIAPRO\.XML$/i.test(baseName(name.trim()))
 
@@ -123,7 +129,8 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
   const inScope = (f: FileLike, scope: string[]) => pathKey((f.folderPath || []).slice(0, scope.length)) === pathKey(scope)
   const biggest = (fs: FileLike[]) => fs.reduce<FileLike | null>((a, f) => (!a || (f.size || 0) > (a.size || 0) ? f : a), null)
 
-  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [] }
+  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [], twinCopies: [] }
+  const verified = new Map<string, FileLike[]>() // md5 → the non-empty files a card lists that are here
   const seen = new Set<string>()
   const listedIn = new Map<string, string[][]>()
   const ratios: Array<{ key: string; card: string; file: string; ratio: number; id?: string }> = []
@@ -155,6 +162,7 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
           continue
         }
         if (!best.size) { res.zero.push({ card: where, file: r, id: best.id }); continue }
+        if (best.md5) verified.set(best.md5, [...(verified.get(best.md5) || []), best])
         if (r === mat.uri && mat.dur > 0) ratios.push({ key: `${mat.videoType}|${mat.fps}`, card: where, file: r, ratio: best.size / mat.dur, id: best.id })
       }
     }
@@ -180,7 +188,19 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
     if (roots.some(r => pathKey(fp.slice(0, r.length)) === pathKey(r))) continue
     unlisted.set(pathKey(fp), fp)
   }
-  res.unverifiablePaths = [...roots, ...unlisted.values()]
+  // v1.267 — a folder whose Sony clip files ALL have an md5 twin among the verified files, held OUTSIDE this folder
+  // (a file matched to itself by name fallback is not a second copy — review), is a copy, not a gap. Every clip
+  // file counts: a 0-byte copy has the empty-file md5, which no verified file has → the folder stays unverifiable.
+  const under = (f: FileLike, dir: string[]) => pathKey((f.folderPath || []).slice(0, dir.length)) === pathKey(dir)
+  const isTwinCopy = (dir: string[]) => {
+    const clipFiles = live.filter(f => under(f, dir) && sonyClipPart(f.name))
+    return clipFiles.some(f => sonyClipPart(f.name)?.part === 'orig') &&
+      clipFiles.every(f => !!f.md5 && (verified.get(f.md5) || []).some(g => !under(g, dir)))
+  }
+  for (const dir of [...roots, ...unlisted.values()]) {
+    if (isTwinCopy(dir)) res.twinCopies.push(dir.join('/'))
+    else res.unverifiablePaths.push(dir)
+  }
   res.unverifiable = res.unverifiablePaths.map(r => r.join('/'))
   return res
 }
@@ -224,7 +244,7 @@ export async function loadMediaproCards(files: DriveFile[]): Promise<MediaproCar
  * when every file the cards list is in place. Any error = not ok, with the reason —
  * a check that could not run must never read as "complete".
  */
-export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptions = {}): Promise<{ ok: boolean; text: string; check: MediaproCheck | null }> {
+export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptions = {}): Promise<{ ok: boolean; text: string; check: MediaproCheck | null; files?: DriveFile[] }> {
   try {
     if (!folderIds.length) return { ok: false, text: 'ไม่มีโฟลเดอร์ให้ตรวจ MEDIAPRO', check: null }
     const files: DriveFile[] = []
@@ -238,9 +258,11 @@ export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptio
     const check = mediaproCheck(files, await loadMediaproCards(files), opts)
     const ok = mediaproComplete(check)
     return {
-      ok, check,
+      ok, check, files,
       text: ok
-        ? [check.cards ? `ครบตาม MEDIAPRO ${check.cards} การ์ด · ${check.listed - check.stale.length} ไฟล์` : 'ไม่มีการ์ด Sony (ไม่มี MEDIAPRO ให้เทียบ)', mediaproStaleText(check)].filter(Boolean).join(' · ')
+        ? [check.cards ? `ครบตาม MEDIAPRO ${check.cards} การ์ด · ${check.listed - check.stale.length} ไฟล์` : 'ไม่มีการ์ด Sony (ไม่มี MEDIAPRO ให้เทียบ)',
+            check.twinCopies.length ? `สำเนาการ์ดที่ตรงทุกไบต์ ${check.twinCopies.length} โฟลเดอร์ (${check.twinCopies.slice(0, 2).map(p => p.split('/').slice(-2).join('/')).join(', ')})` : '',
+            mediaproStaleText(check)].filter(Boolean).join(' · ')
         : mediaproGapText(check),
     }
   } catch (e: any) {

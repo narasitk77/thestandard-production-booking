@@ -857,6 +857,8 @@ async function checkBox(o: {
       // sorted: Drive lists in no fixed order and the note goes into the Doc hash
       const staleNames = [...new Set(mc.stale.map(s => s.file.split('/').pop() || ''))].filter(Boolean).sort()
       if (staleNames.length) notes.push(`${mediaproStaleText(mc)} · ${staleNames.slice(0, 5).join(', ')}${staleNames.length > 5 ? ` …+${staleNames.length - 5}` : ''}`)
+      // v1.267 — a folder accepted as a byte-identical copy of a checked card leaves the issue list: say so (review)
+      if (mc.twinCopies.length) notes.push(`สำเนาการ์ดที่ตรงทุกไบต์ ${mc.twinCopies.length} โฟลเดอร์ (ไม่มี MEDIAPRO แต่ทุกคลิป md5 ตรงกับการ์ดที่ตรวจแล้ว) · ${[...mc.twinCopies].sort().slice(0, 3).join(', ')}${mc.twinCopies.length > 3 ? ` …+${mc.twinCopies.length - 3}` : ''}`)
       // "left by an earlier shoot" is an assumption — for the first ten unique (FX6) names, ask Drive whether such a
       // file exists anywhere live; one that exists nowhere is reported as missing after all (hint says why).
       for (const name of staleNames.filter(hasUniqueClipName).slice(0, 10)) {
