@@ -39,7 +39,8 @@ import { bookingShowName } from './display'
 import { getDriveLink, rememberDriveLinks } from './drive-links'
 import { noteResolve } from './id-first-metrics'
 import { isFolderAlive } from './google-drive'
-import { alertOps } from './ops-alert'
+import { alertOps, OPS_ALERT_EVERY_MS } from './ops-alert'
+import { createHash } from 'crypto'
 
 // "Production Team" landing Shared Drive (NAS drop zone) — mirrors prep-folders.ts.
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
@@ -229,14 +230,39 @@ async function hasConflictInside(folderId: string, depth = 0): Promise<boolean> 
  * (สัญญาความปลอดภัย §0: reconciler ห้ามลบเกินต้นแบบ — ต้นแบบจึงต้องไม่มีอันนี้)
  */
 
-/** v1.261 — a storm in a landing folder is an ops incident, not a counter: log + alertOps (6h throttle per booking). */
-async function reportConflicts(code: string, conflicts: string[]): Promise<void> {
+/**
+ * v1.266.2 — the same leftovers re-alerted every 6 h for days: POP-PIV-261007-02's 123 names went out 8 times
+ * in 2 days (9–11 Oct 2026) while every one of its originals was already in the box — the fix is a human removing
+ * one uploader, which no 6-hourly repeat makes faster. A set already reported waits a week (a backstop, so a
+ * stuck leftover never goes silent for good); a set that changed — the storm is still writing — is news at the
+ * normal 6 h. The last reported set is a fingerprint in system_heartbeats `sync-storm-set:<code>`.
+ */
+export const SYNC_STORM_SAME_SET_EVERY_MS = 7 * 24 * 3_600_000
+export function conflictSetKey(names: string[]): string {
+  return createHash('sha1').update([...names].sort().join('\n')).digest('hex').slice(0, 16)
+}
+
+/** v1.261 — a storm in a landing folder is an ops incident, not a counter: log + alertOps (throttle: see above). */
+export async function reportConflicts(code: string, conflicts: string[]): Promise<void> {
   if (!conflicts.length) return
   const shown = conflicts.slice(0, 8).join('\n  ')
   console.warn(`[video-merge] ${code}: ${conflicts.length} sync-conflict name(s) left in landing — not merged:\n  ${shown}`)
-  await alertOps(`sync-storm:${code}`, `⚠️ โฟลเดอร์ชื่อซ้ำ "(1)" ใน landing — ${code}`,
+  const set = conflictSetKey(conflicts)
+  const setKey = `sync-storm-set:${code}`
+  let reported: string | null = null
+  try { reported = (await prisma.systemHeartbeat.findUnique({ where: { key: setKey } }))?.note ?? null }
+  catch (e: any) { console.warn(`[video-merge] ${code}: อ่านชุดที่เตือนไปแล้วไม่ได้ — ถือว่าชุดใหม่:`, e?.message || e) } // louder beats silent
+  const same = reported === set
+  const r = await alertOps(`sync-storm:${code}`, `⚠️ โฟลเดอร์ชื่อซ้ำ "(1)" ใน landing — ${code}`,
     `video-merge ไม่ย้าย ${conflicts.length} รายการของ ${code} เพราะชื่อมีท้าย "(1)" จากซิงก์ชนกัน ` +
-    `(Cloud Sync ของ NAS กับ Drive for desktop อัปโฟลเดอร์เดียวกันพร้อมกัน) — ต้องเหลือตัวอัปตัวเดียวแล้วเก็บซากก่อน ของถึงจะเข้ากล่อง\n  ${shown}${conflicts.length > 8 ? `\n  … อีก ${conflicts.length - 8}` : ''}`)
+    `(Cloud Sync ของ NAS กับ Drive for desktop อัปโฟลเดอร์เดียวกันพร้อมกัน) — ต้องเหลือตัวอัปตัวเดียวแล้วเก็บซากก่อน ของถึงจะเข้ากล่อง\n  ${shown}${conflicts.length > 8 ? `\n  … อีก ${conflicts.length - 8}` : ''}` +
+    `\n(ชุดเดิมเตือนซ้ำสัปดาห์ละครั้ง · มีชื่อใหม่เพิ่ม = เตือนใหม่)`,
+    same ? SYNC_STORM_SAME_SET_EVERY_MS : OPS_ALERT_EVERY_MS)
+  if (r.attempted && !same) {
+    const at = new Date()
+    try { await prisma.systemHeartbeat.upsert({ where: { key: setKey }, create: { key: setKey, at, note: set }, update: { at, note: set } }) }
+    catch (e: any) { console.warn(`[video-merge] ${code}: บันทึกชุดที่เตือนไม่ได้ (รอบหน้าจะเตือนซ้ำที่ 6 ชม.):`, e?.message || e) }
+  }
 }
 
 export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
