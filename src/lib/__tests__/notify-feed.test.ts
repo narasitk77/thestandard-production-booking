@@ -42,6 +42,8 @@ test('แถว audit 3 ชนิด → event ที่ relay ใช้ · ops.
       changes: { fileCount: 12, recipients: ['p@x.co', 'admin-digest'], mediapro: 'MEDIAPRO ครบ' } },
     { id: 'a2', at, action: 'nas.folder_drained', actorEmail: 'nas-sync', entityId: 'Key Message (NWS-KYM-261009-01)', bookingCode: 'NWS-KYM-261009-01',
       changes: { folder: 'Key Message (NWS-KYM-261009-01)', driveFiles: 3, driveBytes: 2048 } },
+    { id: 'a4', at, action: 'booking.ready_followup', actorEmail: 'footage-ready-worker', entityId: 'b1', bookingCode: 'NWS-KYM-261009-01',
+      changes: { recipients: ['p@x.co'], fileCount: 20, cams: ['CAM-A', 'CAM-B'] } },
     { id: 'a3', at, action: 'ops.alert', actorEmail: 'ops-alert', entityId: 'sync-storm:POP-PIV-261007-02', bookingCode: null,
       changes: { subject: '⚠️ โฟลเดอร์ชื่อซ้ำ', text: 'บรรทัดแรก\nบรรทัดสอง', discord: false, lark: false, email: true } },
   ]
@@ -49,8 +51,10 @@ test('แถว audit 3 ชนิด → event ที่ relay ใช้ · ops.
   const res = await GET(req('since=2026-10-09T00:00:00Z'))
   assert.equal(res.status, 200)
   const body: any = await res.json()
-  assert.deepEqual(bookingWhere.OR[0].id.in, ['b1'], 'เฉพาะแถว booking.* ที่ใช้ entityId ค้น booking')
-  const [ready, nas, ops] = body.events
+  assert.deepEqual(bookingWhere.OR[0].id.in, ['b1'], 'เฉพาะแถว booking.* ที่ใช้ entityId ค้น booking (ซ้ำ id เดียว)')
+  const [ready, nas, followup, ops] = body.events
+  assert.equal(followup.kind, 'footage-complete', 'v1.268 — แจ้งซ้ำตอนกล้องตามมาครบ')
+  assert.equal(followup.boxUrl, 'https://drive.google.com/drive/folders/BOXID')
   assert.equal(ready.kind, 'footage-ready')
   assert.equal(ready.people, 1, 'admin-digest ไม่ใช่คน')
   assert.equal(ready.files, 12)

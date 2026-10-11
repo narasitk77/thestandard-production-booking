@@ -5,6 +5,7 @@ Posts what the operator wants to HEAR, from /api/internal/notify-feed:
   📣 ฟุตเทจพร้อม  — every footage-ready notice probook sent to a team (auto or 📣 by hand)
   ✅ NAS ส่งครบ    — a NAS queue drained (the Mac agent's manifest)
   ⚠️ NAS เงียบ     — the NAS picture is older than 2 h (once per 12 h while it stays silent)
+  ✅ กล้องครบแล้ว  — v1.268: the cameras missing when the notice went out have arrived (second notice)
   ⚠️ ops          — every alertOps() the app raised (sync storm, stale worker, …) — v1.263, nobody else
                     hears these: the app's own ops Discord room (DISCORD_OPS_WEBHOOK_URL) is not set
 Prints NOTHING when there is nothing new (Hermes then sends nothing).
@@ -145,7 +146,7 @@ def gb(b):
 
 
 OPS_LINES, OPS_CHARS, OPS_LINE_CHARS = 6, 700, 300
-KNOWN = {"footage-ready", "footage-ready-manual", "nas-drained", "ops-alert"}
+KNOWN = {"footage-ready", "footage-ready-manual", "footage-complete", "nas-drained", "ops-alert"}
 
 
 def quiet(t):
@@ -180,6 +181,11 @@ def line_for(e):
     if e["kind"] not in KNOWN:  # a newer feed than this relay: say it, never dress it up as footage-ready
         return f"❔ {e['kind']} · {quiet(title) or code} (relay ยังไม่รู้จักชนิดนี้ — อัปเดต probook-notify-relay.py)"
     head = f"{code} — {title}" if title else code
+    if e["kind"] == "footage-complete":  # v1.268 — the cameras missing at the first notice arrived
+        people = f" · แจ้งทีม {e['people']} คน" if e.get("people") else " · ⚠️ ไม่มีคนในทีมได้รับเมล"
+        err = f" · ⚠️ เมล: {e['emailError']}" if e.get("emailError") else ""
+        link = e.get("boxUrl") or e.get("url") or ""
+        return f"✅ กล้องตามมาครบแล้ว · {quiet(head)}{people}{err}" + (f"\n   {link}" if link else "")
     if e["kind"] == "nas-drained":
         size = f" ({gb(e['bytes'])})" if e.get("bytes") else ""
         files = f" · บน Drive {e['files']} ไฟล์{size}" if e.get("files") is not None else ""
@@ -362,6 +368,11 @@ def selftest():
     assert "อีก 4 บรรทัด" in wide and len(wide) < 1000, wide
     # app text never pings the room
     assert "@\u200beveryone" in line_for({**ops, "text": "@everyone ไฟล์หาย"})
+    # v1.268 follow-up line
+    fc = line_for(ev(9, "2026-10-09T05:00:00Z", "footage-complete"))
+    assert fc.startswith("✅ กล้องตามมาครบแล้ว · NWS-KYM-261009-01 — Key Message · แจ้งทีม 4 คน"), fc
+    assert "⚠️ เมล: 1/3" in line_for(ev(9, "2026-10-09T05:00:00Z", "footage-complete", emailError="1/3 ส่งไม่สำเร็จ"))
+    assert "⚠️ ไม่มีคนในทีมได้รับเมล" in line_for(ev(9, "2026-10-09T05:00:00Z", "footage-complete", people=0))
     # an unknown kind from a newer feed is SAID, never posted as footage-ready
     assert line_for(ev(8, "2026-10-09T05:00:00Z", "new-thing")).startswith("❔ new-thing"), "unknown kind"
     # ops rows travel through run() with footage rows, in order, and are not posted twice

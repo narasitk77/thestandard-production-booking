@@ -303,6 +303,10 @@ export type FootageReadyScanResult = {
   settling: string[]         // codes waiting out the settle window
   skipped: Array<{ code: string; reason: string; detail?: string }>
   errors: Array<{ code: string; error: string }>
+  /** v1.268 — bookings sent with a camera warning whose missing cameras have now arrived: second notice sent (dry run: would send) */
+  followedUp: string[]
+  /** v1.268 — still waiting for the second notice, with why */
+  followUpWaiting: Array<{ code: string; detail: string }>
 }
 
 // `program` is widened here (the base type has name only) so the photo-album
@@ -341,12 +345,36 @@ type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
  * mailed it (2026-10-11). A preview that disagrees with the run is worse than
  * none. computeFootagePayload persists nothing, so dryRun stays write-free.
  */
+const CANDIDATE_SELECT = {
+  id: true, bookingCode: true, status: true, driveFolders: true,
+  projectId: true, projectName: true, category: true, crewRequired: true,
+  producer: true, producerEmail: true, coProducerEmail: true, createdByEmail: true, assignedEmails: true,
+  directorEmail: true, director2Email: true, director3Email: true, cameraCount: true,
+  callTime: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
+  readySnapshot: true, readyCheckedAt: true,
+  outlet: { select: { code: true, name: true } },
+  program: { select: { name: true, code: true } },
+  episodes: {
+    orderBy: { sequence: 'asc' as const },
+    select: { episodeId: true, sequence: true, title: true, program: { select: { name: true, code: true } } },
+  },
+}
+
 export async function sweepFootagePayload(b: BookingForFootagePayload, dryRun: boolean): Promise<FootagePayload> {
   return dryRun ? computeFootagePayload(b) : getCachedFootagePayload(b, { refresh: true })
 }
 
 export async function runFootageReadyScan(
   opts: { dryRun?: boolean; codes?: string[] } = {},
+): Promise<FootageReadyScanResult> {
+  const result = await runReadySweep(opts)
+  // a caller naming codes asks about THOSE bookings — follow-ups belong to the unattended sweep
+  if (result.forced.length === 0) await followUpCameraGaps(result)
+  return result
+}
+
+async function runReadySweep(
+  opts: { dryRun?: boolean; codes?: string[] },
 ): Promise<FootageReadyScanResult> {
   const dryRun = !!opts.dryRun
   const forced = (opts.codes || []).slice(0, FORCED_MAX)
@@ -359,7 +387,7 @@ export async function runFootageReadyScan(
 
   const result: FootageReadyScanResult = {
     dryRun, forced, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
-    notified: [], settling: [], skipped: [], errors: [],
+    notified: [], settling: [], skipped: [], errors: [], followedUp: [], followUpWaiting: [],
   }
   let inactive: string[] | undefined // v1.264 — users.active=false, read once per scan and only when a notice goes out
 
@@ -381,20 +409,7 @@ export async function runFootageReadyScan(
             OR: [{ shootDate: { gte: since } }, { shootEndDate: { gte: since } }],
           }),
     },
-    select: {
-      id: true, bookingCode: true, status: true, driveFolders: true,
-      projectId: true, projectName: true, category: true, crewRequired: true,
-      producer: true, producerEmail: true, coProducerEmail: true, createdByEmail: true, assignedEmails: true,
-      directorEmail: true, director2Email: true, director3Email: true, cameraCount: true,
-      callTime: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
-      readySnapshot: true, readyCheckedAt: true,
-      outlet: { select: { code: true, name: true } },
-      program: { select: { name: true, code: true } },
-      episodes: {
-        orderBy: { sequence: 'asc' },
-        select: { episodeId: true, sequence: true, title: true, program: { select: { name: true, code: true } } },
-      },
-    },
+    select: CANDIDATE_SELECT,
   }) as unknown as CandidateRow[]
   result.scanned = rows.length
   if (rows.length === 0) return result
@@ -545,6 +560,7 @@ export async function runFootageReadyScan(
           folderCount: payload.folders.length,
           fileCount: payload.fileCount,
           mediapro: verified,
+          ...(cov.gap ? { cameraGap: cov.gap, cameraCams: cov.cams } : {}), // v1.268 — the follow-up pass looks for this
           emailError: sent.error,
           forced: forced.length > 0 || undefined,
           // v1.186 — ผลจริงของช่องทาง operator: ตอบคำถาม "เขาได้ยินไหม" ได้จาก audit
@@ -560,6 +576,170 @@ export async function runFootageReadyScan(
   }
 
   return result
+}
+
+// ── Follow-up when the missing cameras arrive (v1.268) ──────────────────────
+// นัท 11 ต.ค. 2569: "ทำแจ้งซ้ำตอนกล้องตามมาครบด้วย" — ใบที่ถูกแจ้งพร้อม "⚠️ มีไฟล์ภาพ 2/3 กล้อง" (v1.267 รอจนเกือบหน้าต่างปิด)
+// ได้ฉบับที่สองเมื่อกล้องที่ขาดขึ้น Drive ครบ + ไฟล์หยุดเข้ามาแล้ว settle + MEDIAPRO ครบ · สถานะเก็บใน audit (ไม่แก้ schema):
+// แถว booking.auto_notified_ready ที่มี cameraGap และยังไม่มีแถว booking.ready_followup ของใบนั้น
+
+export const FOLLOWUP_DAYS = 7
+const FOLLOWUP_MAX_PER_RUN = 5
+// ponytail: in-process state (reset on restart) — rotation so 5 bookings that never resolve cannot starve the rest
+// (review v1.268, same class as orderForWalk v1.179), and a guard so a sent follow-up whose audit insert failed is not
+// re-sent by the next sweep. Upgrade path if restarts start to matter: a Booking column.
+const followUpCheckedAt = new Map<string, number>()
+const followUpSent = new Set<string>()
+
+/** newest createdTime/modifiedTime among the files (ms) — "still arriving" without a stored snapshot */
+export function newestFileAt(files: Array<{ createdTime?: string | null; modifiedTime?: string | null }>): number {
+  let t = 0
+  for (const f of files) for (const v of [f.createdTime, f.modifiedTime]) { const ms = v ? Date.parse(v) : NaN; if (Number.isFinite(ms) && ms > t) t = ms }
+  return t
+}
+
+const GAP_RE = /(มีไฟล์ภาพ (\d+)\/\d+ กล้อง[^·]*|ยังไม่มีไฟล์ภาพ[^·]*)/
+/**
+ * The camera gap a notice went out with, and how many cameras had video then. v1.268 rows carry `cameraGap` +
+ * `cameraCams`; v1.267 rows (live before this) only have it inside `mediapro` ("… · ⚠️ มีไฟล์ภาพ 2/3 กล้อง (…)").
+ */
+export function noticeGap(changes: unknown): { gap: string; cams: number } | null {
+  const c = (changes || {}) as Record<string, any>
+  if (typeof c.cameraGap === 'string') {
+    return { gap: c.cameraGap, cams: Array.isArray(c.cameraCams) ? c.cameraCams.length : Number(GAP_RE.exec(c.cameraGap)?.[2] || 0) }
+  }
+  const m = typeof c.mediapro === 'string' && c.mediapro.includes('⚠️') ? GAP_RE.exec(c.mediapro) : null
+  return m ? { gap: m[1].trim(), cams: Number(m[2] || 0) } : null
+}
+
+const isFootageFile = (f: { name: string }) => VIDEO_EXT.test(f.name) || !!sonyClipPart(f.name)
+
+async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void> {
+  const now = new Date()
+  const settleMs = envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000)
+  try {
+    const notices = await prisma.auditLog.findMany({
+      where: { action: { in: ['booking.auto_notified_ready', 'booking.notified_ready'] }, at: { gte: new Date(now.getTime() - FOLLOWUP_DAYS * DAY) } },
+      orderBy: { at: 'asc' },
+      select: { entityId: true, bookingCode: true, at: true, action: true, changes: true },
+    })
+    // the LATEST notice per booking decides: a later 📣 or a later clean re-notify means nothing is owed (review: duplicates)
+    const latest = new Map<string, (typeof notices)[number]>()
+    for (const n of notices) if (n.entityId) latest.set(n.entityId, n)
+    const owed = [...latest.values()]
+      .map(n => ({ n, first: n.action === 'booking.auto_notified_ready' ? noticeGap(n.changes) : null }))
+      .filter((x): x is { n: (typeof notices)[number]; first: { gap: string; cams: number } } => !!x.first && !followUpSent.has(x.n.entityId!))
+    if (!owed.length) return
+    const followed = await prisma.auditLog.findMany({
+      where: { action: 'booking.ready_followup', entityId: { in: owed.map(x => x.n.entityId!) } },
+      select: { entityId: true, at: true },
+    })
+    const todo = owed
+      .filter(x => !followed.some(f => f.entityId === x.n.entityId && f.at >= x.n.at))
+      .sort((a, b) => (followUpCheckedAt.get(a.n.entityId!) || 0) - (followUpCheckedAt.get(b.n.entityId!) || 0))
+    const nasState = await latestNasState().catch(() => ({ manifest: null, statuses: {} as Record<string, any> }))
+    const nasStatuses = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? (nasState.statuses || {}) : {}
+    for (const { n: w, first } of todo.slice(0, FOLLOWUP_MAX_PER_RUN)) {
+      const code = w.bookingCode || w.entityId!
+      followUpCheckedAt.set(w.entityId!, now.getTime())
+      const wait = (detail: string) => { result.followUpWaiting.push({ code, detail }) }
+      try {
+        // same "nothing owed any more" rules as the first notice: ส่งงานแล้ว / ขอยกเลิก / ยกเลิก / ลบ
+        const b = await prisma.booking.findFirst({
+          where: { id: w.entityId!, deletedAt: null, deliveredAt: null, cancelRequestedAt: null, status: { in: ['CONFIRMED', 'COMPLETED'] } },
+          select: CANDIDATE_SELECT,
+        }) as unknown as CandidateRow | null
+        if (!b) continue
+        // gate (c) / (d) of the first notice: still uploading, or the NAS still sending this code
+        const inFlight = await prisma.upload.count({
+          where: { bookingId: b.id, status: { in: ['PENDING', 'UPLOADING'] }, updatedAt: { gte: new Date(now.getTime() - DAY) } },
+        })
+        if (inFlight > 0) { wait('ยังอัปโหลดอยู่'); continue }
+        if ((nasStatuses[code]?.lastPending || 0) > 0) { wait('NAS ยังส่งไม่หมด'); continue }
+        const box = (b.driveFolders as Record<string, unknown> | null)?.box
+        const boxState = typeof box === 'string' ? await folderLiveness(box) : 'dead'
+        if (boxState === 'unknown') { wait('ตรวจกล่องไม่ได้ (Drive)'); continue }
+        const roots = [...new Set([...(boxState === 'alive' ? [box as string] : []), ...(await findFoldersByCode(code)).map(f => f.id)])]
+        const gate = await mediaproGate(roots, { shootFrom: new Date(b.shootDate).toISOString().slice(0, 10) })
+        if (!gate.ok) { wait(gate.text); continue }
+        const cov = cameraCoverage(gate.files || [], b, gate.check?.twinCopies)
+        if (cov.gap) { wait(cov.gap); continue }
+        // "the cameras arrived" must be TRUE, not "the rule went quiet" (review): countable, and more cameras than at the notice
+        if (cov.uncounted) { wait('นับกล้องไม่ได้ (มีภาพอยู่นอกโฟลเดอร์ CAM-x) — ไม่ส่งฉบับ "กล้องครบ"'); continue }
+        if (cov.cams.length <= first.cams) { wait(`ไม่มีกล้องใหม่ขึ้นมา (${cov.cams.length} กล้องเท่าตอนแจ้ง) — จำนวนกล้องในใบอาจถูกแก้`); continue }
+        if (now.getTime() - newestFileAt((gate.files || []).filter(isFootageFile)) < settleMs) { wait('ไฟล์ยังทยอยเข้า — รอให้นิ่ง'); continue }
+        if (result.dryRun) { result.followedUp.push(code); continue }
+        const sent = await sendCameraFollowUp(b, w, cov, gate.text, gate.files?.length || 0)
+        if (!sent.delivered) { result.errors.push({ code, error: `follow-up: ${sent.error || 'no channel'}` }); continue } // retried next sweep
+        followUpSent.add(w.entityId!)
+        result.followedUp.push(code)
+        try {
+          // awaited + throwing (not logAudit, which swallows): this row is the send-once record
+          await prisma.auditLog.create({
+            data: {
+              actorEmail: 'footage-ready-worker', action: 'booking.ready_followup', entityType: 'Booking', entityId: b.id, bookingCode: code,
+              changes: JSON.parse(JSON.stringify({
+                audience: result.audience, recipients: sent.recipients, ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
+                cameraGapBefore: first.gap, cams: cov.cams, fileCount: gate.files?.length || 0, mediapro: gate.text,
+                emailError: sent.error, operatorChannels: sent.operatorChannels,
+              })),
+            },
+          })
+        } catch (e: any) {
+          result.errors.push({ code, error: `follow-up ส่งแล้วแต่บันทึกไม่ลง (จะไม่ส่งซ้ำจนกว่าคอนเทนเนอร์รีสตาร์ท): ${e?.message || e}` })
+        }
+      } catch (e: any) {
+        result.errors.push({ code, error: `follow-up: ${e?.message || e}` })
+      }
+    }
+    if (todo.length > FOLLOWUP_MAX_PER_RUN) result.followUpWaiting.push({ code: '…', detail: `อีก ${todo.length - FOLLOWUP_MAX_PER_RUN} ใบ ผลัดตรวจรอบถัดไป` })
+  } catch (e: any) {
+    result.errors.push({ code: 'follow-up', error: e?.message || String(e) }) // loud: a broken pass must not look like "nothing to follow up"
+  }
+}
+
+async function sendCameraFollowUp(
+  b: CandidateRow,
+  first: { at: Date },
+  cov: CameraCoverage,
+  verified: string,
+  fileCount: number,
+): Promise<{ delivered: boolean; recipients: string[]; skippedInactive: string[]; operatorChannels: { digestOk: boolean; discordOk: boolean; larkOk: boolean }; error: string | null }> {
+  const code = b.bookingCode as string
+  const show = bookingDisplayName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
+  const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
+  const box = (b.driveFolders as Record<string, unknown> | null)?.box
+  const firstAt = new Date(first.at.getTime() + 7 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ')
+  const subject = `[Footage ครบแล้ว] ${code} — ${show}`
+  const text = `กล้องที่ยังขาดตอนแจ้ง "ฟุตเทจพร้อม" ครั้งแรก ตามมาครบแล้ว ✅ (แจ้งอัตโนมัติโดยระบบ)
+${b.outlet.name} · ${show} · ${new Date(b.shootDate).toISOString().slice(0, 10)}
+
+ไฟล์ภาพครบ ${cov.cams.length} กล้อง${cov.cams.length ? ` (${cov.cams.join(', ')})` : ''} · ${fileCount} ไฟล์
+✔︎ ${verified}
+แจ้งครั้งแรก ${firstAt} น.
+${typeof box === 'string' ? `\nเปิดกล่องงาน: https://drive.google.com/drive/folders/${box}` : ''}
+เปิดในระบบ: ${appUrl}/upload?bookingId=${b.id}
+
+THE STANDARD Production Booking`
+  const audience = footageReadyAudience()
+  const { people, digest, inactive } = footageReadyRecipients(audience, b, process.env.REMINDER_ADMIN_EMAIL || process.env.EMAIL_FROM, await inactiveUserEmails())
+  let emailed = 0
+  let error: string | null = null
+  if (people.length && isEmailConfigured()) {
+    const results = await Promise.allSettled(people.map(to => sendEmail({ to: [to], subject, text })))
+    emailed = results.filter(r => r.status === 'fulfilled').length
+    if (emailed < results.length) error = `${results.length - emailed}/${results.length} ส่งไม่สำเร็จ`
+  } else if (!people.length) error = 'ไม่มีคนในทีมให้แจ้ง'
+  else error = 'email not configured'
+  const digestOk = digest || !people.length ? await notifyEmailDigest(subject, text) : false
+  const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`✅ กล้องตามมาครบ: ${code} — ${show} (${cov.cams.join(', ') || 'ไฟล์ภาพครบ'}) → ${emailed}/${people.length} อีเมล`)
+  return {
+    delivered: emailed > 0 || (!isEmailConfigured() && chatOk) || (people.length === 0 && (digestOk || chatOk)),
+    recipients: digestOk ? [...people, ADMIN_DIGEST] : people,
+    skippedInactive: inactive,
+    operatorChannels: { digestOk, discordOk, larkOk },
+    error,
+  }
 }
 
 // ── Delivery ────────────────────────────────────────────────────────────────

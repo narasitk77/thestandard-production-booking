@@ -20,9 +20,10 @@ export const dynamic = 'force-dynamic'
  *
  * Sources are the audit rows the senders already write (a record of what WAS sent, not intent):
  *   booking.auto_notified_ready · booking.notified_ready (📣 by hand) · nas.folder_drained (v1.262) · ops.alert (v1.263)
+ *   · booking.ready_followup (v1.268 — the missing cameras arrived after a warned notice)
  * plus how old the NAS picture is, so a silent NAS scanner is visible from the same call.
  */
-const ACTIONS = ['booking.auto_notified_ready', 'booking.notified_ready', 'nas.folder_drained', 'ops.alert'] as const
+const ACTIONS = ['booking.auto_notified_ready', 'booking.notified_ready', 'booking.ready_followup', 'nas.folder_drained', 'ops.alert'] as const
 
 export async function GET(request: NextRequest) {
   const allowed =
@@ -74,7 +75,8 @@ export async function GET(request: NextRequest) {
       return {
         id: r.id,
         at: r.at.toISOString(),
-        kind: ops ? 'ops-alert' : r.action === 'nas.folder_drained' ? 'nas-drained' : r.action === 'booking.notified_ready' ? 'footage-ready-manual' : 'footage-ready',
+        kind: ops ? 'ops-alert' : r.action === 'nas.folder_drained' ? 'nas-drained' : r.action === 'booking.notified_ready' ? 'footage-ready-manual'
+          : r.action === 'booking.ready_followup' ? 'footage-complete' : 'footage-ready',
         code: ops ? r.entityId : r.bookingCode,
         title: ops ? (c.subject ?? null) : b ? bookingDisplayName({ projectName: b.projectName, program: b.program, episodes: b.episodes }) : (c.folder ?? null),
         text: ops && typeof c.text === 'string' ? c.text : null,

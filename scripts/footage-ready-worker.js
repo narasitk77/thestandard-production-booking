@@ -56,8 +56,10 @@ async function runOnce() {
     // v1.267 — and because a booked camera has no video on Drive yet (review: that hold was invisible in the log)
     const blocked = (json.skipped || []).filter(s => s.reason === 'mediapro-incomplete' || s.reason === 'camera-incomplete')
     console.log(
-      `[footage-ready] scanned=${json.scanned} eligible=${json.eligible} walked=${json.walked} notified=${(json.notified || []).length} settling=${(json.settling || []).length} deferred=${json.deferred} blocked=${blocked.length} errors=${(json.errors || []).length}`,
+      `[footage-ready] scanned=${json.scanned} eligible=${json.eligible} walked=${json.walked} notified=${(json.notified || []).length} settling=${(json.settling || []).length} deferred=${json.deferred} blocked=${blocked.length} followedUp=${(json.followedUp || []).length} errors=${(json.errors || []).length}`,
     )
+    // v1.268 — warned bookings still waiting for their "cameras complete" follow-up
+    for (const w of json.followUpWaiting || []) console.log(`[footage-ready] follow-up waiting ${w.code}: ${String(w.detail || '').slice(0, 200)}`)
     for (const s of blocked) console.log(`[footage-ready] held ${s.code} (${s.reason}): ${String(s.detail || '').slice(0, 300)}`)
   } catch (err) {
     console.error('[footage-ready] run failed:', err?.message || err)
