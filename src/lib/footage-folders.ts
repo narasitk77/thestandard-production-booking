@@ -242,8 +242,14 @@ export async function getCachedFootagePayload(booking: BookingForFootagePayload,
   }
   const fresh = await computeFootagePayload(booking)
   const now = new Date()
-  await prisma.booking.update({ where: { id: booking.id }, data: { footageCache: fresh as any, footageCacheAt: now } }).catch(() => {})
+  await storeFootageCache(booking.id, fresh, now).catch(() => {})
   return { ...fresh, cached: false, cachedAt: now.toISOString() }
+}
+
+/** Store a freshly computed payload as the booking's cache. Throws — the caller decides whether a failed write matters
+ *  (v1.266: the daily check's cache repair exists only for this write, so it must not read a failure as done). */
+export async function storeFootageCache(bookingId: string, payload: FootagePayload, at: Date = new Date()): Promise<void> {
+  await prisma.booking.update({ where: { id: bookingId }, data: { footageCache: payload as any, footageCacheAt: at } })
 }
 
 /** Invalidate the cache (footage changed) — next detect re-walks Drive. */

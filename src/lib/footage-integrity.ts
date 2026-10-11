@@ -35,7 +35,9 @@
  *   • files stranded in a TRASHED drop folder — the 723 GB PP-26-034 case
  *   • the editor's Media Pool (latest `<ProjectID>…drp` on Drive) vs the box, both ways
  *
- * Still report-only for footage: the one thing it writes is its own Doc.
+ * Still report-only for footage: it never touches a file. It writes its own Doc,
+ * and (v1.266) the booking's footage cache when that cache says empty over a box
+ * that holds more footage than the cache knows — see cacheBehindBox.
  */
 import { createHash } from 'crypto'
 import { prisma } from './db'
@@ -52,6 +54,7 @@ import { parseDrpMediaPool } from './drp-mediapool'
 import { loadMediaproCards, mediaproCheck, mediaproStaleText, type MediaproCheck } from './mediapro'
 import { folderNameMatchesCode } from './outlet-folders'
 import { isShootMarkerFile, lastShootDay } from './reconciler/guards'
+import { computeFootagePayload, storeFootageCache, type BookingForFootagePayload } from './footage-folders'
 
 /** Google-native docs report no size at all; that is not a truncation. */
 const GOOGLE_NATIVE_PREFIX = 'application/vnd.google-apps'
@@ -441,6 +444,43 @@ export interface BoxCheck {
   errors: string[]
   /** v1.260 — informational lines (also in the Doc): clips an unformatted card lists from an earlier shoot */
   notes: string[]
+  /** v1.266 — the footage cache was behind this box (see cacheBehindBox): refreshed / would-refresh / skipped / failed / disagrees */
+  cache?: string
+}
+
+/** The booking fields checkBox needs beyond the box itself — the footage-ready state and the cache. */
+type CheckRow = BookingForFootagePayload & {
+  readyNotifiedAt?: Date | null
+  deliveredAt?: Date | null
+  footageCache?: unknown
+  footageCacheAt?: Date | null
+}
+
+/**
+ * v1.266 — should the daily check re-walk this booking's footage cache?
+ *
+ * The footage-ready worker walks a booking only inside its lookback (4 days on
+ * prod), and the cache keeps whatever that last walk saw. Footage that lands
+ * later — NAS down, a card dumped a week on — leaves `fileCount: 0` there for
+ * good, and /footage-ready/stats reads the cache, so the booking never showed as
+ * aged out: KND-KNF-260916-01, AGN-260904-01 and EVT-EVF-260901-01 sat silent
+ * until the 11 Oct audit found them by hand. This check is the only thing still
+ * walking those boxes, so it is what corrects the cache.
+ *
+ * Only when someone still needs telling (not notified, not ส่งงาน) and the cache
+ * counts FEWER files than the box holds — not merely "zero" (review of v1.266):
+ * footage lands in batches, and the system video-merge worker moves each batch in
+ * without clearing the cache, so a repair that only fired on zero would freeze the
+ * first batch's count, and the 📣 that agedOut asks for reuses any non-empty cache
+ * (notify-ready refresh:false) — a mail listing CAM-A without CAM-B/C. A fresh
+ * walk of a live box counts every file in it (plus landing/staging), so it is
+ * never below this check's real-footage count: behind = stale. A cleared cache
+ * (upload complete nulls footageCacheAt) counts as nothing.
+ */
+export function cacheBehindBox(b: Omit<CheckRow, keyof BookingForFootagePayload>, realFiles: number): boolean {
+  if (realFiles === 0 || b.readyNotifiedAt || b.deliveredAt) return false
+  const n = b.footageCacheAt ? (b.footageCache as { fileCount?: unknown } | null)?.fileCount : null
+  return !(typeof n === 'number' && n >= realFiles)
 }
 
 export function issueKey(issues: FootageIssue[], waiting: boolean): string {
@@ -726,7 +766,14 @@ export async function scanFootagePage(opts: {
   const total = await prisma.booking.count({ where })
   const rows = await prisma.booking.findMany({
     where,
-    select: { bookingCode: true, projectId: true, projectName: true, shootDate: true, shootEndDate: true, driveFolders: true },
+    select: {
+      id: true, bookingCode: true, projectId: true, projectName: true, shootDate: true, shootEndDate: true, driveFolders: true,
+      // v1.266 — what cacheBehindBox and a cache re-walk need (the detect-footage select)
+      category: true, crewRequired: true, readyNotifiedAt: true, deliveredAt: true, footageCache: true, footageCacheAt: true,
+      outlet: { select: { code: true } },
+      program: { select: { name: true } },
+      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
+    },
     orderBy: [{ shootDate: 'desc' }, { id: 'asc' }],
     skip: offset,
     take: limit,
@@ -762,6 +809,7 @@ export async function scanFootagePage(opts: {
         lastDay: lastShootDay(b).toISOString().slice(0, 10),
         landingId: typeof folders.landing === 'string' ? folders.landing : undefined,
         drp: projectId ? drp.get(projectId)! : null, docs, now, today, appUrl,
+        booking: b as unknown as CheckRow,
       })
     }
   }
@@ -773,6 +821,7 @@ export async function scanFootagePage(opts: {
 async function checkBox(o: {
   code: string; boxId: string; projectId: string | null; projectName: string | null; shootDate: string; lastDay: string
   landingId: string | undefined; drp: Promise<DrpLoad> | null; docs: boolean; now: Date; today: string; appUrl: string
+  booking: CheckRow
 }): Promise<BoxCheck> {
   const errors: string[] = []
   // Ageing uses the LAST shoot day — a multi-day shoot is not over on day one.
@@ -860,6 +909,33 @@ async function checkBox(o: {
     if (sharing > 1) blocked = `กล่องนี้ผูกกับ ${sharing} ใบจอง — ไม่เขียนเอกสาร`
   }
 
+  // v1.266 — repair a footage cache that is behind this box. Same gates as the Doc: our own live
+  // box only (a shared or mis-linked box holds other bookings' footage — the walk would store
+  // theirs as this booking's, and a 📣 would mail it), and a dry run only says it would.
+  let cache: string | undefined
+  if (cacheBehindBox(o.booking, real.length)) {
+    if (blocked) cache = `skipped: ${blocked}`
+    else if (!o.docs) cache = 'would-refresh'
+    else {
+      try {
+        const p = await computeFootagePayload(o.booking)
+        if (p.fileCount < real.length) {
+          // The walk saw less than this check just counted — a swallowed Drive error, not the truth.
+          // Writing it would stamp a fresh cache that detect-footage then trusts. Keep the old one; say so.
+          cache = `refresh disagrees: box ${real.length} · walk ${p.fileCount}`
+          console.error(`[footage-check] cache refresh ${o.code}: ${cache}`)
+        } else {
+          await storeFootageCache(o.booking.id, p)
+          cache = `refreshed ${p.fileCount}`
+        }
+      } catch (e: any) {
+        // Not a footage check — never in `errors`/the Doc. The daily summary names it (formatRunSummary).
+        cache = `refresh failed: ${e?.message || e}`
+        console.error(`[footage-check] cache refresh ${o.code} failed:`, e?.message || e)
+      }
+    }
+  }
+
   let doc: BoxCheck['doc'] = { action: 'skipped', url: null, note: blocked || undefined }
   if (box && !box.trashed) {
     const { html, hash } = renderCheckDoc({
@@ -873,6 +949,7 @@ async function checkBox(o: {
     bookingCode: o.code, projectId: o.projectId, shootDate: o.shootDate, boxId: o.boxId,
     state, waiting, files: real.length, bytes, counts, issues: issues.slice(0, 20),
     stranded, mediaPool, issueKey: issueKey(issues, waiting), doc, errors, notes,
+    ...(cache ? { cache } : {}),
   }
 }
 
@@ -912,7 +989,9 @@ export function formatRunSummary(s: RunSummary): string {
   const unreadable = boxes.filter(b => b.state === 'unreadable')
   const docFailed = boxes.filter(b => b.doc.action === 'failed')
   const partial = boxes.filter(b => b.state !== 'unreadable' && b.errors.length)
-  if (!stranded.length && !news.length && !unreadable.length && !docFailed.length && !partial.length && !s.failure) return ''
+  // v1.266 — a cache repair that did not land keeps that booking out of /footage-ready/stats agedOut: say so
+  const cacheFailed = boxes.filter(b => /^refresh (failed|disagrees)/.test(b.cache || ''))
+  if (!stranded.length && !news.length && !unreadable.length && !docFailed.length && !partial.length && !cacheFailed.length && !s.failure) return ''
 
   const range = s.since && s.until ? ` (ถ่าย ${thaiDate(new Date(s.since))} – ${thaiDate(new Date(s.until))})` : ''
   const noBox = s.noBox || 0
@@ -925,6 +1004,7 @@ export function formatRunSummary(s: RunSummary): string {
   if (s.failure) run.push(`⚠️ รอบนี้ตรวจไม่ครบ: ${s.failure}`)
   if (unreadable.length) run.push(`❔ อ่านกล่องไม่ได้ ${unreadable.length} ใบ: ${unreadable.slice(0, 5).map(b => `${b.bookingCode} (${(b.errors[0] || '?').slice(0, 80)})`).join(' · ')}`)
   if (partial.length) run.push(`⚠️ ตรวจบางส่วนไม่ได้ ${partial.length} ใบ: ${partial.slice(0, 3).map(b => `${b.bookingCode} (${b.errors[0].slice(0, 80)})`).join(' · ')}`)
+  if (cacheFailed.length) run.push(`⚠️ ซ่อม cache ฟุตเทจไม่ได้ ${cacheFailed.length} ใบ (จะไม่ขึ้นใน agedOut จนกว่าจะซ่อมได้): ${cacheFailed.slice(0, 3).map(b => `${b.bookingCode} (${(b.cache || '').slice(0, 80)})`).join(' · ')}`)
   const d = (a: DocAction) => boxes.filter(b => b.doc.action === a).length
   run.push(s.docs
     ? `📄 _FOOTAGE-CHECK: สร้าง ${d('created')} · อัปเดต ${d('updated') + d('refreshed')} · เหมือนเดิม ${d('unchanged')} · ข้าม ${d('skipped')} · ล้ม ${docFailed.length}`

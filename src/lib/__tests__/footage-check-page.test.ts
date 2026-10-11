@@ -13,7 +13,10 @@
 import { test, mock, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
-type Row = { id: string; bookingCode: string; projectId: string | null; projectName: string | null; shootDate: Date; shootEndDate?: Date | null; driveFolders: any }
+type Row = {
+  id: string; bookingCode: string; projectId: string | null; projectName: string | null; shootDate: Date; shootEndDate?: Date | null; driveFolders: any
+  readyNotifiedAt?: Date | null; deliveredAt?: Date | null; footageCache?: unknown; footageCacheAt?: Date | null
+}
 let rows: Row[] = []
 let located: Record<string, string> = {}
 let lastWhere: any = null
@@ -68,6 +71,24 @@ mock.module('../google-drive', {
   },
 })
 
+// v1.266 — the cache repair: a fresh walk (what Drive holds) and the write that stores it
+let walked: string[] = []
+let stored: Array<{ id: string; fileCount: number }> = []
+let storeFails: Error | null = null
+let walkCount = 41
+mock.module('../footage-folders', {
+  namedExports: {
+    computeFootagePayload: async (b: any) => {
+      walked.push(b.bookingCode)
+      return { found: 1, fileCount: walkCount, folders: [], bookingFolderUrl: null, soundStagingUrl: null }
+    },
+    storeFootageCache: async (id: string, p: any) => {
+      if (storeFails) throw storeFails
+      stored.push({ id, fileCount: p.fileCount })
+    },
+  },
+})
+
 let fi: typeof import('../footage-integrity')
 before(async () => { fi = await import('../footage-integrity') })
 
@@ -89,6 +110,7 @@ function booking(i: number, over: Partial<Row> = {}): Row {
 beforeEach(() => {
   rows = []; sharing = 1; boxNames = {}; boxFiles = {}; docs = {}; writes = []; trashed = []; tree = 'in-tree'
   trashFolders = []; trashTrees = {}; drp = null
+  walked = []; stored = []; storeFails = null; walkCount = 41
 })
 
 test('60 ใบ หน้าละ 25 → 25, 50, null · ครบทุกใบ', async () => {
@@ -315,4 +337,94 @@ test('v1.258 รีวิว: ชื่อ C0001 (เริ่มนับให
   assert.ok(miss.some(i => i.detail.includes('C0003.MXF')))
   assert.ok(miss.every(i => i.hint === undefined))
   located = {}
+})
+
+// ── v1.266 cache repair: footage that arrived after the footage-ready lookback ──
+// KND-KNF-260916-01 / AGN-260904-01 / EVT-EVF-260901-01 (11 ต.ค. 2569): ฟุตเทจมาถึงหลังหน้าต่างแจ้งอัตโนมัติปิด
+// cache ค้าง fileCount 0 → /footage-ready/stats ไม่เคยขึ้นว่า agedOut จนตรวจด้วยมือเจอ
+
+const EMPTY_CACHE = { footageCache: { found: 0, fileCount: 0, folders: [] }, footageCacheAt: new Date('2026-09-20T16:43:00Z') }
+
+test('cacheBehindBox: มีฟุตเทจในกล่อง + cache ว่าง/ถูกล้าง/ตามไม่ทัน + ยังไม่ได้แจ้ง → ต้องเดินใหม่', () => {
+  assert.equal(fi.cacheBehindBox(EMPTY_CACHE, 41), true, 'cache ว่างค้าง (เคส KND)')
+  assert.equal(fi.cacheBehindBox({ footageCache: { fileCount: 9 }, footageCacheAt: null }, 41), true, 'upload complete ล้าง cache (footageCacheAt=null) = ไม่รู้ ไม่ใช่มี')
+  assert.equal(fi.cacheBehindBox({}, 41), true, 'ไม่เคยมี cache')
+  assert.equal(fi.cacheBehindBox({ footageCache: 'junk', footageCacheAt: new Date() }, 41), true, 'cache พัง ≠ มีฟุตเทจ')
+  // review v1.266: ฟุตเทจมาเป็นชุด — ซ่อมแค่ตอน 0 = cache ค้างที่ชุดแรก แล้ว 📣 ส่งรายการไม่ครบ (CAM-A ไม่มี B/C)
+  assert.equal(fi.cacheBehindBox({ footageCache: { fileCount: 41 }, footageCacheAt: new Date() }, 120), true, 'cache ตามกล่องไม่ทัน')
+})
+
+test('cacheBehindBox: ไม่ต้องเดิน — กล่องไม่มีฟุตเทจ / แจ้งแล้ว / ส่งงานแล้ว / cache เห็นครบแล้ว', () => {
+  assert.equal(fi.cacheBehindBox(EMPTY_CACHE, 0), false)
+  assert.equal(fi.cacheBehindBox({ ...EMPTY_CACHE, readyNotifiedAt: new Date() }, 41), false)
+  assert.equal(fi.cacheBehindBox({ ...EMPTY_CACHE, deliveredAt: new Date() }, 41), false)
+  assert.equal(fi.cacheBehindBox({ footageCache: { fileCount: 41 }, footageCacheAt: new Date() }, 41), false)
+  assert.equal(fi.cacheBehindBox({ footageCache: { fileCount: 44 }, footageCacheAt: new Date() }, 41), false, 'cache นับ landing/staging ด้วย จึงมากกว่ากล่องได้')
+})
+
+test('dry run บอกว่าจะเดิน cache ใหม่ แต่ไม่เดินไม่เขียน · ของจริงเดินแล้วเขียน cache ของใบนั้น', async () => {
+  rows = [booking(1, EMPTY_CACHE)]
+  const dry = await fi.scanFootagePage({ now: NOW })
+  assert.equal(dry.boxes[0].cache, 'would-refresh')
+  assert.deepEqual(walked, [])
+  assert.deepEqual(stored, [])
+
+  const real = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.equal(real.boxes[0].cache, 'refreshed 41')
+  assert.deepEqual(walked, ['AGN-260911-01'])
+  assert.deepEqual(stored, [{ id: 'id001', fileCount: 41 }])
+  assert.equal(real.boxes[0].state, dry.boxes[0].state, 'ผลตรวจกล่องเหมือนเดิมทั้งสองรอบ')
+})
+
+test('แจ้งแล้ว / cache เห็นฟุตเทจแล้ว / กล่องมีแต่ _SHOOT.txt → ไม่แตะ cache', async () => {
+  rows = [
+    booking(1, { ...EMPTY_CACHE, readyNotifiedAt: new Date('2026-09-21') }),
+    booking(2, { footageCache: { fileCount: 3 }, footageCacheAt: new Date('2026-09-21') }),
+    booking(3, EMPTY_CACHE),
+  ]
+  boxFiles.box3 = [{ name: '_SHOOT.txt', folderPath: [] }]
+  const p = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.deepEqual(p.boxes.map(b => b.cache), [undefined, undefined, undefined])
+  assert.deepEqual(walked, [])
+  assert.deepEqual(stored, [])
+})
+
+test('เขียน cache ไม่ได้ → บอกว่าล้ม (ไม่รายงานว่าแก้แล้ว) และไม่ปนเข้าผลตรวจฟุตเทจ/เอกสาร', async () => {
+  rows = [booking(1, EMPTY_CACHE)]
+  storeFails = new Error('DB down')
+  const p = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.match(p.boxes[0].cache!, /^refresh failed: DB down/)
+  assert.deepEqual(p.boxes[0].errors, [], 'ไม่ใช่ปัญหาของฟุตเทจ — ห้ามขึ้นในเอกสาร _FOOTAGE-CHECK')
+  assert.equal(p.boxes[0].state, 'ok')
+})
+
+test('กล่องใช้ร่วม / ชื่อกล่องไม่ใช่ของคิว → ไม่ซ่อม cache (จะเอาฟุตเทจใบอื่นมาเป็นของใบนี้) · บอกว่าข้าม', async () => {
+  rows = [booking(1, EMPTY_CACHE)]
+  sharing = 2
+  const shared = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.match(shared.boxes[0].cache!, /^skipped: .*ผูกกับ 2 ใบจอง/)
+
+  sharing = 1; boxNames.box1 = 'GDH x 8 Minute History (PP-26-034)'
+  const misLinked = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.match(misLinked.boxes[0].cache!, /^skipped: .*ไม่ใช่ของคิวนี้/)
+  assert.deepEqual(walked, [])
+  assert.deepEqual(stored, [])
+})
+
+test('เดินแล้วได้น้อยกว่าที่กล่องมี (Drive error ที่ถูกกลืน) → ไม่เขียน cache · บอกว่าไม่ตรง · สรุปรายวันพูดถึง', async () => {
+  rows = [booking(1, EMPTY_CACHE)]
+  walkCount = 0
+  const p = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.match(p.boxes[0].cache!, /^refresh disagrees: box \d+ · walk 0/)
+  assert.deepEqual(stored, [], 'ห้ามประทับ cache ใหม่ด้วยค่าที่รู้ว่าผิด')
+  assert.match(fi.formatRunSummary({ boxes: p.boxes, docs: true }), /ซ่อม cache ฟุตเทจไม่ได้ 1 ใบ .*AGN-260911-01/)
+})
+
+test('ซ่อมสำเร็จอย่างเดียว ไม่ทำให้สรุปรายวันพูด (ไม่มีอะไรต้องทำ)', async () => {
+  rows = [booking(1, EMPTY_CACHE)]
+  docs.box1 = [{ id: 'd', ours: true, hash: null, writtenAt: null, webViewLink: 'u' }]
+  const p = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.equal(p.boxes[0].cache, 'refreshed 41')
+  const quiet = p.boxes.map(b => ({ ...b, doc: { ...b.doc, announced: b.issueKey } }))
+  assert.equal(fi.formatRunSummary({ boxes: quiet, docs: true }), '')
 })

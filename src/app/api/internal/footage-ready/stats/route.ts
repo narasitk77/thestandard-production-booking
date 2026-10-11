@@ -64,6 +64,13 @@ export async function GET(request: NextRequest) {
   // Deliberately NOT limited to the lookback window: the aged-out bucket only
   // exists because those rows fell out of it, so the query has to see further
   // back than the worker does.
+  // v1.266 — as far back as the daily footage check walks (FOOTAGE_INTEGRITY_DAYS,
+  // the worker's own env and default): that check is what corrects a cache left
+  // empty by footage that arrived after the lookback, so it is also how far back
+  // `fileCount` can be believed. Was lookback+4 = 8 days, which is why
+  // AGN-260904-01 / EVT-EVF-260901-01 / KND-KNF-260916-01 never showed here.
+  // Windowed on the LAST shoot day, the same OR the check uses.
+  const agedOutFrom = new Date(now.getTime() - Math.max(windowDays, lookbackDays + 4, envInt('FOOTAGE_INTEGRITY_DAYS', 30)) * DAY)
   const candidates = await prisma.booking.findMany({
     where: {
       status: { in: ['CONFIRMED', 'COMPLETED'] },
@@ -72,7 +79,7 @@ export async function GET(request: NextRequest) {
       bookingCode: { not: null },
       readyNotifiedAt: null,
       deliveredAt: null,
-      shootDate: { gte: new Date(now.getTime() - Math.max(windowDays, lookbackDays + 4) * DAY) },
+      OR: [{ shootDate: { gte: agedOutFrom } }, { shootEndDate: { gte: agedOutFrom } }],
     },
     select: {
       bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
