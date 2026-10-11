@@ -2,6 +2,12 @@
 // in-process /api/internal/reminders/run endpoint once per interval (daily by
 // default), which runs the scan + dispatch (Discord + email digest).
 //
+// v1.266.1 — anchored to a BKK clock hour (REMINDERS_HOUR, default 09), like the
+// other daily workers. It used to fire 60 s after every boot and then every 24 h
+// from there, so a deploy WAS the schedule: all six "⏰ เตือนงานค้าง" digests of
+// 9–11 Oct 2026 went out at deploy times (two on 11 Oct), and the producers' QU
+// reminders rode the same random clock. A boot no longer sends anything.
+//
 // Stays dormant when REMINDERS_WORKER_ENABLED is unset / '0' / 'false' — the
 // supervisor loop still restarts this script every 5s, so flipping the env var
 // live in Portainer and restarting the stack turns it on without a code change.
@@ -12,8 +18,10 @@
 const { parsePositiveInt, appBaseUrl, exitDisabled } = require('./lib/env')
 const { httpRequest } = require('./lib/http')
 
+// Run as a worker only when started as one — a test requires this file for msUntilNextRun.
+const isMain = require.main === module
 const enabled = String(process.env.REMINDERS_WORKER_ENABLED || '').toLowerCase()
-if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
+if (isMain && enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
   exitDisabled('reminders', 'REMINDERS_WORKER_ENABLED')
 }
 
@@ -21,6 +29,7 @@ const intervalMs = Math.max(
   60_000,
   parsePositiveInt(process.env.REMINDERS_WORKER_INTERVAL_MS, 24 * 60 * 60_000),
 )
+const targetHourBkk = Math.min(23, Math.max(0, parsePositiveInt(process.env.REMINDERS_HOUR, 9)))
 const baseUrl = appBaseUrl(process.env.REMINDERS_URL)
 const secret = (
   process.env.REMINDERS_SECRET ||
@@ -29,10 +38,18 @@ const secret = (
   ''
 ).trim()
 
-if (!secret) {
+if (isMain && !secret) {
   console.warn(
     '[reminders] WARN: no secret configured (REMINDERS_SECRET / NEXTAUTH_SECRET / AUTH_SECRET). Worker will keep polling but every request will 401.',
   )
+}
+
+// Same as footage-integrity-worker / lark-export-worker: the next HH:00 in Bangkok (UTC+7, no DST).
+function msUntilNextRun(now = new Date(), hourBkk = targetHourBkk) {
+  const targetUtcHour = (hourBkk - 7 + 24) % 24
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), targetUtcHour, 0, 0, 0))
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1)
+  return next.getTime() - now.getTime()
 }
 
 let running = false
@@ -69,18 +86,22 @@ async function runOnce() {
   }
 }
 
+module.exports = { msUntilNextRun }
+
 let timer
 function shutdown(signal) {
   console.log(`[reminders] received ${signal}, exiting`)
   if (timer) clearInterval(timer)
   process.exit(0)
 }
-process.on('SIGTERM', () => shutdown('SIGTERM'))
-process.on('SIGINT', () => shutdown('SIGINT'))
+if (isMain) {
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGINT', () => shutdown('SIGINT'))
 
-console.log(
-  `[reminders] worker started; interval=${intervalMs}ms; baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`,
-)
-// Delay first run so Next.js finishes booting before we hit the route.
-setTimeout(runOnce, 60_000)
-timer = setInterval(runOnce, intervalMs)
+  console.log(
+    `[reminders] worker started; first run ~${String(targetHourBkk).padStart(2, '0')}:00 BKK, then every ${intervalMs}ms; baseUrl=${baseUrl}; secret=${secret ? 'set' : 'MISSING'}`,
+  )
+  const wait = msUntilNextRun()
+  console.log(`[reminders] next run in ${Math.round(wait / 60000)} min`)
+  setTimeout(async () => { await runOnce(); timer = setInterval(runOnce, intervalMs) }, wait)
+}

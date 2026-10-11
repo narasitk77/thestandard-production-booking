@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed — เมลเตือนงานค้างออกตามนาฬิกา ไม่ใช่ตามการ deploy (v1.266.1 · 11 ต.ค. 2569)
+
+ตรวจระบบ 11 ต.ค. ข้อ 8 "reminders ส่งทุกครั้งที่บูต" — วัดแล้วจริง: `scripts/reminders-worker.js` ยิง 60 วิหลังบูต แล้วนับ 24 ชม.
+ต่อจากนั้น ทุก deploy จึงรีเซ็ตนาฬิกา · เมล "⏰ เตือนงานค้าง" ทั้ง 6 ฉบับของ 9–11 ต.ค. ออกตรงเวลา deploy ทุกฉบับ
+(11 ต.ค. สองฉบับ 14:20 / 22:05) ไม่เคยออกตามรอบ "รายวัน" จริงเลย · เมลเตือน QU ถึง Producer เกาะรอบเดียวกัน
+(มี cooldown ต่อใบด้วย `quRemindedAt` จึงไม่ได้เมลซ้ำ แต่เวลาที่ได้ก็มั่วตาม deploy)
+- worker รันครั้งแรกที่ `REMINDERS_HOUR` (เวลาไทย ค่าเริ่ม 09) แล้วทุก `REMINDERS_WORKER_INTERVAL_MS` — รูปเดียวกับ footage-integrity /
+  lark-export / shoot-review · การบูตไม่ส่งอะไรแล้ว · `REMINDERS_HOUR` เพิ่มใน compose ทั้ง app และ worker (profile workers)
+- `msUntilNextRun` export ให้เทสได้ (ส่วนที่สตาร์ต worker อยู่ใต้ `require.main === module` แบบ mix-calendar-worker)
+- เทส `reminders-worker.test.ts`: deploy 22:05 → 09:00 พรุ่งนี้ · ตรง 09:00 = พรุ่งนี้ · ข้ามวัน UTC · ทั้งวันมีแค่นาทีเดียวที่ยิงภายใน 1 นาที
+- smoke: รัน worker จริง 3 วิ = 0 request ตอนบูต · `next run in 644 min` · ปิดสวิตช์ยัง exit 78 เหมือนเดิม
+- ข้อจำกัด: container ล่มตรง 09:00 = วันนั้นไม่มีเมล (ตัวเฝ้า heartbeat ของ `reminders` จับได้) เหมือน worker รายวันตัวอื่น
+
 ### Fixed — agedOut มองเห็นใบที่ฟุตเทจมาถึงหลังหน้าต่างแจ้งอัตโนมัติปิด (v1.266.0 · 11 ต.ค. 2569)
 
 นัท: "แก้ agedOut ด้วย 30 วัน" — 4 ใบที่หลุดหน้าต่าง (AGN-260904-01, EVT-EVF-260901-01, KND-KNF-260916-01, AGN-261003-01) มีแค่ใบเดียว

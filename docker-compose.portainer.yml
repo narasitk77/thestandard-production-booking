@@ -244,6 +244,8 @@ services:
       # never commit the value here.
       REMINDERS_WORKER_ENABLED: ${REMINDERS_WORKER_ENABLED:-0}
       REMINDERS_WORKER_INTERVAL_MS: ${REMINDERS_WORKER_INTERVAL_MS:-86400000}
+      # v1.266.1 — BKK hour of the daily run (was: 60 s after every boot, so every deploy sent a digest)
+      REMINDERS_HOUR: ${REMINDERS_HOUR:-9}
       REMINDERS_SECRET: ${REMINDERS_SECRET:-${NEXTAUTH_SECRET}}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       # footage (default) = only file news reaches Discord | all = ops too
@@ -671,6 +673,7 @@ services:
       FOOTAGE_READY_WORKER_ENABLED: ${FOOTAGE_READY_WORKER_ENABLED:-0}
       FOOTAGE_WORKER_ENABLED: ${FOOTAGE_WORKER_ENABLED:-0}
       REMINDERS_WORKER_ENABLED: ${REMINDERS_WORKER_ENABLED:-0}
+      REMINDERS_HOUR: ${REMINDERS_HOUR:-9}
       BACKUP_WORKER_ENABLED: ${BACKUP_WORKER_ENABLED:-0}
       SHOOT_REVIEW_ENABLED: ${SHOOT_REVIEW_ENABLED:-0}
       # v1.212 — ตัวนี้เป็น scheduler ล้วน (ยิง HTTP ไปที่ app) จึงต้องรู้แค่ว่า
