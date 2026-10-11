@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed — dry-run ของ footage-ready เดิน Drive จริงเหมือนรอบส่ง (v1.265.0 · 11 ต.ค. 2569)
+
+นัทสั่งส่ง 4 ใบที่หลุดหน้าต่าง: dry-run ตอบ KND-KNF-260916-01 ว่า `no-footage` ทั้งที่กล่องมี 152 GB (CAM-A/B/C) แต่รอบจริงส่งเมลได้
+— เพราะ dryRun อ่าน `footageCache` อย่างเดียว และบรรทัด "cache ว่างให้ refresh" เรียกอ่าน cache ตัวเดิมซ้ำ (no-op มาตั้งแต่ v1.147)
+ส่วนรอบจริง refresh ทุกครั้ง · video-merge ย้ายไฟล์โดยไม่ล้าง cache จึงค้างว่างได้ → preview บอกตรงข้ามกับของจริง
+- `sweepFootagePayload()`: dryRun = `computeFootagePayload` (เดิน Drive สด ไม่เขียน cache/DB) · รอบจริง = `getCachedFootagePayload(refresh)` เหมือนเดิม
+- เทส `footage-ready-dryrun.test.ts`: cache ค้างว่าง → dry-run ยังเห็นฟุตเทจ · dry-run ไม่เรียกทางที่เขียน cache · dry-run กับรอบจริงตัดสินจากชุดเดียวกัน
+  (ย้อนโค้ดเก่าแล้วเทสล้ม 3/4)
+- ราคา: dry-run ช้าลงเท่ารอบจริง (เดิน Drive ทุกใบที่ถึงขั้นนี้) — ยิงหลายใบในคำขอเดียวอาจโดน Cloudflare 504 ที่ ~90 วิ ทั้งที่ server ทำต่อจนจบ
+
 ### Added — Co-Producer ได้แจ้ง "ฟุตเทจพร้อม" ด้วย (v1.264.0 · 11 ต.ค. 2569)
 
 นัท: "เพิ่ม Co-Producer เข้ารายชื่อแจ้งฟุตเทจพร้อมด้วย" — ต้นเรื่อง TSS บอกว่าไม่ได้แจ้งมานาน: phoemsiri.p@ เป็น Co-Producer

@@ -11,7 +11,7 @@
  *   c) no in-flight  — zero PENDING/UPLOADING Upload rows fresher than 24h
  *                      (older = abandoned browser tab, must not block forever)
  *   d) NAS drained   — the NAS queue for this code is absent or lastPending=0
- *   e) footage exists— fresh Drive walk (getCachedFootagePayload refresh:true)
+ *   e) footage exists— fresh Drive walk (sweepFootagePayload — dryRun too)
  *                      sees >0 folders and >0 files. The Drive walk is the ONLY
  *                      signal that covers BOTH delivery paths (browser uploads
  *                      AND NAS→video-merge, which creates no Upload rows)
@@ -39,7 +39,7 @@ import { prisma } from './db'
 import { logAudit } from './audit'
 import { sendEmail, isEmailConfigured } from './email'
 import { notifyChatDetailed, notifyEmailDigest } from './notify'
-import { getCachedFootagePayload, type CachedFootagePayload, type BookingForFootagePayload } from './footage-folders'
+import { getCachedFootagePayload, computeFootagePayload, type FootagePayload, type BookingForFootagePayload } from './footage-folders'
 import { isPhotoAlbumBooking } from './outlet-folders'
 import { isShootOver } from './shoot-window'
 import { latestNasState, nasManifestAge } from './nas-sync'
@@ -261,6 +261,20 @@ type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
   episodes: Array<{ episodeId: string | null; sequence: number; title: string | null; program: { name: string; code: string } | null }>
 }
 
+/**
+ * Gate (e)'s Drive walk. Both paths walk fresh: the system-wide video-merge worker
+ * moves files WITHOUT clearing footageCache, so the cache can be stale-empty.
+ *
+ * v1.265 — dryRun used to read the cache only (its "refresh if empty" fallback
+ * called the same cache read twice), so the preview said `no-footage` for
+ * KND-KNF-260916-01 — 152 GB in the box — while the real run, which refreshes,
+ * mailed it (2026-10-11). A preview that disagrees with the run is worse than
+ * none. computeFootagePayload persists nothing, so dryRun stays write-free.
+ */
+export async function sweepFootagePayload(b: BookingForFootagePayload, dryRun: boolean): Promise<FootagePayload> {
+  return dryRun ? computeFootagePayload(b) : getCachedFootagePayload(b, { refresh: true })
+}
+
 export async function runFootageReadyScan(
   opts: { dryRun?: boolean; codes?: string[] } = {},
 ): Promise<FootageReadyScanResult> {
@@ -373,11 +387,7 @@ export async function runFootageReadyScan(
   for (const b of toWalk) {
     const code = b.bookingCode as string
     try {
-      // Always refresh on the live path: the system-wide video-merge worker moves
-      // files WITHOUT clearing footageCache, so the cache can be stale-empty.
-      // dryRun stays read-only (cached payload; refresh only if cache is empty-shaped).
-      let payload = await getCachedFootagePayload(b, { refresh: !dryRun })
-      if (dryRun && payload.folders.length === 0) payload = await getCachedFootagePayload(b, { refresh: false })
+      const payload = await sweepFootagePayload(b, dryRun)
       result.walked++
       // Stamp BEFORE the outcome branches: a walk that found nothing still has to
       // move this booking to the back of the queue, or it squats forever (that is
@@ -474,7 +484,7 @@ export async function runFootageReadyScan(
 
 async function sendFootageReadyNotification(
   b: CandidateRow,
-  payload: CachedFootagePayload,
+  payload: FootagePayload,
   audience: FootageReadyAudience,
   verified: string,
   inactiveEmails: string[],
