@@ -82,6 +82,8 @@ mock.module('../footage-folders', {
       walked.push(b.bookingCode)
       return { found: 1, fileCount: walkCount, folders: [], bookingFolderUrl: null, soundStagingUrl: null }
     },
+    // small on purpose: boxes past it are simulated with a handful of clips (prod: 5000)
+    FOOTAGE_WALK_MAX_FILES: 4,
     storeFootageCache: async (id: string, p: any) => {
       if (storeFails) throw storeFails
       stored.push({ id, fileCount: p.fileCount })
@@ -417,7 +419,7 @@ test('เดินแล้วได้น้อยกว่าที่กล�
   const p = await fi.scanFootagePage({ docs: true, now: NOW })
   assert.match(p.boxes[0].cache!, /^refresh disagrees: box \d+ · walk 0/)
   assert.deepEqual(stored, [], 'ห้ามประทับ cache ใหม่ด้วยค่าที่รู้ว่าผิด')
-  assert.match(fi.formatRunSummary({ boxes: p.boxes, docs: true }), /ซ่อม cache ฟุตเทจไม่ได้ 1 ใบ .*AGN-260911-01/)
+  assert.match(fi.formatRunSummary({ boxes: p.boxes, docs: true }), /ซ่อม cache ฟุตเทจไม่ได้ 1 ใบ: AGN-260911-01$/m)
 })
 
 test('ซ่อมสำเร็จอย่างเดียว ไม่ทำให้สรุปรายวันพูด (ไม่มีอะไรต้องทำ)', async () => {
@@ -427,4 +429,20 @@ test('ซ่อมสำเร็จอย่างเดียว ไม่ท�
   assert.equal(p.boxes[0].cache, 'refreshed 41')
   const quiet = p.boxes.map(b => ({ ...b, doc: { ...b.doc, announced: b.issueKey } }))
   assert.equal(fi.formatRunSummary({ boxes: quiet, docs: true }), '')
+})
+
+test('กล่องใหญ่เกินเพดานของการเดิน → นับได้แค่ถึงเพดาน = ตามทันแล้ว (ไม่ disagree ทุกวัน) · รอบถัดไปไม่เดินซ้ำ', async () => {
+  const big = booking(1, EMPTY_CACHE)
+  boxFiles.box1 = Array.from({ length: 6 }, (_, i) => clip(`A00${i}C001_260901AA.MP4`))
+  rows = [big]
+  walkCount = 4 // the walk stops at its cap (4 here) while the box holds 6
+  const p = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.equal(p.boxes[0].cache, 'refreshed 4')
+  assert.deepEqual(stored, [{ id: 'id001', fileCount: 4 }])
+
+  rows = [{ ...big, footageCache: { fileCount: 4 }, footageCacheAt: NOW }]
+  walked = []
+  const next = await fi.scanFootagePage({ docs: true, now: NOW })
+  assert.equal(next.boxes[0].cache, undefined)
+  assert.deepEqual(walked, [])
 })

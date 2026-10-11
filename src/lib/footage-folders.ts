@@ -34,6 +34,10 @@ export interface BookingForFootage {
  * Aggregates each file up to its TOP-level folder under the scan root (the
  * camera / OB group) so a deep camera-card tree collapses to one clickable row.
  */
+/** Per-tree listing cap of the footage walk. Past it the count is a lower bound (v1.266: the daily
+ *  check's cache repair compares against it — its own box listing goes to 20,000). */
+export const FOOTAGE_WALK_MAX_FILES = 5000
+
 export async function resolveFootageFolders(booking: BookingForFootage): Promise<{ folders: FootageFolder[]; fileCount: number; bookingFolderUrl: string | null }> {
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !booking.bookingCode) return { folders: [], fileCount: 0, bookingFolderUrl: null }
@@ -107,13 +111,13 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
   if (isAgency && resolved.viaBookingSubfolder && resolved.bookingFolderId) {
     // v1.112 — the booking has its own layer inside the project box: everything
     // in it belongs to THIS booking → scan it whole, like a non-AGN box.
-    const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 5000 })
+    const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: FOOTAGE_WALK_MAX_FILES })
     raw.filter(isFootage).forEach(f => add(f, label(f.folderPath[0] ?? '')))
   } else if (isAgency) {
     // legacy layout — shared Project box. Scan THIS booking's EP folders (root = the EP folder)…
     const epFolders = resolved.episodes.filter(e => e.folderId)
     await Promise.all(epFolders.map(async e => {
-      const raw = await listFilesRecursive(e.folderId!, { maxFiles: 5000 })
+      const raw = await listFilesRecursive(e.folderId!, { maxFiles: FOOTAGE_WALK_MAX_FILES })
       raw.filter(isFootage).forEach(f => add(f, label(e.episodeFolderName, f.folderPath[0] ?? '')))
     }))
     // …PLUS "loose" footage filed directly in the box but NOT under an EP folder
@@ -122,14 +126,14 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
     if (resolved.bookingFolderId) {
       const epPrefix = `${(booking.projectId || '').toLowerCase()}-`
       const loose = await listFilesRecursive(resolved.bookingFolderId, {
-        maxFiles: 5000,
+        maxFiles: FOOTAGE_WALK_MAX_FILES,
         skipFolder: name => !!epPrefix && name.toLowerCase().startsWith(epPrefix),
       })
       loose.filter(isFootage).forEach(f => add(f, label(f.folderPath[0] ?? '')))
     }
   } else if (resolved.bookingFolderId) {
     // unique Production-ID folder → scan it whole; each top-level folder = one row.
-    const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: 5000 })
+    const raw = await listFilesRecursive(resolved.bookingFolderId, { maxFiles: FOOTAGE_WALK_MAX_FILES })
     raw.filter(isFootage).forEach(f => add(f, label(f.folderPath[0] ?? '')))
   }
 
@@ -156,7 +160,7 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
       })
       const walked = await Promise.all(fresh.map(async c => ({
         c,
-        files: (await listFilesRecursive(c.id, { maxFiles: 5000 })).filter(isFootage),
+        files: (await listFilesRecursive(c.id, { maxFiles: FOOTAGE_WALK_MAX_FILES })).filter(isFootage),
       })))
       for (const { c, files } of walked) {
         if (files.length === 0) continue

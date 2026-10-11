@@ -54,7 +54,7 @@ import { parseDrpMediaPool } from './drp-mediapool'
 import { loadMediaproCards, mediaproCheck, mediaproStaleText, type MediaproCheck } from './mediapro'
 import { folderNameMatchesCode } from './outlet-folders'
 import { isShootMarkerFile, lastShootDay } from './reconciler/guards'
-import { computeFootagePayload, storeFootageCache, type BookingForFootagePayload } from './footage-folders'
+import { computeFootagePayload, storeFootageCache, FOOTAGE_WALK_MAX_FILES, type BookingForFootagePayload } from './footage-folders'
 
 /** Google-native docs report no size at all; that is not a truncation. */
 const GOOGLE_NATIVE_PREFIX = 'application/vnd.google-apps'
@@ -912,14 +912,18 @@ async function checkBox(o: {
   // v1.266 — repair a footage cache that is behind this box. Same gates as the Doc: our own live
   // box only (a shared or mis-linked box holds other bookings' footage — the walk would store
   // theirs as this booking's, and a 📣 would mail it), and a dry run only says it would.
+  // The walk lists each tree only to FOOTAGE_WALK_MAX_FILES; this check lists the box to 20,000. Past the
+  // walk's cap its count is a lower bound, so there any non-empty walk is as caught up as it can get —
+  // otherwise a big box would "disagree" every day and never be repaired (verify pass of v1.266).
+  const need = real.length >= FOOTAGE_WALK_MAX_FILES ? 1 : real.length
   let cache: string | undefined
-  if (cacheBehindBox(o.booking, real.length)) {
+  if (cacheBehindBox(o.booking, need)) {
     if (blocked) cache = `skipped: ${blocked}`
     else if (!o.docs) cache = 'would-refresh'
     else {
       try {
         const p = await computeFootagePayload(o.booking)
-        if (p.fileCount < real.length) {
+        if (p.fileCount < need) {
           // The walk saw less than this check just counted — a swallowed Drive error, not the truth.
           // Writing it would stamp a fresh cache that detect-footage then trusts. Keep the old one; say so.
           cache = `refresh disagrees: box ${real.length} · walk ${p.fileCount}`
@@ -1004,7 +1008,9 @@ export function formatRunSummary(s: RunSummary): string {
   if (s.failure) run.push(`⚠️ รอบนี้ตรวจไม่ครบ: ${s.failure}`)
   if (unreadable.length) run.push(`❔ อ่านกล่องไม่ได้ ${unreadable.length} ใบ: ${unreadable.slice(0, 5).map(b => `${b.bookingCode} (${(b.errors[0] || '?').slice(0, 80)})`).join(' · ')}`)
   if (partial.length) run.push(`⚠️ ตรวจบางส่วนไม่ได้ ${partial.length} ใบ: ${partial.slice(0, 3).map(b => `${b.bookingCode} (${b.errors[0].slice(0, 80)})`).join(' · ')}`)
-  if (cacheFailed.length) run.push(`⚠️ ซ่อม cache ฟุตเทจไม่ได้ ${cacheFailed.length} ใบ (จะไม่ขึ้นใน agedOut จนกว่าจะซ่อมได้): ${cacheFailed.slice(0, 3).map(b => `${b.bookingCode} (${(b.cache || '').slice(0, 80)})`).join(' · ')}`)
+  // Codes only — run lines are never trimmed, and on a bad Drive day they already crowd the 🚨 detail
+  // (verify pass of v1.266). The reason per box is in the run JSON and the web log.
+  if (cacheFailed.length) run.push(`⚠️ ซ่อม cache ฟุตเทจไม่ได้ ${cacheFailed.length} ใบ: ${cacheFailed.slice(0, 3).map(b => b.bookingCode).join(', ')}${cacheFailed.length > 3 ? ' …' : ''}`)
   const d = (a: DocAction) => boxes.filter(b => b.doc.action === a).length
   run.push(s.docs
     ? `📄 _FOOTAGE-CHECK: สร้าง ${d('created')} · อัปเดต ${d('updated') + d('refreshed')} · เหมือนเดิม ${d('unchanged')} · ข้าม ${d('skipped')} · ล้ม ${docFailed.length}`
