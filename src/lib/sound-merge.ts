@@ -24,6 +24,7 @@ import { bookingShowName } from '@/lib/display'
 import { getDriveLink, rememberDriveLinks } from '@/lib/drive-links'
 import { noteResolve } from '@/lib/id-first-metrics'
 import { isFolderAlive } from '@/lib/google-drive'
+import { tryLockMerge, unlockMerge, soundMergeKey } from '@/lib/merge-lock'
 
 export interface SoundMergeResult {
   skipped: boolean
@@ -124,6 +125,9 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
     const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
     const bookingFolderName = buildBookingFolderName(b.bookingCode, jobName, showName)
+    // v1.268.1 — the per-booking button may be merging this booking right now (merge-lock.ts).
+    const lock = [soundMergeKey(b.id)]
+    if (!opts.dryRun && !tryLockMerge(lock)) { base.results.push({ bookingCode: b.bookingCode, skipped: 'merge already running for this booking (per-booking button)' }); continue }
     try {
       // v1.110 — match by immutable Production ID, tolerating both the legacy
       // "<code> · …" and the new "<show> · … (<code>)" folder shapes.
@@ -196,6 +200,8 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
     } catch (e: any) {
       base.errors++
       base.results.push({ bookingCode: b.bookingCode, error: e?.message || String(e) })
+    } finally {
+      if (!opts.dryRun) unlockMerge(lock)
     }
   }
 

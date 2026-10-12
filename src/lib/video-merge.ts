@@ -40,6 +40,7 @@ import { getDriveLink, rememberDriveLinks } from './drive-links'
 import { noteResolve } from './id-first-metrics'
 import { isFolderAlive } from './google-drive'
 import { alertOps, OPS_ALERT_EVERY_MS } from './ops-alert'
+import { tryLockMerge, unlockMerge, videoMergeKey } from './merge-lock'
 import { createHash } from 'crypto'
 
 // "Production Team" landing Shared Drive (NAS drop zone) — mirrors prep-folders.ts.
@@ -295,6 +296,9 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
     const code = b.bookingCode
     const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
     const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
+    // v1.268.1 — the per-booking button may be merging this booking right now (merge-lock.ts).
+    const lock = [videoMergeKey(b.id)]
+    if (!opts.dryRun && !tryLockMerge(lock)) { base.results.push({ bookingCode: code, skipped: 'merge already running for this booking (per-booking button)' }); continue }
     try {
       const isAgency = b.outlet.code === 'AGN'
 
@@ -357,6 +361,8 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
     } catch (e: any) {
       base.errors++
       base.results.push({ bookingCode: code, skipped: `error: ${e?.message || String(e)}` })
+    } finally {
+      if (!opts.dryRun) unlockMerge(lock)
     }
   }
 

@@ -44,6 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     // Footage moves into the box → bust the detect cache when the job lands.
     const status = startMergeJob(params.id, booking, () => clearFootageCache(params.id))
+    if (!status) return NextResponse.json({ error: 'รอบรวมไฟล์อัตโนมัติกำลังย้ายไฟล์ของงานนี้อยู่ — รอสักครู่แล้วกดใหม่' }, { status: 409 })
     return NextResponse.json({ job: status }, { status: 202 })
   } catch (e: any) {
     console.error('POST /api/bookings/[id]/merge error:', e)

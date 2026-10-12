@@ -14,6 +14,7 @@
  */
 import { mergeBookingVideo, type BookingVideoMergeResult } from './video-merge'
 import { mergeBookingSound, type BookingSoundMergeResult } from './sound-merge'
+import { tryLockMerge, unlockMerge, videoMergeKey, soundMergeKey } from './merge-lock'
 
 // Prisma select for a booking passed to runBookingMerge: the fields both merge
 // steps need, plus the access fields the route uses for canViewBooking().
@@ -94,10 +95,15 @@ export function getMergeJobStatus(bookingId: string): MergeJobStatus {
   return { running: !j.done, done: j.done, startedAt: j.startedAt, finishedAt: j.finishedAt, result: j.result, error: j.error }
 }
 
-/** Start (or join, when one is already running) the background merge. */
-export function startMergeJob(bookingId: string, booking: MergeBooking, onDone?: () => Promise<void>): MergeJobStatus {
+/**
+ * Start (or join, when one is already running) the background merge.
+ * v1.268.1 — null = the hourly video/sound pass is on this booking right now (merge-lock.ts).
+ */
+export function startMergeJob(bookingId: string, booking: MergeBooking, onDone?: () => Promise<void>): MergeJobStatus | null {
   const existing = mergeJobs.get(bookingId)
   if (existing && !existing.done) return getMergeJobStatus(bookingId) // running — join
+  const lock = [videoMergeKey(bookingId), soundMergeKey(bookingId)]
+  if (!tryLockMerge(lock)) return null
   const job: MergeJob = { startedAt: new Date().toISOString(), finishedAt: null, done: false }
   mergeJobs.set(bookingId, job)
   ;(async () => {
@@ -108,6 +114,7 @@ export function startMergeJob(bookingId: string, booking: MergeBooking, onDone?:
       job.error = e?.message || String(e)
       console.error('[booking-merge] background job failed:', bookingId, job.error)
     } finally {
+      unlockMerge(lock)
       job.done = true
       job.finishedAt = new Date().toISOString()
     }
