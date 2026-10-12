@@ -88,7 +88,7 @@ export default function SwitcherPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [idLocked, setIdLocked] = useState(false)
   const [editingProductionId, setEditingProductionId] = useState<string | null>(null)
-  const [outletCode, setOutletCode] = useState('TSS')
+  const [outletCode, setOutletCode] = useState('NWS')
   const [jobName, setJobName] = useState('')
   const [workDate, setWorkDate] = useState(todayISO())
   const [startTime, setStartTime] = useState('')
