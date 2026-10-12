@@ -56,6 +56,16 @@ test('buildBookingFolderName: v1.110 show-first "<show> · <job> (<code>)"', () 
   assert.ok(!buildBookingFolderName('X-01', 'job').includes(' - '))
 })
 
+test('v1.269: cleanJobName ตัด "วันที่ X …" ท้ายชื่อตอน (กล่องของงานหลายวันไม่ควรอ่านเป็นวันแรก) · ไม่แตะคำว่าวันที่กลางชื่อ', () => {
+  assert.equal(cleanJobName('ทำสกู๊ปข่าว IMF-WBG ANM2026 วันที่ 12 ต.ค.'), 'ทำสกู๊ปข่าว IMF-WBG ANM2026')
+  assert.equal(cleanJobName('ถ่ายงาน วันที่ 5 ตุลาคม 2569'), 'ถ่ายงาน')
+  assert.equal(cleanJobName('ถ่ายงานวันที่ 3 ธ.ค'), 'ถ่ายงาน')
+  assert.equal(cleanJobName('วันที่ดีที่สุด'), 'วันที่ดีที่สุด', 'ไม่มีตัวเลข = ไม่ใช่วันที่')
+  assert.equal(cleanJobName('งานวันที่ 12 ต.ค. รอบเช้า'), 'งานวันที่ 12 ต.ค. รอบเช้า', 'วันที่อยู่กลางชื่อ = ส่วนหนึ่งของชื่อ')
+  assert.equal(buildBookingFolderName('WLT-MNW-261012-01', 'ทำสกู๊ปข่าว IMF-WBG ANM2026 วันที่ 12 ต.ค.', 'Morning Wealth'),
+    'Morning Wealth · ทำสกู๊ปข่าว IMF-WBG ANM2026 (WLT-MNW-261012-01)')
+})
+
 test('cleanJobName strips ONLY a trailing logistics parenthetical', () => {
   assert.equal(cleanJobName('วิน Souri (รถ. 1. ก.ค ทัด. 081-8018202 ฮย-3959)'), 'วิน Souri')
   assert.equal(cleanJobName('งาน (โทร. 0812345678)'), 'งาน')

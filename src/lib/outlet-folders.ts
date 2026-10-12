@@ -203,6 +203,10 @@ export function cleanJobName(raw?: string | null): string {
   return String(raw || '')
     .trim()
     .replace(/\s*\([^)]*(?:รถ|โทร|ทัด|\d{2,})[^)]*\)\s*$/, '')
+    // v1.269 — a per-day suffix on the first episode's title is that DAY, not the job: the box of a 5-day booking read
+    // "… วันที่ 12 ต.ค." (นัท 12 ต.ค. 2569, WLT-MNW-261012-01 — EP01 keeps its date, the box must not). The Production
+    // ID in the name already carries the date. Only "วันที่ <1–2 digits> <Thai month…>" at the very end is dropped.
+    .replace(/\s*วันที่\s*\d{1,2}\s*[\u0E00-\u0E7F.]+(?:\s*\d{2,4})?\s*$/u, '')
     .trim()
 }
 
