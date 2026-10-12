@@ -18,6 +18,8 @@ logged-in Chrome. No token configured = step 2 is skipped silently.
   3. launchd NAS agent   4. footage-drive period roll
   5. footage-ready OUTCOME — did the mail reach a human on the job? Liveness said
      green for five weeks while 103 notifications went only to the operator.
+  6. Claude desktop routine probook-nightly-check stuck (per_task_limit skips in main.log)
+Self-check without network/prod/Hermes: python3 probook-worker-check.py --selftest
 """
 import json
 import os
@@ -91,6 +93,17 @@ SKIP_RE = re.compile(
     r"|WORKER_ENABLED=0"                          # รูปเดิม
 )
 WORKER_RE = re.compile(r"\[([a-z][a-z-]+)\]")
+# "รอบจบแล้วและ worker ได้คำตอบ" = บรรทัดสรุปที่ worker พิมพ์หลังได้ 2xx (`bookings=3 files=…`,
+# `scanned=81 …`, `ok file=… size=…`, `[x] skipped: …`) — ใช้ตัดสินว่า error "หายแล้ว" จริงไหม
+# 2026-10-07: เดิมนับทุกบรรทัดที่ไม่ใช่ error เป็นรอบที่ดี → `running merge (interval)` กับคำเตือน
+# sync-conflict ที่ฝั่ง server พิมพ์หลัง worker เลิกรอไปแล้ว ถูกอ่านเป็น "video-merge หายแล้ว"
+# ทั้งที่ล้ม 17/17 รอบ (2 ต.ค. ก็หลอกแบบเดียวกัน) · ไม่รู้จักบรรทัดสรุปของ worker ไหน = รายงานว่า
+# ยังเกิดอยู่ (ดังเกินดีกว่าเงียบผิด)
+DONE_RE = re.compile(r"[A-Za-z]=\d|\] skipped: ")   # `] skipped:` = บรรทัดของ worker · server "not mailable, skipped:" ไม่ใช่จบรอบ
+NOT_DONE_RE = re.compile(r"worker started|running merge|next run in"
+                         r"|\] page \d+ offset="        # footage-integrity ระหว่างรอบ
+                         r"|\bINCOMPLETE\b|=FAILED\b"    # จบแต่บอกเองว่าไม่ครบ
+                         r"|prune off|inaccessible")     # บรรทัดตอนสตาร์ต / ล้มที่แต่งตัวเป็น skip
 BAD_RE = re.compile(
     r"run failed|no activity for|route error|\] [45]\d\d:"
     # v1.238 — worker แครชแล้ว supervisor ปลุกใหม่ · รหัสที่ไม่ใช่ 0 เท่านั้น
@@ -181,7 +194,7 @@ def scan_logs(text):
             slot["goodAfter"] = 0
             if len(samples) < 5:
                 samples.append(line.strip()[:150])
-        else:
+        elif DONE_RE.search(line) and not NOT_DONE_RE.search(line):
             slot["good"] = ts or slot["good"]
             if slot["bad"]:
                 slot["goodAfter"] += 1
@@ -224,7 +237,8 @@ def log_scan_report(enabled_keys, dead_keys=()):
             lines.append(f"   • {s}")
         joined = "\n".join(samples)
         if "no activity for" in joined:
-            lines.append("   = endpoint ค้างจริง (timeout ของ scripts/lib/http.js, env WORKER_HTTP_TIMEOUT_MS)")
+            lines.append("   = worker เลิกรอที่ timeout ของ scripts/lib/http.js (WORKER_HTTP_TIMEOUT_MS) — งานฝั่ง server "
+                         "มักเดินต่อจนจบและเขียน heartbeat (health-summary จึงเขียว) แต่ไม่มีใครเห็นผล · ทุกรอบ = pass ยาวเกิน timeout")
         if "fetch failed" in joined:
             lines.append("   = ไม่ควรเจอหลัง v1.172 — เช็ก /api/version ว่า deploy เก่ากว่าฟิกซ์หรือเปล่า")
         if re.search(r"\] 401:", joined):
@@ -350,10 +364,13 @@ FOOTAGE_READY_DAYS = 7
 
 
 def footage_ready_report():
-    """-> list บรรทัดรายงาน · ไม่มี secret = ข้ามเงียบ (เหมือน log scan)"""
+    """-> list บรรทัดรายงาน · ว่าง = เช็กแล้วไม่มี alert เท่านั้น
+    (2026-10-04: เดิมไม่มี secret / 404 = คืนลิสต์ว่าง → "เงียบ" อ่านเป็น "ปกติ" ทั้งที่ไม่ได้เช็ก)"""
     secret = env_val("PROBOOK_LANDING_SECRET") or env_val("FOOTAGE_READY_SECRET")
     if not secret:
-        return []
+        self_fail("footage-ready secret missing")
+        return [f"⚠️ footage-ready: ไม่มี PROBOOK_LANDING_SECRET/FOOTAGE_READY_SECRET ใน {ENV_FILE} "
+                "— ไม่ได้เช็กว่าเมลถึงทีมไหม"]
     url = f"{BASE}/api/internal/footage-ready/stats?days={FOOTAGE_READY_DAYS}"
     req = urllib.request.Request(url, headers={
         "x-footage-ready-secret": secret, "User-Agent": "hermes-probook-watchdog"})
@@ -370,7 +387,9 @@ def footage_ready_report():
                 self_fail("footage-ready stats 401")
                 return ["⚠️ footage-ready stats: 401 — secret ใน probook.env ไม่ตรงกับ prod แล้ว"]
             if e.code == 404:
-                return []  # prod ยังไม่ได้ deploy endpoint นี้ — ไม่ใช่ความผิดปกติ
+                # endpoint มีมาตั้งแต่ v1.181 — 404 ตอนนี้ = BASE ผิด (เคยเกิดตอนย้ายโดเมน) หรือ route หาย
+                return [f"⚠️ footage-ready stats: 404 — BASE ({BASE}) ผิดหรือ endpoint หายไปแล้ว "
+                        "· ไม่ได้เช็กว่าเมลถึงทีมไหม"]
             last = f"HTTP {e.code}"
         except Exception as e:
             last = str(e)[:80]
@@ -380,7 +399,10 @@ def footage_ready_report():
         d = json.loads(body)
     except Exception:
         return [f"⚠️ footage-ready stats: อ่าน JSON ไม่ได้ ({body[:80]})"]
-    alerts = [a for a in (d.get("alerts") or []) if isinstance(a, str)]
+    if not isinstance(d, dict) or not isinstance(d.get("alerts"), list):
+        # 2026-10-04: ไม่มีคีย์ alerts = รูปแบบเปลี่ยน/proxy ตอบหน้าอื่น — ห้ามอ่านเป็น "ปกติ"
+        return ["⚠️ footage-ready stats: คำตอบไม่มี alerts[] — รูปแบบเปลี่ยน? ไม่ได้เช็กว่าเมลถึงทีมไหม"]
+    alerts = [a for a in d["alerts"] if isinstance(a, str)]
     if not alerts:
         return []
     s = d.get("sends") or {}
@@ -435,6 +457,97 @@ def footage_root_report():
     _write_json(FOOTAGE_ROOT_STATE, st)
     return [f"ℹ️ อีก ~{left} วันจะขึ้นงวด {period_of(time.time() + (left + 1) * 86400)} — "
             f"เตรียมสร้างไดรฟ์ VIDEO งวดถัดไป แล้วหมุน DRIVE_FOOTAGE_ROOT บน stack 125"]
+
+
+# ─────────── routine probook-nightly-check (Claude desktop) ค้างไหม ───────────
+# รอบที่รอคนกด Allow ค้างอยู่ทำให้ scheduler ข้ามรอบใหม่ทุกครั้ง (per_task_limit active=1)
+# โดยไม่มีอะไรเตือนเลย — 4 ต.ค. 2026 ถูกข้าม 28 ครั้งในวันเดียว
+# รูปแบบ log จริง (เวลาท้องถิ่น ไม่มี timezone):
+#   2026-10-04 20:35:04 [info] [CCDScheduledTasks] Skipping dispatch for probook-nightly-check: per_task_limit (active=1, limit=1)
+# main.log หมุนไป main1.log ที่ ~10MB จึงต้องอ่านทั้งสองไฟล์ให้ครอบ 24 ชม.
+#
+# หลักฐานเชิงบวก (แก้ 2026-10-04): เดิมนับแค่บรรทัด skip ตรงตัว "per_task_limit" ไม่เจอ = ปกติ
+# ซึ่งเงียบในอย่างน้อย 4 ทาง — แอปไม่ได้เปิด/task ถูกปิด (ไม่มี log ใหม่เลย), ถูกข้ามด้วยเหตุผลอื่น
+# (global_limit), Claude เปลี่ยนถ้อยคำ, และรอบที่ค้างโดยไม่มีบรรทัด skip เลย (3 ต.ค. 01:05 ค้าง
+# 43 ชม. แต่รอบ Hermes 09:00/21:00 นับได้ 0 ทั้งคู่). ตอนนี้จึงต้อง "เห็นการเริ่มรอบ" ภายใน 26 ชม.
+# (log จริงเริ่มรอบทุกคืน ~00:04 ตั้งแต่ 23 ส.ค.) และนับ skip เหตุผลใดก็ได้เฉพาะที่ใหม่กว่า
+# การเริ่มรอบล่าสุด — skip ก่อนหน้านั้นคือรอบที่หลุดออกมาเริ่มใหม่แล้ว ไม่ใช่ค้างอยู่
+CLAUDE_LOGS = [os.path.expanduser("~/Library/Logs/Claude/main.log"),
+               os.path.expanduser("~/Library/Logs/Claude/main1.log")]
+NIGHTLY_SKIP = "Skipping dispatch for probook-nightly-check:"
+_NIGHTLY_SKIP_RE = re.compile(r"Skipping dispatch for probook-nightly-check: (\S+)")
+_NIGHTLY_START_RE = re.compile(r"(?:Spawning new session for scheduled task|runNow: dispatching session for task)"
+                               r" probook-nightly-check(?=\s|$)")
+NIGHTLY_MAX_GAP_H = 26
+_LOG_TS_RE = re.compile(r"^\W*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:[.,]\d+)?\s*(Z|[+-]\d{2}:?\d{2})?")
+
+
+def _log_epoch(line):
+    """เวลาหัวบรรทัด -> epoch · ไม่มี tz = เวลาท้องถิ่น · มี Z/+07:00 ก็รับ · อ่านไม่ออก = None"""
+    from datetime import datetime
+    m = _LOG_TS_RE.match(line)
+    if not m:
+        return None
+    d, t, tz = m.groups()
+    try:
+        if tz:
+            return datetime.strptime(f"{d} {t}{tz}", "%Y-%m-%d %H:%M:%S%z").timestamp()
+        return datetime.strptime(f"{d} {t}", "%Y-%m-%d %H:%M:%S").timestamp()
+    except ValueError:
+        return None
+
+
+def scan_nightly_log(paths, now):
+    """-> (last_start epoch|None, skips [(epoch, เหตุผล)] ใน 24 ชม. ที่ใหม่กว่า last_start,
+           จำนวนบรรทัด nightly ที่อ่านเวลาไม่ออก, errors) · paths[0] ต้องมี ที่เหลือมีหรือไม่ก็ได้"""
+    cutoff = now - 24 * 3600
+    last_start, skips, undated, errs = None, [], 0, []
+    for i, p in enumerate(paths):
+        if i and not os.path.exists(p):
+            continue
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    m = _NIGHTLY_SKIP_RE.search(line)
+                    start = not m and _NIGHTLY_START_RE.search(line)
+                    if not (m or start):
+                        continue
+                    ts = _log_epoch(line)
+                    if ts is None:
+                        undated += 1
+                    elif start:
+                        last_start = ts if last_start is None else max(last_start, ts)
+                    elif ts >= cutoff:
+                        skips.append((ts, m.group(1)))
+        except Exception as e:
+            errs.append(f"{os.path.basename(p)}: {type(e).__name__}")
+    skips = sorted(s for s in skips if last_start is None or s[0] > last_start)
+    return last_start, skips, undated, errs
+
+
+def nightly_stuck_report(paths=None, now=None):
+    """-> list บรรทัดรายงาน · ว่าง = อ่าน log ได้, เริ่มรอบใน 26 ชม. และไม่มีรอบถูกข้ามหลังจากนั้น"""
+    now = now or time.time()
+    last_start, skips, undated, errs = scan_nightly_log(paths or CLAUDE_LOGS, now)
+    fmt = lambda ts: time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+    lines = []
+    if errs:
+        lines.append(f"⚠️ อ่าน log ของ Claude desktop ไม่ได้ — ไม่ได้เช็ก nightly ({', '.join(errs)[:100]})")
+    elif last_start is None:
+        lines.append("⚠️ probook-nightly-check ไม่ได้เริ่มรอบเลยใน log ของ Claude desktop "
+                     "(แอปไม่ได้เปิด / task ถูกปิด / ถ้อยคำ log เปลี่ยน?)")
+    elif now - last_start > NIGHTLY_MAX_GAP_H * 3600:
+        lines.append(f"⚠️ probook-nightly-check ไม่ได้เริ่มรอบมา {int((now - last_start) // 3600)} ชม. "
+                     f"(ล่าสุด {fmt(last_start)}) — แอป Claude desktop ไม่ได้เปิด หรือรอบนั้นค้างอยู่?")
+    if skips:
+        reasons = ", ".join(sorted({r for _, r in skips}))
+        lines.append(f"⚠️ probook-nightly-check ค้าง (รอคนกด Allow หรือรอบก่อนยังไม่จบ) — "
+                     f"รอบใหม่ถูกข้าม {len(skips)} ครั้งตั้งแต่ {fmt(skips[0][0])} "
+                     f"(ล่าสุด {fmt(skips[-1][0])} · {reasons})")
+    if undated:
+        lines.append(f"⚠️ log Claude desktop มีบรรทัด nightly (เริ่มรอบ/skip) ที่อ่านเวลาไม่ออก {undated} บรรทัด "
+                     "— รูปแบบ log เปลี่ยน? นับ nightly ค้างไม่ได้")
+    return lines
 
 
 # ── OUTBOX: ส่งซ้ำรายงานที่ Hermes ส่งไม่ออก ────────────────────────────────
@@ -559,6 +672,34 @@ def hours(sec):
         return "?"
 
 
+def finish(lines, heartbeat=False):
+    """epilogue เดียวของทุกทางออก (ยกเว้น --ack-footage-root)
+    2026-10-04: เดิมทางเน็ตล่ม/prod ล่ม print แล้ว exit ก่อนถึง epilogue → ข้อความพวกนั้นไม่เข้า outbox
+    และไม่ได้ล้าง outbox เก่า รอบถัดไปจึงส่งซ้ำรายงานเก่าที่ "ถึงแล้ว" พร้อมป้าย "ส่งไม่ออก"
+    ส่วนข้อความเน็ตล่มที่หายจริงไม่เคยถูกส่งซ้ำ"""
+    # ตัดที่ 14 บรรทัดเพื่อให้อ่านบนมือถือได้ — แต่ต้องบอกว่าตัด ไม่งั้นคำเตือนท้าย ๆ (nightly ค้าง, footage-ready) หายเงียบ
+    shown = lines if len(lines) <= 14 else lines[:13] + [f"… (+{len(lines) - 13} บรรทัดถูกตัด)"]
+    report = "\n".join(shown) if lines else ""
+
+    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของ "รอบก่อน" ให้เสร็จก่อน แล้วจึงเขียนของรอบนี้ทับ
+    # (สลับลำดับ = undelivered_lines ลบรายงานรอบนี้ที่เพิ่งเขียนไปทิ้ง)
+    resend = undelivered_lines(JOB_NAME, OUTBOX)
+    payload = "\n".join(resend + ([report] if report else []))
+
+    # เก็บ payload ทั้งก้อน ไม่ใช่แค่ report ของรอบนี้ — ถ้าเน็ตล่มติดกันหลายรอบ
+    # ของเก่าจะได้ถูกหอบต่อไปเรื่อย ๆ แทนที่จะหล่นหายตั้งแต่รอบที่สอง (cap 60 บรรทัด)
+    # heartbeat ไม่เข้า outbox: หายไปก็แก้ตัวเองรอบหน้า ส่วนคำเตือนที่หายคือของจริง
+    remember_report(OUTBOX, "" if heartbeat else "\n".join(payload.splitlines()[:60]))
+
+    if payload:
+        print(payload)
+    # exit 1 เฉพาะตอนที่ "เราเอง" เช็กไม่สำเร็จ (401 / เน็ตล่ม) — ไม่ใช่ตอนที่
+    # เจอ worker ค้างที่ prod ซึ่งแปลว่าสคริปต์นี้ทำงานสำเร็จตามหน้าที่
+    # เงียบเมื่อปกติ (รอบค่ำ) — ไม่ print อะไรเลย = Hermes ไม่ส่งข้อความ
+    # (ทุกที่ที่เรียก self_fail ใส่บรรทัดรายงานด้วยเสมอ จึงไม่มีกรณี exit 1 แบบเงียบ)
+    sys.exit(1 if _SELF_FAIL else 0)
+
+
 def main():
     # โหมดยืนยันว่าหมุนไดรฟ์ให้งวดใหม่แล้ว: --ack-footage-root 2027-H1
     if "--ack-footage-root" in sys.argv:
@@ -568,6 +709,7 @@ def main():
         print(f"บันทึกแล้ว: DRIVE_FOOTAGE_ROOT = งวด {period}")
         return
 
+    started = time.time()
     state = load_state()
     lines = []
 
@@ -578,17 +720,21 @@ def main():
             # เครื่องนี้เน็ต/DNS ล่ม → เราไม่รู้อะไรเลยเรื่อง prod ห้ามตะโกนว่า prod ตาย
             self_fail("net down")
             save_state(state)
-            print("⚠️ เช็ก probook ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod)")
-            print(f"   ({body[:100]}) รอบหน้าจะลองใหม่เอง")
-            sys.exit(1 if _SELF_FAIL else 0)
+            hm = lambda ts: time.strftime("%H:%M", time.localtime(ts))
+            finish([
+                "⚠️ เช็ก probook ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod)",
+                f"   ({body[:100]}) รอบหน้าจะลองใหม่เอง",
+                f"   (เริ่ม {hm(started)} · เช็กเสร็จ {hm(time.time())} — ห่างกันนาน = แมคหลับระหว่างรัน)",
+            ])
         self_fail("prod not responding")
         state["neverTicked"] = {}
         state["appDownStreak"] = int(state.get("appDownStreak", 0)) + 1
         save_state(state)
-        print("⚠️ probook ตอบไม่ได้เลย — /api/health-summary ไม่มีการตอบกลับ (เน็ตเครื่องนี้ปกติ)")
-        print(f"   ({body[:120]}) ครั้งที่ {state['appDownStreak']} ติดกัน")
-        print("   ดูต่อ: Portainer stack 125 → container production-booking-app (ผมรีสตาร์ทให้ไม่ได้)")
-        sys.exit(1 if _SELF_FAIL else 0)
+        finish([
+            "⚠️ probook ตอบไม่ได้เลย — /api/health-summary ไม่มีการตอบกลับ (เน็ตเครื่องนี้ปกติ)",
+            f"   ({body[:120]}) ครั้งที่ {state['appDownStreak']} ติดกัน",
+            "   ดูต่อ: Portainer stack 125 → container production-booking-app (ผมรีสตาร์ทให้ไม่ได้)",
+        ])
     state["appDownStreak"] = 0
 
     try:
@@ -646,6 +792,12 @@ def main():
     except Exception as e:
         lines.append(f"⚠️ เช็ก footage-ready พังเอง: {str(e)[:80]}")
 
+    # STEP 6 — routine probook-nightly-check ของ Claude desktop ค้างรอ Allow ไหม (อ่าน log ในเครื่อง)
+    try:
+        lines.extend(nightly_stuck_report())
+    except Exception as e:
+        lines.append(f"⚠️ เช็ก nightly ค้างพังเอง: {str(e)[:80]}")
+
     vstatus, vbody = get_retry("/api/version", timeout=15)
     if vstatus != 200:
         lines.append(f"⚠️ /api/version ตอบ HTTP {vstatus} (คาด 200)")
@@ -671,25 +823,210 @@ def main():
             + (f" · prod {ver}" if ver else "")
         )
 
-    report = "\n".join(lines[:14]) if lines else ""
+    finish(lines, heartbeat)
 
-    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของ "รอบก่อน" ให้เสร็จก่อน แล้วจึงเขียนของรอบนี้ทับ
-    # (สลับลำดับ = undelivered_lines ลบรายงานรอบนี้ที่เพิ่งเขียนไปทิ้ง)
-    resend = undelivered_lines(JOB_NAME, OUTBOX)
-    payload = "\n".join(resend + ([report] if report else []))
 
-    # เก็บ payload ทั้งก้อน ไม่ใช่แค่ report ของรอบนี้ — ถ้าเน็ตล่มติดกันหลายรอบ
-    # ของเก่าจะได้ถูกหอบต่อไปเรื่อย ๆ แทนที่จะหล่นหายตั้งแต่รอบที่สอง (cap 60 บรรทัด)
-    # heartbeat ไม่เข้า outbox: หายไปก็แก้ตัวเองรอบหน้า ส่วนคำเตือนที่หายคือของจริง
-    remember_report(OUTBOX, "" if heartbeat else "\n".join(payload.splitlines()[:60]))
+def selftest():
+    """--selftest: ไม่แตะเน็ต/prod/Discord/Hermes · ทุก path state/outbox/log ชี้ไป temp dir"""
+    import contextlib
+    import io
+    import tempfile
+    g = globals()
+    tmp = tempfile.mkdtemp(prefix="pwc-selftest-")
+    P = lambda *a: os.path.join(tmp, *a)
+    for k in [k for k in os.environ if k.startswith(("PORTAINER_", "PROBOOK_", "FOOTAGE_READY"))]:
+        del os.environ[k]
+    g.update(STATE=P("state.json"), OUTBOX=P("outbox.json"), HERMES_JOBS=P("jobs.json"),
+             ENV_FILE=P("probook.env"), NAS_LOG=P("nas.log"), NAS_ARCHIVE=P("nas-archive.log"),
+             NAS_STATE=P("nas.json"), FOOTAGE_ROOT_STATE=P("footage-root.json"),
+             CLAUDE_LOGS=[P("main.log"), P("main1.log")], BASE="https://selftest.invalid",
+             RETRY_DELAYS=())
+    with open(ENV_FILE, "w") as f:
+        f.write("PROBOOK_LANDING_SECRET=selftest\n")   # ไม่มี PORTAINER_* = log scan ข้ามตามดีไซน์
+    with open(P("main.log"), "w") as f:                 # log Claude สะอาด: เพิ่งเริ่มรอบ ไม่มี skip
+        f.write(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 3600))
+                + " [info] [CCDScheduledTasks] Spawning new session for scheduled task probook-nightly-check { x }\n")
 
-    if payload:
-        print(payload)
-        # exit 1 เฉพาะตอนที่ "เราเอง" เช็กไม่สำเร็จ (401 / เน็ตล่ม) — ไม่ใช่ตอนที่
-        # เจอ worker ค้างที่ prod ซึ่งแปลว่าสคริปต์นี้ทำงานสำเร็จตามหน้าที่
-        sys.exit(1 if _SELF_FAIL else 0)
-    # เงียบเมื่อปกติ (รอบค่ำ) — ไม่ print อะไรเลย = Hermes ไม่ส่งข้อความ
+    sim = {"down": False, "footage404": False}
+
+    class Resp:
+        def __init__(self, status, body):
+            self.status, self._b = status, body.encode()
+        def read(self):
+            return self._b
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        assert url.startswith("https://selftest.invalid/"), f"selftest เกือบยิงเน็ตจริง: {url}"
+        if sim["down"]:
+            raise urllib.error.URLError("simulated DNS failure")
+        if "/api/health-summary" in url:
+            return Resp(200, json.dumps({"workers": [{"key": "w", "enabled": True, "lastTickAgoSec": 60}]}))
+        if "/api/version" in url:
+            return Resp(200, json.dumps({"version": "v-selftest"}))
+        if "/footage-ready/stats" in url:
+            if sim["footage404"]:
+                raise urllib.error.HTTPError(url, 404, "nf", {}, io.BytesIO(b""))
+            return Resp(200, json.dumps({"alerts": []}))
+        raise AssertionError(f"unexpected URL {url}")
+
+    urllib.request.urlopen = fake_urlopen
+    g["net_down"] = lambda: sim["down"]
+
+    def jobs(err):
+        _write_json(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": err}]})
+
+    def run():
+        _SELF_FAIL.clear()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                main()
+                code = 0
+            except SystemExit as e:
+                code = e.code or 0
+        return code, out.getvalue()
+
+    # (a) เน็ตล่ม → exit != 0 และข้อความเข้า outbox · รอบถัดไปที่ส่งไม่ออกต้องส่งซ้ำ "ข้อความเน็ตล่ม"
+    jobs(None)
+    sim["down"] = True
+    code, out = run()
+    assert code != 0, code
+    assert "เน็ต/DNS ของเครื่องนี้ล่ม" in out and "เริ่ม " in out and "เช็กเสร็จ" in out, out
+    ob = _ob_read(OUTBOX)
+    assert ob and "เน็ต/DNS ของเครื่องนี้ล่ม" in ob["text"], ob
+    sim["down"] = False
+    jobs("simulated delivery failure")
+    code, out = run()
+    assert "📮 ส่งซ้ำ" in out and "เน็ต/DNS ของเครื่องนี้ล่ม" in out, out
+    print("ok (a) net-down -> outbox + exit!=0; resent next run")
+
+    # (a2) prod ไม่ตอบ (เน็ตปกติ) ก็ต้องเข้า outbox
+    jobs(None)
+    sim["down"] = True
+    g["net_down"] = lambda: False
+    code, out = run()
+    assert code == 1 and "probook ตอบไม่ได้เลย" in out, (code, out)
+    assert "probook ตอบไม่ได้เลย" in _ob_read(OUTBOX)["text"]
+    sim["down"] = False
+    g["net_down"] = lambda: sim["down"]
+    print("ok (a2) prod-down -> outbox + exit 1")
+
+    # (b) outbox ค้างจากรอบก่อน → ส่งซ้ำครั้งเดียว · รอบถัดไปที่ส่งถึงแล้ว → ล้าง
+    jobs("simulated delivery failure")
+    _ob_write(OUTBOX, {"runAt": "2026-01-01 09:00", "text": "OLD-WARNING-XYZ"})
+    code, out = run()
+    assert code == 0, (code, out)
+    assert out.count("OLD-WARNING-XYZ") == 1 and out.count("📮 ส่งซ้ำ") == 1, out
+    jobs(None)
+    code, out = run()
+    assert code == 0 and "OLD-WARNING-XYZ" not in out and "📮" not in out, (code, out)
+    assert not os.path.exists(OUTBOX), _ob_read(OUTBOX)
+    print("ok (b) resent once, cleared after delivered")
+
+    # (c) main.log สังเคราะห์: เริ่มรอบ 5 ชม.ก่อน (ใน main1) แล้ว skip 3 ครั้งหลังจากนั้น (มี global_limit)
+    #     + skip ก่อนเริ่มรอบ 1 + skip เก่า 30 ชม. 1 → นับ 3 · เริ่มรอบใหม่แล้ว → เงียบ
+    now = time.time()
+    fmt = lambda ts: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+    TAG = "[info] [CCDScheduledTasks]"
+    def logf(name, rows):
+        with open(P(name), "w") as f:
+            for ago, msg in rows:
+                f.write(f"{fmt(now - ago)} {TAG} {msg}\n")
+            f.write("  apiHost: 'continuation line without timestamp',\n")
+    SKIP_T = NIGHTLY_SKIP + " per_task_limit (active=1, limit=1)"
+    SKIP_G = NIGHTLY_SKIP + " global_limit (active=3, limit=3)"
+    START = "Spawning new session for scheduled task probook-nightly-check { cronExpression: '0 0 * * *' }"
+    logf("c-main1.log", [(30 * 3600, SKIP_T), (7 * 3600, SKIP_T), (5 * 3600, START)])
+    logf("c-main.log", [(3 * 3600, SKIP_T), (2 * 3600, SKIP_G), (3600, SKIP_T),
+                        (60, "Skipping dispatch for probook-nightly-check-other: per_task_limit (active=1, limit=1)")])
+    last, skips, undated, errs = scan_nightly_log([P("c-main.log"), P("c-main1.log")], now)
+    assert len(skips) == 3 and undated == 0 and not errs and abs(last - (now - 5 * 3600)) < 2, (last, skips, undated, errs)
+    rep = nightly_stuck_report([P("c-main.log"), P("c-main1.log")], now)
+    assert len(rep) == 1 and "ถูกข้าม 3 ครั้ง" in rep[0] and "global_limit" in rep[0], rep
+    assert _log_epoch("2026-10-04T13:00:00Z x") == _log_epoch("2026-10-04 20:00:00+07:00 x")
+    print("ok (c) skips after last start == 3 (any reason)")
+
+    # (c2) false positive เดิม: skip 22 ครั้งแต่หลุดออกมาเริ่มรอบใหม่แล้ว (runNow) → เงียบ
+    logf("c2-main.log", [(h * 1800, SKIP_T) for h in range(2, 24)]
+         + [(1800, "runNow: dispatching session for task probook-nightly-check")])
+    rep = nightly_stuck_report([P("c2-main.log")], now)
+    assert rep == [], rep
+    print("ok (c2) skips before a newer start are not 'stuck'")
+
+    # (c3) log ไม่มีบรรทัดเริ่มรอบเลย (แอปไม่ได้เปิด/task ถูกปิด/ถ้อยคำเปลี่ยน) → ต้องเตือน
+    logf("c3-main.log", [(3600, "Some unrelated line")])
+    rep = nightly_stuck_report([P("c3-main.log")], now)
+    assert len(rep) == 1 and "ไม่ได้เริ่มรอบเลย" in rep[0], rep
+    print("ok (c3) no start line at all -> warning")
+
+    # (c4) เริ่มรอบล่าสุด 30 ชม. ก่อน ไม่มี skip (ค้างเงียบแบบ 3 ต.ค.) → เตือน 30 ชม.
+    logf("c4-main.log", [(30 * 3600, START), (29 * 3600, 'Not auto-approving "Bash" in scheduled task "probook-nightly-check"')])
+    rep = nightly_stuck_report([P("c4-main.log")], now)
+    assert len(rep) == 1 and "ไม่ได้เริ่มรอบมา 30 ชม." in rep[0], rep
+    print("ok (c4) last start 30h ago -> warning")
+
+    # (d) log อ่านไม่ได้ → มีบรรทัดเตือน ไม่เงียบ
+    rep = nightly_stuck_report([P("nope", "main.log")], now)
+    assert any("อ่าน log ของ Claude desktop ไม่ได้" in l for l in rep), rep
+    rep = nightly_stuck_report([tmp], now)                 # directory = อ่านไม่ได้
+    assert any("อ่าน log ของ Claude desktop ไม่ได้" in l for l in rep), rep
+    print("ok (d) unreadable log -> warning")
+
+    # (e) รูเงียบของ footage-ready: ไม่มี secret / 404
+    _SELF_FAIL.clear()
+    with open(ENV_FILE, "w") as f:
+        f.write("")
+    rep = footage_ready_report()
+    assert rep and "ไม่ได้เช็ก" in rep[0] and _SELF_FAIL, (rep, _SELF_FAIL)
+    _SELF_FAIL.clear()
+    with open(ENV_FILE, "w") as f:
+        f.write("PROBOOK_LANDING_SECRET=selftest\n")
+    sim["footage404"] = True
+    rep = footage_ready_report()
+    assert rep and "404" in rep[0] and "ไม่ได้เช็ก" in rep[0], rep
+    print("ok (e) footage-ready missing secret / 404 are loud")
+
+    # (f) 2026-10-07 log จริง: worker เลิกรอ แล้ว server พิมพ์คำเตือนตามมา — ห้ามอ่านเป็น "หายแล้ว"
+    vm = lambda t, m: f"\x01\x00\x00\x00\x00\x00\x00k2026-10-07T{t}.0Z [video-merge] {m}"
+    seq = [vm("01:04:34", "running merge (interval)"),
+           vm("01:34:35", "run failed: no activity for 1800s — giving up"),
+           vm("01:38:24", "AGN-260930-01: 372 sync-conflict name(s) left in landing — not merged:"),
+           "  A025 (2) (1) (1)",
+           vm("02:04:35", "running merge (interval)")]
+    bad, seen, _, last = scan_logs("\n".join(seq))
+    assert bad == {"video-merge": 1} and seen["video-merge"] == 4, (bad, seen)
+    assert last["video-merge"]["goodAfter"] == 0, last
+    bad, seen, _, last = scan_logs("\n".join(seq + [vm("02:20:01", "bookings=318 files=0 folders=0 dupLeft=9 errors=0")]))
+    assert last["video-merge"]["goodAfter"] == 1 and last["video-merge"]["good"].startswith("2026-10-07T02:20"), last
+    is_done = lambda l: bool(DONE_RE.search(l)) and not NOT_DONE_RE.search(l)
+    # บรรทัดสรุปจริงของ worker ที่เห็นใน log prod → ต้องนับเป็นจบรอบ
+    for l in ("[backup] ok file=backup-x.sql.gz size=1234B pruned=0",
+              "[shoot-marker] scanned 19p/41b · changed=0 warnings=0 errors=0",
+              "[room-booking] scanned=81 ปลดแล้ว=0", "[video-merge] skipped: DRIVE_FOOTAGE_ROOT unset",
+              "[footage-integrity] done boxes=12 ok=10 issues=1 waiting=1 unreadable=0 nobox=0 docs=on",
+              "[mix-calendar] create=0 update=0 delete=0 failed=0"):
+        assert is_done(l), l
+    # บรรทัดเริ่ม/ระหว่างรอบ/ฝั่ง server/ล้มที่แต่งตัวเป็น skip → ต้องไม่นับ
+    for l in ("[sound-merge] worker started; interval=3600000ms; baseUrl=http://127.0.0.1:3000",
+              "[landing] next run in 412 min (~19:00 BKK)", "[video-merge] running merge (interval)",
+              "[shoot-review] not mailable, skipped: video@x ×2",
+              "[footage-integrity] page 2 offset=40 boxes=20 next=60 total=90",
+              "[footage-integrity] done boxes=12 ok=10 issues=1 waiting=1 unreadable=0 nobox=0 docs=on INCOMPLETE",
+              "[landing-prune] LANDING_PRUNE_ENABLED=0 — noon prune off.",
+              "[lark-export] archive=FAILED file=x.json rows=3",
+              "[video-merge] skipped: Production Team landing empty / inaccessible"):
+        assert not is_done(l), l
+    print("ok (f) only a worker's own run-summary line counts as a recovery")
+    print("SELFTEST PASSED")
 
 
 if __name__ == "__main__":
-    main()
+    if "--selftest" in sys.argv:
+        selftest()
+    else:
+        main()
