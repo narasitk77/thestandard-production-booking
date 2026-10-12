@@ -6,6 +6,24 @@ until 2026-10-01 — see the 2026-10-04 entry). Newest first.
 
 ---
 
+## 2026-10-12 (เช้า) · v1.268.1 DEPLOYED `sha-c49be7c` (07:13) lock ต่อใบ ปุ่มรวมไฟล์ × รอบรายชั่วโมง · stack env ค้างจาก v1.268.0
+
+นัท: "A deploy เลย" — รีวิว video-merge จาก session อื่นสองข้อ
+- **(1) trash gap 5–40 วิ** — แก้ไปแล้วใน v1.261.1 (`aac28b5`): เช็ก `isFolderEmpty(destSub)` ซ้ำก่อน trash + เทสล้มเมื่อถอด (8/9) · ไม่แก้ซ้ำ
+- **(2) ปุ่ม "รวมไฟล์เข้ากล่องนี้" ไม่ถือ lock ของ route รายชั่วโมง** — จริง → v1.268.1 `merge-lock.ts` lock ต่อใบ (ดู CHANGELOG) ·
+  วางแผนเป็น 1.267.1 แต่ v1.268.0 (`357ff32`) ขึ้น main ระหว่างรอ → rebase เป็น 1.268.1 · gate 1173/1173
+- **ก่อนยิงเจอ:** คอนเทนเนอร์รัน `sha-357ff32` (v1.268.0) ตั้งแต่ 11 ต.ค. 23:56 แต่ stack env `IMAGE_TAG` ยังเป็น `sha-c811bef`
+  (UpdateDate 22:51) และไม่มีบันทึก deploy v1.268.0 ที่นี่ · แอปปกติ (1.268.0, health ok) · deploy.py จึงจดจุดถอยเป็น c811bef
+  → แก้มือใน `~/.probook/deploy-state.json` เป็น `sha-357ff32` (+ช่อง `note`) · `rollback.py --check` ยืนยันเป้า 357ff32 schema สะอาด
+- **deploy 07:09:** backup `backup-2026-10-12T000857.sql.gz` ✓ · stack = คอนเทนเนอร์ = c49be7c ตั้งแต่ 07:13:30 ·
+  deploy.py **exit 3** — 502 ช่วงบูต แล้ว URLError ทุกเส้น (Portainer + แอป) 07:21–07:30 จนครบ 20 นาที ·
+  ฝั่งเซิร์ฟเวอร์ไม่ได้ล่ม: คอนเทนเนอร์ Up ต่อเนื่อง RestartCount 0 และ log มีงานวิ่งช่วงนั้น (sound-merge อ่าน Drive 07:24) → น่าจะเป็นเน็ตของเครื่องนี้
+  · ตรวจซ้ำ 11:43: ครบสามเงื่อนไข + `/api/version` 1.268.1 `schemaSync: in-sync` + health ok
+- หลัง deploy: video-merge 5 รอบ `errors=0` (รอบละ ~11–12 นาที — เท่ากับเวลาที่ปุ่มจะถูกบล็อกถ้าใช้ flag เดียวทั้ง route) ·
+  sound-merge 5 รอบ `errors=0` · POP-PIV-261007-02 ซาก "(1)" 123 ชื่อชุดเดิมยังอยู่
+
+---
+
 ## 2026-10-11 (ค่ำ) · offboard phantawat.s@ → ฝัน (atisthan.k@) · v1.267.0 DEPLOYED `sha-c811bef` (22:52) ด่านกล้อง + ผู้กำกับ + สำเนาการ์ด
 
 นัท: "phantawat ของ POD ออกแล้ว โยนให้ Atisthan ได้เลย ตอนนี้ไม่มีใครใหม่" · "ไม่ต้องแจ้งย้อนหลัง ทำสิ่งที่ต้องทำไป"
