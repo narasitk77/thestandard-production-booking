@@ -4007,3 +4007,5 @@ problem and not a deployment problem.
 **ยังรอ:** App Password (SMTP) → ส่ง footage-ready 4 ใบค้าง (LIF-4HR/WLT-NGI/POD-OTH/TSS-WYS-02 ของ 15 ต.ค.) เมื่อนัทสั่ง · re-auth rental-sheet · reconnect Gmail · VPN สำหรับ NAS · `pmset -c sleep 0`
 
 **11:28 — SMTP กลับมา:** นัทส่ง App Password ใหม่ → `deploy.py eb38e93 --set SMTP_PASS=…` (redeploy เดิม, backup `backup-2026-10-19T042459.sql.gz` ก่อน) → `transporter.verify()` ผ่าน + เมลทดสอบถึง narasit.k@ · ค้าง: ส่ง footage-ready 4 ใบของ 15 ต.ค. เมื่อนัทสั่ง go
+
+**11:29–11:31 — ส่ง footage-ready ย้อนหลัง 4 ใบ** (`footage-ready/run?codes=…&dryRun=0`, นัทสั่ง): POD-OTH-261015-01 (3 คน) · WLT-NGI-261015-01 (6) · TSS-WYS-261015-02 (4) · LIF-4HR-261015-01 (5) + admin-digest ทุกใบ, emailError=null · หมายเหตุ: busybox wget ใน `call_internal.py` retry เอง → รอบซ้ำเห็น 409 ทั้งที่รอบแรกส่งไปแล้ว (send-once กันซ้ำ) → ใส่ `--tries=1` แล้ว · NAS agent กลับมาหลังต่อ VPN (11:19) · rental-sheet OAuth รอ code จากนัท
