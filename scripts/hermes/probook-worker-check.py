@@ -798,6 +798,20 @@ def main():
     except Exception as e:
         lines.append(f"⚠️ เช็ก nightly ค้างพังเอง: {str(e)[:80]}")
 
+    # STEP 7 — งาน Hermes ตัวอื่นที่ "เงียบเพราะพัง": rental-sheet-trigger บอก error ซ้ำทุก 6 ชม. เท่านั้น
+    #   (19 ต.ค. 2569: token Google ถูกเพิกถอน 15 ต.ค. → ล้ม 317 รอบติด ส่งสแปมกลบ alert อื่น 4 วัน)
+    #   สถานะจริงอยู่ใน state ของมัน — รายงานตรงนี้ทุกรอบ จนกว่าจะหาย
+    try:
+        rs = json.load(open(os.path.expanduser("~/.hermes/state/rental-sheet/changes.json"), encoding="utf-8"))
+        for key, rec in (rs.get("broken") or {}).items():
+            since = time.strftime("%d/%m %H:%M", time.localtime(rec.get("since") or 0))
+            what = "Google token ถูกเพิกถอน — รัน setup.py --auth-url/--auth-code" if key == "auth" else f"{key} ล่ม"
+            lines.append(f"‼️ rental-sheet-trigger หยุดทำงานตั้งแต่ {since}: {what}")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        lines.append(f"⚠️ อ่านสถานะ rental-sheet ไม่ได้: {str(e)[:80]}")
+
     vstatus, vbody = get_retry("/api/version", timeout=15)
     if vstatus != 200:
         lines.append(f"⚠️ /api/version ตอบ HTTP {vstatus} (คาด 200)")

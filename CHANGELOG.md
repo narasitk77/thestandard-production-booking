@@ -7,6 +7,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed — จองห้องในระบบกลางตั้งแต่ REQUESTED ไม่รอ approve (v1.270.0 · 19 ต.ค. 2569)
+
+นัท: "เปลี่ยน logic จาก Approved แล้วค่อยจองห้อง เป็นจองห้องตั้งแต่ Requested — โปรดิวเซอร์ต้องการล็อกคิวห้องไว้
+ทีม Production ไม่ปฏิเสธคิวอยู่แล้ว แค่พี่ตุ้ยมา assign คนทีหลัง"
+
+- `room-booking-reconcile.ts` + `/api/internal/room-booking/run`: ชุดใบที่ "ควรมีห้อง" = `REQUESTED | ASSIGNED | CONFIRMED`
+  (เดิม CONFIRMED เท่านั้น) · ยกเลิกคิวยังคืนห้องผ่าน `releaseRoomForBooking` เส้นเดิม · at-most-once/manual-hold/CONFLICT ไม่เปลี่ยน
+- ผลข้างเคียงที่ต้องรู้: ใบ REQUESTED ที่ค้างอยู่ (19 ต.ค.: 60 ใบ Studio 1) จะถูกจองทยอยรอบละ `ROOM_BOOKING_RECONCILE_MAX`
+  ต่อชั่วโมง ภายใน `ROOM_BOOKING_RECONCILE_DAYS` (45) วัน — ทุกใบเด้งเข้ากลุ่ม LINE แอดมินของ IT เหมือนการจองปกติ
+- **ต้องย้ายปลายทางด้วย:** พอร์ทัลย้ายโดเมน `service.thestandard.co` → `hub.thestandard.co` (หน้าเก่าขึ้นประกาศ
+  "แจ้งเปลี่ยนที่อยู่เว็บไซต์") ตั้งแต่ ~12 ต.ค. 15:14 → `/api/liff/*` ที่โดเมนเดิมตอบหน้า HTML/405 ระบบจอง/คืนห้อง
+  ไม่ได้เลย 7 วัน (ล้ม=5 ทุกชั่วโมงใน log · 5 ใบยกเลิกแล้วยังถือห้องในระบบเขา) · แก้ที่ env `ROOM_BOOKING_BASE_URL` บน stack
+
+### Fixed — ปฏิทินวนล้มเพราะอีเมลผู้ร่วมงานไม่ใช่อีเมล (v1.270.0)
+
+EVT-EVT-261104-01 ถูกสร้างด้วย `producerEmail = "tbc"` → ตอน approve Google ตอบ `Invalid attendee email.`
+แล้ว reconciler ยิงซ้ำทุก 10 นาที = ล้ม 125 ครั้งใน 2 วัน (18–19 ต.ค.) และ**ไม่มีใครในงานได้ invite เลย**
+- `bookingCalendarAttendees()` (แหล่งความจริงที่เดียวของลิสต์แขก) ตัดค่าที่ไม่ใช่รูปอีเมลทิ้งก่อนส่ง Google
+  → event สร้างได้พร้อมแขกที่เหลือ · เทสต์ใหม่ใน `calendar-attendees.test.ts`
+- ฟอร์มยังรับ "tbc" ในช่อง Producer ได้ตามเดิม (เป็นการตัดสินใจของคนจอง) — แค่ไม่ส่งให้ปฏิทิน
+
+
 ### Changed — ชื่อกล่องไม่เอา "วันที่ X …" ท้ายชื่อตอนมาด้วย (v1.269.0 · 12 ต.ค. 2569)
 
 นัท: WLT-MNW-261012-01 (Morning Wealth ถ่าย 5 วัน 12–16 ต.ค.) กล่องชื่อ "… วันที่ 12 ต.ค. (WLT-MNW-261012-01)" เพราะชื่อกล่องดึงชื่อตอน EP01

@@ -62,10 +62,10 @@ export async function GET(request: NextRequest) {
       roomBookingNo: null,
       // สั่งเจาะจงรหัส = "เอาใบนี้แหละ" จึงไม่กรองสถานะ (ยกเว้นที่ยกเลิกไปแล้ว)
       // — ใช้ตอนทดสอบกับงานที่จบไปแล้ว หรือตามเก็บใบที่ตกหล่น
-      // ส่วนการกวาดตามช่วงวันยังจำกัดที่ CONFIRMED เหมือนเดิม
+      // ส่วนการกวาดตามช่วงวัน = ชุดเดียวกับ reconciler (v1.270: REQUESTED ด้วย ไม่รอ approve)
       ...(codes.length > 0
         ? { bookingCode: { in: codes }, status: { not: 'CANCELLED' } }
-        : { status: 'CONFIRMED', shootDate: { gte: from, lt: to } }),
+        : { status: { in: ['REQUESTED', 'ASSIGNED', 'CONFIRMED'] }, shootDate: { gte: from, lt: to } }),
     },
     // select ชุดเดียวกับที่ตัวประกอบ payload ต้องการ — กันสองฝั่งหลุดจากกัน
     select: ROOM_BOOKING_SELECT,

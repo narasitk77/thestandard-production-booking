@@ -138,3 +138,11 @@ test('v1.233 ไม่มีทั้งครู Producer และ Co-Pro = �
     [],
   )
 })
+
+test('v1.270 — ค่าที่ไม่ใช่อีเมล ("tbc") ถูกตัดทิ้ง ไม่ส่งให้ Google (เคสวนล้ม EVT-EVT-261104-01)', () => {
+  assert.deepEqual(
+    bookingCalendarAttendees({ assignedEmails: ['tbc', 'cam1@thestandard.co', 'ชื่อคน'], producerEmail: 'tbc', coProducerEmail: ' phoemsiri.p@thestandard.co ', outletCode: 'EVT' }),
+    ['cam1@thestandard.co', 'phoemsiri.p@thestandard.co'],
+  )
+  assert.deepEqual(bookingCalendarAttendees({ producerEmail: 'tbc' }), [])
+})

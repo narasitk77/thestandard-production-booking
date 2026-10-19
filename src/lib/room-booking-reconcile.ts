@@ -117,7 +117,10 @@ export async function reconcileRoomBookings(opts: {
       shootDate: { gte: from, lt: to },
       OR: [
         { roomBookingNo: { not: null } },
-        { deletedAt: null, status: 'CONFIRMED' },
+        // v1.270 — จองห้องตั้งแต่ REQUESTED ไม่รอ approve (นัท 19 ต.ค. 2569: โปรดิวเซอร์
+        // ต้องการล็อกห้องทันทีที่ขอคิว ทีม Production ไม่ปฏิเสธคิวอยู่แล้ว แค่ assign คนทีหลัง)
+        // ใบที่ถูกยกเลิกยังคืนห้องผ่าน releaseRoomForBooking เส้นเดิม
+        { deletedAt: null, status: { in: ['REQUESTED', 'ASSIGNED', 'CONFIRMED'] } },
       ],
     },
     select: {

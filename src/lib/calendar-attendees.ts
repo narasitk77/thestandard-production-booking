@@ -34,12 +34,17 @@ export interface CalendarAttendeeInput {
  * ลิสต์แขกสุดท้าย: ทีมงาน + Producer + Co-Producer (+ Director ถ้าเป็น AGN)
  * dedupe แบบไม่สนตัวพิมพ์ และคงลำดับที่เจอครั้งแรกไว้ (ทีมงานมาก่อนเสมอ)
  */
+// v1.270 — ค่าที่ไม่ใช่อีเมล ("tbc", ชื่อคน) ห้ามหลุดไปถึง Google: Calendar ตอบ
+// "Invalid attendee email." แล้ว reconciler (10 นาที) ยิงซ้ำไม่รู้จบ — EVT-EVT-261104-01
+// producerEmail="tbc" ล้ม 125 ครั้งใน 2 วัน (18–19 ต.ค. 2569) โดยไม่มีใครได้ invite เลย
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export function bookingCalendarAttendees(input: CalendarAttendeeInput): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   const add = (raw: string | null | undefined) => {
     const email = (raw || '').trim()
-    if (!email) return
+    if (!email || !EMAIL_RE.test(email)) return
     const key = email.toLowerCase()
     if (seen.has(key)) return
     seen.add(key)
