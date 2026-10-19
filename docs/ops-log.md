@@ -3982,3 +3982,26 @@ problem and not a deployment problem.
   spine as this app.
 
 ---
+
+## 2026-10-19 — routine outage 15–19 ต.ค. + v1.270.0 (room from REQUESTED · calendar guard · hub.thestandard.co)
+
+นัท: "ติดงาน ติดซ้อมวิ่งไม่เข้ามา Routine หลายวันเป็นไงบ้าง ถ้าพังซ่อมด้วย" — ตรวจ 5 กลุ่มงานตั้งเวลาแล้วเจอของพังซ้อนกัน:
+
+**ต้นตอร่วม 15 ต.ค. บ่าย: บัญชี Google narasit.k@ ถูกรีเซ็ตรหัส** (วันเดียวกับ rclone re-auth)
+- SMTP ของแอปตาย 15:51 BKK — `535 Username and Password not accepted` 4,300+ ครั้ง → ไม่มีเมลออกเลย 4 วัน
+  (digest, footage-ready 4 ใบ 15 ต.ค. ส่งไม่ได้จน agedOut, QU reminder, shoot-review, รายงาน worker) · **รอ App Password ใหม่จากนัท** → `deploy.py <sha> --set SMTP_PASS=…`
+- Hermes `rental-sheet-trigger` `invalid_grant` ตั้งแต่ 13:10 → ล้ม 317 รอบ สแปม Discord ทุก 10 นาที · รอนัท re-auth (`setup.py --auth-url/--auth-code`)
+- Gmail MCP connector หลุด
+
+**คนละต้นตอ:** พอร์ทัลห้อง `service.thestandard.co` → `hub.thestandard.co` (~12 ต.ค. 15:14) หน้าเก่าขึ้นประกาศย้าย → `/api/liff/*` ตอบ HTML/405
+→ จอง/คืนห้องไม่ได้ 7 วัน (`[room-booking] … ล้ม=5` ทุกชั่วโมง · 5 ใบ CANCELLED ยังถือห้อง BK-0122/0184/0188/0341/0371 · 7 ใบ CONFIRMED ค้าง UNKNOWN)
+· ปฏิทินวนล้ม 125 ครั้ง (EVT-EVT-261104-01 producerEmail="tbc") · trash-watch ล้ม 71 รอบ (backlog ~800 รายการทำไม่จบ 14 นาที → token ไม่เลื่อน → เริ่มใหม่ทุกรอบ)
+· แมคหลับ 150–300 ครั้ง/วัน + DNS ยังไม่มาตอน DarkWake → Hermes ล้มเป็นชุดตอนตื่น, nightly ข้าม 17–18 ต.ค.
+
+**ทำ:**
+- v1.270.0 `eb38e93` DEPLOYED 10:19 BKK (`deploy.py eb38e93 --set ROOM_BOOKING_BASE_URL=https://hub.thestandard.co`):
+  room candidates = REQUESTED|ASSIGNED|CONFIRMED (คำสั่งนัท: โปรดิวเซอร์ล็อกห้องตั้งแต่ขอคิว) · `bookingCalendarAttendees` ตัดค่าที่ไม่ใช่อีเมล · test 1175/1175 tsc 0
+- Hermes: `rental-sheet-trigger.py` + `probook-trash-watch.py` รอ DNS 60 วิ, บอก error ซ้ำทุก 6 ชม., trash-watch ทำ backlog ต่อข้ามรอบ (seen) · worker-check STEP 7 รายงาน rental-sheet ที่หยุด · ฆ่า node ค้าง 3 ตัวในคอนเทนเนอร์
+- GDH (PP-26-034) แผน 14 ต.ค. apply ตามคำสั่ง go: ย้าย WAV 24 ไฟล์เข้า EP ที่ถูก (manifest `footage-check/audit-2026-10-14/gdh/fix/plan_audio.applied.*`) + ทิ้งซ้ำ (plan_dups / plan_quarantine)
+
+**ยังรอ:** App Password (SMTP) → ส่ง footage-ready 4 ใบค้าง (LIF-4HR/WLT-NGI/POD-OTH/TSS-WYS-02 ของ 15 ต.ค.) เมื่อนัทสั่ง · re-auth rental-sheet · reconnect Gmail · VPN สำหรับ NAS · `pmset -c sleep 0`
