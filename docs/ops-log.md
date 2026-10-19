@@ -4005,3 +4005,5 @@ problem and not a deployment problem.
 - GDH (PP-26-034) แผน 14 ต.ค. apply ตามคำสั่ง go: ย้าย WAV 24 ไฟล์เข้า EP ที่ถูก (manifest `footage-check/audit-2026-10-14/gdh/fix/plan_audio.applied.*`) + ทิ้งซ้ำ (plan_dups / plan_quarantine)
 
 **ยังรอ:** App Password (SMTP) → ส่ง footage-ready 4 ใบค้าง (LIF-4HR/WLT-NGI/POD-OTH/TSS-WYS-02 ของ 15 ต.ค.) เมื่อนัทสั่ง · re-auth rental-sheet · reconnect Gmail · VPN สำหรับ NAS · `pmset -c sleep 0`
+
+**11:28 — SMTP กลับมา:** นัทส่ง App Password ใหม่ → `deploy.py eb38e93 --set SMTP_PASS=…` (redeploy เดิม, backup `backup-2026-10-19T042459.sql.gz` ก่อน) → `transporter.verify()` ผ่าน + เมลทดสอบถึง narasit.k@ · ค้าง: ส่ง footage-ready 4 ใบของ 15 ต.ค. เมื่อนัทสั่ง go
