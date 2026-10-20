@@ -4015,3 +4015,4 @@ problem and not a deployment problem.
 - NAS: VPN ต่อจากเครื่อง (`scutil --nc start`), agent ค้างใน SMB เก่า → unmount force + remount + kickstart
 - รัน routine ด้วยมือ: Hermes 4 งาน ok · nightly-check ok (13:30) · พรอด: calendar reconcile 120 ok, room reconcile (3 ใบ CONFLICT จริง), prep-folders 2 ใบ, footage-ready sweep, mix-calendar, sound/video-merge, shoot-review, backup
 - ข้ามคืน 19→20 ต.ค. หลัง v1.270.0: จองห้องสำเร็จ 39 ใบ คืนห้องค้าง 4 ใบ ชน 11 ครั้ง (Pod 1 มีคนจองจริง) · SMTP ปกติ (EAUTH 0) · shoot-review 10:00 ส่ง 8 ฉบับ · trash-watch เก็บ backlog หมดแล้ว (seen 1146)
+- 14:30 Hermes job `probook-vpn-keepalive` (*/5) ต่อ VPN + mount NAS ผ่าน `open smb://` อัตโนมัติ (osascript mount ค้างหลัง VPN ต่อใหม่) · ชีท "คลังฟุตเทจ The Secret Sauce 2023–2026" ส่งนัทแล้ว (1G5dUDqusa3b6IA2K1XxMjX18_BXb-3UME1xpxBlWAK8) — 66,462 ไฟล์ / 2,720 ชม. / 75.8 TB แยก 3 หมวด
