@@ -28,7 +28,9 @@ import urllib.error
 import urllib.request
 
 ENV_FILE = os.path.expanduser('~/.probook/nas-agent.env')
-SKIP_DIRS_PREFIX = '.'
+# '.' = Finder/AppleDouble junk · '@' = Synology @eaDir thumbnails · '#' = #recycle / #snapshot (only visible when
+# the scan runs ON the NAS — DSM mode, 2026-10-20; the SMB client never showed these)
+SKIP_DIRS_PREFIX = ('.', '@', '#')
 MAX_FILES_PER_FOLDER = 6000
 
 
@@ -127,6 +129,10 @@ def main():
     env = {**load_env(), **{k: v for k, v in os.environ.items() if k.startswith(('NAS_', 'PROBOOK_'))}}
     mount = env.get('NAS_MOUNT') or '/Volumes/production team'
     smb_url = env.get('NAS_SMB_URL') or 'smb://192.168.21.220/production%20team'
+    # DSM mode (2026-10-20): the agent runs ON the Synology via Task Scheduler, reading the share's local
+    # path (/volume1/production team) — nothing to mount, no VPN, no macOS TCC. NAS_LOCAL=1 in nas-agent.env.
+    if env.get('NAS_LOCAL') == '1':
+        globals()['ensure_mounted'] = lambda m, _u: None if os.path.isdir(m) else f'{m} is not a directory on this NAS'
     url = (env.get('PROBOOK_URL') or 'https://probook.thestandard.co').rstrip('/') + '/api/internal/nas-manifest'
     secret = env.get('NAS_SECRET', '')
     if not secret:

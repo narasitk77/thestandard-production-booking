@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed — NAS manifest agent รันบน Synology ได้ (DSM mode)
+
+- `scripts/nas_manifest_agent.py`: `NAS_LOCAL=1` ใน nas-agent.env = อ่านแชร์จาก path ในเครื่อง NAS (`/volume1/production team`) ไม่ต้อง mount/VPN/TCC ·
+  ข้ามโฟลเดอร์ `@eaDir` `#recycle` `#snapshot` ที่เห็นเฉพาะตอนรันบน NAS · ติดตั้งผ่าน DSM Task Scheduler ทุก 10 นาที (20 ต.ค. 2569 — ตัวสแกนบนแมคจากบ้านผ่าน VPN อ่านได้ไม่ครบ/หลุดบ่อย)
+
 ### Changed — จองห้องในระบบกลางตั้งแต่ REQUESTED ไม่รอ approve (v1.270.0 · 19 ต.ค. 2569)
 
 นัท: "เปลี่ยน logic จาก Approved แล้วค่อยจองห้อง เป็นจองห้องตั้งแต่ Requested — โปรดิวเซอร์ต้องการล็อกคิวห้องไว้
