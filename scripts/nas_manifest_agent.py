@@ -27,7 +27,9 @@ import sys
 import urllib.error
 import urllib.request
 
-ENV_FILE = os.path.expanduser('~/.probook/nas-agent.env')
+# env file: next to this script first (DSM mode — Task Scheduler runs it from its own folder), else ~/.probook
+_ENV_CANDIDATES = [os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nas-agent.env'), os.path.expanduser('~/.probook/nas-agent.env')]
+ENV_FILE = next((p for p in _ENV_CANDIDATES if os.path.exists(p)), _ENV_CANDIDATES[-1])
 # '.' = Finder/AppleDouble junk · '@' = Synology @eaDir thumbnails · '#' = #recycle / #snapshot (only visible when
 # the scan runs ON the NAS — DSM mode, 2026-10-20; the SMB client never showed these)
 SKIP_DIRS_PREFIX = ('.', '@', '#')
