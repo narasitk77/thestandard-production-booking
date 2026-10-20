@@ -262,6 +262,7 @@ def log_scan_report(enabled_keys, dead_keys=()):
 NAS_LOG = "/tmp/probook-nas-agent.log"
 NAS_ARCHIVE = os.path.expanduser("~/.hermes/state/probook/nas-agent.log")
 NAS_STATE = os.path.expanduser("~/.hermes/state/probook/nas-agent.json")
+RENTAL_STATE = os.path.expanduser("~/.hermes/state/rental-sheet/changes.json")  # STEP 7
 NAS_AGENT_INTERVAL_MIN = 10
 AGENT_SILENT_MIN = 45          # log ไม่ขยับเกินนี้ = agent อาจไม่ได้เด้ง (interval 10 นาที)
 NAS_UNMOUNTED_ALERT_HOURS = 48  # ไม่ mount ต่อเนื่องนานกว่านี้ = manifest ฝั่ง server ค้าง
@@ -285,6 +286,10 @@ def _write_json(path, data):
 
 def nas_agent_report():
     """-> list บรรทัดรายงาน · ว่าง = agent ปกติ (หรือไม่ได้ติดตั้ง)"""
+    # 20 ต.ค. 2569: ตัวสแกนย้ายไปรันบน DSM (Task Scheduler) — log บนแมคเลิกเดิน ไม่ใช่ agent ตาย
+    # ความสดของ manifest ฝั่ง server ถูกเฝ้าโดย notify-relay อยู่แล้ว ("ตัวสแกน NAS เงียบ" ทุก 12 ชม.)
+    if os.path.exists(os.path.expanduser("~/.hermes/state/probook/nas-agent-mode.dsm")):
+        return []
     lines = []
     st = _read_json(NAS_STATE, {})
     now = time.time()
@@ -802,7 +807,7 @@ def main():
     #   (19 ต.ค. 2569: token Google ถูกเพิกถอน 15 ต.ค. → ล้ม 317 รอบติด ส่งสแปมกลบ alert อื่น 4 วัน)
     #   สถานะจริงอยู่ใน state ของมัน — รายงานตรงนี้ทุกรอบ จนกว่าจะหาย
     try:
-        rs = json.load(open(os.path.expanduser("~/.hermes/state/rental-sheet/changes.json"), encoding="utf-8"))
+        rs = json.load(open(RENTAL_STATE, encoding="utf-8"))
         for key, rec in (rs.get("broken") or {}).items():
             since = time.strftime("%d/%m %H:%M", time.localtime(rec.get("since") or 0))
             what = "Google token ถูกเพิกถอน — รัน setup.py --auth-url/--auth-code" if key == "auth" else f"{key} ล่ม"
@@ -852,7 +857,7 @@ def selftest():
         del os.environ[k]
     g.update(STATE=P("state.json"), OUTBOX=P("outbox.json"), HERMES_JOBS=P("jobs.json"),
              ENV_FILE=P("probook.env"), NAS_LOG=P("nas.log"), NAS_ARCHIVE=P("nas-archive.log"),
-             NAS_STATE=P("nas.json"), FOOTAGE_ROOT_STATE=P("footage-root.json"),
+             NAS_STATE=P("nas.json"), FOOTAGE_ROOT_STATE=P("footage-root.json"), RENTAL_STATE=P("rental.json"),
              CLAUDE_LOGS=[P("main.log"), P("main1.log")], BASE="https://selftest.invalid",
              RETRY_DELAYS=())
     with open(ENV_FILE, "w") as f:
