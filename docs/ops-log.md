@@ -4009,3 +4009,9 @@ problem and not a deployment problem.
 **11:28 — SMTP กลับมา:** นัทส่ง App Password ใหม่ → `deploy.py eb38e93 --set SMTP_PASS=…` (redeploy เดิม, backup `backup-2026-10-19T042459.sql.gz` ก่อน) → `transporter.verify()` ผ่าน + เมลทดสอบถึง narasit.k@ · ค้าง: ส่ง footage-ready 4 ใบของ 15 ต.ค. เมื่อนัทสั่ง go
 
 **11:29–11:31 — ส่ง footage-ready ย้อนหลัง 4 ใบ** (`footage-ready/run?codes=…&dryRun=0`, นัทสั่ง): POD-OTH-261015-01 (3 คน) · WLT-NGI-261015-01 (6) · TSS-WYS-261015-02 (4) · LIF-4HR-261015-01 (5) + admin-digest ทุกใบ, emailError=null · หมายเหตุ: busybox wget ใน `call_internal.py` retry เอง → รอบซ้ำเห็น 409 ทั้งที่รอบแรกส่งไปแล้ว (send-once กันซ้ำ) → ใส่ `--tries=1` แล้ว · NAS agent กลับมาหลังต่อ VPN (11:19) · rental-sheet OAuth รอ code จากนัท
+
+## 2026-10-20 — ปิดท้าย outage: rental token ต่อแล้ว, NAS กลับมาผ่าน VPN, รัน routine ทุกตัวตามคำสั่ง
+- 13:35 `~/.hermes/google_token.json` ใหม่ (OAuth ผ่าน loopback listener :17123 + Chrome ของนัท) → `rental-sheet-trigger` กลับมาทำงาน ตามเก็บ changes ตั้งแต่ 15 ต.ค. 13:10
+- NAS: VPN ต่อจากเครื่อง (`scutil --nc start`), agent ค้างใน SMB เก่า → unmount force + remount + kickstart
+- รัน routine ด้วยมือ: Hermes 4 งาน ok · nightly-check ok (13:30) · พรอด: calendar reconcile 120 ok, room reconcile (3 ใบ CONFLICT จริง), prep-folders 2 ใบ, footage-ready sweep, mix-calendar, sound/video-merge, shoot-review, backup
+- ข้ามคืน 19→20 ต.ค. หลัง v1.270.0: จองห้องสำเร็จ 39 ใบ คืนห้องค้าง 4 ใบ ชน 11 ครั้ง (Pod 1 มีคนจองจริง) · SMTP ปกติ (EAUTH 0) · shoot-review 10:00 ส่ง 8 ฉบับ · trash-watch เก็บ backlog หมดแล้ว (seen 1146)
