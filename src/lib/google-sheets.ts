@@ -546,19 +546,27 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
     // the rest of the patch still goes out.
     const nextCode = fields.productionId === undefined ? '' : String(fields.productionId).trim()
     if (nextCode && nextCode !== bookingCode.trim()) {
-      try {
-        const prevCell = await sheets.spreadsheets.values.get({
-          spreadsheetId,
-          range: `${SHEET_TAB}!${colLetter(COL.previousIds)}${rowIndex}`,
-        })
-        const existing = String(prevCell.data.values?.[0]?.[0] ?? '')
-        updates.push({
-          range: `${SHEET_TAB}!${colLetter(COL.previousIds)}${rowIndex}`,
-          values: [[appendPreviousId(existing, bookingCode, nextCode)]],
-        })
-      } catch (e) {
-        console.error(`updateBookingRow: could not read Previous IDs for "${bookingCode}" — column left as is`, e)
+      // The live tab's grid only grows when something writes past it: until the
+      // first append after deploy runs ensureSheetTab, col AS does not exist and
+      // both reading AS<row> and a batchUpdate that names it fail with 400
+      // "exceeds grid limits" (verified 2026-10-21 on a 44-column copy). Ensure
+      // the header row first — idempotent, and code rewrites are rare.
+      if (!tabEnsured) {
+        await ensureSheetTab(sheets, spreadsheetId)
+        tabEnsured = true
       }
+      // No try/catch on purpose: once col A is overwritten the old code cannot be
+      // recovered (the row is found by it), so a failed read must fail the whole
+      // patch → 'error' → regenerate aborts with the DB untouched and can retry.
+      const prevCell = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${SHEET_TAB}!${colLetter(COL.previousIds)}${rowIndex}`,
+      })
+      const existing = String(prevCell.data.values?.[0]?.[0] ?? '')
+      updates.push({
+        range: `${SHEET_TAB}!${colLetter(COL.previousIds)}${rowIndex}`,
+        values: [[appendPreviousId(existing, bookingCode, nextCode)]],
+      })
     }
     // always bump "Updated At"
     updates.push({
