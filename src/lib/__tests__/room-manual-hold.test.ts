@@ -146,3 +146,37 @@ test('ข้อมูลเวลาพังไม่ทำให้ล่ม',
   assert.equal(findManualHold([row({ endAt: 'ไม่ใช่เวลา' })], T, [OWNER]), null)
   assert.equal(findManualHold([row()], { ...T, startAt: 'พัง' }, [OWNER]), null)
 })
+
+// v1.271 — คนในทีมเดียวกัน (ไม่ใช่โปรดิวเซอร์/คนเปิดใบ) จองมือด้วย **ชื่องานเดียวกัน**
+const EVT_TITLE = 'Q2 - ลงเสียง Voice Over | ECONOMIC FORUM 2026'
+const evtRow = (o: any = {}) => row({ roomId: 12, bookedBy: 'Areeya Nirapai', email: 'areeya.n@thestandard.co',
+  title: EVT_TITLE, startAt: '2026-10-22T09:30:00.000Z', endAt: '2026-10-22T11:00:00.000Z', ...o })
+const EVT_T = { roomId: 12, startAt: '2026-10-22T09:30:00.000Z', endAt: '2026-10-22T11:00:00.000Z' }
+const EVT_OWNERS = ['ratchanon.k@thestandard.co', 'event@thestandard.co']
+
+test('เคสจริง EVT-EVT-261022-01: ทีม Event จองมือชื่องานเดียวกัน เวลาตรง → รับว่าห้องได้แล้ว', () => {
+  const h = findManualHold([evtRow()], EVT_T, EVT_OWNERS, '[PB-EVT-EVT-261022-01]', ['EVT · ' + EVT_TITLE])!
+  assert.equal(h.bookingNo, 'BK-9')
+  assert.equal(h.bookedBy, 'Areeya Nirapai')
+})
+
+test('ชื่องานเดียวกันแต่ครอบไม่หมดช่วงถ่าย → ไม่รับ', () => {
+  const short = evtRow({ endAt: '2026-10-22T10:00:00.000Z' })
+  assert.equal(findManualHold([short], EVT_T, EVT_OWNERS, null, ['EVT · ' + EVT_TITLE]), null)
+})
+
+test('ชื่อไม่ตรงและอีเมลไม่ตรง → ชนของจริง', () => {
+  const other = evtRow({ title: 'ประชุมทีมขาย' })
+  assert.equal(findManualHold([other], EVT_T, EVT_OWNERS, null, ['EVT · ' + EVT_TITLE]), null)
+})
+
+test('ชื่องานสั้นเกินไปไม่ใช้จับคู่ (กันจับใบคนอื่นด้วยคำว่า "Test")', () => {
+  const short = evtRow({ title: 'Test' })
+  assert.equal(findManualHold([short], EVT_T, EVT_OWNERS, null, ['EVT · Test']), null)
+})
+
+test('ใบที่โปรบุ๊คจองให้งานอื่นชื่อเดียวกัน (มี marker) ไม่นับผ่านทางชื่อ', () => {
+  const pb = evtRow({ isProbook: true, title: '[PB-EVT-EVT-261029-01] EVT · ' + EVT_TITLE })
+  assert.equal(findManualHold([pb], EVT_T, EVT_OWNERS, null, ['EVT · ' + EVT_TITLE]), null)
+})
+

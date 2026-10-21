@@ -164,7 +164,8 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     const wantEnd = bangkokToUtcIso(p0.endDate, p0.endTime)
     if (wantStart && wantEnd) {
       const hold = findManualHold(month, { roomId, startAt: wantStart, endAt: wantEnd },
-                                  [b.producerEmail, b.createdByEmail], roomBookingMarker(code))
+                                  [b.producerEmail, b.createdByEmail], roomBookingMarker(code),
+                                  [p0.title.replace(roomBookingMarker(code), '').trim()])   // v1.271 ชื่องานเดียวกัน
       if (hold) {
         // เขียน **เฉพาะตอนสถานะเปลี่ยนจริง** — worker เดินทุกชั่วโมงและสภาพนี้นิ่ง
         // (คนจองห้องเองไว้แล้ว) ถ้าเขียนทุกรอบจะได้ audit ~48 แถว/วัน ต่อใบตลอดไป

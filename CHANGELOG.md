@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.271.0] — 2026-10-21
+
+### Fixed — ใบจองมือ "ชื่องานเดียวกัน" ของคนในทีมนับเป็นห้องของงานนี้ (ไม่ใช่ CONFLICT)
+
+- `findManualHold` รับ `ownerTitles`: ใบในพอร์ทัลที่ไม่ใช่ของโปรบุ๊ค ชื่อตรงกับชื่องานทั้งชื่อ (มี/ไม่มีคำนำหน้า outlet) และครอบช่วงถ่ายทั้งช่วง
+  = ห้องได้แล้ว → สถานะ SKIPPED manual-hold เหมือนกรณีอีเมลตรง · ชื่อสั้นกว่า 8 ตัวอักษรไม่นับ · `room-booking-sync` และ dry-run ของ reconcile ส่งค่าเดียวกัน
+- เคสจริง: EVT-EVT-261022-01 / EVT-EVT-261028-01 (Pod 1 16:30–18:00) ทีม Event เปิดใบด้วย event@ แต่ areeya.n@ จองห้องเองด้วยชื่องานเดียวกัน
+  → ป้ายแดง "ห้องไม่ว่าง" + ลองใหม่ทุก 6 ชม. บนงานที่ห้องถูกกันไว้ถูกต้องแล้ว
+
 ### Changed — NAS manifest agent รันบน Synology ได้ (DSM mode)
 
 - `scripts/nas_manifest_agent.py`: `NAS_LOCAL=1` ใน nas-agent.env = อ่านแชร์จาก path ในเครื่อง NAS (`/volume1/production team`) ไม่ต้อง mount/VPN/TCC ·

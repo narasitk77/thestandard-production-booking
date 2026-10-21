@@ -630,17 +630,36 @@ export function findManualHold(
   ownerEmails: Array<string | null | undefined>,
   /** marker ของงานนี้เอง — ถ้ามีใบของตัวเองอยู่แล้วต้องไม่เอามานับเป็น "คนอื่นกันไว้ให้" */
   selfMarker?: string | null,
+  /**
+   * v1.271 — ชื่องานนี้ (เช่น "EVT · Q2 - ลงเสียง Voice Over | ECONOMIC FORUM 2026")
+   * ใบจองมือที่ **ชื่อตรงกับงานนี้ทั้งชื่อ** นับเป็นของงานนี้แม้คนจองไม่ใช่โปรดิวเซอร์/คนเปิดใบ
+   * เคสจริง EVT-EVT-261022-01 / -261028-01 (21 ต.ค. 2569): ทีม Event เปิดใบด้วยกล่องกลาง
+   * event@ โปรดิวเซอร์ ratchanon.k@ แต่คนจอง Pod 1 ในพอร์ทัลคือ areeya.n@ ด้วยชื่องาน
+   * เดียวกันเป๊ะและเวลาตรงเป๊ะ → ระบบตีเป็น CONFLICT ป้ายแดง + ลองใหม่ทุก 6 ชม. ไม่มีวันสำเร็จ
+   * ชื่อสั้น ๆ (< 8 ตัวอักษร) ไม่นับ กัน "Test"/"ถ่าย" ไปจับใบคนอื่น
+   */
+  ownerTitles?: Array<string | null | undefined>,
 ): ManualHold | null {
   const owners = new Set(
     ownerEmails.filter(Boolean).map(e => String(e).trim().toLowerCase()).filter(e => e.includes('@')),
   )
-  if (!owners.size) return null
+  const normTitle = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase()
+  const titles = new Set(
+    (ownerTitles || []).filter(Boolean).flatMap(x => {
+      const n = normTitle(String(x))
+      // พอร์ทัลมักไม่มีคำนำหน้า outlet ("EVT · ") — รับทั้งแบบมีและไม่มี
+      return [n, n.replace(/^[a-z0-9]{2,4} · /, '')]
+    }).filter(n => n.length >= 8),
+  )
+  if (!owners.size && !titles.size) return null
   const s = Date.parse(t.startAt), e = Date.parse(t.endAt)
   if (!Number.isFinite(s) || !Number.isFinite(e) || !(s < e)) return null
 
   const mine = rows.filter(r => {
     if (!r.live || r.roomId !== t.roomId) return false
-    if (!r.email || !owners.has(r.email.trim().toLowerCase())) return false
+    const byEmail = !!r.email && owners.has(r.email.trim().toLowerCase())
+    const byTitle = !r.isProbook && !!r.title && titles.has(normTitle(r.title))
+    if (!byEmail && !byTitle) return false
     if (!r.startAt || !r.endAt) return false
     if (selfMarker && (r.title || '').includes(selfMarker)) return false
     const rs = Date.parse(r.startAt), re = Date.parse(r.endAt)

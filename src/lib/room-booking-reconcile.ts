@@ -141,9 +141,10 @@ export async function reconcileRoomBookings(opts: {
     const startAt = bangkokToUtcIso(p.startDate, p.startTime)
     const endAt = bangkokToUtcIso(p.endDate, p.endTime)
     if (!startAt || !endAt) return null
+    const marker = roomBookingMarker(bk.bookingCode || bk.id)
     const hold = findManualHold(rows, { roomId: p.roomId, startAt, endAt },
-                                [bk.producerEmail, bk.createdByEmail],
-                                roomBookingMarker(bk.bookingCode || bk.id))
+                                [bk.producerEmail, bk.createdByEmail], marker,
+                                [String(p.title || '').replace(marker, '').trim()])   // v1.271 ชื่องานเดียวกัน
     return hold ? (hold.bookedBy || 'มีคน') : null
   }
 
