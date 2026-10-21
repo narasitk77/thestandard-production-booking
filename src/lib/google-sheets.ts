@@ -27,7 +27,7 @@ import { getDriveLink } from './drive-links'
 const getSheetId = getProducerDashboardSheetId
 const SHEET_TAB = getBookingsTabName()
 
-// 35 columns. PD/DIR are nicknames (match the rest of the Dashboard); the
+// 45 columns (A–AS). PD/DIR are nicknames (match the rest of the Dashboard); the
 // *Email columns keep the canonical id so Airtable can join on either.
 // PD Phone is filled only for non-Content-Agency outlets (free-text producer).
 const HEADERS = [
@@ -60,6 +60,13 @@ const HEADERS = [
   // same value the calendar description carries, not a second source of truth.
   'Equipment Note', 'Rental Gear Note', 'Camera Count', 'Mic Count',
   'Van Count', 'Special Equipment', 'Agency Ref', 'Block Shot', 'Itinerary',
+  // Previous IDs (col AS, append-only) — every Production ID this booking had before
+  // a regenerate / move-outlet rewrote col A in place, oldest first, comma-joined.
+  // Without it the old code survives only in audit_logs (90 days), so PMDC's daily
+  // sync sees a brand-new booking and a vanished one instead of one renamed booking
+  // (case PM-PMG-260817-01 → NWS-TWD, 2026-08-06). Written ONLY by updateBookingRow
+  // when productionId changes — never by hand, never on create.
+  'Previous IDs',
 ]
 
 // 1-indexed column positions for partial updates.
@@ -100,6 +107,8 @@ const COL = {
   agencyRef: 42,
   blockShot: 43,
   itinerary: 44,
+  // Col AS — maintained automatically by updateBookingRow when col A changes.
+  previousIds: 45,
 } as const
 
 /**
@@ -410,6 +419,7 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
       booking.agencyRef || '', // Agency Ref
       booking.isBlockShot ? 'Yes' : '', // Block Shot
       booking.itinerary || '', // Itinerary
+      '', // Previous IDs — a new booking has none (filled when col A is rewritten)
     ]
 
     // ทุก request ที่กินโควตาต้องอยู่ **ในคิว** รวมถึง ensureSheetTab
@@ -443,6 +453,24 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
  * so it now returns a status. Legacy callers that ignore the return are unaffected.
  */
 export type SheetUpdateResult = 'updated' | 'not-found' | 'skipped' | 'error'
+
+/**
+ * Previous IDs cell (col AS) after a Production ID rewrite: keep the existing chain
+ * (oldest first), add the code being replaced, never list the code the row now
+ * carries (a regenerate back to an older code must not claim it as "previous"),
+ * no duplicates. Pure — exported for tests.
+ */
+export function appendPreviousId(existing: string | null | undefined, oldCode: string, newCode: string): string {
+  const oldC = (oldCode || '').trim()
+  const newC = (newCode || '').trim()
+  const out: string[] = []
+  for (const raw of String(existing || '').split(',')) {
+    const code = raw.trim()
+    if (code && code !== newC && !out.includes(code)) out.push(code)
+  }
+  if (oldC && oldC !== newC && !out.includes(oldC)) out.push(oldC)
+  return out.join(', ')
+}
 
 export async function updateBookingRow(bookingCode: string, fields: Partial<{
   /** v1.109 — rewrite col A (Production ID). Row is found by the OLD code passed
@@ -511,6 +539,26 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
         range: `${SHEET_TAB}!${colLetter(col)}${rowIndex}`,
         values: [[String(value)]],
       })
+    }
+    // Col A rewritten → remember the code being replaced in Previous IDs (col AS).
+    // Read-then-append so the whole chain survives repeated moves. If the read
+    // fails we skip only this column (never overwrite the chain with a guess);
+    // the rest of the patch still goes out.
+    const nextCode = fields.productionId === undefined ? '' : String(fields.productionId).trim()
+    if (nextCode && nextCode !== bookingCode.trim()) {
+      try {
+        const prevCell = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: `${SHEET_TAB}!${colLetter(COL.previousIds)}${rowIndex}`,
+        })
+        const existing = String(prevCell.data.values?.[0]?.[0] ?? '')
+        updates.push({
+          range: `${SHEET_TAB}!${colLetter(COL.previousIds)}${rowIndex}`,
+          values: [[appendPreviousId(existing, bookingCode, nextCode)]],
+        })
+      } catch (e) {
+        console.error(`updateBookingRow: could not read Previous IDs for "${bookingCode}" — column left as is`, e)
+      }
     }
     // always bump "Updated At"
     updates.push({
