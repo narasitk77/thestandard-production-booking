@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.273.0] — 2026-10-22
+
+### Fixed — ล็อกอินหมดอายุกลางฟอร์มจอง: "Unauthorized" แล้วใบไม่เข้าระบบ
+
+- ต้นเหตุ: session JWT อายุ 7 วันนับจาก**ตอนล็อกอิน**ตายตัว — ไม่มีใครเรียก `/api/auth/session` และ `getServerSession` ใน App Router เขียน cookie ไม่ได้
+  คนที่เปิดฟอร์มค้างข้ามวันที่ 7 กด Confirm & Submit ได้ 401 + ข้อความ "Unauthorized" เฉย ๆ (เคสจริง: ใบ Shark Ninja ของ LIFE 28 ต.ค. ไม่เข้าระบบ)
+- `SessionKeepAlive` (mount ทุกหน้าที่มี session): เรียก `/api/auth/session` ตอนเปิดหน้าและตอนกลับมาที่แท็บ อย่างมากชั่วโมงละครั้ง
+  → next-auth ออก cookie ใหม่อายุ 7 วันนับจากตอนนั้น = นับจากการใช้งานล่าสุด
+- `BookingWizard`: 401 ตอนส่ง → ข้อความ "ล็อกอินหมดอายุ ข้อมูลยังอยู่ครบ" + ลิงก์เข้าสู่ระบบในแท็บใหม่ แล้วกลับมากดส่งซ้ำ (ไม่ทิ้งข้อมูลในฟอร์ม · ร่าง localStorage ยังอยู่)
+
 ## [1.272.0] — 2026-10-21
 
 ### Added — คอลัมน์ "Previous IDs" ในแท็บ Bookings (col AS) เก็บรหัสเดิมเมื่อรหัสงานถูกเปลี่ยนในที่

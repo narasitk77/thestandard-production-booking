@@ -238,6 +238,8 @@ export default function BookingWizard() {
   const [step, setStep] = useState<StepKey>(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  // v1.273 — 401 ตอนกดส่ง = ล็อกอินหมดอายุ ไม่ใช่ไม่มีสิทธิ์ (บอกทางไปต่อ แทนคำว่า "Unauthorized" เฉย ๆ)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [outletChangeWarning, setOutletChangeWarning] = useState('')
   const [summaryOpen, setSummaryOpen] = useState(false) // mobile-only
@@ -850,6 +852,7 @@ export default function BookingWizard() {
     }
     setSubmitting(true)
     setError('')
+    setSessionExpired(false)
     // PM "ไม่มี Producer" → the Co-Producer becomes the producer of record, so the
     // booking belongs to them (My Bookings / producer scope key off producerEmail).
     // v1.185 — พิมพ์เอง: ชื่อ/อีเมลที่กรอกเป็นตัวจริงของ booking ทุก outlet รวม AGN
@@ -941,6 +944,12 @@ export default function BookingWizard() {
               ? ' — แอปอาจกำลังรีสตาร์ทหลัง deploy ลองใหม่อีกครั้งใน ~1 นาที'
               : ' — ลองใหม่อีกครั้ง หรือแจ้งแอดมินพร้อมเวลาที่เกิด'),
         )
+      }
+      if (res.status === 401) {
+        // ข้อมูลในฟอร์มยังอยู่ในแท็บนี้ (และในร่าง localStorage) — ให้ล็อกอินในแท็บใหม่แล้วกลับมากดส่งซ้ำ
+        setSessionExpired(true)
+        setSubmitting(false)
+        return
       }
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
@@ -1061,6 +1070,13 @@ export default function BookingWizard() {
       {error && (
         <div className="ops-card px-3 py-2 mb-3 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">
           {error}
+        </div>
+      )}
+      {sessionExpired && (
+        <div role="alert" className="ops-card px-3 py-2 mb-3 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">
+          ล็อกอินหมดอายุ (ระบบให้อยู่ได้ 7 วัน) — <b>ข้อมูลที่กรอกยังอยู่ครบ ยังไม่ได้บันทึก</b>{' '}
+          <a href="/login?callbackUrl=/my-bookings" target="_blank" rel="noopener" className="underline font-semibold">เข้าสู่ระบบใหม่ในแท็บใหม่</a>{' '}
+          แล้วกลับมาที่หน้านี้กด Confirm &amp; Submit อีกครั้ง
         </div>
       )}
       {/* v1.177 — amber, not red: this is a heads-up, not a rejection. The last
