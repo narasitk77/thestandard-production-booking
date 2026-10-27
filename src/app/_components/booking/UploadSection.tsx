@@ -304,7 +304,9 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       if (!pr.ok) { setNotifyMsg({ ok: false, text: preview.error || `ไม่สำเร็จ (HTTP ${pr.status})` }); return }
     } catch (e: any) { setNotifyMsg({ ok: false, text: e?.message || 'ไม่สำเร็จ' }); return }
     const who = (preview.recipients || [])
-    if (!confirm(`ส่งลิงก์แจ้ง "footage พร้อมแล้ว" ถึง ${who.length} คน?\n\n${who.join('\n')}`)) return
+    // v1.274 — the auto path was holding this one back: say why before a human overrides it
+    const heldWarn = preview.held?.detail ? `⚠️ ระบบอัตโนมัติยังไม่แจ้ง เพราะไฟล์ไม่ครบ (ตรวจ ${String(preview.held.at || '').slice(0, 10)}): ${preview.held.detail}\nส่งตอนนี้ = ทีมจะได้แจ้งว่าพร้อมทั้งที่ยังขาดไฟล์\n\n` : ''
+    if (!confirm(`${heldWarn}ส่งลิงก์แจ้ง "footage พร้อมแล้ว" ถึง ${who.length} คน?\n\n${who.join('\n')}`)) return
     setNotifying(true)
     try {
       const r = await fetch(`/api/bookings/${booking.id}/notify-ready`, { method: 'POST' })

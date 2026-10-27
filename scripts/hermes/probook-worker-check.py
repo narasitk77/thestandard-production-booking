@@ -413,7 +413,11 @@ def footage_ready_report():
     s = d.get("sends") or {}
     head = (f"   ({FOOTAGE_READY_DAYS} วัน: แจ้ง {s.get('total', 0)} ใบ · ถึงทีม {s.get('toTeam', 0)} ใบ · "
             f"คนที่ได้รับ {s.get('peopleReached', 0)} คน · ถ่ายจบ {d.get('shootsOver', 0)} ใบ)")
-    return alerts[:3] + [head]
+    # v1.274 — never cut silently: a dropped line read as "nothing else wrong"
+    shown = alerts[:4]
+    if len(alerts) > len(shown):
+        shown.append(f"   … +{len(alerts) - len(shown)} alert ที่ไม่ได้แสดง (ดู /api/internal/footage-ready/stats)")
+    return shown + [head]
 
 
 # ─────────── งวดของไดรฟ์ฟุตเทจ (ระเบิดเวลาปี 2027) ───────────

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readHeld, heldStill } from '@/lib/footage-ready-health'
 import { prisma } from '@/lib/db'
 import { getSession, canUploadToBooking } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       select: {
-        id: true, driveFolders: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true,
+        id: true, driveFolders: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true, readySnapshot: true,
         assignedEmails: true, createdByEmail: true, producer: true, producerEmail: true, coProducerEmail: true,
         directorEmail: true, director2Email: true, director3Email: true,
         projectId: true, projectName: true, category: true, callTime: true, shootDate: true,
@@ -80,7 +81,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     if (preview) {
-      return NextResponse.json({ preview: true, recipients, skippedInactive, folderCount: folders.length, fileCount, emailConfigured: isEmailConfigured() })
+      // v1.274 — this button does not run the MEDIAPRO gate; say what the auto path saw before a human overrides it
+      const held = heldStill(readHeld(booking.readySnapshot), fileCount, folders.reduce((n: number, f: any) => n + (f.totalBytes || 0), 0))
+      return NextResponse.json({ preview: true, recipients, skippedInactive, folderCount: folders.length, fileCount, emailConfigured: isEmailConfigured(),
+        held })
     }
 
     const shootDate = new Date(booking.shootDate).toISOString().slice(0, 10)

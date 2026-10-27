@@ -17,7 +17,7 @@ import { footageReadyAudience } from '@/lib/footage-ready'
 import { isPhotoAlbumBooking, PHOTO_ALBUM_EPISODE_CODE } from '@/lib/outlet-folders'
 import { isShootOver } from '@/lib/shoot-window'
 import {
-  summarizeSends, bucketPending, footageReadyAlerts,
+  summarizeSends, bucketPending, footageReadyAlerts, readHeld,
   type SendRow, type PendingBooking,
 } from '@/lib/footage-ready-health'
 
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
     },
     select: {
       bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
-      readyCheckedAt: true, footageCache: true, footageCacheAt: true,
+      readyCheckedAt: true, footageCache: true, footageCacheAt: true, readySnapshot: true,
       program: { select: { code: true } },
       episodes: { select: { program: { select: { code: true } } } },
     },
@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
   const pendingRows: PendingBooking[] = candidates
     .filter(b => isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap }, now))
     .map(b => {
-      const c = b.footageCacheAt ? (b.footageCache as { fileCount?: unknown } | null) : null
+      const c = b.footageCacheAt ? (b.footageCache as { fileCount?: unknown; folders?: unknown } | null) : null
       // Window on the LAST day of the shoot — same OR the worker's query uses.
       const end = b.shootEndDate && b.shootEndDate > b.shootDate ? b.shootEndDate : b.shootDate
       return {
@@ -99,6 +99,10 @@ export async function GET(request: NextRequest) {
         windowDate: end,
         fileCount: typeof c?.fileCount === 'number' ? c.fileCount : 0,
         walkedAt: b.readyCheckedAt ?? null,
+        held: readHeld(b.readySnapshot),
+        totalBytes: Array.isArray(c?.folders)
+          ? (c!.folders as Array<{ totalBytes?: unknown }>).reduce((n, f) => n + (typeof f?.totalBytes === 'number' ? f.totalBytes : 0), 0)
+          : -1,
         // The same two-sided photo-album gate the sweep applies (booking program
         // AND episode programs) — otherwise a lighting-only job nags forever.
         skippedByDesign:

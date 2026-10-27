@@ -134,3 +134,18 @@ test('strayEpisodeFolders: unclaimed EPxx folders only; ID-led and crew folders 
   assert.deepEqual(strayEpisodeFolders(kids, ['EP01 · Decoding The World'], []).map(k => k.id), ['d', 'e'])
   assert.deepEqual(strayEpisodeFolders([], epNames, []), [])
 })
+
+test('buildDailyDigest: an error says WHICH booking and why (v1.274)', () => {
+  const { text } = buildDailyDigest([
+    { changes: { checked: 60, warnings: 0, errors: 1, landingRepaired: 1, actions: ['POP-7TG-261026-01: repair landing drop folders'],
+                 errorLines: ['NWS-TSN-261027-01: Drive 500 backendError'] } },
+  ])
+  assert.match(text, /❌ error 1 รายการ:/)
+  assert.match(text, /NWS-TSN-261027-01: Drive 500 backendError/)
+})
+
+test('buildDailyDigest: an old row without errorLines says the text was not kept, not nothing', () => {
+  const { text } = buildDailyDigest([{ changes: { checked: 60, warnings: 0, errors: 1 } }])
+  assert.match(text, /❌ error 1 รายการ \(รอบนั้นยังไม่ได้เก็บข้อความ error\)/)
+})
+

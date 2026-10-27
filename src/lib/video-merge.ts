@@ -308,7 +308,13 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       const landingViaStored = !!flatId
       // v1.110 — match the landing folder by Production ID (legacy "<code> · …" OR
       // new "<show> · … (<code>)" shape).
-      if (!flatId) flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+      if (!flatId) {
+        const byName = flatChildren.filter(c => folderNameMatchesCode(c.name, code))
+        flatId = byName[0]?.id ?? null
+        // v1.274 — heal at resolve time (see sound-merge): only an unambiguous match,
+        // Cloud Sync "(1)" twins of a landing folder are common.
+        if (byName.length === 1 && !opts.dryRun && b.id) await rememberDriveLinks(b.id, { landing: byName[0].id })
+      }
       if (!flatId) { base.results.push({ bookingCode: code, skipped: 'no landing folder' }); continue }
       noteResolve('video-merge', 'landing', code, landingViaStored) // v1.154 — id-first coverage gauge
 
@@ -351,7 +357,8 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       }
       noteResolve('video-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
       // self-heal: remember what we just resolved so next time skips the walk.
-      if (!opts.dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
+      // landing was stored at resolve time (stored link, or a unique name match) — never re-store an ambiguous one here
+      if (!opts.dryRun && b.id) await rememberDriveLinks(b.id, { box: destId ?? undefined })
 
       const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [] }
       await mirrorMove(flatId, destId, code, stats, !!opts.dryRun)
@@ -416,9 +423,11 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   const landingLink = getDriveLink(b.driveFolders, 'landing')
   let flatId: string | null = landingLink && await isFolderAlive(landingLink) ? landingLink : null
   const landingViaStored = !!flatId
+  let landingUnique = false
   if (!flatId) {
-    const flatChildren = await listChildFolders(PRODUCTION_TEAM_ROOT)
-    flatId = flatChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+    const byName = (await listChildFolders(PRODUCTION_TEAM_ROOT)).filter(c => folderNameMatchesCode(c.name, code))
+    flatId = byName[0]?.id ?? null
+    landingUnique = byName.length === 1 // v1.274 — only an unambiguous match may be stored
   }
   if (!flatId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์ใน Production Team (NAS ยังไม่ sync?)', ...zero }
   noteResolve('video-merge', 'landing', code, landingViaStored) // v1.154 — id-first coverage gauge
@@ -452,7 +461,7 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
     }
   }
   noteResolve('video-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
-  if (!dryRun && b.id) await rememberDriveLinks(b.id, { landing: flatId, box: destId ?? undefined })
+  if (!dryRun && b.id) await rememberDriveLinks(b.id, { landing: landingViaStored || landingUnique ? flatId : undefined, box: destId ?? undefined })
 
   const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [] }
   await mirrorMove(flatId, destId, code, stats, dryRun)

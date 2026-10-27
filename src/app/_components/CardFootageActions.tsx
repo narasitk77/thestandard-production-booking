@@ -62,7 +62,9 @@ export default function CardFootageActions({
       const recips: string[] = p.recipients || p.to || []
       const folders = p.folderCount ?? p.folders ?? '?'
       if (!recips.length) { setMsg('ไม่มีผู้รับ (ยังไม่ได้ assign / ไม่มีอีเมล)'); return }
-      if (!confirm(`ส่งเมล "ไฟล์พร้อม" ให้ ${recips.length} คน?\n\n${recips.join('\n')}\n\nโฟลเดอร์ที่แนบ: ${folders}`)) { setMsg(null); return }
+      // v1.274 — the auto path was holding this one back: say why before a human overrides it
+      const heldWarn = p.held?.detail ? `⚠️ ระบบอัตโนมัติยังไม่แจ้ง เพราะไฟล์ไม่ครบ (ตรวจ ${String(p.held.at || '').slice(0, 10)}): ${p.held.detail}\nส่งตอนนี้ = ทีมจะได้แจ้งว่าพร้อมทั้งที่ยังขาดไฟล์\n\n` : ''
+      if (!confirm(`${heldWarn}ส่งเมล "ไฟล์พร้อม" ให้ ${recips.length} คน?\n\n${recips.join('\n')}\n\nโฟลเดอร์ที่แนบ: ${folders}`)) { setMsg(null); return }
       setMsg('⏳ กำลังส่งเมล…')
       const r = await fetch(`/api/bookings/${bookingId}/notify-ready`, { method: 'POST', credentials: 'include' })
       const d = await r.json().catch(() => ({}))

@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  summarizeSends, bucketPending, footageReadyAlerts, ADMIN_DIGEST, COLD_AFTER_MS,
+  summarizeSends, bucketPending, footageReadyAlerts, readHeld, ADMIN_DIGEST, COLD_AFTER_MS,
   type SendRow, type PendingBooking,
 } from '../footage-ready-health'
 
@@ -94,7 +94,7 @@ test('never-walked shoots are their own bucket (the starvation symptom)', () => 
 
 test('walked and genuinely empty is NOT an alert — footage simply is not there yet', () => {
   const b = bucketPending([p('EMPTY', 1, 0, daysAgo(0))], T0, 4)
-  assert.deepEqual(b, { waiting: [], agedOut: [], neverWalked: [] })
+  assert.deepEqual(b, { waiting: [], agedOut: [], agedOutHeld: [], neverWalked: [] })
 })
 
 test('a job the sweep skips by design is never "starved" — it is skipped forever', () => {
@@ -149,7 +149,7 @@ const base = {
   audience: 'team',
   windowDays: 7,
   sends: summarizeSends([]),
-  pending: { waiting: [], agedOut: [], neverWalked: [] },
+  pending: { waiting: [], agedOut: [], agedOutHeld: [], neverWalked: [] },
   shootsOver: 0,
 }
 
@@ -176,7 +176,7 @@ test('THE five-week bug: sends happened, none reached the job → red, names the
 })
 
 test('worker off short-circuits — one clear line, no derived noise', () => {
-  const alerts = footageReadyAlerts({ ...base, workerEnabled: false, shootsOver: 9, pending: { waiting: [], agedOut: ['X-1'], neverWalked: ['Y-1'] } })
+  const alerts = footageReadyAlerts({ ...base, workerEnabled: false, shootsOver: 9, pending: { waiting: [], agedOut: ['X-1'], agedOutHeld: [], neverWalked: ['Y-1'] } })
   assert.equal(alerts.length, 1)
   assert.match(alerts[0], /worker ปิดอยู่/)
 })
@@ -196,7 +196,7 @@ test('aged-out bookings are listed by code so someone can press 📣', () => {
     ...base,
     sends: summarizeSends([row('A-1', T0, ['p@thestandard.co'])]),
     shootsOver: 4,
-    pending: { waiting: [], agedOut: ['TSS-TSS-260813-01', 'AGN-260813-01'], neverWalked: [] },
+    pending: { waiting: [], agedOut: ['TSS-TSS-260813-01', 'AGN-260813-01'], agedOutHeld: [], neverWalked: [] },
   })
   assert.equal(alerts.length, 1)
   assert.match(alerts[0], /TSS-TSS-260813-01, AGN-260813-01/)
@@ -218,7 +218,7 @@ test('waiting bookings alone never alert — that is the system working', () => 
     ...base,
     sends: summarizeSends([row('A-1', T0, ['p@thestandard.co'])]),
     shootsOver: 5,
-    pending: { waiting: ['W-1', 'W-2'], agedOut: [], neverWalked: [] },
+    pending: { waiting: ['W-1', 'W-2'], agedOut: [], agedOutHeld: [], neverWalked: [] },
   })
   assert.deepEqual(alerts, [])
 })
@@ -254,3 +254,50 @@ test('ADMIN_DIGEST ยังไม่นับเป็นคนจริง แ
   assert.equal(s.adminOnly, 1)
   assert.equal(s.peopleReached, 0)
 })
+
+// ── v1.274 — aged out but the MEDIAPRO gate was holding it ──────────────────────
+// Real case 27 ต.ค. 2569: WLT-MNW-261012-01 / NWS-GLF-261012-01 were reported as
+// "ต้องกด 📣 เอง" — but 2–3 clips were missing, and the 📣 button does not run the
+// MEDIAPRO gate: pressing it would have told the team the footage was ready.
+const HELD = { detail: 'ขาด 2 ไฟล์ตาม MEDIAPRO (A014C001_261013XU.MP4, A008C001_261013LI.MP4)', at: '2026-10-14T05:00:00.000Z', fileCount: 120, totalBytes: 5e11 }
+const aged = (o: any = {}) => ({ bookingCode: 'WLT-MNW-261012-01', windowDate: new Date('2026-10-12'), fileCount: 120, totalBytes: 5e11, walkedAt: new Date('2026-10-15'), skippedByDesign: false, ...o })
+
+test('aged out + held with the same footage → agedOutHeld, not "press 📣"', () => {
+  const b = bucketPending([aged({ held: HELD })], new Date('2026-10-27'), 4)
+  assert.deepEqual(b.agedOut, [])
+  assert.deepEqual(b.agedOutHeld, [{ code: 'WLT-MNW-261012-01', detail: HELD.detail, at: HELD.at }])
+  const a = footageReadyAlerts({ workerEnabled: true, audience: 'team', windowDays: 7, shootsOver: 19,
+    sends: summarizeSends([{ bookingCode: 'A', at: new Date(), recipients: ['x@thestandard.co'] }]), pending: b })
+  assert.ok(a.some(l => l.includes('อย่าเพิ่งกด 📣') && l.includes('A014C001_261013XU.MP4') && l.includes('ตรวจ 2026-10-14') && l.includes('run?codes=')), a.join('\n'))
+  assert.ok(!a.some(l => l.includes('ต้องกด 📣 เอง')), 'must not tell anyone to press 📣 for incomplete footage')
+})
+
+test('held but the footage changed since → the reason is stale, back to "press 📣"', () => {
+  const b = bucketPending([aged({ held: HELD, fileCount: 122 })], new Date('2026-10-27'), 4)
+  assert.deepEqual(b.agedOut, ['WLT-MNW-261012-01'])
+  assert.deepEqual(b.agedOutHeld, [])
+})
+
+test('held inside the window stays "waiting" — the sweep still owns it', () => {
+  const b = bucketPending([aged({ held: HELD, windowDate: new Date('2026-10-26') })], new Date('2026-10-27'), 4)
+  assert.deepEqual(b.waiting, ['WLT-MNW-261012-01'])
+  assert.deepEqual(b.agedOutHeld, [])
+})
+
+test('readHeld tolerates the settle snapshot with or without a hold', () => {
+  assert.equal(readHeld(null), null)
+  assert.equal(readHeld({ fileCount: 3, totalBytes: 9, at: '2026-10-14T00:00:00Z' }), null)
+  assert.deepEqual(readHeld({ fileCount: 3, totalBytes: 9, at: 'x', held: HELD }), HELD)
+  assert.equal(readHeld({ held: { detail: 'x' } }), null, 'half-written hold is ignored, not trusted')
+})
+
+test('held, same file count but bytes changed (a clip re-copied over a partial one) → stale, back to "press 📣"', () => {
+  const b = bucketPending([aged({ held: HELD, totalBytes: 5e11 + 4e9 })], new Date('2026-10-27'), 4)
+  assert.deepEqual(b.agedOut, ['WLT-MNW-261012-01'])
+  assert.deepEqual(b.agedOutHeld, [])
+})
+
+test('a hold written without bytes (half-written) is not trusted', () => {
+  assert.equal(readHeld({ held: { detail: 'x', at: 'y', fileCount: 1 } }), null)
+})
+

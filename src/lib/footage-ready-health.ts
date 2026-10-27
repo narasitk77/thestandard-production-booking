@@ -76,6 +76,28 @@ export type PendingBooking = {
   windowDate: Date
   fileCount: number       // what the last Drive walk saw (0 = walked, nothing there)
   walkedAt: Date | null   // readyCheckedAt — null = the worker has never looked
+  /** v1.274 — the sweep's last MEDIAPRO hold (readySnapshot.held), if any, and the bytes to judge it by */
+  held?: HeldNote | null
+  totalBytes?: number
+}
+
+/**
+ * v1.274 — why the AUTO path is holding a notice back, remembered on the booking
+ * (`readySnapshot.held`, written by the sweep when the MEDIAPRO gate refuses).
+ * `fileCount` is the walk's count at that moment: if the footage changed since,
+ * the reason is stale and must not be repeated as fact.
+ */
+export type HeldNote = { detail: string; at: string; fileCount: number; totalBytes: number }
+
+export function readHeld(snapshot: unknown): HeldNote | null {
+  const h = (snapshot as { held?: Partial<HeldNote> } | null | undefined)?.held
+  if (!h || typeof h.detail !== 'string' || typeof h.at !== 'string' || typeof h.fileCount !== 'number' || typeof h.totalBytes !== 'number') return null
+  return { detail: h.detail, at: h.at, fileCount: h.fileCount, totalBytes: h.totalBytes }
+}
+
+/** The hold still describes the footage only if count AND bytes are unchanged since (a re-copied clip changes bytes). */
+export function heldStill(h: HeldNote | null | undefined, fileCount: number, totalBytes: number): HeldNote | null {
+  return h && h.fileCount === fileCount && h.totalBytes === totalBytes ? h : null
 }
 
 export type PendingBuckets = {
@@ -84,6 +106,9 @@ export type PendingBuckets = {
   /** Footage is on Drive and the shoot is older than the window: the auto path
    *  will never look at it again. Someone has to press 📣 by hand. */
   agedOut: string[]
+  /** v1.274 — aged out AND the sweep's MEDIAPRO gate was holding it (footage unchanged
+   *  since): pressing 📣 would announce incomplete footage — the button does not gate. */
+  agedOutHeld: Array<{ code: string; detail: string; at: string }>
   /** Shoot is over but no walk has ever happened — starvation symptom. */
   neverWalked: string[]
 }
@@ -108,7 +133,7 @@ export function bucketPending(
   coldAfterMs: number = COLD_AFTER_MS,
 ): PendingBuckets {
   const cutoff = now.getTime() - lookbackDays * 86_400_000
-  const out: PendingBuckets = { waiting: [], agedOut: [], neverWalked: [] }
+  const out: PendingBuckets = { waiting: [], agedOut: [], agedOutHeld: [], neverWalked: [] }
   for (const r of rows) {
     const code = r.bookingCode || '(no code)'
     const at = new Date(r.windowDate).getTime()
@@ -116,7 +141,10 @@ export function bucketPending(
     if (r.fileCount > 0) {
       // Footage exists — worth mailing even for a job the sweep skips, so the
       // by-design skip must NOT suppress these two buckets.
-      ;(inWindow ? out.waiting : out.agedOut).push(code)
+      const held = heldStill(r.held, r.fileCount, r.totalBytes ?? -1)
+      if (inWindow) out.waiting.push(code)
+      else if (held) out.agedOutHeld.push({ code, detail: held.detail, at: held.at })
+      else out.agedOut.push(code)
     } else if (!r.walkedAt && inWindow && !r.skippedByDesign && now.getTime() - at >= coldAfterMs) {
       out.neverWalked.push(code)
     }
@@ -156,6 +184,14 @@ export function footageReadyAlerts(h: HealthInput): string[] {
     a.push(
       `🟠 ${h.pending.agedOut.length} ใบมีฟุตเทจบน Drive แล้วแต่หลุดหน้าต่างแจ้งอัตโนมัติ ` +
       `ต้องกด 📣 เอง: ${h.pending.agedOut.join(', ')}`,
+    )
+  }
+  if (h.pending.agedOutHeld.length > 0) {
+    a.push(
+      `🟠 ${h.pending.agedOutHeld.length} ใบหลุดหน้าต่างแจ้งอัตโนมัติ และไฟล์ยังไม่ครบ — อย่าเพิ่งกด 📣 ` +
+      `(ปุ่มไม่ตรวจ MEDIAPRO ทีมจะได้แจ้งว่าพร้อมทั้งที่ขาดไฟล์): ` +
+      h.pending.agedOutHeld.map(x => `${x.code} — ${x.detail.slice(0, 140)} (ตรวจ ${x.at.slice(0, 10)})`).join(' · ') +
+      ` · ถ้าไฟล์มาครบแล้ว: footage-ready/run?codes=<code> ตรวจซ้ำ (ครบ = ส่งเอง)`,
     )
   }
   if (h.pending.neverWalked.length > 0) {

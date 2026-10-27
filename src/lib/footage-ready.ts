@@ -46,7 +46,7 @@ import { latestNasState, nasManifestAge } from './nas-sync'
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
-import { ADMIN_DIGEST } from './footage-ready-health'
+import { ADMIN_DIGEST, readHeld } from './footage-ready-health'
 import { mediaproGate } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
 import { isQuarantined, sonyClipPart, type FootageFileLike } from './footage-completeness'
@@ -364,6 +364,17 @@ export async function sweepFootagePayload(b: BookingForFootagePayload, dryRun: b
   return dryRun ? computeFootagePayload(b) : getCachedFootagePayload(b, { refresh: true })
 }
 
+/** v1.274 — `readySnapshot.held` (see readHeld). Written only when the reason or the footage changed. */
+async function noteHeld(b: { id: string; readySnapshot: unknown }, code: string, detail: string, fileCount: number, totalBytes: number, now: Date): Promise<void> {
+  const prev = readHeld(b.readySnapshot)
+  if (prev && prev.detail === detail && prev.fileCount === fileCount && prev.totalBytes === totalBytes) return
+  const base = b.readySnapshot && typeof b.readySnapshot === 'object' ? (b.readySnapshot as Record<string, unknown>) : {}
+  await prisma.booking.update({
+    where: { id: b.id },
+    data: { readySnapshot: { ...base, held: { detail, fileCount, totalBytes, at: now.toISOString() } } as any },
+  }).catch(e => console.error('[footage-ready] noteHeld failed:', code, e?.message || e))
+}
+
 export async function runFootageReadyScan(
   opts: { dryRun?: boolean; codes?: string[] } = {},
 ): Promise<FootageReadyScanResult> {
@@ -517,7 +528,17 @@ async function runReadySweep(
       const gate = await mediaproGate(roots, { shootFrom: new Date(b.shootDate).toISOString().slice(0, 10) })
       if (!gate.ok) {
         result.skipped.push({ code, reason: 'mediapro-incomplete', detail: gate.text })
+        // v1.274 — remember WHY, so the health check and the 📣 preview can say "files missing"
+        // after this booking ages out of the window (re-running this gate costs minutes of Drive walks)
+        // only a comparison that ran is evidence of missing files; check:null = "could not check" — keep any earlier verdict
+        if (!dryRun && gate.check) await noteHeld(b, code, gate.text, payload.fileCount, payload.folders.reduce((n, f) => n + f.totalBytes, 0), now)
         continue
+      }
+      // the gate passed: an earlier hold is no longer true (a camera wait or failed send can still age this one out)
+      if (!dryRun && readHeld(b.readySnapshot)) {
+        const { held: _gone, ...rest } = b.readySnapshot as Record<string, unknown>
+        await prisma.booking.update({ where: { id: b.id }, data: { readySnapshot: rest as any } })
+          .catch(e => console.error('[footage-ready] clear held failed:', code, e?.message || e))
       }
       // v1.267 — a camera booked but not on Drive yet (or audio only): wait, then send WITH the warning (never age out silently)
       let verified = gate.text

@@ -67,6 +67,8 @@ async function runOnce() {
       `${dupes ? ` EP-DUPLICATES=${dupes}` : ''}` +
       ` warn=${(j.warnings || []).length} errors=${(j.errors || []).length} deferred=${j.deferred || 0}`,
     )
+    // v1.274 — print each error: a bare count left nothing to debug with
+    for (const e of (j.errors || []).slice(0, 5)) console.error(`[folder-integrity] error ${e.code}: ${e.error}`)
   } catch (err) {
     console.error('[folder-integrity] run failed:', err?.message || err)
   } finally {

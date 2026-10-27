@@ -595,6 +595,10 @@ export async function runFolderIntegrity(opts: {
           // bloat the audit row.
           actions: base.actions.slice(0, 40),
           warningLines: base.warnings.slice(0, 20),
+          // v1.274 — the error TEXT too. Before this the row kept only the count, the
+          // worker log printed only the count, and the digest said "❌ error 1" with no
+          // way left anywhere to find out which booking or why (26 ต.ค. 2569 19:50).
+          errorLines: base.errors.slice(0, 10).map(e => `${e.code}: ${e.error}`.slice(0, 300)),
         },
       })
     }
@@ -628,6 +632,7 @@ export function buildDailyDigest(
   const totals: Record<string, number> = {}
   const sampleActions: string[] = []
   const sampleWarnings: string[] = []
+  const sampleErrors: string[] = []
   let totalWarnings = 0
   let totalErrors = 0
   let runs = 0
@@ -641,6 +646,7 @@ export function buildDailyDigest(
     totalErrors += Number(c.errors) || 0
     for (const a of (c.actions || []) as string[]) if (sampleActions.length < 12) sampleActions.push(a)
     for (const w of (c.warningLines || []) as string[]) if (sampleWarnings.length < 6) sampleWarnings.push(w)
+    for (const e of (c.errorLines || []) as string[]) if (sampleErrors.length < 5 && !sampleErrors.includes(e)) sampleErrors.push(e)
   }
 
   const totalFixed = FIX_LABELS.reduce((n, [k]) => n + (totals[k] || 0), 0)
@@ -672,7 +678,10 @@ export function buildDailyDigest(
     for (const w of sampleWarnings) lines.push(`  • ${w.slice(0, 160)}`)
     if (totalWarnings > sampleWarnings.length) lines.push(`  …และอีก ${totalWarnings - sampleWarnings.length} รายการ (ดูอีเมล)`)
   }
-  if (totalErrors > 0) lines.push(`\n❌ error ${totalErrors} รายการ`)
+  if (totalErrors > 0) {
+    lines.push(`\n❌ error ${totalErrors} รายการ${sampleErrors.length ? ':' : ' (รอบนั้นยังไม่ได้เก็บข้อความ error)'}`)
+    for (const e of sampleErrors) lines.push(`  • ${e.slice(0, 200)}`)
+  }
 
   return { text: lines.join('\n'), totalFixed, totalWarnings }
 }

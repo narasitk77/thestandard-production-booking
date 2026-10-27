@@ -135,7 +135,14 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       const stagingLink = getDriveLink(b.driveFolders, 'staging')
       let stagingId: string | null = stagingLink && await isFolderAlive(stagingLink) ? stagingLink : null
       const stagingViaStored = !!stagingId
-      if (!stagingId) stagingId = stagingChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+      if (!stagingId) {
+        const byName = stagingChildren.filter(c => folderNameMatchesCode(c.name, code))
+        stagingId = byName[0]?.id ?? null
+        // v1.274 — heal now, not only after a merge: a booking whose audio hasn't arrived
+        // fell back by name every hour for weeks (63/day). Only an unambiguous match is
+        // stored — a "(1)" twin must never become the folder id-first trusts.
+        if (byName.length === 1 && !opts.dryRun) await rememberDriveLinks((b as any).id, { staging: byName[0].id })
+      }
       if (!stagingId) { base.results.push({ bookingCode: b.bookingCode, skipped: 'no staging folder' }); continue }
       noteResolve('sound-merge', 'staging', code, stagingViaStored) // v1.154 — id-first coverage gauge
       const stagingFiles = (await listFilesRecursive(stagingId, { maxFiles: 2000 })).filter(f => isAudio(f.name))
@@ -175,7 +182,8 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
         }
       }
       noteResolve('sound-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
-      if (!opts.dryRun) await rememberDriveLinks((b as any).id, { staging: stagingId, box: boxTargetId })
+      // staging was stored at resolve time (stored link, or a unique name match) — never re-store an ambiguous one here
+      if (!opts.dryRun) await rememberDriveLinks((b as any).id, { box: boxTargetId })
 
       // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);
       // dedup spans every existing AUDIO location so nothing is re-copied.
@@ -246,11 +254,14 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   const stagingLink = getDriveLink(b.driveFolders, 'staging')
   let stagingId: string | null = stagingLink && await isFolderAlive(stagingLink) ? stagingLink : null
   const stagingViaStored = !!stagingId
+  let stagingUnique = false
   if (!stagingId) {
     const stagingRoot = await findChildFolder(root, SOUND_STAGING_DIR)
     if (!stagingRoot) return { skipped: true, reason: 'ยังไม่มี _SOUND-STAGING', ...zero }
     const stagingChildren = await listSoundStagingBookingFolders(stagingRoot)
-    stagingId = stagingChildren.find(c => folderNameMatchesCode(c.name, code))?.id ?? null
+    const byName = stagingChildren.filter(c => folderNameMatchesCode(c.name, code))
+    stagingId = byName[0]?.id ?? null
+    stagingUnique = byName.length === 1 // v1.274 — only an unambiguous match may be stored
   }
   if (!stagingId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์เสียงใน staging', ...zero }
   noteResolve('sound-merge', 'staging', code, stagingViaStored) // v1.154 — id-first coverage gauge
@@ -288,7 +299,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
     }
   }
   noteResolve('sound-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
-  if (!dryRun && b.id) await rememberDriveLinks(b.id, { staging: stagingId, box: boxTargetId })
+  if (!dryRun && b.id) await rememberDriveLinks(b.id, { staging: stagingViaStored || stagingUnique ? stagingId : undefined, box: boxTargetId })
 
   // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);
   // dedup spans every existing AUDIO location so nothing is re-copied.
