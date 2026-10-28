@@ -14,12 +14,15 @@
 
    | Env | ค่า | จำเป็น |
    |---|---|---|
-   | `MCP_API_KEY` | key จากข้อ 1 — **ไม่ตั้งสักตัว (ทั้ง 3 env นี้) = ปิด MCP** (endpoint ตอบ 503) | ✅* |
+   | `MCP_API_KEY` | key จากข้อ 1 — **ไม่ตั้งสักตัว (ทั้ง 4 env นี้) = ปิด MCP** (endpoint ตอบ 503) | ✅* |
    | `MCP_API_KEYS` | v1.146 (ทางเลือก) — key รายไคลเอนต์ คั่นด้วย comma, รูปแบบ `<label>:<key>` เช่น `claude-desktop:abc,n8n:def` — หลุดตัวไหน revoke ตัวนั้นโดยไม่ต้อง rotate ทุกไคลเอนต์ (ใช้แทนหรือควบคู่กับ `MCP_API_KEY` ก็ได้) | ✅* |
-   | `MCP_API_KEYS_READONLY` | v1.212 (ทางเลือก) — รูปแบบเดียวกับ `MCP_API_KEYS` แต่ key ในลิสต์นี้**อ่านได้อย่างเดียว**: เห็น/เรียกได้เฉพาะ tools ที่ไม่เขียนข้อมูล (ตาราง read ข้างล่าง) — เหมาะกับบอท/ระบบอัตโนมัติที่แค่ถามข้อมูล เช่น `pigwidgeon:xyz789` · key ที่เผลอใส่ทั้งสองลิสต์จะได้สิทธิ์ read (เลือกต่ำสุดเสมอ) | ✅* |
+   | `MCP_API_KEYS_READONLY` | v1.212 (ทางเลือก) — รูปแบบเดียวกับ `MCP_API_KEYS` แต่ key ในลิสต์นี้**อ่านได้อย่างเดียว**: เห็น/เรียกได้เฉพาะ tools ที่ไม่เขียนข้อมูล (ตาราง read ข้างล่าง) — เหมาะกับบอท/ระบบอัตโนมัติที่แค่ถามข้อมูล เช่น `pigwidgeon:xyz789` · key ที่เผลอใส่หลายลิสต์จะได้สิทธิ์ต่ำสุด: read > request > full | ✅* |
+   | `MCP_API_KEYS_REQUEST` | รูปแบบ `<label>:<key>` เช่น `veela:xyz789` — สำหรับบอทแชตที่ผู้ใช้ไม่ได้ล็อกอิน probook: อ่านได้เฉพาะ `list_bookings` `get_booking` `list_outlets_and_programs` `list_projects` `list_project_episodes` `list_switcher_jobs` `list_mix_jobs` และสร้างคำขอผ่าน `create_booking` · ไม่มีสิทธิ์ cancel/mark-paid/repair และไม่เห็นค่าเช่า/ซ่อม/อุปกรณ์ | ✅* |
+   | `MCP_REQUEST_ACTOR_EMAIL` | (ทางเลือก) ตัวตนของใบที่สร้างผ่าน key request · ค่าเริ่มต้น `mcp-request@probook` — **ตัว reconciler ห้องใช้ค่านี้แยกใบของบอท** อย่าเปลี่ยนทั้งที่ยังมีใบ REQUESTED ค้าง | |
+   | `MCP_REQUEST_DAILY_MAX` | (ทางเลือก) จำนวนใบสูงสุดที่ key request สร้างได้ใน 24 ชม. · ค่าเริ่มต้น 20 | |
    | `MCP_ACTOR_EMAIL` | อีเมลที่ใช้บันทึก audit ของงานที่สั่งผ่าน AI (default `mcp@probook`) | — |
 
-   *ต้องตั้งอย่างน้อยหนึ่งใน `MCP_API_KEY` / `MCP_API_KEYS` / `MCP_API_KEYS_READONLY`. ยิง auth ผิดซ้ำเกิน 10 ครั้ง/15 นาทีต่อ IP จะโดน 429 ชั่วคราว.
+   *ต้องตั้งอย่างน้อยหนึ่งใน `MCP_API_KEY` / `MCP_API_KEYS` / `MCP_API_KEYS_READONLY` / `MCP_API_KEYS_REQUEST`. ยิง auth ผิดซ้ำเกิน 10 ครั้ง/15 นาทีต่อ IP จะโดน 429 ชั่วคราว.
 
 3. เช็ค `/admin/health` → ส่วน config ต้องเห็น `mcp.enabled: true`
 
@@ -38,6 +41,13 @@ claude mcp add --transport http probook https://probook.thestandard.co/api/mcp \
 
 **Claude Desktop (config JSON):** ใช้ `mcp-remote` หรือ custom connector แบบเดียวกับ claude.ai
 
+key แบบ request (`MCP_API_KEYS_REQUEST`, v1.276) — `create_booking` ผ่าน key นี้ถูกจำกัดกว่า key เต็ม:
+- รับเฉพาะฟิลด์ใน schema (+ `agencyRef`) ฟิลด์อื่นถูกตัดและแจ้งกลับใน `ignoredFields` · จองได้วันเดียว ห้ามย้อนหลัง · วันที่ต้องเป็น ค.ศ. และมีจริง
+- `producerEmail` ต้องเป็นผู้ใช้ probook ที่ยังทำงานอยู่ · `requestedBy` ลง audit เท่านั้น ไม่กลายเป็นเจ้าของใบ (ผู้ใช้แชตไม่ได้ยืนยันตัวตน)
+- ไม่เกิน `MCP_REQUEST_DAILY_MAX` ใบ/24 ชม. · ส่งคำขอเดิมซ้ำภายใน 15 นาทีได้ใบเดิมกลับ (`duplicate: true`) ไม่สร้างใหม่
+- ใบที่สร้างจะ**ยังไม่จองห้องในพอร์ทัลกลาง**จนกว่าแอดมินอนุมัติ (ต่างจากฟอร์มเว็บที่ล็อกห้องตั้งแต่ REQUESTED) · audit มี `via: mcp:<label>`
+- `list_switcher_jobs` / `list_mix_jobs` ใช้ได้กับ key request และ key เต็มเท่านั้น (key read-only เดิมไม่ได้เพิ่ม)
+
 ## Tools ที่เปิดให้
 
 key แบบ read-only (`MCP_API_KEYS_READONLY`) เห็นเฉพาะแถวที่คอลัมน์ "เขียนข้อมูล?" เป็น — เท่านั้น
@@ -46,6 +56,8 @@ key แบบ read-only (`MCP_API_KEYS_READONLY`) เห็นเฉพาะแ
 | Tool | ทำอะไร | เขียนข้อมูล? |
 |---|---|---|
 | `list_bookings` | ดูตารางจอง กรองช่วงวันที่/สถานะ/outlet | — |
+| `list_switcher_jobs` | อ่านบันทึกสวิตเชอร์ กรองวันทำงาน/outlet/สถานะ/ผู้ทำ | — |
+| `list_mix_jobs` | อ่านคิวมิกซ์ กรองวันสร้าง (`from`/`to`) หรือวันกำหนดส่ง (`dueFrom`/`dueTo`)/สถานะ/ผู้รับงาน พร้อมลิงก์ต้นทางและส่งงาน (ไม่รวม event bodies) | — |
 | `get_booking` | รายละเอียดเต็มของ booking หนึ่งใบ | — |
 | `list_outlets_and_programs` | รหัส outlet + รายการทั้งหมด (ใช้ก่อนจอง) | — |
 | `list_projects` | โปรเจกต์ Content Agency ที่ยังจองได้ | — |

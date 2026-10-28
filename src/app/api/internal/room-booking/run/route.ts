@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roomEligibleWhere } from '@/lib/room-booking-reconcile'
 import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { prisma } from '@/lib/db'
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest) {
       // ส่วนการกวาดตามช่วงวัน = ชุดเดียวกับ reconciler (v1.270: REQUESTED ด้วย ไม่รอ approve)
       ...(codes.length > 0
         ? { bookingCode: { in: codes }, status: { not: 'CANCELLED' } }
-        : { status: { in: ['REQUESTED', 'ASSIGNED', 'CONFIRMED'] }, shootDate: { gte: from, lt: to } }),
+        : { ...roomEligibleWhere(), shootDate: { gte: from, lt: to } }), // v1.276 — same set as the reconciler
     },
     // select ชุดเดียวกับที่ตัวประกอบ payload ต้องการ — กันสองฝั่งหลุดจากกัน
     select: ROOM_BOOKING_SELECT,

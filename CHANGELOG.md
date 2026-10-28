@@ -7,6 +7,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.276.0] — 2026-10-28
+
+> เลข 1.275.0 สงวนไว้ให้ Field Uploader Phase 1 (commit e9c8a74 บนเครื่องนัท ยังไม่ push/deploy) — รุ่นนี้ข้ามไป 1.276.0 กันเลขชน
+
+### Added — MCP สำหรับ Veela และข้อมูลคิวงาน PMDC (PR #21 จาก Minerva/PMDC + แก้จากรีวิว)
+
+- `MCP_API_KEYS_REQUEST`: ให้บอทสวิตเชอร์ Veela อ่านข้อมูลและส่งคำขอจองผ่าน `create_booking` ได้เท่านั้น (ยังรอ admin อนุมัติ) · ไม่เปิด cancel/mark-paid/repair
+- key ซ้ำหลายลิสต์เลือกสิทธิ์ต่ำสุด read > request > full · allowlist บังคับทั้ง tools/list และ tools/call แบบ fail-closed
+- `list_switcher_jobs` / `list_mix_jobs`: ให้ PMDC อ่านบันทึกสวิตเชอร์และคิวมิกซ์พร้อมตัวกรองและลิงก์ส่งงาน โดยไม่ดึง MixJobEvent bodies
+
+### Security — รีวิวอิสระ (3 มุม + ตรวจแย้ง) ยืนยัน 14 ข้อ แก้ก่อน merge
+
+- **ห้อง**: ใบ REQUESTED ที่สร้างผ่าน key request ยังไม่จองห้องในพอร์ทัลกลางจนแอดมินอนุมัติ (`roomEligibleWhere` ใช้ทั้ง reconciler และ room-booking/run) · ใบจากฟอร์มเว็บยังล็อกห้องตั้งแต่ REQUESTED ตามกฎ v1.270 · createdByEmail NULL ยังได้ห้อง
+- **จำนวน/ซ้ำ**: ไม่เกิน `MCP_REQUEST_DAILY_MAX` (20) ใบ/24 ชม. · คำขอเดิมภายใน 15 นาทีคืนใบเดิม ไม่เผาเลข Episode ID
+- **ตัวตน**: `requestedBy` จากแชตลง audit เท่านั้น ไม่เป็นเจ้าของใบ (เดิมกลายเป็น createdByEmail ของใครก็ได้ รวมแอดมิน) · ใบสร้างในชื่อ `mcp-request@probook` + audit `via: mcp:<label>`
+- **ฟิลด์**: key request ส่งได้เฉพาะฟิลด์ใน schema (+agencyRef) — isRoutine/routineGroupId/locationId/shootEndDate/virtualProduction/co-producer/director ถูกตัดและแจ้งกลับ · producerEmail ต้องเป็นผู้ใช้ที่ยังทำงาน · วันถ่ายต้องจริง ค.ศ. ไม่ย้อนหลัง
+- **สิทธิ์อ่าน**: key request เห็นแค่ 7 read tools ที่จำเป็น (ไม่เห็นค่าเช่า/ซ่อม/เตือน/อุปกรณ์) · `list_switcher_jobs`/`list_mix_jobs` ไม่ถูกเพิ่มให้ key read-only เดิม (Pigwidgeon)
+- **read tools**: status/email ไม่สนตัวพิมพ์ · status ผิด = error ไม่ใช่ "ไม่มี" · วันที่ไม่มีจริง/ปี พ.ศ. = error · `list_mix_jobs` กรองวันกำหนดส่งได้ (`dueFrom`/`dueTo`)
+- ตรวจซ้ำรอบสอง (2 มุม): คำขอซ้ำที่มาพร้อมกันเข้าคิวเดียว (ไม่สร้างใบซ้ำ) · เพดานนับเป็น**ตอน** ไม่ใช่ใบ และเช็กซ้ำก่อนเพดาน · dedupe รวม programCode/projectId (งานต่างรายการเวลาเดียวกันไม่ถูกนับซ้ำ) · `list_projects`/`get_booking` ของ key request ไม่คืนชื่อลูกค้า/notes/อีเมลทีม · เมลยืนยันตอนอนุมัติและเมลฟุตเทจพร้อมไม่ส่งหา MCP actor (`isMcpActorEmail` — เป็นตัวตน ไม่ใช่กล่องเมล) · `MCP_REQUEST_ACTOR_EMAIL` ตั้งชนกับ `MCP_ACTOR_EMAIL` ไม่ได้
+- key เต็ม (Claude Desktop/n8n) และ key read-only ทำงานเหมือนเดิม
+
+
 ## [1.274.0] — 2026-10-27
 
 ### Fixed — การแจ้งเตือนที่บอกไม่หมด / ชี้ทางผิด (จากข้อความ Discord 27 ต.ค.)

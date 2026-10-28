@@ -376,8 +376,9 @@ hand, so we do not double-book against ourselves. Plan and endpoint notes:
   accepts **any** configured secret rather than a precedence chain — a
   first-match chain caused silent hourly 401s when prod defined a var the
   worker did not send.
-- **MCP** (`/api/mcp`, 14 tools): API-key auth, with `MCP_API_KEYS_READONLY` for
-  keys that may read but not write (v1.212).
+- **MCP** (`/api/mcp`, 16 tools): API-key auth, with `MCP_API_KEYS_READONLY` for
+  keys that may read but not write (v1.212), and `MCP_API_KEYS_REQUEST` for
+  read tools + create_booking only (Veela); duplicate keys resolve read > request > full.
 
 ## Deploy flow
 
