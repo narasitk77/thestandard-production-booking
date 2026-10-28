@@ -99,15 +99,17 @@ export async function POST(request: NextRequest) {
   }
 
   // fail-closed: เฉพาะ scope 'full' ที่เห็นเครื่องมือครบ · scope อื่น/ที่ไม่รู้จัก = อ่านอย่างเดียว
+  const all = buildMcpRegistry({ scope: key.scope, label: key.label })
   const registry = key.scope === 'full'
-    ? buildMcpRegistry()
-    : filterRegistry(buildMcpRegistry(), key.scope === 'request' ? REQUEST_TOOLS : READ_ONLY_TOOLS)
+    ? all
+    : filterRegistry(all, key.scope === 'request' ? REQUEST_TOOLS : READ_ONLY_TOOLS)
   const instructions = key.scope === 'read'
     ? 'Production Booking ของ THE STANDARD: ดูตารางถ่าย โปรเจกต์/Episode ของ Content Agency และคลังอุปกรณ์/ยืม/เช่า/ซ่อม. ' +
       'This key is READ-ONLY — booking creation/cancellation is done in the web app, not through this connection.'
     : key.scope === 'request'
       ? 'Production Booking ของ THE STANDARD: ส่งคำขอจองคิว (create_booking) และดูตาราง. ' +
-        'This key can only REQUEST bookings — every request starts as REQUESTED and waits for admin approval; cancellation is done in the web app.'
+        'This key can only REQUEST bookings — every request starts as REQUESTED and waits for admin approval; a studio/room is reserved only after approval; ' +
+        'one shoot day per request; producerEmail must be a probook user; a limited number of requests per day. Cancellation is done in the web app.'
     : 'Production Booking ของ THE STANDARD: จองคิวถ่ายทำ (booking) ดูตารางถ่าย ดูโปรเจกต์/Episode ของ Content Agency. ' +
       'Before create_booking, call list_outlets_and_programs (outlet bookings) or list_projects + list_project_episodes (Content Agency). ' +
       'New bookings start as REQUESTED and wait for admin approval.'

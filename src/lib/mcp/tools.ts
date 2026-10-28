@@ -16,6 +16,7 @@
  * (approve/assign/hard-delete/purge) are deliberately NOT exposed.
  */
 import { formatMixNumber, addDaysKey } from '@/lib/mix-jobs'
+import { mcpActorEmail, mcpRequestActorEmail, mcpRequestDailyMax, type McpKeyScope } from '@/lib/mcp/auth'
 import { prisma } from '@/lib/db'
 import { OUTLETS } from '@/lib/data'
 import { listProjects } from '@/lib/projects'
@@ -28,9 +29,7 @@ import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { clearBookingOT } from '@/lib/ot-sync'
 import { McpToolError, type McpRegistry } from './server'
 
-export function mcpActorEmail(): string {
-  return process.env.MCP_ACTOR_EMAIL?.trim() || 'mcp@probook'
-}
+export { mcpActorEmail } from '@/lib/mcp/auth'
 
 const bookingInclude = {
   outlet: true,
@@ -67,19 +66,53 @@ async function findBookingByCode(code: string) {
 }
 
 /** วันที่แบบ YYYY-MM-DD เท่านั้น — รูปแบบอื่น (ไม่เติม 0 · มีเวลา/โซน) เลื่อนวันได้เงียบ ๆ จึงปฏิเสธ */
-function dateKeyArg(v: unknown, name: string): string {
+export function dateKeyArg(v: unknown, name: string): string {
   const s = String(v).trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(new Date(`${s}T00:00:00Z`).getTime())) {
-    throw new McpToolError(`${name} must be YYYY-MM-DD`)
+  // round-trip: V8 rolls 2026-02-30 over to 03-02 instead of failing — a real date must survive toISOString
+  const d = new Date(`${s}T00:00:00Z`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s) {
+    throw new McpToolError(`${name} must be a real date YYYY-MM-DD`)
   }
+  const y = Number(s.slice(0, 4))
+  if (y < 2000 || y > 2100) throw new McpToolError(`${name}: use the Gregorian year (ค.ศ.), e.g. 2026 not 2569`)
   return s
+}
+
+/** Status filter: case-insensitive, unknown value = error (a typo must not read as "nothing found"). */
+function statusArg(v: unknown, allowed: readonly string[]): string {
+  const s = String(v).trim().toUpperCase()
+  if (!allowed.includes(s)) throw new McpToolError(`status must be one of ${allowed.join(', ')}`)
+  return s
+}
+
+/** Emails are stored lower-case (session.email) — compare the same way. */
+const emailArg = (v: unknown) => String(v).trim().toLowerCase()
+
+/**
+ * Fields a request key (Veela) may send to create_booking — the documented schema
+ * plus agencyRef. Everything else (isRoutine, routineGroupId, locationId,
+ * shootEndDate, director/co-producer emails, virtualProduction, …) is dropped and
+ * reported back, never silently applied.
+ */
+export const REQUEST_CREATE_FIELDS: readonly string[] = [
+  'outletCode', 'programCode', 'shootDate', 'callTime', 'estimatedWrap', 'shootType', 'category',
+  'producer', 'producerEmail', 'producerPhone', 'locationName', 'videoType', 'notes',
+  'videographerCount', 'switcherCount', 'cameraCount', 'micCount', 'isBlockShot', 'vanCount',
+  'episodes', 'projectId', 'projectName', 'selectedEpisodeIds', 'agencyRef', 'requestedBy',
+]
+
+/** Same request twice (LINE resend, LLM retry) → same key → return the first booking instead of a second one. */
+export function requestDedupeKey(x: { shootDate?: unknown; callTime?: unknown; outletCode?: unknown; programCode?: unknown; projectId?: unknown; producer?: unknown }): string {
+  const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const day = x.shootDate instanceof Date ? x.shootDate.toISOString().slice(0, 10) : String(x.shootDate ?? '').trim().slice(0, 10)
+  return [day, norm(x.callTime), norm(x.outletCode).toUpperCase(), norm(x.programCode).toUpperCase(), norm(x.projectId), norm(x.producer)].join('|')
 }
 
 function limitArg(v: unknown): number {
   return Math.min(Math.max(1, Math.trunc(Number(v)) || 50), 200)
 }
 
-export function buildMcpRegistry(): McpRegistry {
+export function buildMcpRegistry(ctx: { scope?: McpKeyScope; label?: string } = {}): McpRegistry {
   return {
     defs: [
       {
@@ -99,12 +132,14 @@ export function buildMcpRegistry(): McpRegistry {
       },
       {
         name: 'list_mix_jobs',
-        description: 'List sound-mix queue jobs, newest created first. Dates are inclusive Bangkok calendar dates.',
+        description: 'List sound-mix queue jobs, newest created first. from/to filter the date the request was CREATED; dueFrom/dueTo filter the due date (what is due when). Dates are inclusive Bangkok calendar dates.',
         inputSchema: {
           type: 'object',
           properties: {
-            from: { type: 'string', description: 'Earliest date, YYYY-MM-DD (inclusive)' },
-            to: { type: 'string', description: 'Latest date, YYYY-MM-DD (inclusive)' },
+            from: { type: 'string', description: 'Created on/after, YYYY-MM-DD (inclusive)' },
+            to: { type: 'string', description: 'Created on/before, YYYY-MM-DD (inclusive)' },
+            dueFrom: { type: 'string', description: 'Due on/after, YYYY-MM-DD (inclusive)' },
+            dueTo: { type: 'string', description: 'Due on/before, YYYY-MM-DD (inclusive)' },
             status: { type: 'string', enum: ['QUEUED', 'IN_PROGRESS', 'DONE', 'CANCELLED'] },
             assigneeEmail: { type: 'string' },
             limit: { type: 'number', description: 'Max rows (default 50, max 200)' },
@@ -203,6 +238,7 @@ export function buildMcpRegistry(): McpRegistry {
             projectId: { type: 'string', description: 'Content Agency only' },
             projectName: { type: 'string', description: 'Content Agency only' },
             selectedEpisodeIds: { type: 'array', items: { type: 'string' }, description: 'Content Agency only' },
+            agencyRef: { type: 'string', description: 'Quotation no. (QU-xxxx) — required for ADVERTORIAL; QU-1234TBC if not known yet' },
             requestedBy: { type: 'string', description: 'Email of the human who asked for this booking (recorded in the audit trail)' },
           },
           required: ['outletCode', 'programCode', 'shootDate', 'callTime', 'shootType', 'category', 'producer'],
@@ -284,8 +320,8 @@ export function buildMcpRegistry(): McpRegistry {
       async list_switcher_jobs(args) {
         const limit = limitArg(args.limit)
         const where: any = { deletedAt: null }
-        if (args.status) where.status = String(args.status)
-        if (args.switcherEmail) where.switcherEmail = String(args.switcherEmail)
+        if (args.status) where.status = statusArg(args.status, ['DRAFT', 'LOGGED'])
+        if (args.switcherEmail) where.switcherEmail = emailArg(args.switcherEmail)
         if (args.outlet) where.outletCode = String(args.outlet).toUpperCase()
         if (args.from || args.to) {
           where.workDate = {}
@@ -304,8 +340,14 @@ export function buildMcpRegistry(): McpRegistry {
       async list_mix_jobs(args) {
         const limit = limitArg(args.limit)
         const where: any = { deletedAt: null }
-        if (args.status) where.status = String(args.status)
-        if (args.assigneeEmail) where.assigneeEmail = String(args.assigneeEmail)
+        if (args.status) where.status = statusArg(args.status, ['QUEUED', 'IN_PROGRESS', 'DONE', 'CANCELLED'])
+        if (args.assigneeEmail) where.assigneeEmail = emailArg(args.assigneeEmail)
+        // dueDate is the date the mix queue runs on ("what is due tomorrow"); from/to stay on createdAt
+        if (args.dueFrom || args.dueTo) {
+          where.dueDate = {}
+          if (args.dueFrom) where.dueDate.gte = new Date(`${dateKeyArg(args.dueFrom, 'dueFrom')}T00:00:00Z`)
+          if (args.dueTo) where.dueDate.lte = new Date(`${dateKeyArg(args.dueTo, 'dueTo')}T00:00:00Z`)
+        }
         if (args.from || args.to) {
           where.createdAt = {}
           // createdAt มีเวลา: รวมทั้งวันกรุงเทพด้วยขอบบนวันถัดไปแบบ exclusive
@@ -354,13 +396,14 @@ export function buildMcpRegistry(): McpRegistry {
           producerEmail: b.producerEmail,
           director: b.director,
           crewRequired: b.crewRequired,
-          assignedEmails: b.assignedEmails,
+          ...(ctx.scope === 'request' ? {} : { assignedEmails: b.assignedEmails }),
           videographerCount: b.videographerCount,
           switcherCount: b.switcherCount,
           cameraCount: b.cameraCount,
           micCount: b.micCount,
           vanCount: b.vanCount,
-          notes: b.notes,
+          // request keys: no free-text notes / crew e-mail list for an unauthenticated chat
+          ...(ctx.scope === 'request' ? {} : { notes: b.notes }),
           calendarSyncStatus: b.calendarSyncStatus,
           createdByEmail: b.createdByEmail,
           createdAt: b.createdAt,
@@ -378,7 +421,9 @@ export function buildMcpRegistry(): McpRegistry {
 
       async list_projects() {
         const projects = await listProjects()
-        return { count: projects.length, projects }
+        // request keys (chat users probook never authenticated) need only id/name to book — not client/director
+        const out = ctx.scope === 'request' ? projects.map((p: any) => ({ projectId: p.projectId, projectName: p.projectName })) : projects
+        return { count: out.length, projects: out }
       },
 
       async list_project_episodes(args) {
@@ -389,6 +434,7 @@ export function buildMcpRegistry(): McpRegistry {
       },
 
       async create_booking(args) {
+        if (ctx.scope === 'request') return serialRequest(() => createRequestedBooking(args, ctx.label || 'unnamed'))
         const requestedBy = typeof args.requestedBy === 'string' && args.requestedBy.includes('@')
           ? args.requestedBy.trim().toLowerCase()
           : null
@@ -522,3 +568,77 @@ export function buildMcpRegistry(): McpRegistry {
     },
   }
 }
+
+/**
+ * create_booking for a REQUEST key (v1.276 — review of PR #21). The caller is a
+ * chat bot whose users probook never authenticated, so compared with a full key:
+ * - only REQUEST_CREATE_FIELDS pass; anything else is dropped and listed back
+ * - requestedBy is recorded in the audit, never promoted to the booking's owner
+ * - producerEmail must be an active probook user (no outside addresses that would
+ *   later get calendar invites / QU reminders)
+ * - shootDate must be a real date, today or later; one day only (no shootEndDate)
+ * - at most mcpRequestDailyMax() bookings per 24 h, and the same request repeated
+ *   within 15 min returns the first booking instead of burning a second Episode ID
+ * - created as mcpRequestActorEmail(): the room reconciler leaves these without a
+ *   room until an admin approves them (roomEligibleWhere)
+ */
+// ponytail: one in-process queue for every request-scope create, so the dedupe and the daily cap
+// (read, then create) cannot race with a concurrent resend. Single web container, same as
+// merge-lock.ts; a second web replica would need this under a DB lock.
+const gq = globalThis as unknown as { __probookMcpRequestQueue?: Promise<unknown> }
+function serialRequest<T>(fn: () => Promise<T>): Promise<T> {
+  const run = (gq.__probookMcpRequestQueue ?? Promise.resolve()).then(fn)
+  gq.__probookMcpRequestQueue = run.catch(() => undefined)
+  return run
+}
+
+async function createRequestedBooking(args: Record<string, any>, label: string) {
+  const body: Record<string, any> = {}
+  const ignoredFields: string[] = []
+  for (const [k, v] of Object.entries(args || {})) {
+    if (REQUEST_CREATE_FIELDS.includes(k)) body[k] = v
+    else ignoredFields.push(k)
+  }
+  body.shootDate = dateKeyArg(body.shootDate, 'shootDate')
+  const todayBkk = new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 10)
+  if (body.shootDate < todayBkk) throw new McpToolError(`shootDate ${body.shootDate} is in the past`)
+
+  if (body.producerEmail) {
+    const email = emailArg(body.producerEmail)
+    const u = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, active: true }, select: { email: true } })
+    if (!u) throw new McpToolError(`producerEmail ${email} is not an active probook user — ask the producer, or leave it empty`)
+    body.producerEmail = u.email
+  }
+  const requestedBy = typeof body.requestedBy === 'string' && body.requestedBy.includes('@') ? emailArg(body.requestedBy) : null
+
+  const actor = mcpRequestActorEmail()
+  const now = Date.now()
+  const key = requestDedupeKey(body)
+  const recent = await prisma.booking.findMany({
+    where: { createdByEmail: actor, deletedAt: null, status: { not: 'CANCELLED' }, createdAt: { gte: new Date(now - 15 * 60_000) } },
+    include: bookingInclude,
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  })
+  const dup = recent.find((b: any) => requestDedupeKey({ shootDate: b.shootDate, callTime: b.callTime, outletCode: b.outlet?.code, programCode: b.program?.code, projectId: b.projectId, producer: b.producer }) === key)
+  if (dup) {
+    return { created: false, duplicate: true, note: 'Same request was made in the last 15 minutes — returning that booking instead of creating another.', booking: compactBooking(dup) }
+  }
+  // cap on EPISODES, not bookings: each one burns an Episode ID for good (one booking may carry 20)
+  const incoming = Array.isArray(body.episodes) ? body.episodes.length : Array.isArray(body.selectedEpisodeIds) ? body.selectedEpisodeIds.length : 1
+  const eps24h = await prisma.episode.count({ where: { booking: { createdByEmail: actor, createdAt: { gte: new Date(now - 24 * 3_600_000) } } } })
+  if (eps24h + incoming > mcpRequestDailyMax()) {
+    throw new McpToolError(`request limit reached (${eps24h} episodes in 24 h, max ${mcpRequestDailyMax()}) — book in the web app or ask an admin`)
+  }
+
+  const result = await createBookingFromPayload(body, actor, { requestedBy, via: `mcp:${label}` })
+  if (!result.ok) throw new McpToolError(result.error)
+  return {
+    created: true,
+    status: result.booking.status,
+    note: 'Request recorded as REQUESTED — an admin must approve it; a studio/room is reserved only after approval.',
+    ...(ignoredFields.length ? { ignoredFields } : {}),
+    booking: compactBooking(result.booking),
+  }
+}
+

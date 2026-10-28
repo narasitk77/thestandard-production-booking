@@ -1,4 +1,6 @@
 import { prisma } from './db'
+import { mcpRequestActorEmail } from './mcp/auth'
+import type { Prisma } from '@prisma/client'
 import { logAudit } from './audit'
 import { notifyChat } from './notify'
 import {
@@ -97,6 +99,22 @@ async function stampSkipped(id: string, reason: string) {
   })
 }
 
+/**
+ * Which bookings should hold a room. ASSIGNED/CONFIRMED always; REQUESTED too
+ * (v1.270 — producers lock the room the moment they ask) EXCEPT requests made by
+ * a bot through an MCP request key (v1.276, PR #21): nobody vouched for those yet,
+ * so they get a room only once an admin approves them. createdByEmail NULL must
+ * stay eligible — SQL `<>` drops NULLs, hence the explicit branch.
+ */
+export function roomEligibleWhere(requestActor: string = mcpRequestActorEmail()): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { status: { in: ['ASSIGNED', 'CONFIRMED'] } },
+      { status: 'REQUESTED', OR: [{ createdByEmail: null }, { createdByEmail: { not: requestActor } }] },
+    ],
+  }
+}
+
 export async function reconcileRoomBookings(opts: {
   dryRun?: boolean
   days?: number
@@ -120,7 +138,7 @@ export async function reconcileRoomBookings(opts: {
         // v1.270 — จองห้องตั้งแต่ REQUESTED ไม่รอ approve (นัท 19 ต.ค. 2569: โปรดิวเซอร์
         // ต้องการล็อกห้องทันทีที่ขอคิว ทีม Production ไม่ปฏิเสธคิวอยู่แล้ว แค่ assign คนทีหลัง)
         // ใบที่ถูกยกเลิกยังคืนห้องผ่าน releaseRoomForBooking เส้นเดิม
-        { deletedAt: null, status: { in: ['REQUESTED', 'ASSIGNED', 'CONFIRMED'] } },
+        { deletedAt: null, ...roomEligibleWhere() },
       ],
     },
     select: {

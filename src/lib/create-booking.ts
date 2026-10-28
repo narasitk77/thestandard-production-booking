@@ -42,6 +42,8 @@ export async function createBookingFromPayload(
   opts: {
     createdByEmail?: string | null
     requestedBy?: string | null
+    /** e.g. 'mcp:veela' — which client created it (audit only) */
+    via?: string | null
     assignedEmails?: readonly string[] | null
   } = {},
 ): Promise<CreateBookingResult> {
@@ -488,6 +490,7 @@ export async function createBookingFromPayload(
       programCode,
       shootDate: parsedDate.toISOString(),
       ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
+      ...(opts.via ? { via: opts.via } : {}),
       ...(opts.createdByEmail && opts.createdByEmail !== actorEmail ? { createdByEmail: opts.createdByEmail } : {}),
       // v1.183 — ทิ้งร่องรอยไว้ว่าใบนี้ระบบเติม Co-Producer ให้ (ไม่ใช่คนเลือก)
       // และใบไหนยังค้างเลข QU อยู่ — เวลามีคนถามว่า "ทำไมมีชื่อแก้วโผล่มา" หรือ

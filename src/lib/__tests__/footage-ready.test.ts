@@ -340,3 +340,9 @@ test('review v1.267: รอกล้องได้ถึงก่อนหน�
     assert.ok(until > d.getTime() + 86_400_000 + 12 * 3_600_000, `lookback=${lookback}: รอนานพอให้กล้องที่อัปช้าตามมาได้`)
   }
 })
+
+test('v1.276 — an MCP actor as the booking creator never gets the footage-ready mail (identity, not a mailbox)', () => {
+  const r = footageReadyRecipients('everyone', { ...BK, createdByEmail: 'mcp-request@probook' }, ADMIN)
+  assert.ok(!r.people.includes('mcp-request@probook'), r.people.join(','))
+})
+

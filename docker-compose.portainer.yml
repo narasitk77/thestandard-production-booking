@@ -490,6 +490,10 @@ services:
       MCP_API_KEYS_READONLY: ${MCP_API_KEYS_READONLY:-}
       # Veela: read tools + create_booking only; read > request > full.
       MCP_API_KEYS_REQUEST: ${MCP_API_KEYS_REQUEST:-}
+      # v1.276 — request-key bookings: identity (the room reconciler keys on it — do not change while
+      # REQUESTED bot bookings exist) and the 24 h cap. Empty = code defaults (mcp-request@probook, 20).
+      MCP_REQUEST_ACTOR_EMAIL: ${MCP_REQUEST_ACTOR_EMAIL:-}
+      MCP_REQUEST_DAILY_MAX: ${MCP_REQUEST_DAILY_MAX:-}
       # Identity written into the audit trail for MCP-driven writes. Read-only
       # keys never reach a write handler, so this matters for full/request keys.
       MCP_ACTOR_EMAIL: ${MCP_ACTOR_EMAIL:-}

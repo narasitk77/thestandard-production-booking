@@ -7,6 +7,7 @@ import { syncBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
 import { adminAssignedEmails } from '@/lib/vp-assign'
 import { sendBookingConfirmedEmail, sendAssignmentEmail } from '@/lib/email'
+import { isMcpActorEmail } from '@/lib/mcp/auth'
 import { getValidGoogleAccessToken } from '@/lib/google-token'
 import { getToken } from 'next-auth/jwt'
 // v1.70 (issue #5) — pre-create the Drive footage folders when CONFIRMED.
@@ -373,7 +374,8 @@ export async function POST(
     // event creation; links to /dashboard/[id], viewable now that a CONFIRMED
     // booking is visible to any signed-in user (see booking-access.ts).
     const bookerEmail = (updated.createdByEmail || '').trim()
-    if (bookerEmail && bookerEmail.toLowerCase() !== session.email.toLowerCase()) {
+    // v1.276 — an MCP actor (mcp@probook / mcp-request@probook) is an identity, not a mailbox
+    if (bookerEmail && !isMcpActorEmail(bookerEmail) && bookerEmail.toLowerCase() !== session.email.toLowerCase()) {
       sendBookingConfirmedEmail({
         to: bookerEmail,
         toName: bookerEmail.split('@')[0],

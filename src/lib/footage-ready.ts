@@ -35,6 +35,7 @@
  * (default 3) are ever considered — the first production run cannot blast the
  * backlog. The worker itself is OFF until FOOTAGE_READY_WORKER_ENABLED=1.
  */
+import { isMcpActorEmail } from './mcp/auth'
 import { prisma } from './db'
 import { logAudit } from './audit'
 import { sendEmail, isEmailConfigured } from './email'
@@ -191,7 +192,8 @@ export function footageReadyRecipients(
     audience === 'everyone' || audience === 'team'
       ? [b.producerEmail, b.coProducerEmail, b.directorEmail, b.director2Email, b.director3Email, b.createdByEmail, ...(b.assignedEmails || [])]
       : [b.producerEmail, b.coProducerEmail]
-  let people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@'))))
+  // v1.276 — the MCP actor is an identity, not a mailbox
+  let people = Array.from(new Set(raw.map(clean).filter(e => e.includes('@') && !isMcpActorEmail(e))))
   if (audience === 'team') people = people.filter(e => isInternalEmail(e))
   const gone = new Set(Array.from(inactiveEmails, clean))
   const inactive = people.filter(e => gone.has(e))

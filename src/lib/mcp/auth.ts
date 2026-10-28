@@ -33,8 +33,6 @@ export type McpKey = { label: string; key: string; scope: McpKeyScope }
  */
 export const READ_ONLY_TOOLS: readonly string[] = [
   'list_bookings',
-  'list_switcher_jobs',
-  'list_mix_jobs',
   'get_booking',
   'list_outlets_and_programs',
   'list_projects',
@@ -46,8 +44,46 @@ export const READ_ONLY_TOOLS: readonly string[] = [
   'list_equipment',
 ]
 
-/** Request keys: reads + booking requests only; new write tools stay hidden (fail-closed). */
-export const REQUEST_TOOLS: readonly string[] = [...READ_ONLY_TOOLS, 'create_booking']
+/**
+ * Request keys (Veela, a LINE bot in the switcher group): only what a booking
+ * request needs — NOT every read tool. Rentals (amounts, invoice/quote numbers),
+ * repairs, reminders and equipment stay out, and a read tool added later does
+ * not flow here by itself (fail-closed, review of PR #21).
+ * list_switcher_jobs / list_mix_jobs are request+full only: existing read keys
+ * (e.g. Pigwidgeon in a group chat) did not gain them silently.
+ */
+export const REQUEST_TOOLS: readonly string[] = [
+  'list_bookings', 'get_booking', 'list_outlets_and_programs', 'list_projects', 'list_project_episodes',
+  'list_switcher_jobs', 'list_mix_jobs', 'create_booking',
+]
+
+/**
+ * Identity of bookings created through a request key. Deliberately not a real
+ * mailbox and not the full-key actor: the room reconciler keys on it to leave
+ * these REQUESTED bookings without a room until an admin approves them.
+ */
+export function mcpRequestActorEmail(env: Record<string, string | undefined> = process.env): string {
+  const set = env.MCP_REQUEST_ACTOR_EMAIL?.trim()
+  // must never equal the full-key actor: the room rule would then also hold back full-key bookings
+  return set && set.toLowerCase() !== mcpActorEmail(env).toLowerCase() ? set : 'mcp-request@probook'
+}
+
+/** Identity of bookings created through a full key (unchanged default). */
+export function mcpActorEmail(env: Record<string, string | undefined> = process.env): string {
+  return env.MCP_ACTOR_EMAIL?.trim() || 'mcp@probook'
+}
+
+/** An MCP actor is an identity, not a mailbox — never e-mail it (approve confirmation, footage-ready). */
+export function isMcpActorEmail(email: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
+  const e = (email || '').trim().toLowerCase()
+  return !!e && (e === mcpActorEmail(env).toLowerCase() || e === mcpRequestActorEmail(env).toLowerCase())
+}
+
+/** Max bookings a request key may create per rolling 24 h (a looping bot or a leaked key stops here). */
+export function mcpRequestDailyMax(env: Record<string, string | undefined> = process.env): number {
+  const n = Number(env.MCP_REQUEST_DAILY_MAX)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 20
+}
 
 function parseKeyList(raw: string | undefined, scope: McpKeyScope): McpKey[] {
   const out: McpKey[] = []
