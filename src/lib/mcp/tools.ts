@@ -7,13 +7,15 @@
  * audit-logged with the MCP actor identity.
  *
  * Auth happens in the route (Bearer MCP_API_KEY) — by the time a tool
- * runs, the caller is trusted at "staff" level. Read-only keys
+ * runs, full-scope callers act at "staff" level. Read-only keys
  * (MCP_API_KEYS_READONLY, v1.212) never reach the write handlers at
  * all: the route filters this registry down to READ_ONLY_TOOLS
  * (@/lib/mcp/auth) before serving them — add a new READ tool there too
- * or read-only keys won't see it. Admin-only surfaces
+ * or read-only keys won't see it. Request keys (MCP_API_KEYS_REQUEST)
+ * get REQUEST_TOOLS — reads + create_booking only. Admin-only surfaces
  * (approve/assign/hard-delete/purge) are deliberately NOT exposed.
  */
+import { formatMixNumber, addDaysKey } from '@/lib/mix-jobs'
 import { prisma } from '@/lib/db'
 import { OUTLETS } from '@/lib/data'
 import { listProjects } from '@/lib/projects'
@@ -64,9 +66,51 @@ async function findBookingByCode(code: string) {
   return booking
 }
 
+/** วันที่แบบ YYYY-MM-DD เท่านั้น — รูปแบบอื่น (ไม่เติม 0 · มีเวลา/โซน) เลื่อนวันได้เงียบ ๆ จึงปฏิเสธ */
+function dateKeyArg(v: unknown, name: string): string {
+  const s = String(v).trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(new Date(`${s}T00:00:00Z`).getTime())) {
+    throw new McpToolError(`${name} must be YYYY-MM-DD`)
+  }
+  return s
+}
+
+function limitArg(v: unknown): number {
+  return Math.min(Math.max(1, Math.trunc(Number(v)) || 50), 200)
+}
+
 export function buildMcpRegistry(): McpRegistry {
   return {
     defs: [
+      {
+        name: 'list_switcher_jobs',
+        description: 'List switcher jobs, newest work date first. Dates are inclusive Bangkok calendar dates.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            from: { type: 'string', description: 'Earliest date, YYYY-MM-DD (inclusive)' },
+            to: { type: 'string', description: 'Latest date, YYYY-MM-DD (inclusive)' },
+            outlet: { type: 'string', description: 'Outlet code' },
+            status: { type: 'string', enum: ['DRAFT', 'LOGGED'] },
+            switcherEmail: { type: 'string' },
+            limit: { type: 'number', description: 'Max rows (default 50, max 200)' },
+          },
+        },
+      },
+      {
+        name: 'list_mix_jobs',
+        description: 'List sound-mix queue jobs, newest created first. Dates are inclusive Bangkok calendar dates.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            from: { type: 'string', description: 'Earliest date, YYYY-MM-DD (inclusive)' },
+            to: { type: 'string', description: 'Latest date, YYYY-MM-DD (inclusive)' },
+            status: { type: 'string', enum: ['QUEUED', 'IN_PROGRESS', 'DONE', 'CANCELLED'] },
+            assigneeEmail: { type: 'string' },
+            limit: { type: 'number', description: 'Max rows (default 50, max 200)' },
+          },
+        },
+      },
       {
         name: 'list_bookings',
         description:
@@ -237,6 +281,46 @@ export function buildMcpRegistry(): McpRegistry {
     ],
 
     handlers: {
+      async list_switcher_jobs(args) {
+        const limit = limitArg(args.limit)
+        const where: any = { deletedAt: null }
+        if (args.status) where.status = String(args.status)
+        if (args.switcherEmail) where.switcherEmail = String(args.switcherEmail)
+        if (args.outlet) where.outletCode = String(args.outlet).toUpperCase()
+        if (args.from || args.to) {
+          where.workDate = {}
+          if (args.from) where.workDate.gte = new Date(`${dateKeyArg(args.from, 'from')}T00:00:00Z`)
+          if (args.to) where.workDate.lte = new Date(`${dateKeyArg(args.to, 'to')}T00:00:00Z`)
+        }
+        const rows = await prisma.switcherJob.findMany({
+          where,
+          select: { productionId: true, outletCode: true, jobName: true, workDate: true, startTime: true, endTime: true, endDayOffset: true, links: true, requestedBy: true, switcherEmail: true, source: true, status: true, createdAt: true, updatedAt: true },
+          orderBy: [{ workDate: 'desc' }, { createdAt: 'desc' }],
+          take: limit,
+        })
+        return { count: rows.length, jobs: rows }
+      },
+
+      async list_mix_jobs(args) {
+        const limit = limitArg(args.limit)
+        const where: any = { deletedAt: null }
+        if (args.status) where.status = String(args.status)
+        if (args.assigneeEmail) where.assigneeEmail = String(args.assigneeEmail)
+        if (args.from || args.to) {
+          where.createdAt = {}
+          // createdAt มีเวลา: รวมทั้งวันกรุงเทพด้วยขอบบนวันถัดไปแบบ exclusive
+          if (args.from) where.createdAt.gte = new Date(`${dateKeyArg(args.from, 'from')}T00:00:00+07:00`)
+          if (args.to) where.createdAt.lt = new Date(`${addDaysKey(dateKeyArg(args.to, 'to'), 1)}T00:00:00+07:00`)
+        }
+        const rows = await prisma.mixJob.findMany({
+          where,
+          select: { number: true, title: true, bookingCode: true, episodeCode: true, requesterEmail: true, assigneeEmail: true, assignedByEmail: true, claimedAt: true, dueDate: true, deliveredAt: true, status: true, createdAt: true, updatedAt: true, sourceLink: true, deliveryLink: true },
+          orderBy: [{ createdAt: 'desc' }],
+          take: limit,
+        })
+        return { count: rows.length, jobs: rows.map(r => ({ ...r, number: formatMixNumber(r.number) })) }
+      },
+
       async list_bookings(args) {
         const limit = Math.min(Math.max(1, Number(args.limit) || 50), 200)
         // v1.51 — soft-deleted bookings are hidden from MCP listings

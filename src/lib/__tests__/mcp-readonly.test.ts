@@ -15,7 +15,7 @@
  */
 import { test, mock } from 'node:test'
 import assert from 'node:assert/strict'
-import { configuredKeys, resolveBearerKey, READ_ONLY_TOOLS } from '../mcp/auth'
+import { configuredKeys, resolveBearerKey, READ_ONLY_TOOLS, REQUEST_TOOLS } from '../mcp/auth'
 import { handleMcpMessage, filterRegistry, type McpRegistry } from '../mcp/server'
 
 // ---- 1) key parsing + scope -------------------------------------------------
@@ -114,17 +114,22 @@ test('prototype-chain names are unknown tools, not inherited functions — filte
 // ---- 3) dead-man switch on the real registry -------------------------------
 
 // tools.ts pulls Prisma + Google-backed modules at import time — swap them for
-// inert stubs; this test only inspects tool NAMES, never runs handlers.
+// inert stubs; registry checks and read queries never reach the DB/services.
 // NOTE: relative specifiers on purpose ('../db', not '@/lib/db') — CI's
 // mock.module() resolves the specifier with plain node rules (no tsconfig
 // alias), same as heartbeat-specs.test.ts. Interception still applies to
 // tools.ts's '@/lib/...' imports because both resolve to the same file.
-mock.module('../db', { namedExports: { prisma: {} } })
+const queries: { model: string; args: any }[] = []
+mock.module('../db', { namedExports: { prisma: {
+  switcherJob: { async findMany(args: any) { queries.push({ model: 'switcher', args }); return [] } },
+  mixJob: { async findMany(args: any) { queries.push({ model: 'mix', args }); return [{ number: 7, sourceLink: 'source', deliveryLink: 'delivery' }] } },
+} } })
 mock.module('../projects', { namedExports: { listProjects: async () => [] } })
 mock.module('../dashboard-episodes', { namedExports: { listProjectEpisodes: async () => [] } })
 mock.module('../create-booking', { namedExports: { createBookingFromPayload: async () => ({}) } })
 mock.module('../google-calendar', { namedExports: { deleteCalendarEvent: async () => undefined } })
 mock.module('../audit', { namedExports: { logAudit: async () => undefined } })
+mock.module('../room-booking-sync', { namedExports: { releaseRoomForBooking: async () => undefined } })
 mock.module('../ot-sync', { namedExports: { clearBookingOT: async () => undefined } })
 
 const KNOWN_WRITE_TOOLS = ['create_booking', 'cancel_booking', 'create_repair_ticket', 'mark_rental_paid']
@@ -155,4 +160,69 @@ test('every registry tool is classified read or write — unclassified tools fai
   const filtered = filterRegistry(registry, READ_ONLY_TOOLS)
   assert.deepEqual(filtered.defs.map(d => d.name).sort(), [...READ_ONLY_TOOLS].sort())
   for (const t of KNOWN_WRITE_TOOLS) assert.ok(!filtered.handlers[t], `write handler survived filter: ${t}`)
+})
+
+
+test('request keys parse in least-privilege order and enable the endpoint alone', () => {
+  assert.deepEqual(configuredKeys({ MCP_API_KEYS_REQUEST: 'veela:req, bare ,empty: ' }).map(k => [k.label, k.key, k.scope]), [
+    ['veela', 'req', 'request'], ['unnamed', 'bare', 'request'],
+  ])
+  const env = { MCP_API_KEY: 'same', MCP_API_KEYS: 'full:same', MCP_API_KEYS_REQUEST: 'veela:same' }
+  assert.equal(resolveBearerKey('Bearer same', env)!.scope, 'request')
+  assert.equal(resolveBearerKey('Bearer same', { ...env, MCP_API_KEYS_READONLY: 'bot:same' })!.scope, 'read')
+  assert.deepEqual(configuredKeys({ ...env, MCP_API_KEYS_READONLY: 'bot:same' }).map(k => k.scope), ['read', 'request', 'full', 'full'])
+})
+
+test('request registry lists reads + create_booking only and rejects other writes server-side', async () => {
+  const { buildMcpRegistry } = await import('../mcp/tools')
+  const registry = filterRegistry(buildMcpRegistry(), REQUEST_TOOLS)
+  const list = await handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, registry, serverInfo)
+  assert.deepEqual((list!.result as any).tools.map((t: any) => t.name).sort(), [...READ_ONLY_TOOLS, 'create_booking'].sort())
+  for (const name of ['cancel_booking', 'mark_rental_paid', 'create_repair_ticket']) {
+    const call = await handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name } }, registry, serverInfo)
+    assert.equal(call!.error?.code, -32602)
+  }
+  const readList = await handleMcpMessage({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, filterRegistry(buildMcpRegistry(), READ_ONLY_TOOLS), serverInfo)
+  for (const name of ['list_switcher_jobs', 'list_mix_jobs']) {
+    assert.ok((readList!.result as any).tools.some((t: any) => t.name === name))
+  }
+  assert.ok(!filterRegistry(fakeRegistry, REQUEST_TOOLS).handlers.write_b)
+})
+
+
+test('new read tools filter compact queries and include the whole Bangkok day', async () => {
+  const { buildMcpRegistry } = await import('../mcp/tools')
+  const registry = buildMcpRegistry()
+  queries.length = 0
+  await registry.handlers.list_switcher_jobs({ from: '2026-10-01', to: '2026-10-28', outlet: 'nws', status: 'DRAFT', switcherEmail: 'switcher@example.com', limit: 999 })
+  assert.deepEqual(queries[0].args.where, {
+    deletedAt: null, outletCode: 'NWS', status: 'DRAFT', switcherEmail: 'switcher@example.com',
+    workDate: { gte: new Date('2026-10-01'), lte: new Date('2026-10-28') },
+  })
+  assert.equal(queries[0].args.take, 200)
+  assert.deepEqual(queries[0].args.orderBy, [{ workDate: 'desc' }, { createdAt: 'desc' }])
+  assert.equal(queries[0].args.select.notes, undefined)
+  const result = await registry.handlers.list_mix_jobs({ from: '2026-10-28', to: '2026-10-28', status: 'QUEUED', assigneeEmail: 'mix@example.com' }) as any
+  assert.deepEqual(queries[1].args.where, {
+    deletedAt: null, status: 'QUEUED', assigneeEmail: 'mix@example.com',
+    createdAt: { gte: new Date('2026-10-27T17:00:00Z'), lt: new Date('2026-10-28T17:00:00Z') },
+  })
+  assert.equal(queries[1].args.take, 50)
+  assert.equal(queries[1].args.select.events, undefined)
+  assert.equal(queries[1].args.select.sourceLink, true)
+  assert.equal(queries[1].args.select.deliveryLink, true)
+  assert.equal(result.jobs[0].number, 'MIX-007')
+})
+
+test('new read tools reject non YYYY-MM-DD dates instead of shifting a day, and truncate limit', async () => {
+  const { buildMcpRegistry } = await import('../mcp/tools')
+  const { McpToolError } = await import('../mcp/server')
+  const registry = buildMcpRegistry()
+  for (const bad of ['2026-10-5', '2026/10/05', '2026-10-28T00:00:00+07:00', '2026-13-40']) {
+    await assert.rejects(registry.handlers.list_switcher_jobs({ to: bad }), McpToolError)
+    await assert.rejects(registry.handlers.list_mix_jobs({ from: bad }), McpToolError)
+  }
+  queries.length = 0
+  await registry.handlers.list_mix_jobs({ limit: 10.7 })
+  assert.equal(queries[0].args.take, 10)
 })

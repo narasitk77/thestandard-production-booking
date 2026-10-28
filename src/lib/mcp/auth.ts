@@ -3,7 +3,7 @@
  * no Next.js imports) so it unit-tests directly; the /api/mcp route is
  * just the HTTP skin over this.
  *
- * Two scopes:
+ * Three scopes:
  *   - 'full' — staff level, every tool. `MCP_API_KEY` + `MCP_API_KEYS`
  *     (unchanged from before — existing keys keep working as-is).
  *   - 'read' — v1.212: `MCP_API_KEYS_READONLY`, same comma-separated
@@ -14,12 +14,15 @@
  *     client holds it. Made for headless bots (e.g. Pigwidgeon) that
  *     only ever query.
  *
- * A key present in BOTH lists resolves to 'read' — least privilege wins
- * over a config mistake.
+ *   - 'request' — `MCP_API_KEYS_REQUEST`: read tools + create_booking
+ *     only, for Veela's booking requests (ยังรอ admin อนุมัติเหมือนเดิม).
+ *
+ * Duplicate keys resolve read > request > full — least privilege wins
+ * over a config mistake; configuredKeys ordering determines first match.
  */
 import { timingSafeEqual } from 'crypto'
 
-export type McpKeyScope = 'full' | 'read'
+export type McpKeyScope = 'full' | 'read' | 'request'
 export type McpKey = { label: string; key: string; scope: McpKeyScope }
 
 /**
@@ -30,6 +33,8 @@ export type McpKey = { label: string; key: string; scope: McpKeyScope }
  */
 export const READ_ONLY_TOOLS: readonly string[] = [
   'list_bookings',
+  'list_switcher_jobs',
+  'list_mix_jobs',
   'get_booking',
   'list_outlets_and_programs',
   'list_projects',
@@ -40,6 +45,9 @@ export const READ_ONLY_TOOLS: readonly string[] = [
   'list_open_repairs',
   'list_equipment',
 ]
+
+/** Request keys: reads + booking requests only; new write tools stay hidden (fail-closed). */
+export const REQUEST_TOOLS: readonly string[] = [...READ_ONLY_TOOLS, 'create_booking']
 
 function parseKeyList(raw: string | undefined, scope: McpKeyScope): McpKey[] {
   const out: McpKey[] = []
@@ -58,12 +66,14 @@ export type McpKeyEnv = {
   MCP_API_KEY?: string
   MCP_API_KEYS?: string
   MCP_API_KEYS_READONLY?: string
+  MCP_API_KEYS_REQUEST?: string
 }
 
-/** Every configured key, read-scope entries first (so both-lists = read). */
+/** First match wins: read → request → full; preserve entry order within each list. */
 export function configuredKeys(env: McpKeyEnv = process.env as McpKeyEnv): McpKey[] {
   const out: McpKey[] = []
   out.push(...parseKeyList(env.MCP_API_KEYS_READONLY, 'read'))
+  out.push(...parseKeyList(env.MCP_API_KEYS_REQUEST, 'request'))
   const single = env.MCP_API_KEY?.trim()
   if (single) out.push({ label: 'default', key: single, scope: 'full' })
   out.push(...parseKeyList(env.MCP_API_KEYS, 'full'))

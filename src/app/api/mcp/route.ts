@@ -17,6 +17,8 @@
  *     queries) — create/cancel/repair/mark-paid are absent from
  *     tools/list and rejected on tools/call. For headless bots that
  *     only query (e.g. Pigwidgeon), so a leaked bot key cannot write.
+ *   - MCP_API_KEYS_REQUEST — same format: read tools + create_booking only,
+ *     for Veela; duplicate keys resolve read > request > full.
  * No key configured at all = the endpoint is OFF (503). Full-scope
  * callers act at staff level under the MCP_ACTOR_EMAIL identity; admin
  * actions are not exposed as tools to any key.
@@ -28,7 +30,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { handleMcpMessage, filterRegistry } from '@/lib/mcp/server'
 import { buildMcpRegistry } from '@/lib/mcp/tools'
-import { configuredKeys, resolveBearerKey, READ_ONLY_TOOLS, type McpKey } from '@/lib/mcp/auth'
+import { configuredKeys, resolveBearerKey, READ_ONLY_TOOLS, REQUEST_TOOLS, type McpKey } from '@/lib/mcp/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,7 +70,7 @@ function authorizedKey(request: NextRequest): McpKey | null {
 export async function POST(request: NextRequest) {
   if (configuredKeys().length === 0) {
     return NextResponse.json(
-      { error: 'MCP is not enabled — set MCP_API_KEY (or MCP_API_KEYS / MCP_API_KEYS_READONLY) in the stack env' },
+      { error: 'MCP is not enabled — set MCP_API_KEY (or MCP_API_KEYS / MCP_API_KEYS_READONLY / MCP_API_KEYS_REQUEST) in the stack env' },
       { status: 503 },
     )
   }
@@ -96,12 +98,16 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const registry = key.scope === 'read'
-    ? filterRegistry(buildMcpRegistry(), READ_ONLY_TOOLS)
-    : buildMcpRegistry()
+  // fail-closed: เฉพาะ scope 'full' ที่เห็นเครื่องมือครบ · scope อื่น/ที่ไม่รู้จัก = อ่านอย่างเดียว
+  const registry = key.scope === 'full'
+    ? buildMcpRegistry()
+    : filterRegistry(buildMcpRegistry(), key.scope === 'request' ? REQUEST_TOOLS : READ_ONLY_TOOLS)
   const instructions = key.scope === 'read'
     ? 'Production Booking ของ THE STANDARD: ดูตารางถ่าย โปรเจกต์/Episode ของ Content Agency และคลังอุปกรณ์/ยืม/เช่า/ซ่อม. ' +
       'This key is READ-ONLY — booking creation/cancellation is done in the web app, not through this connection.'
+    : key.scope === 'request'
+      ? 'Production Booking ของ THE STANDARD: ส่งคำขอจองคิว (create_booking) และดูตาราง. ' +
+        'This key can only REQUEST bookings — every request starts as REQUESTED and waits for admin approval; cancellation is done in the web app.'
     : 'Production Booking ของ THE STANDARD: จองคิวถ่ายทำ (booking) ดูตารางถ่าย ดูโปรเจกต์/Episode ของ Content Agency. ' +
       'Before create_booking, call list_outlets_and_programs (outlet bookings) or list_projects + list_project_episodes (Content Agency). ' +
       'New bookings start as REQUESTED and wait for admin approval.'

@@ -89,7 +89,7 @@ export async function GET(_req: NextRequest) {
     },
     // v1.49.0 — MCP endpoint for external AI clients (docs/mcp.md).
     // v1.212: enabled must mirror the route's own 503 gate (any of
-    // MCP_API_KEY / MCP_API_KEYS / MCP_API_KEYS_READONLY) — checking only
+    // MCP_API_KEY / MCP_API_KEYS / MCP_API_KEYS_READONLY / MCP_API_KEYS_REQUEST) — checking only
     // MCP_API_KEY reported "disabled" for keys-list-only deployments.
     mcp: {
       enabled: mcpConfiguredKeys().length > 0,

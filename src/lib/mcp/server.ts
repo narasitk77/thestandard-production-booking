@@ -37,7 +37,7 @@ export type McpRegistry = {
  * Restrict a registry to the named tools. Dropped tools disappear from
  * BOTH surfaces at once: tools/list (def filtered out) and tools/call
  * (handler absent → "Unknown tool"), so there is a single choke point
- * for scoping instead of two checks that can drift apart. Returns a new
+ * for read/request scoping instead of two checks that can drift apart. Returns a new
  * registry — the input is not mutated.
  */
 export function filterRegistry(registry: McpRegistry, allowedNames: Iterable<string>): McpRegistry {

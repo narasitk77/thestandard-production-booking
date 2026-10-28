@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added — MCP สำหรับ Veela และข้อมูลคิวงาน PMDC
+
+- `MCP_API_KEYS_REQUEST`: ให้บอทสวิตเชอร์ Veela อ่านข้อมูลและส่งคำขอจองผ่าน `create_booking` ได้เท่านั้น (ยังรอ admin อนุมัติ) · ไม่เปิด cancel/mark-paid/repair
+- key ซ้ำหลายลิสต์เลือกสิทธิ์ต่ำสุด read > request > full · allowlist บังคับทั้ง tools/list และ tools/call แบบ fail-closed
+- `list_switcher_jobs` / `list_mix_jobs`: ให้ PMDC อ่านบันทึกสวิตเชอร์และคิวมิกซ์พร้อมตัวกรองและลิงก์ส่งงาน โดยไม่ดึง MixJobEvent bodies
+
+
 ## [1.274.0] — 2026-10-27
 
 ### Fixed — การแจ้งเตือนที่บอกไม่หมด / ชี้ทางผิด (จากข้อความ Discord 27 ต.ค.)

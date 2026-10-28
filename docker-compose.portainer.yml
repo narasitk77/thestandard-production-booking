@@ -477,18 +477,21 @@ services:
       #   MCP_API_KEYS_READONLY       — v1.212 (PR #19). Read tools only; the
       #                                 write tools are absent from tools/list
       #                                 and rejected on tools/call.
-      # A headless bot in a group chat belongs in the READONLY list. Putting a
+      #   MCP_API_KEYS_REQUEST        — Veela: reads + create_booking only.
+      # A query-only bot in a group chat belongs in the READONLY list. Putting a
       # bot key in MCP_API_KEYS instead hands the room the ability to book and
       # cancel — and it would look identical from the outside until it did.
       #
-      # Format for both lists: comma-separated `<label>:<key>`. The label exists
+      # Format for all lists: comma-separated `<label>:<key>`. The label exists
       # so one client can be revoked without rotating everyone else's key. The
       # BEARER TOKEN THE CLIENT SENDS IS ONLY THE PART AFTER THE COLON.
       MCP_API_KEY: ${MCP_API_KEY:-}
       MCP_API_KEYS: ${MCP_API_KEYS:-}
       MCP_API_KEYS_READONLY: ${MCP_API_KEYS_READONLY:-}
+      # Veela: read tools + create_booking only; read > request > full.
+      MCP_API_KEYS_REQUEST: ${MCP_API_KEYS_REQUEST:-}
       # Identity written into the audit trail for MCP-driven writes. Read-only
-      # keys never reach a write handler, so this only matters for full keys.
+      # keys never reach a write handler, so this matters for full/request keys.
       MCP_ACTOR_EMAIL: ${MCP_ACTOR_EMAIL:-}
 
       # v1.111 — NAS ↔ Production Team sync verification. The Mac agent
