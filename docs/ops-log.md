@@ -4051,3 +4051,9 @@ problem and not a deployment problem.
 - gate `AUTH_DISABLED=0 npm run build` 1216/1216 · CI + Docker ผ่าน · `deploy.py --check` schema ไม่เปลี่ยน · backup-2026-10-28T081110.sql.gz 1.31MB · deploy 15:13–15:15 · จุดถอย sha-db306e0
 - หลัง deploy: /api/version 1.277.0 in-sync · `/api/upload/ingest` ticket ไม่มี session = 401 · heartbeat โค้ดมั่ว = BAD_TICKET · log แอป 0 error ใน 2 นาทีแรก
 - **ยังไม่มีใครใช้จริง** — ต่อไป: pilot การ์ดเดียวบนใบของนัท (ใบที่ไม่ใช่ AGN, CONFIRMED, กล่อง id-first, การ์ด Sony ทั้งใบ) ก่อนแจกทีม
+
+## 2026-10-28 — ออก MCP key แบบ request ให้ veela (ปุ๊ก)
+- นัทสั่ง "ขอคีย์ที่ปุ๊กขอมา" → key สุ่ม 64 hex เก็บที่ `~/.probook/veela-mcp-request-key.txt` (600, เครื่องนัท) · stack 125 `MCP_API_KEYS_REQUEST=veela:<key>` · ไม่ใช้ `deploy.py --set` (มันพิมพ์ค่า + จดลง deploy-state.json)
+- backup-2026-10-28T153120.sql.gz 1.31MB → redeploy อิมเมจเดิม sha-a0e7325 · **Portainer ตอบ 500 "Unable get latest commit id" (DNS ใน Portainer หา github.com ไม่เจอ) แต่คอนเทนเนอร์ app+db ถูกสร้างใหม่จริง 22:31 พร้อม key** — ขณะที่ stack Env **ไม่ถูกบันทึก** (deploy รอบหน้าจะทำ key หายเงียบ ๆ) → แก้ด้วย `POST /api/stacks/125/git?endpointId=2` (บันทึก Env อย่างเดียว ไม่ redeploy) · diff env ก่อน/หลัง = เปลี่ยนแค่ MCP_API_KEYS_REQUEST · คอนเทนเนอร์ไม่ถูกแตะ
+- ตรวจด้วย key จริงบนพรอด: tools/list = 8 ตัวชุด request ตรงเป๊ะ · cancel_booking = Unknown tool · list_outlets_and_programs ตอบได้ · แอปล่ม ~1.5 นาที (502 22:31–22:33)
+- บทเรียน: Portainer 500 ≠ ไม่ได้ทำอะไร — ต้องเทียบ Id คอนเทนเนอร์ + env ในคอนเทนเนอร์กับ stack Env ทุกครั้ง (deploy.py ตอนนี้ exit 1 "ปฏิเสธ" ในเคสนี้ทั้งที่ทำไปแล้ว)
