@@ -4039,3 +4039,9 @@ problem and not a deployment problem.
 - "ต้องกด 📣 เอง" WLT-MNW-261012-01 / NWS-GLF-261012-01: ตัวกัน MEDIAPRO กันอยู่ (ขาด 2+2 คลิป) และปุ่ม 📣 ไม่ตรวจ MEDIAPRO → กดตามคำเตือน = แจ้งทีมผิด · v1.274 จำเหตุผลใน readySnapshot.held + alert "อย่าเพิ่งกด 📣" + เตือนในหน้ายืนยัน 📣 · รีวิวอิสระ 2 มุม 6 ข้อแก้ครบ · CI ผ่าน · deploy 14:53–15:02 (boot ช้า seed ~3 นาที) · รัน run?codes=…&dryRun=0 หลัง dry-run ยืนยันว่ากัน → held ถูกบันทึกทั้งสองใบ ไม่มีเมลออก · stats ตอนนี้: agedOutHeld 2 / agedOut 0
 - POP-PIV-261007-02: ซาก sync-conflict 123 ชื่อใน landing นิ่ง (ไม่งอก) — video-merge เตือนทุกชั่วโมงแต่ไม่ merge (ถูกต้อง)
 
+## 2026-10-28 — v1.276.0 = PR #21 (MCP request key สำหรับ Veela) + แก้จากรีวิว
+- ปุ๊กส่ง PR #21 (Minerva/PMDC): key แบบ request ให้บอท LINE สวิตเชอร์ส่งคำขอจอง + list_switcher_jobs/list_mix_jobs · tsc/เทสต์/CI ผ่าน แต่รีวิวอิสระยืนยัน 14 ข้อ (blocker: ใบ REQUESTED ของบอทล็อกห้องพอร์ทัลกลางทันที, สร้างไม่จำกัด/ซ้ำ)
+- นัทสั่ง "แก้เลย" → commit 090e043 บน minerva/mcp-request-scope: ห้องรออนุมัติ (roomEligibleWhere), เพดานตอน/วัน + dedupe 15 นาที + คิวเดียว, requestedBy ลง audit เท่านั้น, allowlist ฟิลด์, producerEmail ต้องเป็น user active, key request เห็น 7 tools และไม่เห็นลูกค้า/notes, read keys เดิมไม่ได้ tools ใหม่, อินพุต read tools เข้มขึ้น · ตรวจซ้ำรอบสองเจอ 5 ข้อ แก้ครบ · 1208/1208
+- merge db306e0 (worktree แยก ไม่แตะ local main ที่มี v1.275.0 Field Uploader ยังไม่ push) · CI ผ่าน · deploy 12:59–13:02 · ชุดใบที่ได้ห้องหลัง deploy เท่าเดิม 97/97 (ยังไม่มีใบจากบอท)
+- **ยังไม่ได้ออก key veela** · รอนัทตอบปุ๊ก 2 เรื่อง: ค่าตั้งต้นคำขอจากสวิตเชอร์ / สิทธิ์อ่าน Lark · v1.275.0 สงวนให้ Field Uploader (local main ต้อง rebase บน db306e0)
+
