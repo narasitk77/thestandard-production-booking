@@ -4045,3 +4045,9 @@ problem and not a deployment problem.
 - merge db306e0 (worktree แยก ไม่แตะ local main ที่มี v1.275.0 Field Uploader ยังไม่ push) · CI ผ่าน · deploy 12:59–13:02 · ชุดใบที่ได้ห้องหลัง deploy เท่าเดิม 97/97 (ยังไม่มีใบจากบอท)
 - **ยังไม่ได้ออก key veela** · รอนัทตอบปุ๊ก 2 เรื่อง: ค่าตั้งต้นคำขอจากสวิตเชอร์ / สิทธิ์อ่าน Lark · v1.275.0 สงวนให้ Field Uploader (local main ต้อง rebase บน db306e0)
 
+## 2026-10-28 — v1.277.0 = Field Uploader Phase 1 (ส่งฟุตเทจจากหน้างาน) deployed
+- commit e9c8a74 (เดิมจองเลข 1.275.0) rebase บน v1.276.0 → **a0e7325 = 1.277.0** (1.275.0 ไม่มีรุ่นจริง — ถ้าใช้จะถอยหลังจาก 1.276.0 ที่ขึ้นไปแล้ว) · ชนแค่ CHANGELOG/package.json
+- เพิ่มก่อน push: `probook-field.sh` ใส่ `--no-update-modtime` คู่ `--immutable` (ไฟล์เนื้อเดียวกันแต่ mtime ต่าง rclone v1.75.2 เคย exit 6 "Timestamp mismatch between immutable objects" — เจอตอนทดสอบ Drive Uploader กับ Drive จริง)
+- gate `AUTH_DISABLED=0 npm run build` 1216/1216 · CI + Docker ผ่าน · `deploy.py --check` schema ไม่เปลี่ยน · backup-2026-10-28T081110.sql.gz 1.31MB · deploy 15:13–15:15 · จุดถอย sha-db306e0
+- หลัง deploy: /api/version 1.277.0 in-sync · `/api/upload/ingest` ticket ไม่มี session = 401 · heartbeat โค้ดมั่ว = BAD_TICKET · log แอป 0 error ใน 2 นาทีแรก
+- **ยังไม่มีใครใช้จริง** — ต่อไป: pilot การ์ดเดียวบนใบของนัท (ใบที่ไม่ใช่ AGN, CONFIRMED, กล่อง id-first, การ์ด Sony ทั้งใบ) ก่อนแจกทีม
