@@ -29,6 +29,7 @@ interface UploadItem {
   initiatedAt: string
   completedAt: string | null
   failureReason: string | null
+  notes?: string | null   // v1.277 — field-ingest CARD_ rows: JSON {phase, bytes, files, eta, at}
 }
 
 interface InFlight {
@@ -519,6 +520,11 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
         </div>
       </div>
 
+      {/* v1.277 — ส่งจากหน้างาน: rclone on the crew's laptop, one ticket per card (Sony whole card, non-AGN) */}
+      {!isAgency && (
+        <FieldIngestPanel bookingId={booking.id} camera={camera} episodeRowId={episodeRowId} history={history} onChanged={fetchHistory} />
+      )}
+
       {/* v1.101 — Detect footage already in this booking's Drive folders (incl. NAS-moved) */}
       <div className="gf-card p-4 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -809,3 +815,90 @@ function ProgressBar({ label, frac, retry }: { label: string; frac: number; retr
 // v1.35.6 — uploadToDrive moved to src/lib/upload-client.ts.
 // That file holds the chunked + retry logic so the component focuses on
 // queue UI / rendering. See the `driveUpload` import at top.
+
+// ── v1.277 — ส่งจากหน้างาน ──────────────────────────────────────────────────
+// One ticket = one card = one `CARD_…` Upload row. The crew pastes the ticket
+// into scripts/field/probook-field.sh on their own Mac; rclone does the bytes.
+// This panel only mints tickets and shows what the server knows about each card.
+const PHASE_TH: Record<string, string> = {
+  start: 'รอเริ่ม', pass1: 'กำลังส่ง proxy+เสียง', check1: 'ตรวจ md5 (รอบ 1)', 'proxies-ok': 'proxy ครบ · รอต้นฉบับ',
+  pass2: 'กำลังส่งต้นฉบับ', check2: 'ตรวจ md5 (รอบ 2)', 'quota-wait': 'โควตาวันนี้เต็ม · รอ', complete: 'ครบ', failed: 'ล้ม',
+}
+function FieldIngestPanel({ bookingId, camera, episodeRowId, history, onChanged }: {
+  bookingId: string; camera: string; episodeRowId: string; history: UploadItem[]; onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const fieldCamera = /^(CAM-[A-D]|AUDIO)$/.test(camera) // Phase 1: the API refuses DRONE/SWITCHER/PHOTO/SCREEN
+  // ADMIN override — FAILED lets go of the footage-ready hold; files on Drive are never touched
+  const release = async (u: UploadItem) => {
+    const reason = window.prompt(`ปลดการ์ด ${u.fileName}? footage พร้อม จะไม่ถูกถือไว้ด้วยการ์ดนี้อีก (ไม่ลบไฟล์บน Drive)\nเหตุผล:`)
+    if (reason == null) return
+    const res = await fetch('/api/upload/ingest', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'release', uploadId: u.id, reason }) }).catch(() => null)
+    const data = res ? await res.json().catch(() => ({})) : {}
+    if (!res || !res.ok || !data.ok) { setErr(data.error || 'ปลดไม่สำเร็จ'); return }
+    onChanged()
+  }
+  const [issued, setIssued] = useState<{ ticket: string; cardName: string; camera: string } | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const cards = history.filter(u => u.fileName.startsWith('CARD_'))
+  const mint = async () => {
+    setBusy(true); setErr(null); setIssued(null)
+    try {
+      const res = await fetch('/api/upload/ingest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ticket', bookingId, camera, episodeRowId: episodeRowId || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) { setErr(data.error || `HTTP ${res.status}`); return }
+      setIssued({ ticket: data.ticket, cardName: data.cardName, camera: data.camera })
+    } catch (e: any) { setErr(e?.message || 'network error') } finally { setBusy(false) }
+  }
+  const cmd = issued ? `probook-field.sh ${issued.ticket} "/Volumes/<การ์ด>"` : ''
+  return (
+    <div className="gf-card p-4 space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-sm font-medium text-gray-700">
+          🛰️ ส่งจากหน้างาน <span className="text-[11px] text-gray-400 font-normal">(rclone บนเครื่องคุณ · การ์ด Sony ทั้งใบ · 1 โค้ดต่อ 1 การ์ด)</span>
+        </div>
+        <button type="button" onClick={mint} disabled={busy || !fieldCamera}
+          title={fieldCamera ? '' : 'Phase 1 รับเฉพาะ CAM-A…CAM-D และ AUDIO'}
+          className="py-1.5 px-3 rounded text-xs font-medium border border-[#673ab7] text-[#673ab7] hover:bg-purple-50 disabled:opacity-50">
+          {busy ? 'กำลังขอ…' : fieldCamera ? `ขอโค้ดส่งการ์ด ${camera}` : `${camera} ส่งจากหน้างานไม่ได้`}
+        </button>
+      </div>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      {issued && (
+        <div className="text-xs space-y-1">
+          <p className="text-gray-600">การ์ด <code className="text-gray-800">{issued.cardName}</code> — วางคำสั่งนี้ใน Terminal บนเครื่องที่เสียบการ์ด (โค้ดใช้ได้กับการ์ดนี้ใบเดียว):</p>
+          <pre className="bg-gray-900 text-green-200 rounded p-2 overflow-x-auto select-all">{cmd}</pre>
+          <p className="text-[10px] text-gray-500">ส่ง proxy+เสียงก่อน (ข้าม Clip/) แล้วแจ้งห้อง Discord · ต้นฉบับส่งทีหลังด้วยโค้ดเดิม + <code>--originals</code> · ห้ามลากการ์ดเดียวกันเข้า Drive/NAS ซ้ำ · ห้าม format จนกว่าจะขึ้น &quot;ครบ&quot;</p>
+        </div>
+      )}
+      {cards.length > 0 && (
+        <ul className="text-xs divide-y divide-gray-100">
+          {cards.map(u => {
+            let n: { phase?: string; bytes?: number; files?: number; eta?: string; at?: string } = {}
+            try { n = u.notes ? JSON.parse(u.notes) : {} } catch {}
+            const stale = u.status === 'UPLOADING' && n.at && Date.now() - new Date(n.at).getTime() > 20 * 60_000 && !['proxies-ok', 'quota-wait'].includes(n.phase || '')
+            return (
+              <li key={u.id} className="py-1.5 flex items-center gap-2 flex-wrap">
+                <code className="text-gray-800">{u.fileName}</code>
+                {statusChip(u.status)}
+                <span className="text-gray-600">{PHASE_TH[n.phase || ''] || n.phase || '—'}</span>
+                {n.bytes != null && <span className="text-gray-500">{formatSize(n.bytes)}{n.files != null ? ` · ${n.files} ไฟล์` : ''}</span>}
+                {n.eta && <span className="text-gray-500">ETA {n.eta}</span>}
+                {n.at && <span className={`text-[10px] ${stale ? 'text-red-600' : 'text-gray-400'}`}>สัญญาณล่าสุด {new Date(n.at).toLocaleString('th-TH')}{stale ? ' — เงียบเกิน 20 นาที' : ''}</span>}
+                {u.failureReason && <span className="text-red-600">{u.failureReason}</span>}
+                {u.driveUrl && <a href={u.driveUrl} target="_blank" rel="noreferrer" className="text-[#673ab7] hover:underline">Drive</a>}
+                {(u.status === 'UPLOADING' || u.status === 'ORPHANED') && (
+                  <button type="button" onClick={() => release(u)} className="text-[10px] text-gray-500 hover:text-red-600 underline">ปลด (แอดมิน)</button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}

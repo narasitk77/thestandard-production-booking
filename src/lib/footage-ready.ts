@@ -10,6 +10,11 @@
  *   b) shoot over    — isShootOver() (Bangkok time, honors shootEndDate)
  *   c) no in-flight  — zero PENDING/UPLOADING Upload rows fresher than 24h
  *                      (older = abandoned browser tab, must not block forever)
+ *                      v1.277: a field-ingest card (`CARD_…` row, src/lib/ingest.ts)
+ *                      holds with NO expiry while UPLOADING or ORPHANED — a parked
+ *                      "proxies first" run or a dead laptop must never time out into
+ *                      "พร้อม"; FAILED (set by an admin) is the only release. A card
+ *                      silent 20 min and not parked is flipped to ORPHANED + alertOps.
  *   d) NAS drained   — the NAS queue for this code is absent or lastPending=0
  *   e) footage exists— fresh Drive walk (sweepFootagePayload — dryRun too)
  *                      sees >0 folders and >0 files. The Drive walk is the ONLY
@@ -51,6 +56,8 @@ import { ADMIN_DIGEST, readHeld } from './footage-ready-health'
 import { mediaproGate } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
 import { isQuarantined, sonyClipPart, type FootageFileLike } from './footage-completeness'
+import { alertOps } from './ops-alert'
+import { CARD_PREFIX, isStaleCard, cardHoldsNotice } from './ingest'
 
 const DAY = 86_400_000
 
@@ -419,7 +426,11 @@ async function runReadySweep(
         ? { bookingCode: { in: forced } }
         : {
             bookingCode: { not: null },
-            OR: [{ shootDate: { gte: since } }, { shootEndDate: { gte: since } }],
+            OR: [
+              { shootDate: { gte: since } }, { shootEndDate: { gte: since } },
+              // v1.277 — a field card still moving (pass 2 can come days later) keeps its booking in view
+              { uploads: { some: { fileName: { startsWith: CARD_PREFIX }, updatedAt: { gte: since } } } },
+            ],
           }),
     },
     select: CANDIDATE_SELECT,
@@ -435,10 +446,33 @@ async function runReadySweep(
       bookingId: { in: rows.map(r => r.id) },
       status: { in: ['PENDING', 'UPLOADING'] },
       updatedAt: { gte: new Date(now.getTime() - DAY) },
+      // v1.277 — field cards are governed by ingestHeld below; a ticket nobody ran (PENDING) holds nothing
+      NOT: { fileName: { startsWith: CARD_PREFIX } },
     },
     _count: true,
   })
   const uploading = new Set(freshInFlight.map(u => u.bookingId))
+
+  // v1.277 — field-ingest cards: hold with no expiry; flip the silent ones to ORPHANED and say so.
+  // The stale scan covers EVERY open card (a second camera's card on a booking already notified must still
+  // alert when its laptop dies); the hold applies to this sweep's candidates. dryRun holds the same, flips nothing.
+  const cardRows = await prisma.upload.findMany({
+    where: { fileName: { startsWith: CARD_PREFIX }, status: { in: ['UPLOADING', 'ORPHANED'] } },
+    select: { id: true, bookingId: true, fileName: true, status: true, updatedAt: true, notes: true, uploadedBy: true, camera: true,
+      booking: { select: { bookingCode: true } } },
+  })
+  const ingestHeld = new Set(cardRows.filter(r => cardHoldsNotice([r])).map(r => r.bookingId))
+  if (!dryRun) {
+    for (const r of cardRows.filter(r => isStaleCard(r, now))) {
+      const code = r.booking?.bookingCode || r.bookingId
+      const silentMin = Math.round((now.getTime() - r.updatedAt.getTime()) / 60_000)
+      await prisma.upload.update({ where: { id: r.id }, data: { status: 'ORPHANED', failureReason: `ไม่มีสัญญาณจากเครื่องที่ส่ง ${silentMin} นาที` } })
+        .catch(e => console.error('[footage-ready] orphan card failed:', r.id, e?.message || e))
+      await alertOps(`ingest-stale:${code}`, `⚠️ ส่งจากหน้างาน ${code} ${r.camera} เงียบ ${silentMin} นาที`,
+        `การ์ด ${r.fileName} โดย ${r.uploadedBy} ไม่ส่งสัญญาณมา ${silentMin} นาที (เครื่องหลับ/เน็ตหลุด/ปิดแอป?) → ORPHANED\n` +
+        'footage พร้อม ของใบนี้ถูกถือไว้ · รันไคลเอนต์ซ้ำด้วยโค้ดเดิมจะส่งต่อได้ · ปล่อยด้วยมือ = แอดมินกด "ปลด" ที่การ์ดบนหน้าอัป (ไม่ลบไฟล์)')
+    }
+  }
 
   // Gate (d): NAS queue state, one read for the whole sweep.
   // v1.262.1 — only while the NAS picture is fresh: a dead Mac agent leaves its last "still sending"
@@ -462,6 +496,9 @@ async function runReadySweep(
     if (forced.length === 0 &&
         (isPhotoAlbumBooking(b.episodes) || (b.program?.code || '').toUpperCase() === PHOTO_ALBUM_EPISODE_CODE)) {
       result.skipped.push({ code, reason: 'photo-album' }); continue
+    }
+    if (ingestHeld.has(b.id)) {
+      result.skipped.push({ code, reason: 'ingest-pending' }); continue
     }
     if (uploading.has(b.id)) {
       result.skipped.push({ code, reason: 'uploads-in-flight' }); continue
@@ -675,9 +712,13 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
         if (!b) continue
         // gate (c) / (d) of the first notice: still uploading, or the NAS still sending this code
         const inFlight = await prisma.upload.count({
-          where: { bookingId: b.id, status: { in: ['PENDING', 'UPLOADING'] }, updatedAt: { gte: new Date(now.getTime() - DAY) } },
+          where: { bookingId: b.id, status: { in: ['PENDING', 'UPLOADING'] }, updatedAt: { gte: new Date(now.getTime() - DAY) },
+            NOT: { fileName: { startsWith: CARD_PREFIX } } },
         })
         if (inFlight > 0) { wait('ยังอัปโหลดอยู่'); continue }
+        // v1.277 — same hold as the first notice: an open or dead field card is not "arrived"
+        const openCards = await prisma.upload.count({ where: { bookingId: b.id, fileName: { startsWith: CARD_PREFIX }, status: { in: ['UPLOADING', 'ORPHANED'] } } })
+        if (openCards > 0) { wait('ส่งจากหน้างานยังไม่ครบ'); continue }
         if ((nasStatuses[code]?.lastPending || 0) > 0) { wait('NAS ยังส่งไม่หมด'); continue }
         const box = (b.driveFolders as Record<string, unknown> | null)?.box
         const boxState = typeof box === 'string' ? await folderLiveness(box) : 'dead'

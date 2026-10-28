@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { deleteDriveFile } from '@/lib/google-drive'
+import { isCardRow } from '@/lib/ingest'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +32,11 @@ export async function POST(
     if (!upload) return NextResponse.json({ error: 'Upload not found' }, { status: 404 })
     if (upload.uploadedBy !== session.email && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    // v1.277 — a field-ingest card's driveFileId is the whole card FOLDER: the delete below is permanent (no
+    // trash) and FAILED releases the footage-ready hold. Cards are released only via /api/upload/ingest `release`.
+    if (isCardRow(upload.fileName)) {
+      return NextResponse.json({ error: 'การ์ดส่งจากหน้างาน — ยกเลิกทางนี้ไม่ได้ (แอดมินใช้ปุ่ม "ปลด" บนหน้าอัป)', code: 'CARD_ROW' }, { status: 409 })
     }
     if (upload.status === 'COMPLETE') {
       return NextResponse.json({ ok: true, idempotent: true, reason: 'already complete' })

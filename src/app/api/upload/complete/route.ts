@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session'
 import { getDriveFile } from '@/lib/google-drive'
 import { appendFootageRows } from '@/lib/footage-sheet'
 import { clearFootageCache } from '@/lib/footage-folders'
+import { isCardRow } from '@/lib/ingest'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +48,11 @@ export async function POST(request: NextRequest) {
     if (!upload) return NextResponse.json({ error: 'Upload not found' }, { status: 404 })
     if (upload.uploadedBy !== session.email && session.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    // v1.277 — a field-ingest card completes only through /api/upload/ingest (md5 check + server re-read);
+    // here a folder has size null, so the size check below would pass it unverified.
+    if (isCardRow(upload.fileName)) {
+      return NextResponse.json({ error: 'การ์ดส่งจากหน้างาน — ปิดได้ทาง /api/upload/ingest เท่านั้น', code: 'CARD_ROW' }, { status: 409 })
     }
     if (upload.status === 'COMPLETE') {
       // Idempotent re-call — return current state without re-doing the work

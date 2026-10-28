@@ -1135,6 +1135,36 @@ export async function trashDriveItem(fileId: string, subject?: string): Promise<
 }
 
 /**
+ * v1.275 — field ingest: mint the per-card folder AS the crew member. STRICT —
+ * an existing child of that name is an error, never reused: two cards sharing
+ * one folder is how `rclone copy` silently overwrites the first card's
+ * C0001.MP4 and MEDIAPRO.XML. `resumeId` = the id this same row minted earlier
+ * (a rerun after a kill); it is returned only while Drive says it is alive.
+ */
+export async function createChildFolderStrict(parentId: string, name: string, subject: string, resumeId?: string | null): Promise<string> {
+  if (resumeId) {
+    const live = await folderLiveness(resumeId)
+    if (live === 'alive') return resumeId
+    throw new Error(`card folder ${resumeId} is ${live} — cannot resume into it`)
+  }
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth(subject) })
+  const safeName = name.replace(/'/g, "\\'")
+  // retried: a 403 rateLimitExceeded here must not surface as "no Shared Drive access"
+  const found = await withDriveRetry(`list card folder "${name}"`, () => drive.files.list({
+    q: `'${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}' and name = '${safeName}'`,
+    fields: 'files(id)', pageSize: 2, supportsAllDrives: true, includeItemsFromAllDrives: true, corpora: 'allDrives',
+  }))
+  if (found.data.files?.length) throw new Error(`a folder named "${name}" already exists under ${parentId}`)
+  const created = await withDriveRetry(`create card folder "${name}"`, () => drive.files.create({
+    requestBody: { name, mimeType: FOLDER_MIME, parents: [parentId] },
+    fields: 'id',
+    supportsAllDrives: true,
+  }))
+  if (!created.data.id) throw new Error(`Drive folder create returned no id for "${name}"`)
+  return created.data.id
+}
+
+/**
  * Read a small text file's content (e.g. a `_SHOOT.txt` marker). Read-only.
  * Returns the UTF-8 string. Used by the marker reconciler to compare a marker's
  * on-Drive content against the DB before deciding whether to rewrite it.

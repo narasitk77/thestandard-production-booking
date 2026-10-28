@@ -63,6 +63,8 @@ function isSafeFilename(filename: string): boolean {
   if (filename.includes('..')) return false
   // No trailing whitespace or dot (Windows reserves these; corrupts ext)
   if (/[. ]$/.test(filename)) return false
+  // v1.277 — CARD_ marks a field-ingest card row (src/lib/ingest.ts); a browser file must never pose as one
+  if (filename.startsWith('CARD_')) return false
   return SAFE_FILENAME_RE.test(filename)
 }
 

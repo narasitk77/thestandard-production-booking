@@ -8,6 +8,7 @@ import { formatBytes } from '@/lib/footage-report'
 import { getCachedFootagePayload } from '@/lib/footage-folders'
 import { bookingDisplayName } from '@/lib/display'
 import { footageReadyRecipients, inactiveUserEmails } from '@/lib/footage-ready'
+import { CARD_PREFIX } from '@/lib/ingest'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // resolving footage folders does a recursive Drive walk
@@ -78,6 +79,17 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const { folders, fileCount, bookingFolderUrl } = payload
     if (folders.length === 0) {
       return NextResponse.json({ error: 'ยังไม่เจอ footage ในโฟลเดอร์ Drive ของงานนี้ — ตรวจสอบก่อนแจ้ง' }, { status: 400 })
+    }
+
+    // v1.277 — a field-ingest card still open (proxies only, or a dead laptop) means the originals are not
+    // here: same hold as the auto notice. A 📣 now would stamp readyNotifiedAt and the real notice never follows.
+    const openCards = await prisma.upload.findMany({
+      where: { bookingId: booking.id, fileName: { startsWith: CARD_PREFIX }, status: { in: ['UPLOADING', 'ORPHANED'] } },
+      select: { fileName: true, camera: true, status: true },
+    })
+    if (openCards.length > 0) {
+      const list = openCards.map(c => `${c.camera} ${c.fileName} (${c.status === 'ORPHANED' ? 'ขาดการติดต่อ' : 'ยังส่งอยู่/รอต้นฉบับ'})`).join(', ')
+      return NextResponse.json({ error: `ส่งจากหน้างานยังไม่ครบ: ${list} — รอให้ครบ หรือให้แอดมินปลดการ์ดก่อนแจ้ง`, code: 'INGEST_OPEN' }, { status: 409 })
     }
 
     if (preview) {

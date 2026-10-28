@@ -7,9 +7,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.277.0] — 2026-10-28
+
+> เดิมจองเลข 1.275.0 ไว้ (commit e9c8a74) แต่ออกหลัง 1.276.0 จึงใช้ 1.277.0 — เลข 1.275.0 ไม่มีรุ่นจริง
+
+### Added — ส่งฟุตเทจจากหน้างาน (field ingest, Phase 1: การ์ด Sony ทั้งใบ · ใบที่ไม่ใช่ AGN)
+
+ที่มา: งาน IMF (14–16 ต.ค.) อัปผ่าน Chrome ได้ 11–25 Mbps เพราะทุกไบต์ผ่าน Sophos · rclone จาก Terminal ได้ 200–580 Mbps
+แต่การอัปมือแบบนั้น probook มองไม่เห็น (แจ้ง "พร้อม" ก่อนครบได้ · โฟลเดอร์ SUB อย่างเดียวพัง MEDIAPRO) — รุ่นนี้ให้ probook เป็นสมอง rclone เป็นกล้ามเนื้อ
+
+- `POST /api/upload/ingest` — `ticket` (session: ขอโค้ดส่ง 1 ใบต่อ 1 การ์ด → Upload row `CARD_<CAM>_<YYMMDD>_<tail>` เก็บแค่ sha256 ของโค้ด ไม่มี env/secret ใหม่)
+  · `start` (ปฏิเสธ: ใบไม่ CONFIRMED/COMPLETED, ไม่มีกล่อง id-first, AGN, ไม่มีวิดีโอ/WAV, ไม่ใช่ Sony ทั้งใบ, ไม่มี MEDIAPRO.XML, landing มีไฟล์, NAS ยังส่ง, คนอื่นกำลังส่งใบนี้, โควตา 750 GB/วันของบัญชีไม่พอ)
+  → สร้างโฟลเดอร์ต่อการ์ดใต้ EP/CAM **ในนามคนส่ง** (`createChildFolderStrict` — ชื่อซ้ำ = error ไม่ reuse · ไม่มี fallback เป็น narasit.k@)
+  · `heartbeat` / `pause` (proxies-ok · quota-wait — เงียบได้ไม่นับว่าตาย) · `complete` (รับเฉพาะ `rclone check` ต่าง 0 + server อ่านโฟลเดอร์เอง: ชื่อซ้ำ/จำนวนไม่ตรง = ปฏิเสธ · liveness ทั้งสาย box→CAM→card)
+  · `fail` → ORPHANED + alertOps
+- footage-ready: CARD_ row ที่ UPLOADING/ORPHANED **ถือ "footage พร้อม" ไว้ไม่มีวันหมดอายุ** (gate (c) เดิมปล่อยหลัง 24 ชม. = fail-open) · heartbeat หาย 20 นาที (ไม่ได้ park) → ORPHANED + alertOps `ingest-stale:<code>` · ใบที่มี CARD_ row ใหม่ยังเป็น candidate แม้พ้น lookback (pass 2 มาช้า)
+  · FAILED (แอดมินตั้งเอง) คือทางปลดเดียว
+- หน้าอัป: กล่อง "ส่งจากหน้างาน" ขอโค้ด + คำสั่ง 1 บรรทัด + สถานะการ์ด (phase/ไบต์/heartbeat ล่าสุด)
+- `scripts/field/probook-field.sh` — ไคลเอนต์ bash: ตรวจต้นทาง (วิดีโอ ≥1, MEDIAPRO, ขนาดนิ่ง) → start → pass 1 (ข้าม Clip/) → `rclone check` by path จากกล่อง → park proxies-ok (หรือ `--originals` ต่อ pass 2 → complete)
+  · `--immutable --error-on-no-transfer --drive-stop-on-upload-limit --max-transfer <budget>` · heartbeat ทุก 60 วิ · `caffeinate -i -s` · ล้มทุกจุด = exit ≠ 0 + แจ้ง server (ไม่เคยพิมพ์ "เสร็จ" จาก exit 0 ของ copy)
+- `src/lib/ingest.ts` (กฎล้วน) + `__tests__/ingest.test.ts`: ORPHANED ยังถือ · park ไม่ stale · complete ปฏิเสธแฝด/จำนวน/check · ลำดับการปฏิเสธ start
+- **ปิดทางหลังที่ข้ามการถือ** (รีวิวแย้ง 4 มุม · 29 ข้อยืนยัน): `/api/upload/[id]/cancel` เคย **ลบโฟลเดอร์การ์ดถาวร** แล้วตั้ง FAILED (= ปลด hold) → การ์ด = 409 ·
+  `/api/upload/complete` เคยปิดการ์ดโดยไม่ตรวจ (โฟลเดอร์ size null) → 409 · ปุ่ม 📣 แจ้งมือข้าม hold แล้วตั้ง readyNotifiedAt → ปฏิเสธเมื่อมีการ์ดเปิด ·
+  ไฟล์ browser ชื่อ `CARD_…` ถูกปฏิเสธ (ห้ามปลอมเป็นการ์ด) · ทางปลดเดียว = action `release` (ADMIN, ไม่แตะ Drive) + ปุ่ม "ปลด (แอดมิน)" บนการ์ด
+- start: รันซ้ำหลัง `fail` ได้ (เดิมชนชื่อโฟลเดอร์ตัวเองตลอดไป) · สองเครื่องเริ่มพร้อมกัน → claim ด้วย updateMany ตัวแพ้ทิ้งโฟลเดอร์ตัวเอง ·
+  เช็ก landing ใช้ได้จริง (เดิม filter สองชั้นขัดกันจนไม่เคยเจอ) · กล่อง 'unknown' = 503 ไม่ใช่ "ไม่มีกล่อง" · โควตาคิดเฉพาะส่วนที่ยังไม่อยู่บน Drive ·
+  path ที่ client ใช้ check สร้างจากชื่อโฟลเดอร์จริงบน Drive · heartbeat ห้าม park ตัวเอง · `fail` ซ้ำไม่ยิงแชตซ้ำ · ข้อความจาก client ตัด @ (ไม่ ping)
+- footage-ready: สแกน stale ทุกการ์ดเปิด (ไม่เฉพาะ candidate) · gate (c) เดิมไม่นับการ์ด (PENDING จากการกดขอโค้ดเฉย ๆ เคยถือ 24 ชม.)
+- ไคลเอนต์: heartbeat เคยตายตั้งแต่รอบแรก (grep ไม่เจอ + set -e) และไม่ส่งระหว่าง check · check ไม่ผ่าน/บรรทัดที่ rclone ไม่พิมพ์ เคยทำสคริปต์ตายเงียบ ·
+  `--max-transfer` เคยถูกอ่านเป็น KiB (ใส่ B แล้ว) · แยกโควตาเต็มด้วย exit code (8/7) ไม่ grep ทั้ง log · exit 6 (--immutable) = แจ้งชัด ·
+  ชุด exclude เดียวกันทั้ง copy/check/manifest (dot-file ทุกชั้น) · lock มี pid เคลียร์เองเมื่อรอบก่อนตาย · ข้อความแจ้งเตือนมี " ไม่หาย ·
+  ทดสอบจริงกับ Drive (server จำลอง): proxy → proxies-ok → รันซ้ำ `--originals` → complete · heartbeat 3 ครั้งพร้อมไบต์/ETA · ไฟล์บน Drive ถูกแก้ → exit 6 + `fail` ถึง server
+- Phase 0 (27 ต.ค.): OAuth client `probook-field` (Internal) · ทีมเป็น Contributor ผ่านกลุ่ม wearethestandard@ แล้ว · kill -9 แล้วรันซ้ำใน 3 วิ → ไฟล์แฝด md5 เท่ากัน และ `rclone check` ตอบ "Duplicate object… ignoring" แล้วผ่าน → server ต้องสแกนเอง (ทำแล้ว)
+- `probook-field.sh`: ใส่ `--no-update-modtime` คู่ `--immutable` — ไฟล์เนื้อเดียวกันแต่เวลาไฟล์ต่าง (อัปมาทางอื่น เช่น Chrome) rclone เคยตอบ "Timestamp mismatch between immutable objects" แล้ว exit 6 ทั้งที่ไม่มีอะไรต่าง (เจอ 28 ต.ค. ตอนทดสอบ Drive Uploader · md5 ยังตรวจที่ `rclone check` เหมือนเดิม)
+
 ## [1.276.0] — 2026-10-28
 
-> เลข 1.275.0 สงวนไว้ให้ Field Uploader Phase 1 (commit e9c8a74 บนเครื่องนัท ยังไม่ push/deploy) — รุ่นนี้ข้ามไป 1.276.0 กันเลขชน
+> เลข 1.275.0 สงวนไว้ให้ Field Uploader Phase 1 (commit e9c8a74 บนเครื่องนัท ยังไม่ push/deploy) — รุ่นนี้ข้ามไป 1.276.0 กันเลขชน · Field Uploader ออกจริงเป็น 1.277.0
 
 ### Added — MCP สำหรับ Veela และข้อมูลคิวงาน PMDC (PR #21 จาก Minerva/PMDC + แก้จากรีวิว)
 

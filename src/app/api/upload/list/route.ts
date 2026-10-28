@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
         initiatedAt: true,
         completedAt: true,
         failureReason: true,
+        notes: true, // v1.277 — field-ingest CARD_ rows keep phase/bytes here
       },
     })
 
