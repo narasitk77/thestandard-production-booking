@@ -122,6 +122,8 @@ export default function Nav({ session, tier = 'crew', canSeeOT = false, canSeePr
     // set, the page's own 403 is still the truth; the menu is just cosmetic.
     // The operator reaches the ACTIVITY view through 📊 ศูนย์ติดตาม above.
     { href: '/admin/reviews', label: 'ผลประเมินหลังงาน', show: isReviewOwner },
+    // v1.278 — ผลแบบสำรวจ "probook ช่วยประหยัดเวลาแค่ไหน" + ปุ่มเปิด/ปิดรับคำตอบ
+    { href: '/admin/survey', label: 'ผลแบบสำรวจ', show: isAdmin },
   ].filter(i => i.show && tierAllows(tier, i.href))
 
   // Active state: primary hubs (คิวงาน / Admin) use their own match fn so the

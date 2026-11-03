@@ -9,6 +9,7 @@ import { formatDisplayDate } from '@/lib/utils'
 import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react'
 import StatusPill, { categoryCardClass, AdBadge } from './_components/StatusPill'
 import { resolveTier, tierAllows } from '@/lib/tiers'
+import SurveyInvite from './_components/SurveyInvite'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -123,6 +124,9 @@ export default function HomeOverview() {
           </Link>
         )}
       </div>
+
+      {/* v1.278 — ชวนตอบแบบสำรวจ (โผล่เฉพาะตอนเปิดรับ + คนจองงาน/ทีมจัดคิวที่ยังไม่ตอบ) */}
+      <SurveyInvite />
 
       {/* กติกาการจองคิว — สื่อสารกับทุกฝ่ายก่อนกดจอง (v1.52) */}
       <BookingRulesNotice />

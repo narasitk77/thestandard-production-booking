@@ -1292,3 +1292,28 @@ model MixJobEvent {
   @@index([at])
   @@map("mix_job_events")
 }
+
+// ─── v1.278 — แบบสำรวจผู้ใช้ ("probook ช่วยประหยัดเวลาแค่ไหน") ─────────────────
+// สองตารางแยกกันโดยเจตนา: คำตอบไม่มีอีเมล ไม่มีเวลา · ตารางคนตอบมีอีเมลแต่ไม่มีคำตอบ ไม่มีเวลา
+// แค่แยกตารางยังไม่พอ (รีวิว v1.278): แถวที่ insert ใน transaction เดียวกันได้ xmin เดียวกัน และสองตาราง
+// เพิ่มท้ายอย่างเดียวจึงเรียงตรงกันแถวต่อแถว (รวมใน pg_dump) → saveSurveyAnswer เขียนคำตอบ "ทั้งชุด" ใหม่
+// ในลำดับสุ่มทุกครั้งที่มีคนตอบ ภายใต้ advisory lock ที่เหลือคือเทียบ snapshot ก่อน/หลังคนหนึ่งตอบ
+// (หน้าผลจึงโชว์ผลเฉพาะตอนปิดรับ) — ห้ามเพิ่มคอลัมน์เวลา/ลำดับในสองตารางนี้
+// นิยามคำถาม/ตัวเลือกอยู่ที่ src/lib/survey.ts · เปิด/ปิดรับคำตอบ = system_heartbeats `survey-open:<key>`
+model SurveyResponse {
+  id        String   @id @default(uuid())
+  surveyKey String
+  group     String   // booker | queue
+  answers   Json
+
+  @@index([surveyKey])
+  @@map("survey_responses")
+}
+
+model SurveyParticipant {
+  surveyKey String
+  email     String
+
+  @@id([surveyKey, email])
+  @@map("survey_participants")
+}

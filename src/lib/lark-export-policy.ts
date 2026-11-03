@@ -42,10 +42,15 @@
  *   shoot_review_invites  Carries `token`, the bearer credential in the emailed
  *                         review link. Anyone holding it can submit as that
  *                         person. Credentials do not go in archives.
+ *   survey_responses      v1.278 — anonymous survey answers (free text included).
+ *   survey_participants   v1.278 — who answered. The form promises the two are
+ *                         never joined; an archive holding both breaks that.
  */
 export const NEVER_EXPORT: readonly string[] = [
   'shoot_reviews',
   'shoot_review_invites',
+  'survey_responses',
+  'survey_participants',
 ] as const
 
 /**

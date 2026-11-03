@@ -67,11 +67,14 @@ export function tierHome(tier: Tier): string {
 // สร้างมาเพื่อเขาเข้าไม่ได้เลย · การกั้นตัวจริงคือปุ่มรับงาน (ทีมเสียงเท่านั้น)
 // ซึ่งบังคับใน src/lib/mix-jobs.ts + route ไม่ใช่ที่ระดับ tier
 //
+// v1.278 — '/survey' เข้า ALWAYS: คนจองงานจำนวนมากอยู่ tier 'crew' (ไม่มี position) — การกั้นจริง
+// (คนจองงาน/ทีมจัดคิวเท่านั้น) อยู่ใน POST /api/survey ไม่ใช่ที่ tier
+//
 // v1.211 — '/switcher' เข้า ALWAYS ด้วยเหตุผลเดียวกับ '/ot': สวิตเชอร์อยู่ tier
 // 'crew' ซึ่งเปิดได้แค่ /upload ถ้าไม่ปล่อยตรงนี้ middleware จะเด้งคนที่ฟีเจอร์นี้
 // สร้างมาเพื่อเขาออกไปทุกครั้ง · การตัดสินตัวจริงอยู่ที่ src/app/switcher/layout.tsx
 // ซึ่งรู้จัก roster (แบบเดียวกับ /ot ที่ ot/layout.tsx เป็นคนตัดสิน)
-const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer', '/review', '/feedback', '/switcher', '/mix']
+const ALWAYS = ['/calendar', '/my-bookings', '/profile', '/manual', '/changelog', '/dashboard', '/bookings', '/booking', '/new', '/ot', '/producer', '/review', '/feedback', '/switcher', '/mix', '/survey']
 // Extra path prefixes each non-admin tier may open.
 const ALLOW: Record<Exclude<Tier, 'admin'>, string[]> = {
   coordinator: ['/admin', '/ot', '/upload', '/new', '/producer', '/dashboard'],

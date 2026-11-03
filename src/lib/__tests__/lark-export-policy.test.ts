@@ -15,6 +15,7 @@ const ALL_TABLES = [
   'bookings', 'episodes', 'audit_logs', 'footage_log', 'users', 'ot_records',
   'shoot_reviews', 'shoot_review_invites', 'page_events', 'feedback_tickets',
   'feedback_messages', '_prisma_migrations', 'lark_export_runs', 'switcher_jobs',
+  'survey_responses', 'survey_participants',
 ]
 
 function decisionFor(table: string, env: { include?: string; exclude?: string } = {}) {
@@ -28,6 +29,14 @@ test('shoot_reviews and its invites are never exported', () => {
     const d = decisionFor(t)
     assert.equal(d.included, false, `${t} must never be included`)
     assert.equal(d.reason, 'never')
+  }
+})
+
+test('v1.278 survey tables are never exported (named, so dropping them from the list fails here)', () => {
+  for (const t of ['survey_responses', 'survey_participants']) {
+    assert.equal(decisionFor(t).included, false, t)
+    assert.equal(decisionFor(t).reason, 'never', t)
+    assert.equal(decisionFor(t, { include: t }).included, false, `${t} via LARK_EXPORT_INCLUDE`)
   }
 })
 
