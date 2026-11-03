@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.278.2] — 2026-11-04
+
+### Security — แพตช์ dependency (ไม่เปลี่ยนพฤติกรรม)
+
+- `next` 14.2.3 → **14.2.35** (ตัวสุดท้ายของสาย 14) · `eslint-config-next` ตาม · `next-auth` → 4.24.15 · `npm audit fix` ตัวที่ไม่ข้าม major
+  · ปิด: DoS ที่ request เดียวแขวน App Router (CVE-2025-55184) · middleware authorization bypass (GHSA-f82v-jwr5-mffw — ของเราไม่หลุดข้อมูลเพราะ layout/API เช็ก session เอง แต่หน้าเปล่าเปิดได้) · cache poisoning · `getToken()` ล้มเมื่อ Bearer เพี้ยน
+  · ที่เหลือใน `npm audit` (ตรวจ 4 พ.ย.): RCE ใน Image Optimizer ต้องมี `sharp` + glibc/AVIF — อิมเมจเราเป็น Alpine ไม่มี sharp · Server Actions DoS — เราไม่มี server action
+    · แก้จริงต้องขึ้น Next 15/16 (major) · nodemailer 6→10 และ googleapis 140→189 ก็ major — แยกงาน
+- `room-booking-worker` log `ค้าง:` พิมพ์รหัสใบด้วย — ใบที่ห้องไม่ว่างยังไม่มีเลขจอง เดิมขึ้นว่าง ๆ
+
 ## [1.278.1] — 2026-11-04
 
 ### Fixed — ลิงก์แบบสำรวจพาไปล็อกอิน
