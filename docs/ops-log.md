@@ -4058,3 +4058,13 @@ problem and not a deployment problem.
 - ตรวจด้วย key จริงบนพรอด: tools/list = 8 ตัวชุด request ตรงเป๊ะ · cancel_booking = Unknown tool · list_outlets_and_programs ตอบได้ · แอปล่ม ~1.5 นาที (502 22:31–22:33)
 - 22:37 นัทสั่งลองใหม่หลังต่อ Portainer: เช็กก่อนว่า Portainer ดึง git ได้ (`POST /api/gitops/repo/file/preview` targetFile=compose → ok) → `deploy.py a0e7325` ปกติ ไม่มี 500 · backup-2026-10-28T153748 · 502 22:38–22:39 → 200 · stack/คอนเทนเนอร์/key ตรงกัน · tools/list 8
 - บทเรียน: Portainer 500 ≠ ไม่ได้ทำอะไร — ต้องเทียบ Id คอนเทนเนอร์ + env ในคอนเทนเนอร์กับ stack Env ทุกครั้ง (deploy.py ตอนนี้ exit 1 "ปฏิเสธ" ในเคสนี้ทั้งที่ทำไปแล้ว)
+
+## 2026-11-03 — v1.278.0 = แบบสำรวจ "probook ช่วยประหยัดเวลาคุณได้แค่ไหน?" ในแอป · deployed (ปิดรับอยู่)
+- นัทสั่ง: ถามแค่คนจองงาน + ทีมจัดคิว ว่าประหยัดเวลาแค่ไหน · "เอาฟอร์มให้อยู่ใน Probook เลย และมาให้ดูก่อน" → ดูบน dev ในเครื่อง (DB ทดสอบ probook-localtest ตัดขาดของจริง) → "เอาเข้าเว็บได้เลย"
+- รีวิวแย้ง 3 มุม (6 agent) ยืนยัน 7 ข้อ แก้หมดก่อน deploy — หลักคือ **xmin**: แถวที่ insert ใน tx เดียวได้ xmin เดียวกัน `JOIN ON p.xmin = r.xmin` ได้อีเมลคู่คำตอบ
+  → เขียนคำตอบทั้งรอบใหม่ในลำดับสุ่มใต้ advisory lock · ทดสอบบน DB จริงในเครื่อง: ส่งพร้อมกัน 5 + ซ้ำ 1 → 5 แถว · ซ้ำถูกปฏิเสธ · xmin เดียวทั้งชุด
+  · ผลโชว์เฉพาะตอนปิดรับ · ทีมจัดคิวซ่อนจน ≥ 3 คน · survey tables ใน Lark NEVER_EXPORT · Co-Producer นับเป็นคนจอง · volume ไม่นับ routine
+- gate `npm run build` 1225/1225 + build ผ่าน · CI + Docker ผ่าน · schema เพิ่ม 2 ตาราง (ไม่ลบอะไร) · backup-2026-11-03T153602.sql.gz 1.36MB
+  · deploy 22:38–22:41 (502 ช่วงสลับ → 200) · `schemaSync: in-sync` · จุดถอย sha-a0e7325
+- ตรวจปลายทาง: /api/version 1.278.0 · survey_responses (4 คอลัมน์) / survey_participants (2) มีจริง · system_heartbeats `survey-open:*` = 0 แถว = **ปิดรับ** · 0 คำตอบ
+- เปิดรับ = นัทกด "เปิดรับคำตอบ" ที่ /admin/survey (การ์ดชวนขึ้นหน้าแรกทันที) · ผลรวมดูได้ตอนกดปิด
