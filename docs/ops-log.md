@@ -4068,3 +4068,13 @@ problem and not a deployment problem.
   · deploy 22:38–22:41 (502 ช่วงสลับ → 200) · `schemaSync: in-sync` · จุดถอย sha-a0e7325
 - ตรวจปลายทาง: /api/version 1.278.0 · survey_responses (4 คอลัมน์) / survey_participants (2) มีจริง · system_heartbeats `survey-open:*` = 0 แถว = **ปิดรับ** · 0 คำตอบ
 - เปิดรับ = นัทกด "เปิดรับคำตอบ" ที่ /admin/survey (การ์ดชวนขึ้นหน้าแรกทันที) · ผลรวมดูได้ตอนกดปิด
+
+## 2026-11-04 — v1.278.1 = ลิงก์แบบสำรวจพาไปล็อกอิน · deployed · **เปิดรับคำตอบแล้ว**
+- นัทสั่ง "ลิงก์ survey เปิด public เลย ให้คนล็อคอินมาดูได้" · ตรวจพรอดก่อนแก้: `/survey` ไม่ล็อกอิน = 200 แล้วหน้า client ขึ้น "Unauthorized" (GET `/api/survey` 401) — `/survey` ไม่อยู่ใน `isAuthRequired` ของ middleware
+- แก้บรรทัดเดียว (a2da914) · จงใจไม่ใส่ `/survey` ใน `TRACKED_PATHS` (หน้าแบบสำรวจสัญญาว่า "ระบบจำแค่ว่าคุณตอบแล้ว") · รีวิว 2 มุม + verify แย้ง = ไม่มีข้อยืนยัน
+- gate 1225/1225 + `AUTH_DISABLED=0 npm run build` · CI + Docker ผ่าน · schema ไม่เปลี่ยน · backup-2026-11-04T022234.sql.gz 1.35MB · deploy 09:25–09:28 · จุดถอย sha-408cd72
+- ตรวจปลายทาง (curl ไม่มี cookie): `/survey` → 307 `/login?callbackUrl=%2Fsurvey` · query ติดไปด้วย (`?openExternalBrowser=1`) · `/api/survey` ยัง 401 JSON · `/` `/admin/survey` 307 เหมือนเดิม · `/changelog` 200
+- 09:28 เปิดรับคำตอบผ่าน `POST /api/admin/survey {open:true}` (session นัท) → `system_heartbeats survey-open:time-2026-11 = open` · มีสิทธิ์ 45 คน · ตอบ 0
+- ลิงก์ที่ควรโพสต์ในไลน์: `https://probook.thestandard.co/survey?openExternalBrowser=1` — Google บล็อกล็อกอินใน in-app browser ของ LINE · พารามิเตอร์นี้ให้ LINE เปิด Safari/Chrome เอง
+- รู้แล้วยังไม่แก้ (เดิม ไม่ใช่จาก diff): ล็อกอินผิดบัญชี (Gmail ส่วนตัว) → `/login?error=domain` ไม่มี callbackUrl → รอบสองไปตก `/` (การ์ดชวนบน Overview ช่วยรับไว้ตอนเปิดรับ)
+- แพตช์ความปลอดภัย next 14.2.35 ย้ายเป็น **v1.278.2** บน branch `chore/security-patch-1279` (7162657, rebase บน a2da914) — ยังไม่ push รอนัทสั่ง
