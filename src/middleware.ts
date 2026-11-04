@@ -22,6 +22,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/ot') ||
     pathname.startsWith('/switcher') ||
     pathname.startsWith('/mix') ||
+    // v1.278.1 — ลิงก์แบบสำรวจถูกแชร์ในไลน์: ไม่ล็อกอิน = เดิมได้หน้าเปล่าขึ้น "Unauthorized" ไม่พาไปล็อกอิน
+    pathname.startsWith('/survey') ||
     pathname === '/'
 
   if (isAuthRequired && !hasSession) {

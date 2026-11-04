@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.278.1] — 2026-11-04
+
+### Fixed — ลิงก์แบบสำรวจพาไปล็อกอิน
+
+- `/survey` เข้า `isAuthRequired` ใน middleware — เดิมคนที่ยังไม่ล็อกอินกดลิงก์จากไลน์ได้ 200 แล้วขึ้น "Unauthorized"
+  (หน้าเป็น client เรียก `/api/survey` แล้วได้ 401) · ตอนนี้ 307 → `/login?callbackUrl=/survey` แล้วกลับมาที่แบบสำรวจ
+- จงใจ **ไม่** ใส่ `/survey` ใน `TRACKED_PATHS` — หน้าแบบสำรวจบอกคนตอบว่า "ระบบจำแค่ว่าคุณตอบแล้ว" (คอมเมนต์ไว้ใน page-events.ts)
+
 ## [1.278.0] — 2026-11-03
 
 ### Added — แบบสำรวจ "probook ช่วยประหยัดเวลาคุณได้แค่ไหน?" (ในแอป · ไม่ผูกชื่อกับคำตอบ)
