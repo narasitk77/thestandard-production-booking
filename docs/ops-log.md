@@ -4087,3 +4087,12 @@ problem and not a deployment problem.
   · `Authorization: Bearer` เพี้ยน → 307 ปกติ (4.24.14 เคย throw ใน getToken) · header `x-middleware-subrequest` ยิงตรง 127.0.0.1:3000 → 307 login (ช่องโหว่ปิดแล้ว · ผ่าน Cloudflare request นี้ค้าง 60 วิ ไม่มีคำตอบ — ด่านหน้าแอป ไม่ใช่แอป)
   · session ของนัทที่ล็อกอินค้างไว้ใช้ต่อได้ ไม่ต้องล็อกอินใหม่ (cookie/JWE เหมือนเดิม) · คนที่กด Sign in ค้างกลางช่วงสลับต้องกดใหม่ 1 ครั้ง (state/pkce cookie ผูก provider ใน 4.24.15)
 - ค้าง (major ทั้งหมด แยกงาน): Next 15/16 · nodemailer 6→10 · googleapis 140→189
+
+## 2026-11-04 — v1.279.0 = แบบสำรวจชุดใหม่ตาม feedback หัวหน้า (4 ข้อ + ทีม · หน้าเดียว · ถามเฉพาะคนจองคิว) · deployed (ปิดรับอยู่)
+- feedback: ลดคำถาม เน้นคนจองคิว (Producer/PM) · หน้าเดียว · มีตัวเลือกแผนก · 4 ข้อ (เป็นระบบ/มีประสิทธิภาพ 1–5 · พึงพอใจโดยรวม 1–5 · ชอบอะไรเทียบระบบเก่า · อยากให้ปรับอะไร) · นัทสั่งเพิ่ม: ตัดส่วนท้าย (ไม่ได้จะสรุปผลส่งทุกคน) + คำถามต้องเป็นกลาง
+- key ใหม่ `satisfaction-2026-11` (รอบเก่า `time-2026-11` ค้างในตาราง: เปิดอยู่ 1 คำตอบ แต่ไม่มีหน้าไหนใช้ key นั้นแล้ว)
+- console roles (ทีมจัดคิว/แอดมิน) ไม่มีสิทธิ์ตอบ — มีสิทธิ์ 40 คน · แอดมินเห็นหน้าเป็นโหมดตัวอย่าง (กดส่งได้ ไม่ยิง POST)
+- GitHub ไม่สร้าง run จาก push ของ 687d3c7 และ 3f67c50 (Actions status ปกติ) → สั่ง `gh workflow run docker-build.yml` เอง (run 41834566245 ผ่าน, ใน Dockerfile มี `npm run build`) · CI ไม่มี workflow_dispatch จึงไม่มีผล CI ของ 3f67c50 — gate ในเครื่องผ่าน (1228/1228, tsc, lint, `AUTH_DISABLED=0 npm run build`)
+- backup-2026-11-04T130958.sql.gz 1.35MB · deploy 20:12–20:14 (502 ~1.5 นาที) · จุดถอย sha-670ce47
+- ตรวจหลัง deploy: /api/version 1.279.0 in-sync · ไม่ล็อกอิน `/survey?openExternalBrowser=1` = 307 → login (คง query) · `/api/survey` ของนัท = open:false canPreview:true · หน้าจอมือถือ 390px: ข้อบังคับว่าง → ขอบแดง + "ยังขาด 3 ข้อ" · กรอกครบแล้วกดส่ง → 🧪 "ไม่ได้ถูกบันทึก" ไม่มี POST · /admin/survey 0/40 ปิดรับ
+- รอนัทดูหน้าแล้วสั่งเปิด (ปุ่ม "เปิดรับคำตอบ" ที่ /admin/survey)
