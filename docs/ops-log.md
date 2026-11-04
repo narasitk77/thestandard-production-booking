@@ -4078,3 +4078,12 @@ problem and not a deployment problem.
 - ลิงก์ที่ควรโพสต์ในไลน์: `https://probook.thestandard.co/survey?openExternalBrowser=1` — Google บล็อกล็อกอินใน in-app browser ของ LINE · พารามิเตอร์นี้ให้ LINE เปิด Safari/Chrome เอง
 - รู้แล้วยังไม่แก้ (เดิม ไม่ใช่จาก diff): ล็อกอินผิดบัญชี (Gmail ส่วนตัว) → `/login?error=domain` ไม่มี callbackUrl → รอบสองไปตก `/` (การ์ดชวนบน Overview ช่วยรับไว้ตอนเปิดรับ)
 - แพตช์ความปลอดภัย next 14.2.35 ย้ายเป็น **v1.278.2** บน branch `chore/security-patch-1279` (7162657, rebase บน a2da914) — ยังไม่ push รอนัทสั่ง
+
+## 2026-11-04 — v1.278.2 = แพตช์ความปลอดภัย next 14.2.35 + next-auth 4.24.15 · deployed
+- มาจากการ maintain คืน 3→4 พ.ย.: `npm audit --omit=dev` = next 14.2.3 critical 2 / high 4 · ประเมินกับของจริงแล้ว: RCE ใน Image Optimizer ต้องมี sharp + glibc/AVIF (อิมเมจ Alpine ไม่มี sharp) · Server Actions DoS (เราไม่มี `'use server'`) = ไม่โดน · ที่โดนจริง: DoS แขวน App Router (CVE-2025-55184) + middleware bypass (CVE-2025-29927 — layout/API เช็ก session เอง หลุดแค่หน้าเปล่า)
+- ก่อน push: รีวิว changelog ครบช่วง (Next 31 release · next-auth 8) ไม่มีข้อยืนยัน · เทียบตาราง route 215 เส้นของ build 14.2.3 vs 14.2.35 = ไม่มีเส้นไหนเปลี่ยน static/dynamic · gate 1225/1225 + `AUTH_DISABLED=0 npm run build` · CI + Docker ผ่าน · schema ไม่เปลี่ยน
+- นัทสั่ง "go deploy แพตช์ 1.278.2 ได้เลย" → backup-2026-11-04T093148.sql.gz 1.35MB · deploy 16:34–16:38 (502 16:35–16:38) · จุดถอย sha-a2da914
+- ตรวจหลัง deploy: /api/version 1.278.2 in-sync · health-summary 200 ไม่มี stale · log คอนเทนเนอร์ใหม่ 0 error · ไม่ล็อกอิน `/` `/survey` `/admin` = 307 → login · `/api/survey` 401
+  · `Authorization: Bearer` เพี้ยน → 307 ปกติ (4.24.14 เคย throw ใน getToken) · header `x-middleware-subrequest` ยิงตรง 127.0.0.1:3000 → 307 login (ช่องโหว่ปิดแล้ว · ผ่าน Cloudflare request นี้ค้าง 60 วิ ไม่มีคำตอบ — ด่านหน้าแอป ไม่ใช่แอป)
+  · session ของนัทที่ล็อกอินค้างไว้ใช้ต่อได้ ไม่ต้องล็อกอินใหม่ (cookie/JWE เหมือนเดิม) · คนที่กด Sign in ค้างกลางช่วงสลับต้องกดใหม่ 1 ครั้ง (state/pkce cookie ผูก provider ใน 4.24.15)
+- ค้าง (major ทั้งหมด แยกงาน): Next 15/16 · nodemailer 6→10 · googleapis 140→189
