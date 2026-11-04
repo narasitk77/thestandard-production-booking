@@ -1,17 +1,18 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Check, ChevronLeft, Loader2 } from 'lucide-react'
-import { SURVEY, OTHER_MAX, TEXT_MAX, questionsFor, type Group, type Question } from '@/lib/survey'
+import { Check, Loader2 } from 'lucide-react'
+import { SURVEY, OTHER_MAX, TEXT_MAX, type Question } from '@/lib/survey'
 
 /* =============================================================================
-   /survey — v1.278. "probook ช่วยประหยัดเวลาคุณได้แค่ไหน?" ทีละคำถามบนมือถือ
-   ข้อที่เลือกได้ข้อเดียวกดแล้วไปต่อเอง · ย้อนได้ทุกข้อ · ส่งครั้งเดียวตอนจบ
-   ปิดรับคำตอบอยู่ = โหมดดูตัวอย่าง: ทำได้ครบทุกหน้าแต่ไม่ยิง request เลย
+   /survey — แบบสำรวจการใช้งาน (v1.279: ทุกข้อในหน้าเดียว · เดิม v1.278 ทีละคำถาม)
+   ส่งครั้งเดียวตอนกด "ส่งคำตอบ" · ข้อบังคับที่ยังไม่ตอบขึ้นกรอบแดง แล้วเลื่อนไปข้อแรกที่ขาด
+   โหมดดูตัวอย่าง = เฉพาะทีมจัดคิว/แอดมิน (canPreview) ตอนปิดรับหรือไม่มีสิทธิ์ตอบ — กรอกได้ครบ ไม่ยิง request
+   คนจองคิวตอนปิดรับเห็นจอ "ไม่ได้เปิดรับ" (เดิมได้โหมดตัวอย่างแล้วขึ้น "ส่งแล้ว ขอบคุณ" ทั้งที่ไม่ได้บันทึก)
    ============================================================================= */
 
-type Status = { key: string; open: boolean; eligible: boolean; answered: boolean }
+type Status = { key: string; open: boolean; eligible: boolean; answered: boolean; canPreview?: boolean }
 type Answers = Record<string, string | string[]>
 
 const BRAND = '#0b8043'
@@ -19,11 +20,12 @@ const BRAND = '#0b8043'
 export default function SurveyPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [loadError, setLoadError] = useState('')
-  const [step, setStep] = useState(-1) // -1 = หน้าแรก
   const [answers, setAnswers] = useState<Answers>({})
+  const [missing, setMissing] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  const refs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -36,10 +38,6 @@ export default function SurveyPage() {
   }, [])
   useEffect(() => { load() }, [load])
 
-  const group = (answers.role as Group | undefined) ?? null
-  const qs = useMemo(() => questionsFor(group), [group])
-  const preview = !!status && !status.open
-
   if (loadError) {
     return (
       <Shell>
@@ -51,47 +49,35 @@ export default function SurveyPage() {
   if (!status) {
     return <Shell><div className="text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด…</div></Shell>
   }
+  const preview = !!status.canPreview && (!status.open || !status.eligible)
+  if (!preview && !status.open) {
+    return <Shell><Center emoji="🕒" title="ตอนนี้แบบสำรวจไม่ได้เปิดรับคำตอบ" /></Shell>
+  }
   if (!preview && status.answered) {
-    return <Shell><Center emoji="🙏" title="คุณตอบแบบสำรวจนี้ไปแล้ว ขอบคุณมากครับ" body={SURVEY.thanks} /></Shell>
+    return <Shell><Center emoji="🙏" title="คุณตอบแบบสำรวจนี้ไปแล้ว ขอบคุณครับ" /></Shell>
   }
   if (!preview && !status.eligible) {
-    return <Shell><Center emoji="🙂" title="แบบสำรวจรอบนี้ถามเฉพาะคนจองงานและทีมจัดคิวครับ" body="ขอบคุณที่แวะมานะครับ" /></Shell>
+    return <Shell><Center emoji="🙂" title="แบบสำรวจรอบนี้ถามเฉพาะคนที่จองคิวถ่ายครับ" body="ขอบคุณที่แวะมานะครับ" /></Shell>
   }
   if (done) {
-    return (
-      <Shell>
-        <Center emoji="🙏" title="ส่งแล้ว ขอบคุณมากครับ" body={SURVEY.thanks} />
-        {preview && <PreviewNote text="🧪 โหมดดูตัวอย่าง — ไม่มีอะไรถูกบันทึก" />}
-      </Shell>
-    )
+    return <Shell>{preview
+      ? <Center emoji="🧪" title="หน้าตัวอย่าง — คำตอบนี้ไม่ได้ถูกบันทึก" />
+      : <Center emoji="🙏" title="ส่งแล้ว ขอบคุณที่สละเวลาตอบครับ" />}</Shell>
   }
 
-  if (step < 0) {
-    return (
-      <Shell>
-        {preview && <PreviewNote text="🧪 ยังไม่เปิดรับคำตอบ — นี่คือหน้าตัวอย่าง กดตอบได้ครบทุกข้อ แต่ไม่มีอะไรถูกบันทึก" />}
-        <h1 className="text-xl font-semibold text-gray-900 leading-snug">{SURVEY.title}</h1>
-        <p className="mt-3 text-[15px] text-gray-700 leading-relaxed">{SURVEY.intro}</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {SURVEY.facts.map(f => <span key={f} className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-700">{f}</span>)}
-        </div>
-        <p className="mt-4 text-xs text-gray-500">🔒 {SURVEY.privacy}</p>
-        <button onClick={() => setStep(0)}
-          className="mt-6 w-full py-3.5 rounded-xl text-white text-[15px] font-medium active:scale-[0.99] transition" style={{ background: BRAND }}>
-          เริ่มเลย →
-        </button>
-      </Shell>
-    )
+  const set = (a: Answers) => {
+    setAnswers(a)
+    if (missing.length) setMissing(missing.filter(id => !isAnswered(SURVEY.questions.find(q => q.id === id)!, a)))
   }
-
-  const q = qs[Math.min(step, qs.length - 1)]
-  const isLast = step >= qs.length - 1
-
-  const next = () => { setError(''); if (!isLast) setStep(step + 1) }
-  const back = () => { setError(''); setStep(step - 1) }
 
   const submit = async () => {
     setError('')
+    const miss = SURVEY.questions.filter(q => q.required && !isAnswered(q, answers)).map(q => q.id)
+    setMissing(miss)
+    if (miss.length) {
+      refs.current[miss[0]]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
     if (preview) { setDone(true); return }
     setBusy(true)
     try {
@@ -106,82 +92,94 @@ export default function SurveyPage() {
     } catch (e: any) { setError(e.message || 'ส่งไม่สำเร็จ ลองอีกครั้งนะครับ') } finally { setBusy(false) }
   }
 
-  const pick = (id: string) => {
-    let a: Answers = { ...answers, [q.id]: id }
-    // เปลี่ยนบทบาท = คำตอบของอีกกลุ่มไม่เกี่ยวแล้ว ทิ้งเลย
-    if (q.id === 'role' && answers.role !== id) a = Object.fromEntries(Object.entries(a).filter(([k]) => !/^[bq]_/.test(k)))
-    setAnswers(a)
-    // ไปต่อเฉพาะเมื่อยังอยู่ข้อที่แตะ: แตะรัวไม่ข้ามข้อ และกดย้อนภายใน 220ms ไม่โดนดีดไปข้างหน้า
-    const target = step + 1
-    if (!isLast) setTimeout(() => setStep(s => (s === target - 1 ? target : s)), 220)
-  }
-
-  const progress = Math.round(((step + 1) / qs.length) * 100)
-
   return (
     <Shell>
-      {preview && <PreviewNote text="🧪 โหมดดูตัวอย่าง — ไม่บันทึก" />}
-      <div className="flex items-center gap-3 mb-5">
-        <button onClick={back} aria-label="ย้อนกลับ" className="p-1 -ml-1 text-gray-500 hover:text-gray-800">
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: BRAND }} />
-        </div>
-        <span className="text-xs text-gray-400 tabular-nums">{step + 1}/{qs.length}</span>
+      {preview && <PreviewNote text={status.open
+        ? '🧪 โหมดดูตัวอย่างสำหรับทีมจัดคิว — กรอกได้ แต่ไม่มีอะไรถูกบันทึก'
+        : '🧪 ยังไม่เปิดรับคำตอบ — นี่คือหน้าตัวอย่าง กรอกได้ แต่ไม่มีอะไรถูกบันทึก'} />}
+      <h1 className="text-xl font-semibold text-gray-900 leading-snug">{SURVEY.title}</h1>
+      <p className="mt-2 text-[15px] text-gray-700 leading-relaxed">{SURVEY.intro}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {SURVEY.facts.map(f => <span key={f} className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-700">{f}</span>)}
       </div>
+      <p className="mt-3 text-xs text-gray-500">🔒 {SURVEY.privacy}</p>
 
-      <h2 className="text-lg font-semibold text-gray-900 leading-snug">{q.title}</h2>
-      {q.help && <p className="mt-1 text-sm text-gray-500">{q.help}</p>}
-
-      <div className="mt-5">
-        {q.kind === 'single' && <Single q={q} value={answers[q.id] as string | undefined} onPick={pick} />}
-        {q.kind === 'multi' && <Multi key={q.id} q={q} answers={answers} setAnswers={setAnswers} />}
-        {q.kind === 'text' && (
-          <textarea key={q.id} value={(answers[q.id] as string) || ''} rows={5} maxLength={TEXT_MAX} autoFocus
-            onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })}
-            placeholder="พิมพ์ได้เลย สั้น ๆ ก็ได้ครับ"
-            className="w-full rounded-xl border border-gray-200 px-3.5 py-3 text-[15px] focus:outline-none focus:border-gray-400" />
-        )}
+      <div className="mt-6 space-y-4">
+        {SURVEY.questions.map((q, i) => {
+          const miss = missing.includes(q.id)
+          return (
+            <div key={q.id} ref={el => { refs.current[q.id] = el }}
+              className={`rounded-xl border p-4 bg-white ${miss ? 'border-red-300' : 'border-gray-200'}`}>
+              <div className="text-[15px] font-medium text-gray-900 leading-snug">
+                {i + 1}. {q.title}{q.required && <span className="text-red-500"> *</span>}
+              </div>
+              {q.help && <p className="mt-0.5 text-xs text-gray-500">{q.help}</p>}
+              <div className="mt-3">
+                {q.kind === 'select' && (
+                  <select value={(answers[q.id] as string) || ''} onChange={e => set({ ...answers, [q.id]: e.target.value })}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-[15px] focus:outline-none focus:border-gray-400">
+                    <option value="" disabled>— เลือก —</option>
+                    {q.options!.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </select>
+                )}
+                {q.kind === 'scale' && <Scale q={q} value={answers[q.id] as string | undefined} onPick={v => set({ ...answers, [q.id]: v })} />}
+                {q.kind === 'multi' && <Multi q={q} answers={answers} setAnswers={set} />}
+                {q.kind === 'text' && (
+                  <textarea value={(answers[q.id] as string) || ''} rows={4} maxLength={TEXT_MAX}
+                    onChange={e => set({ ...answers, [q.id]: e.target.value })}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-[15px] focus:outline-none focus:border-gray-400" />
+                )}
+              </div>
+              {miss && <p className="mt-2 text-xs text-red-600">ยังไม่ได้ตอบข้อนี้</p>}
+            </div>
+          )
+        })}
       </div>
 
       {error && <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2.5">{error}</div>}
-
-      {(q.kind !== 'single' || isLast) && (
-        <button onClick={isLast ? submit : next} disabled={busy}
-          className="mt-6 w-full py-3.5 rounded-xl text-white text-[15px] font-medium disabled:opacity-60 inline-flex items-center justify-center gap-2 active:scale-[0.99] transition"
-          style={{ background: BRAND }}>
-          {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-          {isLast ? 'ส่งคำตอบ 🙏' : answered(q, answers) ? 'ถัดไป →' : 'ข้าม →'}
-        </button>
-      )}
-      {q.kind === 'single' && !isLast && answers[q.id] && (
-        <button onClick={next} className="mt-4 w-full text-sm text-gray-500 hover:text-gray-800">ถัดไป →</button>
-      )}
+      {missing.length > 0 && <p className="mt-4 text-sm text-red-600">ยังขาด {missing.length} ข้อที่ต้องตอบ (มีเครื่องหมาย *)</p>}
+      <button onClick={submit} disabled={busy}
+        className="mt-5 w-full py-3.5 rounded-xl text-white text-[15px] font-medium disabled:opacity-60 inline-flex items-center justify-center gap-2 active:scale-[0.99] transition"
+        style={{ background: BRAND }}>
+        {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+        {preview ? 'ลองกดส่ง (ตัวอย่าง ไม่บันทึก)' : 'ส่งคำตอบ'}
+      </button>
     </Shell>
   )
 }
 
-function answered(q: Question, a: Answers): boolean {
+function isAnswered(q: Question, a: Answers): boolean {
   const v = a[q.id]
   if (q.kind === 'text') return typeof v === 'string' && v.trim() !== ''
   if (q.kind === 'multi') return (Array.isArray(v) && v.length > 0) || !!(a[`${q.id}_other`] as string | undefined)?.trim()
-  return !!v
+  return typeof v === 'string' && v !== ''
 }
 
-function Single({ q, value, onPick }: { q: Question; value?: string; onPick: (id: string) => void }) {
+/** สเกล 1–5 ป้ายครบทุกระดับ (ไม่ใช่แค่สองปลาย) · na = ทางออกสำหรับคนที่เทียบไม่ได้ */
+function Scale({ q, value, onPick }: { q: Question; value?: string; onPick: (v: string) => void }) {
+  const btn = (on: boolean) => (on
+    ? { borderColor: BRAND, background: `${BRAND}14`, color: '#111827' }
+    : { borderColor: '#e5e7eb', background: '#fff', color: '#374151' })
   return (
-    <div className="space-y-2.5">
-      {q.options!.map(o => {
-        const on = value === o.id
-        return (
-          <button key={o.id} onClick={() => onPick(o.id)} aria-pressed={on}
-            className={`w-full text-left px-4 py-3.5 rounded-xl border text-[15px] leading-snug transition ${on ? 'text-gray-900' : 'border-gray-200 bg-white text-gray-800 hover:border-gray-300'}`}
-            style={on ? { borderColor: BRAND, background: `${BRAND}0f` } : undefined}>
-            {o.label}
-          </button>
-        )
-      })}
+    <div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {q.scale!.map((label, i) => {
+          const v = String(i + 1)
+          return (
+            <button key={v} onClick={() => onPick(v)} aria-pressed={value === v} aria-label={`${v} — ${label}`}
+              className="rounded-lg border px-1 py-2 flex flex-col items-center gap-1 transition" style={btn(value === v)}>
+              <span className="text-base font-semibold tabular-nums">{v}</span>
+              <span className="text-[11px] leading-tight text-center">{label}</span>
+            </button>
+          )
+        })}
+      </div>
+      {q.na && (
+        <button onClick={() => onPick('na')} aria-pressed={value === 'na'}
+          className="mt-2 w-full rounded-lg border px-3 py-2 text-sm transition" style={btn(value === 'na')}>
+          {q.na}
+        </button>
+      )}
     </div>
   )
 }
@@ -208,19 +206,19 @@ function Multi({ q, answers, setAnswers }: { q: Question; answers: Answers; setA
     </span>
   )
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-2">
       {q.options!.map(o => {
         const on = chosen.includes(o.id)
         return (
           <button key={o.id} onClick={() => toggle(o.id)} aria-pressed={on}
-            className="w-full text-left px-4 py-3 rounded-xl border text-[15px] leading-snug flex gap-3 transition bg-white"
+            className="w-full text-left px-3 py-2.5 rounded-lg border text-[15px] leading-snug flex gap-3 transition bg-white"
             style={on ? { borderColor: BRAND, background: `${BRAND}0f` } : { borderColor: '#e5e7eb' }}>
             {box(on)}<span className="text-gray-800">{o.label}</span>
           </button>
         )
       })}
       {q.other && (
-        <div className="rounded-xl border px-4 py-3 bg-white" style={{ borderColor: otherOn ? BRAND : '#e5e7eb' }}>
+        <div className="rounded-lg border px-3 py-2.5 bg-white" style={{ borderColor: otherOn ? BRAND : '#e5e7eb' }}>
           <button className="w-full text-left text-[15px] flex gap-3"
             onClick={() => {
               const on = !otherOn
@@ -233,9 +231,9 @@ function Multi({ q, answers, setAnswers }: { q: Question; answers: Answers; setA
             {box(otherOn)}<span className="text-gray-800">อื่น ๆ</span>
           </button>
           {otherOn && (
-            <input value={other} maxLength={OTHER_MAX} autoFocus placeholder="บอกสั้น ๆ ได้เลย"
+            <input value={other} maxLength={OTHER_MAX} autoFocus placeholder="ระบุ"
               onChange={e => setAnswers({ ...answers, [otherKey]: e.target.value })}
-              className="mt-2.5 w-full border-b border-gray-200 py-1.5 text-[15px] focus:outline-none focus:border-gray-400" />
+              className="mt-2 w-full border-b border-gray-200 py-1.5 text-[15px] focus:outline-none focus:border-gray-400" />
           )}
         </div>
       )}
@@ -244,16 +242,16 @@ function Multi({ q, answers, setAnswers }: { q: Question; answers: Answers; setA
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  // pb-28: ปุ่มติชมลอยมุมขวาล่างทับปุ่ม "ถัดไป" บนมือถือ — เว้นที่ให้เลื่อนพ้น
+  // pb-28: ปุ่มติชมลอยมุมขวาล่างทับปุ่ม "ส่งคำตอบ" บนมือถือ — เว้นที่ให้เลื่อนพ้น
   return <div className="max-w-md mx-auto px-4 pt-6 pb-28 sm:pt-10">{children}</div>
 }
 
-function Center({ emoji, title, body }: { emoji: string; title: string; body: string }) {
+function Center({ emoji, title, body }: { emoji: string; title: string; body?: string }) {
   return (
     <div className="text-center py-10 space-y-3">
       <div className="text-5xl">{emoji}</div>
       <div className="text-base font-medium text-gray-900">{title}</div>
-      <p className="text-sm text-gray-600">{body}</p>
+      {body && <p className="text-sm text-gray-600">{body}</p>}
       <Link href="/" className="inline-block pt-2 text-sm underline" style={{ color: BRAND }}>กลับหน้าแรก</Link>
     </div>
   )

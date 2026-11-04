@@ -1303,7 +1303,7 @@ model MixJobEvent {
 model SurveyResponse {
   id        String   @id @default(uuid())
   surveyKey String
-  group     String   // booker | queue
+  group     String   // รอบ satisfaction-2026-11 (v1.279) = TEAMS id ใน src/lib/survey.ts · รอบ time-2026-11 = booker | queue
   answers   Json
 
   @@index([surveyKey])

@@ -68,7 +68,7 @@ export function tierHome(tier: Tier): string {
 // ซึ่งบังคับใน src/lib/mix-jobs.ts + route ไม่ใช่ที่ระดับ tier
 //
 // v1.278 — '/survey' เข้า ALWAYS: คนจองงานจำนวนมากอยู่ tier 'crew' (ไม่มี position) — การกั้นจริง
-// (คนจองงาน/ทีมจัดคิวเท่านั้น) อยู่ใน POST /api/survey ไม่ใช่ที่ tier
+// (v1.279: คนจองคิวเท่านั้น · ทีมจัดคิวดูได้แค่โหมดตัวอย่าง) อยู่ใน POST /api/survey ไม่ใช่ที่ tier
 //
 // v1.211 — '/switcher' เข้า ALWAYS ด้วยเหตุผลเดียวกับ '/ot': สวิตเชอร์อยู่ tier
 // 'crew' ซึ่งเปิดได้แค่ /upload ถ้าไม่ปล่อยตรงนี้ middleware จะเด้งคนที่ฟีเจอร์นี้

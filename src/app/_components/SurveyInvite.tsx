@@ -34,10 +34,10 @@ export default function SurveyInvite() {
 
   return (
     <div className="mb-4 rounded-xl border border-[#0b8043]/30 bg-[#0b8043]/[0.04] p-4 flex items-start gap-3">
-      <div className="text-2xl leading-none">⏱️</div>
+      <div className="text-2xl leading-none">📝</div>
       <div className="flex-1 min-w-0">
-        <div className="text-[15px] font-medium text-gray-900">ช่วยนัทหน่อยครับ — probook ช่วยประหยัดเวลาคุณได้แค่ไหน?</div>
-        <div className="text-xs text-gray-600 mt-0.5">ประมาณ 3 นาที · ไม่ผูกชื่อกับคำตอบ</div>
+        <div className="text-[15px] font-medium text-gray-900">ขอความเห็นเรื่องการใช้งาน Production Booking</div>
+        <div className="text-xs text-gray-600 mt-0.5">ประมาณ 1–2 นาที · ไม่ผูกชื่อกับคำตอบ</div>
         <div className="mt-3 flex items-center gap-4">
           <Link href="/survey" className="px-4 py-2 rounded-lg bg-[#0b8043] text-white text-sm font-medium">ตอบเลย →</Link>
           <button onClick={snooze} className="text-sm text-gray-500 hover:text-gray-800">ไว้ทีหลัง</button>

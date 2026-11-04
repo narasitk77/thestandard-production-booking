@@ -4,7 +4,7 @@
  */
 import { prisma } from './db'
 import { hasConsoleAccess } from './roles'
-import type { Answers, Group } from './survey'
+import type { Answers } from './survey'
 
 const openKey = (key: string) => `survey-open:${key}`
 
@@ -23,11 +23,12 @@ export async function setSurveyOpen(key: string, open: boolean): Promise<void> {
 const BOOKER_WINDOW_MS = 180 * 24 * 3_600_000
 
 /**
- * คนที่แบบสำรวจนี้ถามได้ = ทีมจัดคิว (สิทธิ์คอนโซล) หรือคนที่จอง/เป็น Producer ของใบใน 180 วัน
- * (นัทสั่ง 3 พ.ย.: เอาแค่คนจองงานกับทีมจัดคิว — ทีมกองไม่ถาม)
+ * คนที่แบบสำรวจนี้ถามได้ = คนจองคิว: สร้าง / เป็น Producer / Co-Producer ของใบที่ถ่ายใน 180 วัน
+ * v1.279 — ไม่รวมทีมจัดคิว (สิทธิ์คอนโซล) แล้ว: ฟีดแบ็ก 4 พ.ย. "เน้นให้ฝั่งคนจองคิวตอบ (Producer, PM)"
+ * ทีมจัดคิวเปิดหน้าได้ในโหมดดูตัวอย่าง (`canPreview` ใน GET /api/survey)
  */
 export async function isSurveyEligible(email: string, role: string | null | undefined): Promise<boolean> {
-  if (hasConsoleAccess(role)) return true
+  if (hasConsoleAccess(role)) return false
   const n = await prisma.booking.count({
     where: {
       deletedAt: null,
@@ -51,7 +52,7 @@ export async function eligibleCount(): Promise<number> {
   ])
   const bookers = new Set<string>()
   for (const b of bookings) for (const e of [b.createdByEmail, b.producerEmail, b.coProducerEmail]) if (e) bookers.add(e.toLowerCase())
-  return users.filter(u => hasConsoleAccess(u.role) || bookers.has(u.email.toLowerCase())).length
+  return users.filter(u => !hasConsoleAccess(u.role) && bookers.has(u.email.toLowerCase())).length
 }
 
 /** Fisher–Yates — สุ่มลำดับจริง (sort แบบ random comparator เอียงตามลำดับเดิม) */
@@ -71,7 +72,7 @@ export function shuffled<T>(xs: T[]): T[] {
  * ตอบซ้ำ = unique ของ survey_participants ชน → 'duplicate' (ไม่มีอะไรถูกเขียน)
  * ponytail: อ่าน-ลบ-เขียนทั้งชุดต่อหนึ่งคำตอบ — O(n) ต่อครั้ง ไม่กี่สิบแถวต่อรอบจึงไม่เป็นไร
  */
-export async function saveSurveyAnswer(key: string, email: string, group: Group, answers: Answers): Promise<'ok' | 'duplicate'> {
+export async function saveSurveyAnswer(key: string, email: string, group: string, answers: Answers): Promise<'ok' | 'duplicate'> {
   try {
     return await prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'survey:' + key}))`
