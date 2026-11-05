@@ -52,6 +52,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - docs/landing-folder-policy.md หัวข้อ "Multi-day bookings" (โครง, ชื่อ, เมื่อไม่มีโฟลเดอร์วัน, kill switch, กฎทีม "1 การ์ด = 1 โฟลเดอร์ใหม่", hold)
 - Kill switch ของ hold: `CARD_HOLD=0` (service app) = merge แบบก่อน v1.280 ทันทีไม่ต้อง deploy · MEDIAPRO.XML 0 ไบต์ถือว่าไม่มี index ฝั่งนั้น · รอบที่ไม่มีการ์ดค้างล้าง fingerprint ชุดที่เตือนแล้ว (การ์ดใหม่ที่ path เดิมเป็นข่าวใหม่) · ปุ่มรวมไฟล์บนการ์ดใบจองแสดง ⚠️ error และไม่ขึ้น ✓ เมื่อมี error
 
+## [1.279.4] — 2026-11-05
+
+### Fixed
+- ปุ่ม "บันทึกคำที่แก้" ใน `/admin/survey` ล้มทุกครั้งด้วย "team: ไม่ใช่ข้อสเกล" — ฟอร์มส่ง `scale: []` / `options: {}` มากับทุกข้อ แต่ `validateOverrides` ถือว่าเป็นการแก้ · ตอนนี้ค่าว่าง = ไม่แก้ (เทสต์รูปร่าง draft ของฟอร์มเพิ่มแล้ว) · API ตรง ๆ ของ v1.279.3 ใช้ได้อยู่แล้ว
+
 ## [1.279.3] — 2026-11-05
 
 ### Added

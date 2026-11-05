@@ -147,6 +147,11 @@ test('overrides: only known ids, trimmed, empty = back to code, team stays requi
   assert.equal(validateOverrides({ questions: { improve: { scale: ['a', 'b', 'c', 'd', 'e'] } } }).ok, false)
   assert.equal(validateOverrides({ questions: { useful: { title: 'x'.repeat(501) } } }).ok, false)
   assert.equal(validateOverrides([]).ok, false)
+  // the admin form's draft shape: every question carries scale: [] and options: {} — empty means "unchanged"
+  const draft = { intro: '', questions: Object.fromEntries(SURVEY.questions.map(q => [q.id, { title: '', help: '', required: q.required, scale: [], options: {} }])) }
+  assert.deepEqual(validateOverrides(draft), { ok: true, value: null })
+  draft.questions.improve.help = 'ทดสอบ'
+  assert.deepEqual(validateOverrides(draft), { ok: true, value: { questions: { improve: { help: 'ทดสอบ' } } } })
 })
 
 test('applyOverrides: wording changes, structure (ids, kind, exclusive) does not; the gate follows required', () => {

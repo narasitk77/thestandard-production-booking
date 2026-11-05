@@ -142,7 +142,8 @@ export function validateOverrides(raw: unknown): { ok: true; value: Overrides | 
         if (q.id === 'team' && !o.required) return { ok: false, error: 'ข้อทีมต้องบังคับตอบ (ผลแยกทีมใช้ค่านี้)' }
         if (o.required !== q.required) qo.required = o.required
       }
-      if (o.scale !== undefined && o.scale !== null) {
+      // ฟอร์มแอดมินส่ง scale: [] / options: {} มากับทุกข้อ — ว่าง = ไม่แก้ (บั๊ก v1.279.3: ปฏิเสธ "team: ไม่ใช่ข้อสเกล" ทั้งที่ไม่ได้แก้อะไร)
+      if (o.scale !== undefined && o.scale !== null && !(Array.isArray(o.scale) && o.scale.length === 0)) {
         if (q.kind !== 'scale') return { ok: false, error: `${q.id}: ไม่ใช่ข้อสเกล` }
         if (!Array.isArray(o.scale) || o.scale.length !== 5) return { ok: false, error: `${q.id}: ป้ายสเกลต้องมี 5 ช่อง` }
         const labels: string[] = []
@@ -153,7 +154,7 @@ export function validateOverrides(raw: unknown): { ok: true; value: Overrides | 
         }
         if (labels.some((l, i) => l !== q.scale![i])) qo.scale = labels
       }
-      if (o.options !== undefined && o.options !== null) {
+      if (o.options !== undefined && o.options !== null && !(typeof o.options === 'object' && !Array.isArray(o.options) && Object.keys(o.options).length === 0)) {
         if (!q.options) return { ok: false, error: `${q.id}: ไม่มีตัวเลือกให้แก้` }
         if (typeof o.options !== 'object' || Array.isArray(o.options)) return { ok: false, error: `${q.id}: options ต้องเป็น object` }
         const opts: Record<string, string> = {}
