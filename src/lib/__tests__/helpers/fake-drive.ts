@@ -89,6 +89,14 @@ export class FakeDrive {
   isFolderAlive = async (id: string) => this.folders.has(id) && !this.folders.get(id)!.trashed
   hasDriveCredentials = () => true
 
+  /** file id → body, for downloadDriveFile (v1.280: video-merge reads MEDIAPRO.XML). No body = the download fails. */
+  content = new Map<string, string>()
+  downloadDriveFile = async (id: string) => {
+    const body = this.content.get(id)
+    if (body == null) throw new Error(`download: no content for ${id}`)
+    return Buffer.from(body)
+  }
+
   // ── test assertions helpers ───────────────────────────────────────────────
 
   /** Live child folder names of a parent (for asserting the resulting tree). */

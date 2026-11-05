@@ -75,6 +75,19 @@ export function isFootageCheckReport(name: string): boolean {
   return /^_FOOTAGE-CHECK(\.(md|txt|docx|html|pdf))?$/i.test((name || '').trim())
 }
 
+/**
+ * v1.280 — a camera card's own index files: ONE per card, so neither copy of a pair may ever be deleted.
+ * footage-integrity words a same-name pair of these (plus SONYCARD.IND / DATABASE.BIN) as "do not delete".
+ * (The video-merge card hold compares MEDIAPRO.XML CONTENTS instead — see video-merge cardVerdict.)
+ */
+export const CARD_INDEX_RE = /^(MEDIAPRO\.XML|DISCMETA\.XML|CUEUP\.XML)$/i
+
+/**
+ * v1.280 — what a human does about a held card (video-merge cardHolds); every surface says the same. Assertive on
+ * purpose: a hold is only declared after both MEDIAPRO.XML were read and share no clip (cardVerdict).
+ */
+export const CARD_HOLD_FIX = 'MEDIAPRO ไม่มีคลิปร่วมกับการ์ดในกล่อง = การ์ดอีกใบถูกเทซ้อนการ์ดเดิม: ย้ายทั้งการ์ด (XDROOT/M4ROOT พร้อม SONY/PRIVATE ที่อยู่ข้างกัน) ไปโฟลเดอร์ใหม่ของตัวเอง เช่น D2-<yymmdd> หรือ Card 2 · ห้ามลบไฟล์ index'
+
 // ── "is this folder empty?" ──────────────────────────────────────────────────
 
 /**

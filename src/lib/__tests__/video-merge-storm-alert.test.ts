@@ -19,6 +19,11 @@ mock.module('../db', {
       systemHeartbeat: {
         findUnique: async ({ where }: any) => { if (readFails) throw new Error('db down'); return rows[where.key] ?? null },
         upsert: async ({ where, create, update }: any) => { rows[where.key] = { ...(rows[where.key] ?? create), ...update } },
+        updateMany: async ({ where, data }: any) => {
+          const r = rows[where.key]
+          if (!r || r.note === where.NOT?.note) return { count: 0 }
+          rows[where.key] = { ...r, ...data }; return { count: 1 }
+        },
       },
     },
   },
@@ -79,4 +84,49 @@ test('ไม่มีซาก = ไม่ทำอะไร · ลายนิ�
   assert.equal(sent.length, 0)
   assert.equal(vm.conflictSetKey(['b (1)', 'a (1)']), vm.conflictSetKey(['a (1)', 'b (1)']))
   assert.notEqual(vm.conflictSetKey(['a (1)']), vm.conflictSetKey(['a (1)', 'b (1)']))
+})
+
+// ── v1.280 — card holds: the team chat (cardHoldsAlerted) only for a NEW held set; ops keeps alertOps' 6 h repeat ──
+const holds = (...codes: string[]) => codes.map(c => `${c}: EP01 · x/CAM-A`)
+
+test('การ์ดค้างชุดเดิมรอบสอง → cardHoldsAlerted=false (แชตเงียบ) แต่ ops ยังเตือนซ้ำที่ 6 ชม. · ชุดใหม่ → true', async () => {
+  assert.equal(await vm.reportCardHolds(holds('AGN-261104-01')), true, 'ชุดแรก = ข่าว → แชต')
+  at(6.5)
+  assert.equal(await vm.reportCardHolds(holds('AGN-261104-01')), false, 'ชุดเดิม = ไม่โพสต์แชตซ้ำ')
+  assert.equal(sent.length, 2, 'ops ยังได้เตือนซ้ำตาม throttle 6 ชม. ของ alertOps')
+  assert.equal(sent[1].everyMs, 6 * HOUR)
+  at(7)
+  assert.equal(await vm.reportCardHolds(holds('AGN-261104-01', 'NWS-KYM-261105-01')), true, 'ชุดเปลี่ยน = ข่าวใหม่ → แชต')
+  assert.match(sent[2].text, /MEDIAPRO ไม่มีคลิปร่วมกับการ์ดในกล่อง/)
+})
+
+test('การ์ดค้าง: ชุดเปลี่ยนแต่ alertOps ไม่ได้ส่ง (ชุดนี้เพิ่งเตือนไป < 6 ชม.) → false · อ่านชุดเดิมไม่ได้ → ถือเป็นชุดใหม่ · ไม่มี → false', async () => {
+  assert.equal(await vm.reportCardHolds(holds('X-1')), true)
+  at(1)
+  assert.equal(await vm.reportCardHolds(holds('X-1', 'X-2')), true, 'ชุดใหม่ (key ใหม่) = ส่งทันที')
+  at(2)
+  assert.equal(await vm.reportCardHolds(holds('X-1')), false, 'ต่างจากชุดล่าสุด แต่ชุดนี้ alertOps เพิ่งส่งไป → ไม่ได้ส่ง → แชตไม่โพสต์')
+  at(13)
+  readFails = true
+  assert.equal(await vm.reportCardHolds(holds('X-1')), true, 'เตือนซ้ำดีกว่าเงียบ')
+  assert.equal(await vm.reportCardHolds([]), false)
+})
+
+test('การ์ดค้าง: ปุ่มรวมไฟล์รายใบเก็บลายนิ้วมือแยก key — ไม่ทับชุดของรอบรายชั่วโมง', async () => {
+  assert.equal(await vm.reportCardHolds(holds('A-1', 'B-1')), true)
+  at(7)
+  await vm.reportCardHolds(holds('A-1'), 'card-hold-set:A-1')
+  at(14)
+  assert.equal(await vm.reportCardHolds(holds('A-1', 'B-1')), false, 'ชุดรอบรายชั่วโมงยังเป็นชุดเดิม')
+})
+
+test('การ์ดค้าง: รอบที่ไม่มีการ์ดค้างล้างชุดที่เตือนแล้ว → การ์ดใหม่ที่ path เดิมเป็นข่าวอีกครั้ง · รอบรายใบไม่ล้างชุดรวม', async () => {
+  assert.equal(await vm.reportCardHolds(holds('AGN-261104-01')), true, 'ชุดแรก = ข่าว')
+  at(1)
+  assert.equal(await vm.reportCardHolds([], 'card-hold-set', false), false)
+  assert.equal(rows['card-hold-set'].note !== '', true, 'รอบรายใบ (clearWhenEmpty=false) ต้องไม่ล้างชุดรวม')
+  assert.equal(await vm.reportCardHolds([]), false, 'รอบเต็มที่ไม่มีการ์ดค้าง')
+  assert.equal(rows['card-hold-set'].note, '', 'ล้างชุดแล้ว')
+  at(7) // พ้น throttle 6 ชม. ของ alertOps สำหรับชุดนี้
+  assert.equal(await vm.reportCardHolds(holds('AGN-261104-01')), true, 'การ์ดใหม่ที่ path เดิมหลังแก้ใบแรก = ข่าวใหม่ → แชต')
 })

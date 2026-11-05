@@ -7,6 +7,7 @@
 //   📣 แจ้งไฟล์ครบ — preview recipients → confirm → POST /notify-ready.
 // Each card owns its own state, so several can run at once.
 import { useState } from 'react'
+import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
 
 export default function CardFootageActions({
   bookingId,
@@ -36,10 +37,12 @@ export default function CardFootageActions({
         if (job.done) {
           if (job.error) { setMsg(`❌ ${job.error}`); return }
           const v = job.result?.video || {}, s = job.result?.sound || {}
+          const held = v.cardHolds?.length ?? 0 // v1.280 — a held card is not "moved 0"
           const parts: string[] = []
-          if (!v.skipped) parts.push(`วิดีโอ ${v.moved ?? 0} ไฟล์${(v.movedFolders ?? 0) > 0 ? ` +${v.movedFolders} โฟลเดอร์` : ''}${v.conflicts ? ` ⚠️ ชื่อซ้ำ (1) ${v.conflicts} ไม่ย้าย` : ''}`)
+          if (held) parts.push(`⛔ ค้าง ${held} การ์ด — ${CARD_HOLD_FIX}`)
+          if (!v.skipped) parts.push(`วิดีโอ ${v.moved ?? 0} ไฟล์${(v.movedFolders ?? 0) > 0 ? ` +${v.movedFolders} โฟลเดอร์` : ''}${v.conflicts ? ` ⚠️ ชื่อซ้ำ (1) ${v.conflicts} ไม่ย้าย` : ''}${v.err ? ` ⚠️ error ${v.err}` : ''}`)
           if (!s.skipped && (s.staged ?? 0) > 0) parts.push(`เสียง ${s.copied ?? 0}/${s.staged ?? 0}`)
-          setMsg(`✓ ${parts.join(' · ') || 'ไม่มีไฟล์ให้ย้าย'}`)
+          setMsg(`${held || v.err ? '' : '✓ '}${parts.join(' · ') || 'ไม่มีไฟล์ให้ย้าย'}`)
           onChanged?.()
           return
         }

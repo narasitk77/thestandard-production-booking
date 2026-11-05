@@ -4,6 +4,7 @@ import { runVideoMerge } from '@/lib/video-merge'
 import { recordHeartbeat } from '@/lib/heartbeat'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { notifyChat } from '@/lib/notify'
+import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // walking + moving footage across folders can take a while
@@ -56,10 +57,13 @@ export async function GET(request: NextRequest) {
   try {
     const result = await runVideoMerge({ dryRun, onlyCode })
     if (!dryRun) await recordHeartbeat('video-merge').catch(() => {})
-    if (notify && !dryRun && !result.skipped && (result.moved + result.movedFolders > 0 || result.errors > 0)) {
+    // v1.280 — a run that only HELD cards (moved nothing) must not stay quiet — but a hold persists until a
+    // human moves the card, so post it only when the held SET is new (cardHoldsAlerted); ops keeps alertOps' 6 h repeat
+    if (notify && !dryRun && !result.skipped && (result.moved + result.movedFolders > 0 || result.errors > 0 || result.cardHoldsAlerted)) {
       await notifyChat(
         `🎬 NAS sync เขียวแล้ว → รวมไฟล์วิดีโอ: ย้าย ${result.moved} ไฟล์ + ${result.movedFolders} โฟลเดอร์` +
-        ` (${result.bookings} งาน${result.errors ? ` · ⚠️ error ${result.errors}` : ''})`,
+        ` (${result.bookings} งาน${result.errors ? ` · ⚠️ error ${result.errors}` : ''})` +
+        (result.cardHoldsAlerted ? `\n⛔ ค้าง ${result.cardHolds.length} การ์ด — ${CARD_HOLD_FIX}:\n  ${result.cardHolds.slice(0, 8).join('\n  ')}` : ''),
       ).catch(() => {})
     }
     return NextResponse.json(result)

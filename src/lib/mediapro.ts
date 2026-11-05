@@ -28,6 +28,8 @@ export interface MediaproMaterial {
   videoType: string
   /** every file the card says belongs to this clip, relative to the MEDIAPRO folder (`Clip/X.MXF`, `Sub/XS03.MP4`, …) */
   files: string[]
+  /** v1.280 — the clip's own `<Material umid="…">` when the card writes one (video-merge's same-card test) */
+  umid?: string
 }
 
 export interface MediaproCard {
@@ -74,7 +76,8 @@ export function parseMediapro(xml: string): MediaproMaterial[] {
       const r = rel(attr(p[1], 'uri'))
       if (r && !files.includes(r)) files.push(r)
     }
-    out.push({ uri: own, dur: Number(attr(m[1], 'dur')) || 0, fps: attr(m[1], 'fps'), videoType: attr(m[1], 'videoType'), files })
+    const umid = attr(m[1], 'umid')
+    out.push({ uri: own, dur: Number(attr(m[1], 'dur')) || 0, fps: attr(m[1], 'fps'), videoType: attr(m[1], 'videoType'), files, ...(umid ? { umid } : {}) })
   }
   return out
 }

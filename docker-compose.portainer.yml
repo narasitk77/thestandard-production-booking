@@ -213,6 +213,15 @@ services:
       # and the NAS looked empty all day. Prod runs 3. Creating further ahead is
       # safe: cleanup only trashes EMPTY folders whose shoot day is already past.
       LANDING_CREATE_DAYS: ${LANDING_CREATE_DAYS:-1}
+      # v1.280 — a MULTI-DAY booking filed under one EP gets per-day drop folders
+      # EP/CAM-X/D<n>-<yymmdd> (box first, then landing) when its landing folder is
+      # created, so day 2's card never lands on day 1's. LANDING_DAY_FOLDERS=0 = off.
+      # Read by the landing-creation code, which runs in THIS (app) container — the
+      # worker container only schedules HTTP calls, so setting it there does nothing.
+      LANDING_DAY_FOLDERS: ${LANDING_DAY_FOLDERS:-1}
+      # v1.280 — video-merge leaves a DIFFERENT card (MEDIAPRO shares no clip with the box card) poured onto an
+      # existing card in landing and alerts. CARD_HOLD=0 = merge exactly as before v1.280 (rollback lever). App container.
+      CARD_HOLD: ${CARD_HOLD:-1}
       # v1.220 — the NOON prune (prune=today), moved in from a Hermes cron on a
       # laptop. Clears empty orphan folders the 19:00 sweep refuses to touch
       # (no matching Booking row / inside the grace window). Trashes EMPTY only,

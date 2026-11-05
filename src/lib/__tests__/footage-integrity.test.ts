@@ -43,6 +43,35 @@ test('two files sharing one name in one folder is reported with both sizes', () 
   assert.equal(issues[0].fileIds.length, 2)
 })
 
+test('v1.280: two card-index files in one folder — the detail forbids deleting either and never states the cause as fact', () => {
+  const xd = ['EP01', 'CAM-A', 'XDROOT']
+  const issues = findIssues('AGN-261104-01', [
+    f({ id: 'a', name: 'MEDIAPRO.XML', size: 100, parents: ['xd'], folderPath: xd }),
+    f({ id: 'b', name: 'MEDIAPRO.XML', size: 120, parents: ['xd'], folderPath: xd }),
+  ])
+  assert.equal(issues.length, 1)
+  assert.equal(issues[0].kind, 'duplicate-name')
+  // warning first (the chat cuts a detail at 140) · different sizes may be two cards OR one card re-copied after more shooting
+  assert.match(issues[0].detail, /^ไฟล์ index ชื่อเดียวกันขนาดต่างกัน — อาจเป็นการ์ดคนละใบ หรือการ์ดเดิมที่ก็อปซ้ำหลังถ่ายต่อ · ห้ามลบไฟล์ index/)
+  assert.ok(issues[0].detail.indexOf('ห้ามลบไฟล์ index') < 140)
+  assert.match(issues[0].detail, /100 B vs 120 B/)
+  // equal sizes: maybe two cards, maybe one card uploaded twice — still never "delete one"
+  const same = findIssues('X', [
+    f({ id: 'c', name: 'CUEUP.XML', size: 50, parents: ['xd'], folderPath: xd }), f({ id: 'd', name: 'CUEUP.XML', size: 50, parents: ['xd'], folderPath: xd }),
+  ])
+  assert.match(same[0].detail, /^ไฟล์ index ชื่อเดียวกัน 2 ตัว — อาจเป็นการ์ดคนละใบหรืออัปซ้ำ ห้ามลบจนกว่าจะเทียบ md5/)
+  // SONYCARD.IND is 0 bytes on every card: always the hedged wording
+  const ind = findIssues('X', [
+    f({ id: 'e', name: 'SONYCARD.IND', size: 0, parents: ['sony'] }), f({ id: 'g', name: 'SONYCARD.IND', size: 0, parents: ['sony'] }),
+  ])
+  assert.match(ind[0].detail, /^ไฟล์ index ชื่อเดียวกัน 2 ตัว/)
+  // a clip twin keeps the old wording
+  const clip = findIssues('X', [f({ id: 'h', name: 'A.MXF', parents: ['p'] }), f({ id: 'i', name: 'A.MXF', parents: ['p'] })])
+  assert.doesNotMatch(clip[0].detail, /การ์ดคนละใบ|ไฟล์ index/)
+  // no index wording asserts a cause: every one says "อาจ" (may)
+  for (const d of [issues[0].detail, same[0].detail, ind[0].detail]) assert.match(d, /อาจเป็นการ์ดคนละใบ/)
+})
+
 test('same name in DIFFERENT folders is normal — cameras reuse filenames', () => {
   const issues = findIssues('X-1', [
     f({ id: 'a', name: 'A.MXF', parents: ['camA'] }),

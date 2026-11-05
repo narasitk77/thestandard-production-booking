@@ -25,12 +25,13 @@ import { prisma } from './db'
 import {
   ensureFlatShootFolders, listChildFolders, listFilesRecursive, trashDriveItem, hasDriveCredentials,
   findFoldersByCode, isFootageTreeFolder, listEverythingUnder, getDriveItemState,
+  ensureBoxDayFolders, ensureDayFolders, folderLiveness, findEpisodeFolders, findChildFolderByCode, findChildFolder,
 } from './google-drive'
 import {
   landingBookingFolderName, buildEpisodeFolderName, episodeLeadUsesId, camerasToPreCreate,
-  hasOutletFolderMapping, isPhotoAlbumBooking, folderNameMatchesCode,
+  hasOutletFolderMapping, isPhotoAlbumBooking, folderNameMatchesCode, shootDayFolders,
 } from './outlet-folders'
-import { rememberDriveLinks } from './drive-links'
+import { rememberDriveLinks, getDriveLink } from './drive-links'
 import { computeTypeDroppedId } from './id-migration'
 import { landingMayBeTrashed, isShootMarkerFile, isFootageCheckReport } from './reconciler/guards'
 import { boxFootageState } from './landing-duplicates'
@@ -51,9 +52,13 @@ function codeFromFolderName(name: string): string | null {
   return (computeTypeDroppedId(m[1]) ?? m[1]).toUpperCase()
 }
 
+// v1.280 — OS junk (.DS_Store / Thumbs.db / desktop.ini) is not footage, the same rule as video-merge's
+// isLandingShell: a folder merge leaves behind as empty must read empty here too, or it is kept forever.
+// The walk stops at the cap, so a capped walk is "has files" — junk filling the cap can't hide a real file.
+const REAL_FILES_CAP = 50
 async function hasRealFiles(folderId: string): Promise<boolean> {
-  const files = await listFilesRecursive(folderId, { maxFiles: 6 })
-  return files.some(f => !SHOOT_STUB_RE.test(f.name))
+  const files = await listFilesRecursive(folderId, { maxFiles: REAL_FILES_CAP })
+  return files.length >= REAL_FILES_CAP || files.some(f => !SHOOT_STUB_RE.test(f.name) && !OS_JUNK.test(f.name.trim()))
 }
 
 export interface LandingLifecycleResult {
@@ -106,7 +111,7 @@ export function cancelledLandingText(list: CancelledLanding[]): string {
   ].join('\n')
 }
 
-const OS_JUNK = /^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i
+export const OS_JUNK = /^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i
 
 /**
  * v1.259 — "nothing real inside" for TRASHING a cancelled booking's folder. Sees every
@@ -227,6 +232,81 @@ function landingCreateDays(): number {
   return Math.min(14, Math.max(1, Number.isFinite(n) ? Math.floor(n) : 1))
 }
 
+/**
+ * v1.280 — โฟลเดอร์รายวันของงานหลายวัน (outlet-folders shootDayFolders) · สร้าง **ครั้งเดียวตอนสร้าง landing**
+ * (sweep 19:00 + ensureLandingForBooking ซึ่ง approve เรียกให้งานใกล้ถ่าย) ไม่ใช่ใน folder-integrity/prep/รอบรายชั่วโมง —
+ * D<n> ที่ merge ย้ายเข้ากล่องไปแล้วต้องไม่ถูกสร้างคืนใน landing (กลายเป็นกับดักให้เทการ์ดใบที่ 2 ซ้อน)
+ * LANDING_DAY_FOLDERS=0 = ปิดทั้งหมด (ค่าเริ่ม = เปิด)
+ */
+function dayFoldersFor(b: Parameters<typeof shootDayFolders>[0], episodeCount: number): string[] {
+  return process.env.LANDING_DAY_FOLDERS === '0' ? [] : shootDayFolders(b, episodeCount)
+}
+
+const DAY_FOLDER_RE = /^D\d{1,2}-\d{6}$/
+
+const DAY_SKIP = 'ไม่สร้างโฟลเดอร์วัน ใช้โครงเดิม (merge จะย้าย CAM-X ทั้งก้อน)'
+
+/**
+ * v1.280 — แผนชั้นโฟลเดอร์วัน **อ่านอย่างเดียว** · รันเหมือนกันทุกตัวอักษรทั้ง dryRun และรอบจริง (กฎ: preview ต้องตรงของจริง)
+ * และรันก่อนสร้างอะไร → พรีวิวบอกได้ตรงว่ารอบจริงจะสร้างโฟลเดอร์วันไหม · null = สร้าง · ข้อความ = ไม่สร้าง เพราะอะไร
+ * (1) กันเลื่อนวัน — landing ที่มีอยู่แล้ว: ช่องกล้องแรกของ EP แรกมี D<n> ของวันอื่น = ข้ามทั้งสองฝั่ง ให้คนเปลี่ยนชื่อเอง
+ * (2) กล่องต้องพร้อม: มีลิงก์ · ยังอยู่ (folderLiveness) · มีทุก EP — ไม่ครบ = ไม่สร้างทั้งกล่องและ landing (โครง v1.279)
+ * ไม่ throw · อ่าน Drive ไม่ได้ = ไม่สร้าง + บอก
+ */
+async function planDayFolders(
+  b: { bookingCode: string | null; driveFolders: unknown }, cams: string[], epNames: string[] | undefined, days: string[],
+): Promise<string | null> {
+  if (!days.length) return null
+  try {
+    const stale = await staleLandingDays(b.bookingCode!, cams[0], epNames?.[0], days)
+    if (stale.length) return `landing มีโฟลเดอร์วันของวันถ่ายเดิม (${stale.join(', ')}) — งานเลื่อนวัน? เปลี่ยนชื่อเองให้เป็น ${days.join(', ')} ทุกช่องกล้อง ทั้ง landing และกล่อง · ${DAY_SKIP}`
+    const box = getDriveLink(b.driveFolders, 'box')
+    if (!box) return `ไม่มีกล่อง VIDEO ที่ผูกไว้ (driveFolders.box) · ${DAY_SKIP}`
+    const live = await folderLiveness(box)
+    if (live === 'unknown') return `ตรวจกล่องไม่ได้ (Drive) · ${DAY_SKIP}`
+    if (live === 'dead') return `กล่อง VIDEO ที่ผูกไว้ไม่อยู่แล้ว (ถังขยะ/ถูกลบ) · ${DAY_SKIP}`
+    if (epNames?.length) {
+      const { missing } = await findEpisodeFolders(box, epNames)
+      if (missing.length) return `กล่องไม่มี EP ${missing.join(', ')} · ${DAY_SKIP}`
+    }
+  } catch (e: any) {
+    return `ตรวจโฟลเดอร์วันไม่ได้ (Drive): ${e?.message || e} · ${DAY_SKIP}`
+  }
+  return null
+}
+
+/** v1.280 — D<n> names in an EXISTING landing's first camera slot that are not in `days` (read-only; no landing yet = none). */
+async function staleLandingDays(code: string, cam: string, ep: string | undefined, days: string[]): Promise<string[]> {
+  let parent = await findChildFolderByCode(PRODUCTION_TEAM_ROOT, code)
+  if (parent && ep) parent = (await findEpisodeFolders(parent, [ep])).ids[0] ?? null
+  const camId = parent ? await findChildFolder(parent, cam) : null
+  if (!camId) return []
+  return (await listChildFolders(camId)).map(f => f.name).filter(n => DAY_FOLDER_RE.test(n) && !days.includes(n))
+}
+
+/**
+ * v1.280 — สร้างชั้นโฟลเดอร์วัน เฉพาะเมื่อ planDayFolders บอกว่าสร้าง และ **หลัง** landing แบบ v1.279 (ช่องกล้อง + ลิงก์) เสร็จแล้ว →
+ * พังตรงนี้ไม่ทำให้ทีมเสียช่องกล้อง · **กล่องก่อน** (กล่อง CAM-X ที่มี D<n> ว่าง = ไม่ว่าง → video-merge ลงไปทีละวัน ย้าย D<n> ที่มีไฟล์
+ * เข้า twin ว่างของมัน ส่วน D<n> ว่างใน landing อยู่ให้ทีมเทต่อ) แล้วค่อย landing · ensureBoxDayFolders ตรวจ EP ซ้ำเอง (กล่องก่อนหรือไม่ทำเลย)
+ * คืนข้อความเตือน · null = ครบ · ไม่ throw · ไม่สร้างกล่อง/EP เอง
+ */
+async function addDayFolders(
+  b: { driveFolders: unknown }, landingCams: string[], cams: string[], epNames: string[] | undefined, days: string[],
+): Promise<string | null> {
+  try {
+    const { missingEpisodes } = await ensureBoxDayFolders({ boxFolderId: getDriveLink(b.driveFolders, 'box')!, episodeFolderNames: epNames, cameras: cams, dayFolders: days })
+    if (missingEpisodes.length) return `กล่องไม่มี EP ${missingEpisodes.join(', ')} · ${DAY_SKIP}`
+  } catch (e: any) {
+    return `ทำโฟลเดอร์วันฝั่งกล่องไม่สำเร็จ: ${e?.message || e} · ${DAY_SKIP}`
+  }
+  try {
+    await ensureDayFolders(landingCams, days)
+  } catch (e: any) {
+    return `สร้างโฟลเดอร์วันใน landing ไม่ครบ: ${e?.message || e} (ช่องกล้องยังอยู่ครบ)`
+  }
+  return null
+}
+
 /** เหตุผลที่ไม่ทิ้งโฟลเดอร์ drop — ข้อความเดียวกันทั้ง sweep 19:00 และ prune เที่ยง */
 function keepLabel(state: string): string {
   if (state === 'no-footage') return 'ยังไม่มีฟุตเทจในกล่อง'
@@ -268,6 +348,7 @@ export async function manageLandingFolders(
     orderBy: { shootDate: 'asc' },
     select: {
       id: true, bookingCode: true, cameraCount: true, micCount: true, shootDate: true,
+      shootEndDate: true, callTime: true, estimatedWrap: true, driveFolders: true, // v1.280 — day folders
       projectName: true, outlet: { select: { code: true } },
       program: { select: { code: true, name: true } },
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
@@ -278,14 +359,21 @@ export async function manageLandingFolders(
     const cams = camerasToPreCreate(b.cameraCount, b.micCount)
     if (cams.length === 0) continue
     const name = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
+    const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })) : undefined
+    // v1.280 — the read-only day-folder plan runs in dryRun too, so the preview says what the run will do
+    const planned = dayFoldersFor(b, b.episodes.length)
+    const planWarn = await planDayFolders(b, cams, epNames, planned)
+    const days = planWarn ? [] : planned
     // label with the booking's OWN shoot day — with a multi-day window the
     // window's first day says nothing about which day this folder is for
-    base.actions.push(`create landing "${name}" (${b.shootDate.toISOString().slice(0, 10)})`)
+    base.actions.push(`create landing "${name}" (${b.shootDate.toISOString().slice(0, 10)})${days.length ? ` + โฟลเดอร์วัน ${days.join(', ')}` : ''}`)
+    if (planWarn) { base.createErrors++; base.actions.push(`  WARN day folders ${b.bookingCode}: ${planWarn}`) }
     if (!dryRun) {
       try {
-        const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })) : undefined
-        const lid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
-        await rememberDriveLinks(b.id, { landing: lid })
+        const landing = await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode!, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })
+        await rememberDriveLinks(b.id, { landing: landing.bookingFolderId })
+        const warn = days.length ? await addDayFolders(b, landing.cameraFolderIds, cams, epNames, days) : null // v1.280 — after the slots, box first
+        if (warn) { base.createErrors++; base.actions.push(`  WARN day folders ${b.bookingCode}: ${warn}`) }
       } catch (e: any) { base.createErrors++; base.actions.push(`  ERROR create: ${e?.message || e}`); continue }
     }
     base.created++
@@ -368,7 +456,7 @@ export async function manageLandingFolders(
 export async function ensureLandingForBooking(
   bookingCode: string,
   opts: { dryRun?: boolean } = {},
-): Promise<{ ok: boolean; dryRun: boolean; bookingCode: string; created?: string; folderId?: string | null; url?: string | null; reason?: string }> {
+): Promise<{ ok: boolean; dryRun: boolean; bookingCode: string; created?: string; folderId?: string | null; url?: string | null; reason?: string; dayFolders?: string[]; warnings?: string[] }> {
   const dryRun = !!opts.dryRun
   const code = bookingCode.trim().toUpperCase()
   if (!hasDriveCredentials()) return { ok: false, dryRun, bookingCode: code, reason: 'no Drive credentials' }
@@ -377,6 +465,7 @@ export async function ensureLandingForBooking(
     where: { bookingCode: { equals: code, mode: 'insensitive' }, deletedAt: null },
     select: {
       id: true, bookingCode: true, status: true, cameraCount: true, micCount: true,
+      shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true, driveFolders: true, // v1.280 — day folders
       projectName: true, outlet: { select: { code: true } },
       program: { select: { code: true, name: true } },
       episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
@@ -394,6 +483,7 @@ export async function ensureLandingForBooking(
   // lean lifecycle correctly cleans up. Mirrors prep-folders' delivered-check.
   // (2026-07-09: TSS-KDM-260708-01 had 84 files already in the box — the drop
   // folder was redundant. Per ops: "งานไหนย้ายไฟล์แล้ว ไม่ต้องสร้าง drop มา".)
+  let deliveredUnknown = false
   try {
     for (const c of await findFoldersByCode(b.bookingCode)) {
       // v1.150 — same fix pr-15 applied to prep-folders' delivered-check: the
@@ -408,14 +498,39 @@ export async function ensureLandingForBooking(
     }
   } catch (e: any) {
     console.warn('[landing] delivered-check failed (continuing with create):', code, e?.message || e)
+    deliveredUnknown = true
   }
 
   const name = landingBookingFolderName({ bookingCode: b.bookingCode, projectName: b.projectName, program: b.program, episodes: b.episodes })
-  if (dryRun) return { ok: true, dryRun, bookingCode: code, created: name }
+  // v1.280 — delivered-check unreadable: a D<n> may already be merged into the box, and re-creating it in landing
+  // is the trap day folders exist to remove → the v1.279 layout, and say so
+  const planned = dayFoldersFor(b, b.episodes.length)
+  let days = deliveredUnknown ? [] : planned
+  const warnings = deliveredUnknown && planned.length ? [`ตรวจไม่ได้ว่าฟุตเทจลงกล่องแล้วหรือยัง (Drive) · ${DAY_SKIP}`] : []
   const epNames = b.episodes.length ? b.episodes.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId(b.outlet.code, b.episodes) })) : undefined
-  const fid = (await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })).bookingFolderId
+  // v1.280 — the read-only plan runs in BOTH modes, before anything is created: the dryRun answer is the run's answer
+  const planWarn = await planDayFolders(b, cams, epNames, days)
+  if (planWarn) { warnings.push(planWarn); days = [] }
+  if (dryRun) return { ok: true, dryRun, bookingCode: code, created: name, ...(days.length ? { dayFolders: days } : {}), ...(warnings.length ? { warnings } : {}) }
+  const landing = await ensureFlatShootFolders({ rootFolderId: PRODUCTION_TEAM_ROOT, bookingCode: b.bookingCode, bookingFolderName: name, cameras: cams, episodeFolderNames: epNames })
+  const fid = landing.bookingFolderId
   await rememberDriveLinks(b.id, { landing: fid })
-  return { ok: true, dryRun, bookingCode: code, created: name, folderId: fid, url: fid ? `https://drive.google.com/drive/folders/${fid}` : null }
+  const warn = days.length ? await addDayFolders(b, landing.cameraFolderIds, cams, epNames, days) : null // v1.280 — after the slots, box first
+  if (warn) warnings.push(warn)
+  if (warnings.length) console.warn(`[landing] ${code} day folders: ${warnings.join(' | ')}`)
+  return {
+    ok: true, dryRun, bookingCode: code, created: name, folderId: fid, url: fid ? `https://drive.google.com/drive/folders/${fid}` : null,
+    ...(days.length && !warn ? { dayFolders: days } : {}), ...(warnings.length ? { warnings } : {}),
+  }
+}
+
+/**
+ * v1.280 — approve's imminent-shoot landing waits for the box pre-create (they used to run side by side): the
+ * pre-create stores driveFolders.box, which the day-folder plan reads. A failed pre-create never blocks the landing.
+ */
+export async function ensureLandingAfterBox(boxPrecreate: Promise<unknown>, bookingCode: string): ReturnType<typeof ensureLandingForBooking> {
+  await boxPrecreate.catch((e: any) => console.error('[landing] box pre-create failed — landing goes ahead:', bookingCode, e?.message || e))
+  return ensureLandingForBooking(bookingCode)
 }
 
 export interface LandingPruneResult {

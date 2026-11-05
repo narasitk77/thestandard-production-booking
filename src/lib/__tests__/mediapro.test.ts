@@ -45,7 +45,7 @@ const card = (root: string[], clip: string, origSize = 1_000_000, opts: { skip?:
 test('parseMediapro อ่านทุกไฟล์ของแต่ละคลิป · ไม่ใช่ MEDIAPRO = throw', () => {
   const mats = mp.parseMediapro(xml(material('C022C001_260929R4', 112265)))
   assert.deepEqual(mats, [{ uri: 'Clip/C022C001_260929R4.MXF', dur: 112265, fps: '25p', videoType: 'AVC_3840_2160_H422IP@L51',
-    files: ['Clip/C022C001_260929R4.MXF', 'Sub/C022C001_260929R4S03.MP4', 'Clip/C022C001_260929R4M01.XML', 'Thmbnl/C022C001_260929R4T01.JPG'] }])
+    files: ['Clip/C022C001_260929R4.MXF', 'Sub/C022C001_260929R4S03.MP4', 'Clip/C022C001_260929R4M01.XML', 'Thmbnl/C022C001_260929R4T01.JPG'], umid: 'x' }])
   assert.throws(() => mp.parseMediapro('<html>error page</html>'), /ไม่ใช่ MEDIAPRO/)
 })
 

@@ -35,7 +35,8 @@ mock.module('../google-drive', {
   namedExports: {
     hasDriveCredentials: () => true,
     listChildFolders: async () => folders,
-    listFilesRecursive: async (id: string) => (contents[id] || []).map(name => ({ id: `${id}/${name}`, name })),
+    // stops at maxFiles like the real walk
+    listFilesRecursive: async (id: string, o?: { maxFiles?: number }) => (contents[id] || []).slice(0, o?.maxFiles ?? 5000).map(name => ({ id: `${id}/${name}`, name })),
     trashDriveItem: async (id: string) => { trashed.push(id) },
     ensureFlatShootFolders: async () => ({ bookingFolderId: 'x' }),
     findFoldersByCode: async () => [],
@@ -147,6 +148,22 @@ test('รอบเที่ยง (prune=today): กฎเดียวกัน 
   assert.ok(!trashed.includes('misdrop'))
   assert.deepEqual(r.cancelledWithFiles.map(c => c.id), ['misdrop'])
   assert.ok(r.keptWithFiles.includes(folders[2].name))
+})
+
+test('v1.280: past landing holding only OS junk (CAM-B/.DS_Store) is EMPTY — same rule as video-merge · junk past the walk cap cannot hide a real file', async () => {
+  boxState['TSS-TSS-261001-01'] = 'has-footage'
+  contents.osot = ['_SHOOT.txt', '.DS_Store', 'Thumbs.db'] // what merge leaves behind after an unused slot was opened in Finder
+  await lc.manageLandingFolders({ dryRun: false })
+  assert.ok(trashed.includes('osot'), 'รอบ 19:00')
+  trashed = []
+  await lc.pruneLandingToToday({ dryRun: false })
+  assert.ok(trashed.includes('osot'), 'รอบเที่ยง')
+
+  trashed = []
+  contents.osot = [...Array.from({ length: 60 }, () => '.DS_Store'), 'A001C001.MXF']
+  const r = await lc.pruneLandingToToday({ dryRun: false })
+  assert.ok(!trashed.includes('osot'))
+  assert.ok(r.keptWithFiles.includes(folders[3].name))
 })
 
 test('dry-run ตัดสินเหมือนจริงแต่ไม่ทิ้งอะไร', async () => {

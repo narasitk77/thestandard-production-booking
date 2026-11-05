@@ -53,7 +53,7 @@ import {
 import { parseDrpMediaPool } from './drp-mediapool'
 import { loadMediaproCards, mediaproCheck, mediaproStaleText, type MediaproCheck } from './mediapro'
 import { folderNameMatchesCode } from './outlet-folders'
-import { isShootMarkerFile, lastShootDay } from './reconciler/guards'
+import { isShootMarkerFile, lastShootDay, CARD_INDEX_RE } from './reconciler/guards'
 import { computeFootagePayload, storeFootageCache, FOOTAGE_WALK_MAX_FILES, type BookingForFootagePayload } from './footage-folders'
 
 /** Google-native docs report no size at all; that is not a truncation. */
@@ -161,6 +161,11 @@ export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssu
   // Drive allows it; a camera never does. It means two upload attempts landed
   // side by side, and at most one of them is the whole clip. Size is reported
   // so a human can see the mismatch, NOT so the smaller one can be assumed bad.
+  // v1.280 — EXCEPT a card's own index file (MEDIAPRO.XML, CUEUP.XML, SONYCARD.IND…): two of those may be two
+  // different cards poured into one folder (day 2 onto day 1), or ONE card copied again after it shot more (its
+  // index grew — video-merge merges that re-offload beside the old index, as it always did), or one upload twice.
+  // Sizes cannot tell which. Deleting the wrong one makes a card's clips unverifiable and holds the MEDIAPRO gate
+  // forever — the detail must forbid it, not invite a cleanup.
   const byFolderAndName = new Map<string, DriveFile[]>()
   for (const f of real) {
     const parent = f.parents?.[0] || '?'
@@ -172,9 +177,17 @@ export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssu
   for (const dupes of byFolderAndName.values()) {
     if (dupes.length < 2) continue
     const sizes = dupes.map(d => gb(d.size)).join(' vs ')
+    const cardIndex = CARD_INDEX_RE.test(dupes[0].name) || /^(SONYCARD\.IND|DATABASE\.BIN)$/i.test(dupes[0].name)
+    // SONYCARD.IND is 0 bytes on every card, so its sizes never tell two cards apart
+    const sizesDiffer = !/^SONYCARD\.IND$/i.test(dupes[0].name) && new Set(dupes.map(d => d.size ?? '?')).size > 1
     issues.push({
       bookingCode, kind: 'duplicate-name', fileIds: dupes.map(d => d.id),
-      detail: `${where(dupes[0])} — มี ${dupes.length} ไฟล์ชื่อเดียวกันในโฟลเดอร์เดียวกัน (${sizes})`,
+      // warning FIRST: the chat summary cuts a detail at 140 characters and an EP title alone can be 120
+      detail: cardIndex
+        ? `${sizesDiffer
+          ? 'ไฟล์ index ชื่อเดียวกันขนาดต่างกัน — อาจเป็นการ์ดคนละใบ หรือการ์ดเดิมที่ก็อปซ้ำหลังถ่ายต่อ · ห้ามลบไฟล์ index'
+          : `ไฟล์ index ชื่อเดียวกัน ${dupes.length} ตัว — อาจเป็นการ์ดคนละใบหรืออัปซ้ำ ห้ามลบจนกว่าจะเทียบ md5`} · ${where(dupes[0])} (${dupes.length} ไฟล์: ${dupes.map(d => d.size == null ? '?' : `${d.size} B`).join(' vs ')})`
+        : `${where(dupes[0])} — มี ${dupes.length} ไฟล์ชื่อเดียวกันในโฟลเดอร์เดียวกัน (${sizes})`,
     })
   }
 

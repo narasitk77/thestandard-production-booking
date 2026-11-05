@@ -29,7 +29,7 @@ import { prisma } from './db'
 import {
   findChildFolder, listChildFolders, listFilesInFolder, moveFileToFolder,
   findEpisodeFolderUrls, ensureFolderPath, hasDriveCredentials,
-  isFolderEmpty, trashDriveItem,
+  isFolderEmpty, trashDriveItem, downloadDriveFile,
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode,
@@ -41,6 +41,9 @@ import { noteResolve } from './id-first-metrics'
 import { isFolderAlive } from './google-drive'
 import { alertOps, OPS_ALERT_EVERY_MS } from './ops-alert'
 import { tryLockMerge, unlockMerge, videoMergeKey } from './merge-lock'
+import { CARD_HOLD_FIX } from './reconciler/guards'
+import { OS_JUNK } from './landing-lifecycle'
+import { parseMediapro, isMediaproFile, type MediaproMaterial } from './mediapro'
 import { createHash } from 'crypto'
 
 // "Production Team" landing Shared Drive (NAS drop zone) — mirrors prep-folders.ts.
@@ -58,10 +61,14 @@ export interface VideoMergeResult {
   moved: number         // files moved into a box (or would-move in dryRun)
   movedFolders: number  // v1.127 — whole subfolders relocated in one call (contents uncounted)
   errors: number
-  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; conflicts?: number; skipped?: string }>
+  /** v1.280 — "<code>: <card root path>" of every card held in landing this run (see mirrorMove) */
+  cardHolds: string[]
+  /** v1.280 — true only when this run's held SET is new and its alert went out: the route's chat gate (see reportCardHolds) */
+  cardHoldsAlerted: boolean
+  results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; conflicts?: number; cardHolds?: number; skipped?: string }>
 }
 
-type Stats = { seen: number; moved: number; movedFolders: number; dup: number; err: number; conflicts: string[] }
+type Stats = { seen: number; moved: number; movedFolders: number; dup: number; err: number; conflicts: string[]; cardHolds: string[] }
 
 /**
  * v1.261 — sync-storm guard. Two uploaders (NAS Cloud Sync + a crew member's Google
@@ -78,13 +85,30 @@ export const isConflictName = (name: string) => /(?: \(\d+\))+(?=(?:\.[^.]*)?$)/
  * Recursively mirror-MOVE files from a landing subtree into the matching box
  * subtree. `destId` is null only in a dryRun where the box subfolder doesn't
  * exist yet (then dedup is skipped and everything counts as would-move).
+ * `path` = this folder's path under the landing booking folder (for cardHolds).
  */
-export async function mirrorMove(srcId: string, destId: string | null, code: string, stats: Stats, dryRun: boolean): Promise<void> {
-  const files = (await listFilesInFolder(srcId)).filter(f => !isShootInfo(f.name))
+export async function mirrorMove(srcId: string, destId: string | null, code: string, stats: Stats, dryRun: boolean, path = ''): Promise<void> {
+  // v1.280 — CARD HOLD, decided at the card ROOT before any of its parts moves (see cardVerdict). A different card
+  // poured onto the one in the box twin (a multi-day booking's day 2 dumped into day 1's CAM-X) leaves its card
+  // parts — XDROOT/M4ROOT/PRIVATE/SONY/DCIM/AVF_INFO/MISC and any loose non-junk file here — in landing and is
+  // reported (reportCardHolds): mirroring would put its index files beside the first card's, or strand them as
+  // "dup". Other children (a D2-<yymmdd> / Card 2 folder beside a flat-dumped card) merge as usual. A MEDIAPRO
+  // that cannot be read keeps the card in landing too, as an error (loud), never as a guessed verdict.
+  const subs = await listChildFolders(srcId)
+  // CARD_HOLD=0 = rollback lever without a redeploy (merge exactly as before v1.280)
+  const verdict = destId && process.env.CARD_HOLD !== '0' ? await cardVerdict(subs, destId, code, path) : 'merge'
+  const keepCard = verdict !== 'merge'
+  if (verdict === 'hold') stats.cardHolds.push(`${code}: ${path || '(ราก landing)'}`)
+  if (verdict === 'unreadable') stats.err++
+  let files = (await listFilesInFolder(srcId)).filter(f => !isShootInfo(f.name))
+  if (keepCard) {
+    const loose = files.filter(f => !OS_JUNK.test(f.name.trim()))
+    stats.seen += loose.length
+    files = files.filter(f => OS_JUNK.test(f.name.trim()))
+  }
   if (files.length) {
-    const have = destId
-      ? new Set((await listFilesInFolder(destId)).map(f => `${f.name}|${f.size ?? ''}`))
-      : new Set<string>()
+    const boxFiles = destId ? await listFilesInFolder(destId) : []
+    const have = new Set(boxFiles.map(f => `${f.name}|${f.size ?? ''}`))
     for (const f of files) {
       stats.seen++
       if (isConflictName(f.name)) { stats.conflicts.push(f.name); continue } // v1.261 — sync-storm leftover, never land it
@@ -100,8 +124,8 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
   // files.update. Per-file dedup is vacuous in both cases (dest has no files),
   // so semantics match the old mirror. Any refusal (e.g. Google re-blocking
   // cross-drive folder moves) falls back to the per-file mirror unchanged.
-  const subs = await listChildFolders(srcId)
   for (const s of subs) {
+    if (keepCard && CARD_PART_RE.test(s.name.trim())) continue // v1.280 — the held / unreadable card stays whole
     // v1.150.2 — NEVER relocate an EMPTY landing subtree. The nightly lifecycle
     // creates tomorrow's drop skeleton (EP / CAM-A..N / AUDIO) at 19:00 BKK;
     // the hourly merge then found "box twin missing or empty" and moved that
@@ -143,8 +167,62 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
       }
       if (!destSub) destSub = await ensureFolderPath(destId, [s.name])
     }
-    await mirrorMove(s.id, destSub, code, stats, dryRun)
+    await mirrorMove(s.id, destSub, code, stats, dryRun, path ? `${path}/${s.name}` : s.name)
   }
+}
+
+/** v1.280 — a camera card's own parts at its root (the hold keeps them all in landing together). */
+const CARD_PART_RE = /^(XDROOT|M4ROOT|PRIVATE|SONY|DCIM|AVF_INFO|MISC)$/i
+
+/** v1.280 — the same clip on both cards: by umid when both MEDIAPROs carry one, else by uri AND dur. */
+const sameClip = (a: MediaproMaterial, b: MediaproMaterial) =>
+  a.umid && b.umid ? a.umid === b.umid : a.uri === b.uri && a.dur === b.dur
+
+/** v1.280 — every clip these MEDIAPRO.XML files name (a box XDROOT may already hold two). Throws when one is unreadable. */
+async function mediaproMaterials(files: Array<{ id: string }>): Promise<MediaproMaterial[]> {
+  const lists = await Promise.all(files.map(f => downloadDriveFile(f.id).then(b => parseMediapro(b.toString('utf8')))))
+  return lists.flat()
+}
+
+/**
+ * v1.280 — is landing folder L (children `subs`) a CARD ROOT holding a different card than the one in its box twin
+ * `destId`? L is a card root when it holds XDROOT or M4ROOT, or PRIVATE/M4ROOT. For each such index folder whose box
+ * twin (same names under destId — exactly where the mirror would merge it) also exists, and BOTH hold MEDIAPRO.XML:
+ * read both (a few KB, the same reads in dryRun and real runs) — at least one clip in common (sameClip) = the SAME
+ * card offloaded again (lunch dump, then the whole card at wrap, or only the new clips + a grown MEDIAPRO) → 'merge',
+ * exactly as before v1.280. None in common = a DIFFERENT card → 'hold'. A MEDIAPRO that cannot be downloaded or
+ * parsed → 'unreadable' (logged here; the caller counts an error and keeps the card in landing this run).
+ * ponytail: an index folder with MEDIAPRO on only one side (or neither — non-Sony cards, a card still uploading its
+ * index, a card dumped without its XDROOT folder) merges as before v1.280; DCIM-only cards have no index to compare.
+ */
+async function cardVerdict(subs: Array<{ id: string; name: string }>, destId: string, code: string, path: string): Promise<'merge' | 'hold' | 'unreadable'> {
+  const indexDirs: Array<{ id: string; segs: string[] }> = []
+  for (const s of subs) {
+    if (/^(XDROOT|M4ROOT)$/i.test(s.name.trim())) indexDirs.push({ id: s.id, segs: [s.name] })
+    else if (/^PRIVATE$/i.test(s.name.trim())) {
+      for (const m of await listChildFolders(s.id)) if (/^M4ROOT$/i.test(m.name.trim())) indexDirs.push({ id: m.id, segs: [s.name, m.name] })
+    }
+  }
+  for (const dir of indexDirs) {
+    let twin: string | null = destId
+    for (const seg of dir.segs) twin = twin && await findChildFolder(twin, seg)
+    if (!twin) continue
+    // box side first: a box twin with no MEDIAPRO (the common steady state) costs no landing listing
+    // a 0-byte MEDIAPRO (interrupted copy) lists nothing = no index on that side, not 'unreadable' forever
+    const realIndex = (f: { name: string; size?: string | number | null }) => isMediaproFile(f.name) && Number(f.size ?? 1) !== 0
+    const boxIndex = (await listFilesInFolder(twin)).filter(realIndex)
+    if (!boxIndex.length) continue
+    const landIndex = (await listFilesInFolder(dir.id)).filter(realIndex)
+    if (!landIndex.length) continue
+    let mine: MediaproMaterial[], theirs: MediaproMaterial[]
+    try { [mine, theirs] = await Promise.all([mediaproMaterials(landIndex), mediaproMaterials(boxIndex)]) }
+    catch (e: any) {
+      console.error(`[video-merge] ${code}: อ่าน MEDIAPRO.XML ของการ์ด "${path || '(ราก landing)'}" ไม่ได้ — ไม่ย้ายการ์ดนี้รอบนี้ (ตัดสินไม่ได้ว่าการ์ดเดียวกับในกล่องไหม):`, e?.message || e)
+      return 'unreadable'
+    }
+    if (!mine.some(m => theirs.some(t => sameClip(m, t)))) return 'hold'
+  }
+  return 'merge'
 }
 
 /**
@@ -191,7 +269,9 @@ async function findTwinFolder(destId: string, name: string): Promise<string | nu
 async function isLandingShell(folderId: string, depth = 0): Promise<boolean> {
   if (depth > 4) return false
   const files = await listFilesInFolder(folderId)
-  if (files.some(f => !isShootInfo(f.name))) return false
+  // v1.280 — Finder's .DS_Store (and Windows' Thumbs.db / desktop.ini) is not footage: an empty day
+  // folder someone merely OPENED must stay in landing as a drop target, not be moved into the box.
+  if (files.some(f => !isShootInfo(f.name) && !OS_JUNK.test(f.name.trim()))) return false
   const subs = await listChildFolders(folderId)
   if (subs.some(s => isConflictName(s.name))) return false
   for (const s of subs) {
@@ -266,8 +346,45 @@ export async function reportConflicts(code: string, conflicts: string[]): Promis
   }
 }
 
+/**
+ * v1.280 — a held card is an ops incident, not a counter: log + ONE alertOps per run listing every held card root
+ * (see mirrorMove/cardVerdict). alertOps keeps its own 6 h repeat for ops; the team chat (the route) gets the hold
+ * only when the held SET is new — a hold persists until a human moves the card, and the hourly + 6 h runs would
+ * otherwise repost the same list for days (the v1.266.2 sync-storm lesson). The last reported set is a fingerprint
+ * in system_heartbeats `setKey` (one per run for the global merge, `card-hold-set:<code>` for a booking's button).
+ * Returns true only when the alert went out AND the set changed — the route's chat gate (cardHoldsAlerted).
+ */
+export async function reportCardHolds(holds: string[], setKey = 'card-hold-set', clearWhenEmpty = true): Promise<boolean> {
+  if (!holds.length) {
+    // nothing held now → forget the last set, so a new card held at the same path later is news again
+    if (clearWhenEmpty) {
+      try { await prisma.systemHeartbeat.updateMany({ where: { key: setKey, NOT: { note: '' } }, data: { note: '' } }) }
+      catch (e: any) { console.warn('[video-merge] ล้างชุดการ์ดค้างไม่ได้:', e?.message || e) }
+    }
+    return false
+  }
+  const shown = holds.slice(0, 12).join('\n  ')
+  console.warn(`[video-merge] ${holds.length} card(s) held in landing — ${CARD_HOLD_FIX}:\n  ${shown}`)
+  const set = conflictSetKey(holds)
+  let reported: string | null = null
+  try { reported = (await prisma.systemHeartbeat.findUnique({ where: { key: setKey } }))?.note ?? null }
+  catch (e: any) { console.warn('[video-merge] อ่านชุดการ์ดค้างที่เตือนไปแล้วไม่ได้ — ถือว่าชุดใหม่:', e?.message || e) } // louder beats silent
+  const r = await alertOps(`card-hold:${set}`, `⛔ การ์ดซ้อนการ์ดใน landing — video-merge ไม่ย้าย ${holds.length} การ์ด`,
+    `video-merge ไม่ย้าย ${holds.length} การ์ดใน landing (เช่น การ์ดวันที่ 2 เทลง CAM-X เดียวกับวันที่ 1):\n  ${shown}` +
+    `${holds.length > 12 ? `\n  … อีก ${holds.length - 12}` : ''}` +
+    `\nแก้: ${CARD_HOLD_FIX} — merge รอบหน้าจะย้ายให้เอง`,
+    OPS_ALERT_EVERY_MS) // ops: the normal 6 h repeat for a hold nobody has fixed yet
+  const fresh = reported !== set
+  if (r.attempted && fresh) {
+    const at = new Date()
+    try { await prisma.systemHeartbeat.upsert({ where: { key: setKey }, create: { key: setKey, at, note: set }, update: { at, note: set } }) }
+    catch (e: any) { console.warn('[video-merge] บันทึกชุดการ์ดค้างไม่ได้ (รอบหน้าจะโพสต์แชตซ้ำ):', e?.message || e) }
+  }
+  return r.attempted && fresh
+}
+
 export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
-  const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, results: [] as VideoMergeResult['results'] }
+  const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, cardHolds: [] as string[], cardHoldsAlerted: false, results: [] as VideoMergeResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', ...base }
 
@@ -360,10 +477,11 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // landing was stored at resolve time (stored link, or a unique name match) — never re-store an ambiguous one here
       if (!opts.dryRun && b.id) await rememberDriveLinks(b.id, { box: destId ?? undefined })
 
-      const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [] }
+      const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [], cardHolds: [] }
       await mirrorMove(flatId, destId, code, stats, !!opts.dryRun)
       base.landed += stats.seen; base.moved += stats.moved; base.movedFolders += stats.movedFolders; base.errors += stats.err
-      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, movedFolders: stats.movedFolders, dup: stats.dup, err: stats.err, conflicts: stats.conflicts.length })
+      base.cardHolds.push(...stats.cardHolds)
+      base.results.push({ bookingCode: code, seen: stats.seen, moved: stats.moved, movedFolders: stats.movedFolders, dup: stats.dup, err: stats.err, conflicts: stats.conflicts.length, cardHolds: stats.cardHolds.length })
       if (!opts.dryRun) await reportConflicts(code, stats.conflicts)
     } catch (e: any) {
       base.errors++
@@ -373,6 +491,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
     }
   }
 
+  if (!opts.dryRun) base.cardHoldsAlerted = await reportCardHolds(base.cardHolds, 'card-hold-set', !opts.onlyCode) // a one-booking run must not clear the global set
   return { skipped: false, ...base }
 }
 
@@ -403,13 +522,14 @@ export interface BookingVideoMergeResult {
   dup: number
   err: number
   conflicts: number       // v1.261 — sync-storm names left in landing (see isConflictName)
+  cardHolds: string[]     // v1.280 — cards held in landing: a second card poured onto an existing one (see mirrorMove)
   boxFolderUrl?: string | null
 }
 
 /** MOVE this ONE booking's NAS landing footage into its VIDEO 2026 box. */
 export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: boolean } = {}): Promise<BookingVideoMergeResult> {
   const dryRun = !!opts.dryRun
-  const zero = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: 0 }
+  const zero = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: 0, cardHolds: [] as string[] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'ยังไม่ได้ตั้งค่า Drive', ...zero }
   const code = b.bookingCode
@@ -463,8 +583,9 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   noteResolve('video-merge', 'box', code, boxViaStored) // v1.154 — id-first coverage gauge
   if (!dryRun && b.id) await rememberDriveLinks(b.id, { landing: landingViaStored || landingUnique ? flatId : undefined, box: destId ?? undefined })
 
-  const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [] }
+  const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [], cardHolds: [] }
   await mirrorMove(flatId, destId, code, stats, dryRun)
   if (!dryRun) await reportConflicts(code, stats.conflicts)
+  if (!dryRun) await reportCardHolds(stats.cardHolds, `card-hold-set:${code}`)
   return { ...stats, conflicts: stats.conflicts.length, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
 }

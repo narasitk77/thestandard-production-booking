@@ -19,7 +19,8 @@ import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 import { rememberDriveLinks } from '@/lib/drive-links'
 // v1.149 — landing drop folder for shoots happening today/tomorrow (the
 // nightly 19:00 worker won't come back around for them).
-import { ensureLandingForBooking, shootIsImminentBkk } from '@/lib/landing-lifecycle'
+import { ensureLandingAfterBox, shootIsImminentBkk } from '@/lib/landing-lifecycle'
+import { alertOps } from '@/lib/ops-alert'
 
 export async function POST(
   request: NextRequest,
@@ -126,7 +127,7 @@ export async function POST(
     //     opens the new "VIDEO 2026 [JUL–DEC]" tree and sees the camera slots
     //     waiting (empty slot = that camera hasn't delivered). Own try/catch IIFE
     //     — never blocks approval, runs only when Drive is configured.
-    ;(async () => {
+    const boxPrecreate = (async () => {
       if (!updated.bookingCode || !hasDriveCredentials()) return
       try {
         const jobName = updated.projectName?.trim() || updated.episodes[0]?.title?.trim() || null
@@ -202,8 +203,15 @@ export async function POST(
       if (!updated.bookingCode || !updated.shootDate || !hasDriveCredentials()) return
       try {
         if (!shootIsImminentBkk(new Date(updated.shootDate))) return
-        const r = await ensureLandingForBooking(updated.bookingCode)
+        // v1.280 — box first: the day-folder plan reads driveFolders.box, which the box pre-create above stores
+        const r = await ensureLandingAfterBox(boxPrecreate, updated.bookingCode)
         if (!r.ok) console.warn('[approve] landing ensure skipped:', updated.bookingCode, r.reason)
+        // v1.280 — an imminent shoot gets no later 19:00 retry: a skipped day layer must reach a human now
+        if (r.warnings?.length) {
+          await alertOps(`landing-day-folders:${updated.bookingCode}`, `⚠️ โฟลเดอร์วันไม่ได้สร้าง — ${updated.bookingCode}`,
+            `approve สร้าง landing ของ ${updated.bookingCode} (งานหลายวัน) แบบไม่มีโฟลเดอร์วัน D<n>-<yymmdd>:\n  ${r.warnings.join('\n  ')}` +
+            `\nทีมเทการ์ดวันละใบลง CAM-X เดียวกันไม่ได้ — สร้างโฟลเดอร์วันเอง หรือแก้ตามข้อความแล้วสั่ง ?create=${updated.bookingCode}`)
+        }
       } catch (e: any) {
         console.error('[approve] landing ensure failed (non-fatal):', e?.message || e)
       }

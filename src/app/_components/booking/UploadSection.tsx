@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import { X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
 import { uploadToDrive as driveUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
 import { cameraUploadOptions, buildEpisodeFolderName, episodeLeadUsesId } from '@/lib/outlet-folders'
+import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
 
 interface BookingContext {
   id: string
@@ -229,7 +230,8 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     const v = res?.video || {}, s = res?.sound || {}
     // v1.127 — fast path relocates whole subfolders in one call (their files are
     // never listed), so report files + folders instead of the old moved/seen pair.
-    const vTxt = v.skipped ? `ข้าม (${v.reason || ''})` : `ย้าย ${v.moved ?? 0} ไฟล์${(v.movedFolders ?? 0) > 0 ? ` + ${v.movedFolders} โฟลเดอร์` : ''}${v.err ? ` · error ${v.err}` : ''}${v.conflicts ? ` · ⚠️ ชื่อซ้ำ (1) ${v.conflicts} รายการ ไม่ย้าย` : ''}`
+    const held = v.cardHolds?.length ?? 0 // v1.280 — a held card is not "moved 0"
+    const vTxt = v.skipped ? `ข้าม (${v.reason || ''})` : `${held ? `⛔ ค้าง ${held} การ์ด — ${CARD_HOLD_FIX} · ` : ''}ย้าย ${v.moved ?? 0} ไฟล์${(v.movedFolders ?? 0) > 0 ? ` + ${v.movedFolders} โฟลเดอร์` : ''}${v.err ? ` · error ${v.err}` : ''}${v.conflicts ? ` · ⚠️ ชื่อซ้ำ (1) ${v.conflicts} รายการ ไม่ย้าย` : ''}`
     const sTxt = s.skipped ? `ข้าม (${s.reason || ''})` : `รวม ${s.copied ?? 0}/${s.staged ?? 0}${s.err ? ` · error ${s.err}` : ''}`
     setScanMsg(`วิดีโอ: ${vTxt} · เสียง: ${sTxt}`)
   }

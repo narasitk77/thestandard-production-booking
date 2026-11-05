@@ -1,5 +1,6 @@
 import { OUTLETS } from './data'
 import { bookingDisplayName } from './display'
+import { isoDateToUTC, utcDateToISO, yymmddFromISODate } from './switcher-jobs'
 
 /**
  * Outlet code → folder name mapping.
@@ -147,6 +148,31 @@ export function camerasToPreCreate(cameraCount?: number | null, micCount?: numbe
   const cams: string[] = CAM_LETTERS.slice(0, n).map(l => `CAM-${l}`)
   if ((micCount ?? 0) > 0) cams.push('AUDIO')
   return cams
+}
+
+/**
+ * v1.280 — per-day folders under every camera slot of a MULTI-DAY booking filed under one EP:
+ * `D1-261104`, `D2-261105`, … (n from shootDate, 2-digit when 10+ days; yymmdd = that day's Gregorian date).
+ * Every day's cards used to go into the same EP/CAM-X, where video-merge (dedup by name|size per folder)
+ * either put day 2's MEDIAPRO.XML / CUEUP.XML beside day 1's or left SONYCARD.IND in landing forever.
+ * A day folder with no box twin is moved whole — no collisions.
+ *
+ * [] (no day layer, today's layout) when: single day · end <= start · more than 14 days · a 2-day
+ * overnight session (wrap < call) · one EP per day already (episodeCount >= days).
+ * shootDate/shootEndDate are @db.Date (UTC midnight) → read the date straight off the ISO string.
+ */
+export function shootDayFolders(
+  b: { shootDate: Date; shootEndDate: Date | null; callTime?: string | null; estimatedWrap?: string | null },
+  episodeCount: number,
+): string[] {
+  if (!b.shootEndDate) return []
+  const start = isoDateToUTC(utcDateToISO(b.shootDate)).getTime()
+  const days = Math.round((isoDateToUTC(utcDateToISO(b.shootEndDate)).getTime() - start) / 86_400_000) + 1
+  if (days < 2 || days > 14) return []
+  if (days === 2 && b.callTime && b.estimatedWrap && b.estimatedWrap < b.callTime) return []
+  if (episodeCount >= days) return []
+  return Array.from({ length: days }, (_, i) =>
+    `D${String(i + 1).padStart(days >= 10 ? 2 : 1, '0')}-${yymmddFromISODate(utcDateToISO(new Date(start + i * 86_400_000)))}`)
 }
 
 /**

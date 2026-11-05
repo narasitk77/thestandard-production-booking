@@ -12,7 +12,7 @@ import {
   shootFolderLayers,
   camerasToPreCreate,
   cameraUploadOptions,
- episodeLeadUsesId, } from '../outlet-folders'
+ episodeLeadUsesId, shootDayFolders, } from '../outlet-folders'
 
 const DOT = '·' // U+00B7 MIDDLE DOT — the exact separator PMC's Drive uses
 
@@ -232,4 +232,26 @@ test('episodeLeadUsesId: AGN always; others only when EP<seq> would collide', ()
   const names = eps.map(e => buildEpisodeFolderName(e, { useEpisodeId: episodeLeadUsesId('WLT', eps) }))
   assert.equal(new Set(names.map(n => n.split(' · ')[0])).size, 2)
   assert.deepEqual(names, ['WLT-MNW-261013-01 · Morning Wealth', 'WLT-ITV-261013-01 · สัมภาษณ์'])
+})
+
+// v1.280 — per-day drop folders for a multi-day booking filed under one EP (shootDate/shootEndDate = @db.Date, UTC midnight)
+test('shootDayFolders: D<n>-<yymmdd> per day only when several days share fewer EPs', () => {
+  const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`)
+  const b = (start: string, end: string | null, callTime = '08:00', estimatedWrap: string | null = '19:30') =>
+    ({ shootDate: d(start), shootEndDate: end ? d(end) : null, callTime, estimatedWrap })
+  assert.deepEqual(shootDayFolders(b('2026-11-04', null), 1), [], 'single day (no end date)')
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-04'), 1), [], 'end = start')
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-03'), 1), [], 'end before start')
+  // AGN-261104-01: 4–6 Nov, one EP — Gregorian yymmdd, never the Buddhist year (v1.134's 3112 bug)
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-06'), 1), ['D1-261104', 'D2-261105', 'D3-261106'])
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-06'), 0), ['D1-261104', 'D2-261105', 'D3-261106'], 'no-EP booking too')
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-05', '22:00', '05:00'), 1), [], 'one overnight session')
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-05', '08:00', '19:00'), 1), ['D1-261104', 'D2-261105'], 'two real days')
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-05', '22:00', null), 1), ['D1-261104', 'D2-261105'], 'no wrap = not known overnight')
+  assert.deepEqual(shootDayFolders(b('2026-11-04', '2026-11-06'), 3), [], 'one EP per day already')
+  const ten = shootDayFolders(b('2026-12-28', '2027-01-06'), 1)
+  assert.equal(ten.length, 10)
+  assert.deepEqual([ten[0], ten[3], ten[4], ten[9]], ['D01-261228', 'D04-261231', 'D05-270101', 'D10-270106'], 'zero-padded, across the year end')
+  assert.equal(shootDayFolders(b('2026-11-01', '2026-11-14'), 1).length, 14, '14 days is the ceiling')
+  assert.deepEqual(shootDayFolders(b('2026-11-01', '2026-11-20'), 1), [], '20-day span — no day layer')
 })

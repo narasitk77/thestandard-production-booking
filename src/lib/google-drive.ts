@@ -1250,7 +1250,7 @@ export async function ensureFlatShootFolders(input: {
   cameras: string[]
   /** v1.93 — same per-episode nesting as ensureShootCameraFolders. */
   episodeFolderNames?: string[]
-}): Promise<{ bookingFolderId: string }> {
+}): Promise<{ bookingFolderId: string; cameraFolderIds: string[] }> {
   const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
   const bookingFolderId = input.bookingCode
     ? await ensureBookingFolder(drive, input.rootFolderId, input.bookingCode, input.bookingFolderName)
@@ -1258,10 +1258,64 @@ export async function ensureFlatShootFolders(input: {
   const parents = input.episodeFolderNames?.length
     ? await Promise.all(input.episodeFolderNames.map(ep => ensureEpisodeFolder(drive, bookingFolderId, ep)))
     : [bookingFolderId]
+  const cameraFolderIds: string[] = [] // v1.280 — for the day layer (ensureDayFolders), which runs after this
   for (const parent of parents) {
-    for (const cam of input.cameras) await ensureChildFolder(drive, parent, cam)
+    for (const cam of input.cameras) cameraFolderIds.push(await ensureChildFolder(drive, parent, cam))
   }
-  return { bookingFolderId }
+  return { bookingFolderId, cameraFolderIds }
+}
+
+/** v1.280 — multi-day day folders (outlet-folders shootDayFolders) under each given camera slot. Find-or-create. */
+export async function ensureDayFolders(cameraFolderIds: string[], dayFolders: string[]): Promise<void> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  for (const camId of cameraFolderIds) {
+    for (const day of dayFolders) await ensureChildFolder(drive, camId, day)
+  }
+}
+
+/**
+ * v1.280 — the BOX half of the multi-day day folders: <box>/<EP>/<slot>/<day>. The caller runs it BEFORE the
+ * landing half, so video-merge finds a non-empty box CAM-X twin, recurses, and moves each filled landing day
+ * folder into its own empty box twin while the still-empty landing day folders stay put as drop targets.
+ * Never creates the box or an EP (approve / folder-integrity own those): when any EP is missing it creates
+ * NOTHING and returns them, so the caller can skip the landing half and say so. The camera slot is
+ * find-or-create like every other pre-create.
+ */
+export async function ensureBoxDayFolders(input: {
+  boxFolderId: string
+  episodeFolderNames?: string[]
+  cameras: string[]
+  dayFolders: string[]
+}): Promise<{ missingEpisodes: string[] }> {
+  const drive = google.drive({ version: 'v3', auth: getDriveWriteAuth() })
+  let parents = [input.boxFolderId]
+  if (input.episodeFolderNames?.length) {
+    const eps = await findEpisodeFolders(input.boxFolderId, input.episodeFolderNames)
+    if (eps.missing.length) return { missingEpisodes: eps.missing } // box first or nothing: no half-built day layer
+    parents = eps.ids
+  }
+  const camIds: string[] = []
+  for (const parent of parents) {
+    for (const cam of input.cameras) camIds.push(await ensureChildFolder(drive, parent, cam))
+  }
+  await ensureDayFolders(camIds, input.dayFolders)
+  return { missingEpisodes: [] }
+}
+
+/**
+ * v1.280 — read-only twin of ensureEpisodeFolder: each name's EP folder under `parentId` (exact name, or its
+ * immutable lead), oldest wins. Shared by the day-folder plan (dryRun and real run alike) and ensureBoxDayFolders.
+ */
+export async function findEpisodeFolders(parentId: string, names: string[]): Promise<{ ids: string[]; missing: string[] }> {
+  const kids = await listChildFolders(parentId)
+  const ids: string[] = [], missing: string[] = []
+  for (const ep of names) {
+    const lead = ep.split(' · ')[0]?.trim()
+    const hit = oldestChildFolder(kids.filter(f => f.name === ep || (!!lead && (f.name === lead || f.name.startsWith(`${lead} `)))))
+    if (hit) ids.push(hit.id)
+    else missing.push(ep)
+  }
+  return { ids, missing }
 }
 
 /**

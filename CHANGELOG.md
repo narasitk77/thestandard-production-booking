@@ -7,6 +7,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.280.0] — 2026-11-05
+
+### Added — โฟลเดอร์รายวันของงานหลายวัน + กันเทการ์ดซ้อนการ์ด
+
+ที่มา: AGN-261104-01 (ถ่าย 4–6 พ.ย. EP เดียว) การ์ดทุกวันถูกเทลง EP/CAM-X เดียวกัน · video-merge ตัดสินซ้ำด้วยชื่อ+ขนาดต่อโฟลเดอร์
+→ MEDIAPRO.XML / CUEUP.XML / DISCMETA.XML ของวันที่ 2 ไปวางข้างของวันที่ 1 หรือถูกนับเป็น dup ค้างใน landing ตลอดไป
+(นัทอนุมัติแบบ `box/EP/CAM-X/D<n>-<yymmdd>` เฉพาะงานหลายวัน · งานวันเดียวทุกใบเหมือนเดิมทุกตัวอักษร)
+
+- `shootDayFolders()` (outlet-folders) → `D1-261104`, `D2-261105`, … ปีค.ศ. · ไม่มีชั้นวันเมื่อ: วันเดียว · จบ ≤ เริ่ม · เกิน 14 วัน ·
+  2 วันที่เป็นรอบข้ามคืน (wrap < call) · มี EP เท่ากับหรือมากกว่าจำนวนวันอยู่แล้ว
+- สร้าง **ครั้งเดียวตอนสร้าง landing** (sweep 19:00 + `ensureLandingForBooking`) ใต้ทุก CAM-X/AUDIO ทุก EP ·
+  ลำดับ: **แผนอ่านอย่างเดียว** (`planDayFolders`: กันเลื่อนวัน + กล่องพร้อมไหม) → landing แบบเดิม (ช่องกล้อง + ลิงก์) → **กล่องก่อน** → landing
+  (กล่อง CAM-X ที่มี D<n> ว่าง = ไม่ว่าง → merge ย้ายทีละวันเข้า twin ว่างของมัน ส่วน D<n> ว่างใน landing อยู่ให้เทต่อ) ·
+  `ensureFlatShootFolders` สร้างช่องกล้องเหมือนเดิมทุกตัวอักษร ชั้นวันอยู่รอบที่สองแยก (`ensureDayFolders`) → พังแล้วไม่เสียช่องกล้อง/ลิงก์ landing
+- **dryRun = รอบจริง**: แผนรันเหมือนกันทั้งสองโหมดก่อนสร้างอะไร → `?create=` / sweep dryRun คืน `dayFolders`/`warnings` ชุดเดียวกับรอบจริง ·
+  บรรทัด action ของ sweep ใส่ "+ โฟลเดอร์วัน …" เฉพาะเมื่อแผนบอกว่าจะสร้าง และ `WARN day folders` ขึ้นใน dryRun ด้วย
+- **กล่องก่อน หรือไม่ทำเลย**: ฝั่งกล่องไม่ครบ (ไม่มีกล่อง · กล่องตาย · Drive ตอบไม่ได้ = "ตรวจกล่องไม่ได้ (Drive)" ผ่าน `folderLiveness` ·
+  ไม่มี EP ในกล่อง (`findEpisodeFolders` ตัวเดียวกันทั้งแผนและ `ensureBoxDayFolders` = ไม่สร้างอะไรในกล่องเลย) · error) → landing **ไม่มี**โฟลเดอร์วัน (โครงเดิม) + เตือนดัง: sweep นับ `WARN day folders` ใน
+  `createErrors` (เมล digest) · `ensureLandingForBooking` คืน `warnings` · approve ยิง `alertOps("landing-day-folders:<code>")`
+- กันเลื่อนวัน: แผนหา landing ที่มีอยู่แล้ว (ตาม Production ID → EP แรก → ช่องกล้องแรก อ่านอย่างเดียว) มี `D<n>-<yymmdd>` ที่ไม่อยู่ในชุดใหม่ = ข้ามทั้งกล่องและ landing + WARN ให้เปลี่ยนชื่อเอง
+- delivered-check ของ `ensureLandingForBooking` อ่าน Drive ไม่ได้ → ยังสร้าง landing แต่ไม่มีโฟลเดอร์วัน + warning (D<n> อาจถูก merge เข้ากล่องแล้ว)
+- folder-integrity / prep / รอบรายชั่วโมงไม่สร้างโฟลเดอร์วัน (D<n> ที่ merge แล้วห้ามโผล่คืนใน landing)
+- approve: สร้าง landing ของงานใกล้ถ่าย **หลัง** pre-create กล่องเสร็จ (`ensureLandingAfterBox` · เดิมสองงานวิ่งพร้อมกัน → แผนโฟลเดอร์วันจะหา box ไม่เจอ) ·
+  pre-create พังไม่บล็อก landing
+- kill switch `LANDING_DAY_FOLDERS=0` (ค่าเริ่ม 1) ใน env ของ service **app** ใน docker-compose.portainer.yml
+- video-merge **card hold** (ทุกงาน) ตัดสินที่**รากการ์ด** (โฟลเดอร์ที่มี XDROOT / M4ROOT / PRIVATE/M4ROOT) ก่อนแตะลูกตัวไหน:
+  ถ้า index folder ใน landing กับ twin ในกล่อง **มี MEDIAPRO.XML ทั้งคู่** → อ่านทั้งสองไฟล์ (ไม่กี่ KB · อ่านเหมือนกันทั้ง dryRun และรอบจริง) ·
+  มีคลิปร่วมกันอย่างน้อย 1 (umid ตรงกันเมื่อมีทั้งคู่ · ไม่งั้น uri + dur ตรงกัน) = การ์ดเดิมก็อปซ้ำ (รวมกรณีอัปแค่คลิปใหม่ + MEDIAPRO ที่โต) → merge เหมือนก่อน v1.280 ·
+  ไม่มีเลย = การ์ดคนละใบเทซ้อน → ไม่ย้ายส่วนไหนของการ์ด (XDROOT/M4ROOT/PRIVATE/SONY/DCIM/AVF_INFO/MISC + ไฟล์หลวมที่รากที่ไม่ใช่ขยะ OS) ·
+  โฟลเดอร์อื่นข้าง ๆ (D2-<yymmdd> / Card 2 ข้างการ์ดที่เทแบน, กล้องอื่น) merge ต่อ · อ่าน MEDIAPRO ไม่ได้ = ไม่ย้ายการ์ดนั้นรอบนี้ + นับเป็น **error** (ไม่เดาว่าเป็น hold)
+- `cardHolds` บอก **รากการ์ด** เช่น `AGN-261104-01: EP01 · x/CAM-A` · ทุกข้อความ (alertOps, แชต 🎬, ปุ่มรวมไฟล์ 3 จุด,
+  log worker) ให้หลักฐาน "MEDIAPRO ไม่มีคลิปร่วมกับการ์ดในกล่อง" แล้วบอกให้ย้าย**ทั้งการ์ด** (XDROOT/M4ROOT พร้อม SONY/PRIVATE) ไปโฟลเดอร์ใหม่ของตัวเอง เช่น `D2-<yymmdd>` หรือ `Card 2` ·
+  alertOps รอบละครั้ง key ตามชุดที่ค้าง (ops ซ้ำทุก 6 ชม.) · แชต 🎬 โพสต์เรื่อง hold **เฉพาะเมื่อชุดที่ค้างเป็นชุดใหม่** (ลายนิ้วมือ `card-hold-set` ใน
+  system_heartbeats แบบเดียวกับ sync-storm · ปุ่มรายใบใช้ `card-hold-set:<code>` แยก) — hold ที่ไม่มีใครแก้ไม่โพสต์ทีมซ้ำทุก 6 ชม. ·
+  เพดานที่รู้: MEDIAPRO มีฝั่งเดียว/ไม่มีเลย (กล้องไม่ใช่ Sony, index ยังอัปไม่เสร็จ, เทการ์ดแบบไม่มีโฟลเดอร์ XDROOT) → merge แบบก่อน v1.280
+- ความหมายของ "ว่าง" ตรงกันทุกที่: โฟลเดอร์ที่มีแต่ `.DS_Store` / `Thumbs.db` / `desktop.ini` = ว่าง ทั้ง video-merge (ไม่ย้าย) และ sweep 19:00 / prune เที่ยง
+  (ทิ้งได้ — เดิมนับเป็นไฟล์จริง → landing ค้างตลอดไป) · walk หยุดที่ 50 ไฟล์ ถึงเพดาน = ถือว่ามีไฟล์ (ขยะเต็มเพดานบังไฟล์จริงไม่ได้)
+- footage-integrity: ไฟล์ index ชื่อซ้ำในโฟลเดอร์เดียว (MEDIAPRO/DISCMETA/CUEUP/DATABASE.BIN/SONYCARD.IND) ไม่ชวนลบอีกต่อไป และไม่ฟันธงสาเหตุ —
+  ขนาดต่าง: "ไฟล์ index ชื่อเดียวกันขนาดต่างกัน — อาจเป็นการ์ดคนละใบ หรือการ์ดเดิมที่ก็อปซ้ำหลังถ่ายต่อ · ห้ามลบไฟล์ index" ·
+  ขนาดเท่า (และ SONYCARD.IND 0 ไบต์เสมอ):
+  "ไฟล์ index ชื่อเดียวกัน 2 ตัว — อาจเป็นการ์ดคนละใบหรืออัปซ้ำ ห้ามลบจนกว่าจะเทียบ md5" · detail อยู่ใน issueKey (ไม่ได้เปลี่ยนตรรกะ key) →
+  ใบที่มีปัญหานี้อยู่แล้วจะถูกแจ้งซ้ำ **ครั้งเดียว** ด้วยข้อความใหม่ในรอบ 13:00 แรกหลัง deploy (ยอมรับแล้ว)
+- docs/landing-folder-policy.md หัวข้อ "Multi-day bookings" (โครง, ชื่อ, เมื่อไม่มีโฟลเดอร์วัน, kill switch, กฎทีม "1 การ์ด = 1 โฟลเดอร์ใหม่", hold)
+- Kill switch ของ hold: `CARD_HOLD=0` (service app) = merge แบบก่อน v1.280 ทันทีไม่ต้อง deploy · MEDIAPRO.XML 0 ไบต์ถือว่าไม่มี index ฝั่งนั้น · รอบที่ไม่มีการ์ดค้างล้าง fingerprint ชุดที่เตือนแล้ว (การ์ดใหม่ที่ path เดิมเป็นข่าวใหม่) · ปุ่มรวมไฟล์บนการ์ดใบจองแสดง ⚠️ error และไม่ขึ้น ✓ เมื่อมี error
+
 ## [1.279.3] — 2026-11-05
 
 ### Added
