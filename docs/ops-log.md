@@ -4098,3 +4098,9 @@ problem and not a deployment problem.
 - 5 พ.ย. ~10:45 นัทดูหน้าแล้วสั่ง "เปิดลิงก์นี้ public เอา survey เก่าออกเลย" →
   · ลบรอบเก่า `time-2026-11` บนพรอด (transaction เดียว): survey_responses 1 · survey_participants 1 · system_heartbeats `survey-open:time-2026-11` 1 → เหลือ 0/0/0 · ถ้าต้องกู้ อยู่ใน backup-2026-11-04T130958.sql.gz
   · เปิดรับ `satisfaction-2026-11` ผ่าน POST /api/admin/survey (session นัท) → open:true · 0/40 · ลิงก์ไม่ล็อกอินยัง 307 → login (ต้องล็อกอินตามเดิม — ระบบต้องรู้ว่าใครตอบแล้วเพื่อกันตอบซ้ำ)
+
+## 2026-11-05 — v1.279.1 = แบบสำรวจ: ทีม 1 outlet = 1 ตัวเลือก · deployed (12:05) · โฟลเดอร์รายวันงาน AGN-261104-01
+- นัทสั่ง "outlet ไม่ต้อง group ให้แยกเป็น 1:1" → 11 outlet ตามตาราง outlets (sort) + ทีมอื่น + ไม่ขอระบุ · id = code ตัวเล็ก · เปลี่ยนตอน satisfaction-2026-11 มี 0 คำตอบ (ไม่มี group id กำพร้า)
+- gate 1228/1228 + tsc + lint · CI + Docker ผ่าน (3c2c9f5) · deploy 12:01–12:05 (502 ~3 นาที) · จุดถอย sha-3f67c50 · ตรวจหน้า /survey บนพรอด: dropdown 13 ตัวเลือกตรงตามนี้ · การสำรวจยังเปิดรับอยู่
+- AGN-261104-01 (ถ่าย 4–6 พ.ย. EP เดียว): การ์ดวัน 2+ ถ้าเทลง CAM-X เดิม ไฟล์ระดับการ์ด (MEDIAPRO.XML ฯลฯ) จะชนของวันแรก (video-merge dedup name|size) → นัทสั่ง "เตรียมโฟลเดอร์ใน NAS" → สร้าง `D2-261105` ใน landing CAM-A/B/C/AUDIO (ฝั่ง Drive, Cloud Sync ดึงลง NAS) · ผล footage-check/audit-2026-11-05/mkday-D2-applied.jsonl · D3 สร้างพรุ่งนี้หลัง D2 เข้ากล่อง (กันลงผิดวัน)
+- งานหลายวันอื่นที่ถ่ายอยู่: KND-TMH-261104-01 (4–5 พ.ย.) · EVT-EVT-261104-01 (4–6 พ.ย.) — dry-run โฟลเดอร์วันไว้แล้ว รอนัทสั่ง
