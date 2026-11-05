@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.279.3] — 2026-11-05
+
+### Added
+- `/admin/survey` แก้คำบนจอของแบบสำรวจได้เองไม่ต้อง deploy (นัทสั่ง): คำนำ / หัวข้อ / คำอธิบาย / บังคับตอบ / ป้ายสเกล 1–5 / ป้ายตัวเลือก · เก็บเป็น JSON ใน `system_heartbeats` key `survey-text:<key>` (ไม่เปลี่ยน schema) · โครงคำถาม-ตัวเลือก (id, kind, exclusive) ยังอยู่ในโค้ด เพื่อให้ผลที่เก็บไปแล้วอ่านออก · `GET /api/survey` คืน `survey` ชุดที่ผสานแล้ว และ POST ตรวจคำตอบกับชุดนั้น (required ที่แอดมินเปลี่ยนมีผลจริง) · แถว override เสีย = API ล้มดัง ๆ ไม่ใช่เงียบ ๆ กลับไปใช้คำในโค้ด · audit `survey.text`
+
+### Changed
+- ข้อ 4 ตัดช่อง "อื่น ๆ" ออก (นัทสั่ง)
+
 ## [1.279.2] — 2026-11-05
 
 ### Changed
