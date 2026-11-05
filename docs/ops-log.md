@@ -4103,4 +4103,5 @@ problem and not a deployment problem.
 - นัทสั่ง "outlet ไม่ต้อง group ให้แยกเป็น 1:1" → 11 outlet ตามตาราง outlets (sort) + ทีมอื่น + ไม่ขอระบุ · id = code ตัวเล็ก · เปลี่ยนตอน satisfaction-2026-11 มี 0 คำตอบ (ไม่มี group id กำพร้า)
 - gate 1228/1228 + tsc + lint · CI + Docker ผ่าน (3c2c9f5) · deploy 12:01–12:05 (502 ~3 นาที) · จุดถอย sha-3f67c50 · ตรวจหน้า /survey บนพรอด: dropdown 13 ตัวเลือกตรงตามนี้ · การสำรวจยังเปิดรับอยู่
 - AGN-261104-01 (ถ่าย 4–6 พ.ย. EP เดียว): การ์ดวัน 2+ ถ้าเทลง CAM-X เดิม ไฟล์ระดับการ์ด (MEDIAPRO.XML ฯลฯ) จะชนของวันแรก (video-merge dedup name|size) → นัทสั่ง "เตรียมโฟลเดอร์ใน NAS" → สร้าง `D2-261105` ใน landing CAM-A/B/C/AUDIO (ฝั่ง Drive, Cloud Sync ดึงลง NAS) · ผล footage-check/audit-2026-11-05/mkday-D2-applied.jsonl · D3 สร้างพรุ่งนี้หลัง D2 เข้ากล่อง (กันลงผิดวัน)
-- งานหลายวันอื่นที่ถ่ายอยู่: KND-TMH-261104-01 (4–5 พ.ย.) · EVT-EVT-261104-01 (4–6 พ.ย.) — dry-run โฟลเดอร์วันไว้แล้ว รอนัทสั่ง
+- งานหลายวันอื่นที่ถ่ายอยู่: นัทสั่ง go → สร้างแล้ว: KND-TMH-261104-01 (4–5 พ.ย.) `D2-261105` ใน landing CAM-A/CAM-B/AUDIO · EVT-EVT-261104-01 (4–6 พ.ย., ยังไม่มีฟุตเทจขึ้นสักวัน) `D1-261104` + `D2-261105` ใน landing CAM-A · ผล mkday-KND-EVT-applied.jsonl · นัทสั่งไม่ต้องส่งข้อความถึงทีม
+- นัทสั่ง "go ทำ v1.280.0" (โฟลเดอร์รายวันอัตโนมัติ + hold การ์ดซ้อนการ์ด + ข้อความด่าน MEDIAPRO) — กำลังทำ ยังไม่ deploy
