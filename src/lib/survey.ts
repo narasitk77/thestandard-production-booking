@@ -40,12 +40,19 @@ export type Answers = Record<string, string | string[]>
  * ตัวเลือกที่มีคนแค่ 1–2 คน = คำตอบผูกกับชื่อโดยปริยาย ขัดกับที่บอกคนตอบว่าไม่ผูกชื่อ
  * ทีมถูกเก็บในคอลัมน์ `group` ของ survey_responses (ไม่ซ้ำใน answers)
  */
+// v1.279.1 — 1 outlet = 1 ตัวเลือก (นัทสั่ง: ไม่จับกลุ่ม) · ลำดับ/ชื่อตามตาราง outlets (sort) · id = code ตัวเล็ก
+// ทีมที่คนตอบไม่ถึง TEAM_MIN ถูกรวมเป็นก้อนเดียวในหน้าผลอยู่แล้ว (summarize) — แยกละเอียดขึ้นไม่ทำให้ระบุตัวได้
 export const TEAMS: Option[] = [
-  { id: 'news', label: 'News' },
-  { id: 'wsk', label: 'Wealth / Sport / คำนี้ดี (KND)' },
-  { id: 'shows', label: 'Podcast / POP / LIFE / The Secret Sauce' },
-  { id: 'agency', label: 'Content Agency' },
-  { id: 'event', label: 'Event' },
+  { id: 'nws', label: 'News' },
+  { id: 'wlt', label: 'Wealth' },
+  { id: 'spt', label: 'Sport' },
+  { id: 'pop', label: 'POP' },
+  { id: 'pod', label: 'Podcast' },
+  { id: 'knd', label: 'KND (คำนี้ดี)' },
+  { id: 'lif', label: 'LIFE' },
+  { id: 'tss', label: 'The Secret Sauce' },
+  { id: 'agn', label: 'Content Agency' },
+  { id: 'evt', label: 'Event' },
   { id: 'pm', label: 'PM (Project Management Office)' },
   { id: 'other', label: 'ทีมอื่น' },
   { id: 'na', label: 'ไม่ขอระบุ' },

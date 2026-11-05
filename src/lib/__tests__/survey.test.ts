@@ -5,13 +5,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { validateAnswers, summarize, SURVEY, TEAMS, TEAM_MIN, TEXT_MAX, OTHER_MAX } from '../survey'
 
-const BASE = { team: 'news', efficiency: '4', satisfaction: '3' }
+const BASE = { team: 'nws', efficiency: '4', satisfaction: '3' }
 
 test('a complete answer passes; team goes to group, unknown keys are stripped', () => {
   const r = validateAnswers({ ...BASE, smuggled: 'x', role: 'queue' })
   assert.equal(r.ok, true)
   if (!r.ok) return
-  assert.equal(r.group, 'news')
+  assert.equal(r.group, 'nws')
   assert.deepEqual(r.answers, { efficiency: '4', satisfaction: '3' })
 })
 
@@ -73,9 +73,9 @@ test('definition sanity: unique option ids, exclusive exists, scales have 5 labe
 test('summary: averages ignore "na", a 1–2 person remainder folds the smallest shown team too, texts collected', () => {
   const row = (group: string, answers: Record<string, unknown>) => ({ group, answers })
   const s = summarize([
-    row('news', { efficiency: '5', satisfaction: '4', useful: ['status', 'calendar'] }),
-    row('news', { efficiency: '4', satisfaction: '4', useful: ['status'], improve: 'อยากเลื่อนวันได้' }),
-    row('news', { efficiency: 'na', satisfaction: '2', useful: ['none'] }),
+    row('nws', { efficiency: '5', satisfaction: '4', useful: ['status', 'calendar'] }),
+    row('nws', { efficiency: '4', satisfaction: '4', useful: ['status'], improve: 'อยากเลื่อนวันได้' }),
+    row('nws', { efficiency: 'na', satisfaction: '2', useful: ['none'] }),
     row('pm', { efficiency: '2', satisfaction: '3', useful_other: 'ห้อง' }),
     row('queue', { efficiency: '5', satisfaction: '5' }),            // unknown team → ignored entirely
   ], 3)
@@ -88,7 +88,7 @@ test('summary: averages ignore "na", a 1–2 person remainder folds the smallest
   assert.equal(s.scales.satisfaction.avg, (4 + 4 + 2 + 3) / 4)
   assert.equal(s.scales.satisfaction.topPct, 50)
   assert.equal(s.scales.satisfaction.bottomPct, 25)
-  // pm has 1 → hidden; showing news would make "overall − news" = pm's answer exactly → news folds in too
+  // pm has 1 → hidden; showing nws would make "overall − nws" = pm's answer exactly → nws folds in too
   assert.deepEqual(s.teams, [])
   assert.equal(s.smallTeams, 4)
   assert.deepEqual(s.counts.useful, { status: 2, calendar: 1, none: 1 })
@@ -99,20 +99,20 @@ test('summary: averages ignore "na", a 1–2 person remainder folds the smallest
 
 test('summary: teams at or above the minimum are shown when nothing is left over; team averages ignore "na"', () => {
   const row = (group: string, efficiency: string) => ({ group, answers: { efficiency, satisfaction: '3' } })
-  const s = summarize([row('news', '5'), row('news', '4'), row('news', 'na'), row('pm', '2'), row('pm', '2'), row('pm', '3')], 3)
-  assert.deepEqual(s.teams.map(t => [t.id, t.n]), [['news', 3], ['pm', 3]])
+  const s = summarize([row('nws', '5'), row('nws', '4'), row('nws', 'na'), row('pm', '2'), row('pm', '2'), row('pm', '3')], 3)
+  assert.deepEqual(s.teams.map(t => [t.id, t.n]), [['nws', 3], ['pm', 3]])
   assert.equal(s.smallTeams, 0)
   assert.equal(s.teams[0].scales.efficiency.avg, 4.5)
   assert.equal(s.teams[0].scales.efficiency.na, 1)
   // remainder of 3 is already safe → nothing folded
-  const t = summarize([...['news', 'news', 'news', 'event', 'event', 'event'].map(g => row(g, '4')), row('pm', '3'), row('agency', '3'), row('wsk', '3')], 3)
-  assert.deepEqual(t.teams.map(x => x.id), ['news', 'event'])
+  const t = summarize([...['nws', 'nws', 'nws', 'evt', 'evt', 'evt'].map(g => row(g, '4')), row('pm', '3'), row('agn', '3'), row('wlt', '3')], 3)
+  assert.deepEqual(t.teams.map(x => x.id), ['nws', 'evt'])
   assert.equal(t.smallTeams, 3)
 })
 
 test('the privacy promise shown to respondents quotes the same minimum the summary enforces', () => {
   assert.ok(SURVEY.privacy.includes(`${TEAM_MIN} คน`))
-  assert.equal(summarize([{ group: 'news', answers: { efficiency: '3', satisfaction: '3' } }]).teams.length, 0)
+  assert.equal(summarize([{ group: 'nws', answers: { efficiency: '3', satisfaction: '3' } }]).teams.length, 0)
 })
 
 test('summary of nothing is empty, not NaN', () => {
