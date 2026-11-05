@@ -4133,3 +4133,9 @@ problem and not a deployment problem.
 - deploy 1.280.1: backup-2026-11-05T071431.sql.gz 1.36MB · 14:17–14:19 (502 ~1.5 นาที) · จุดถอย sha-2f5aa13 · /api/version 1.280.1 in-sync
 - ตรวจบนพรอดผ่านหน้า admin จริง: พิมพ์คำอธิบายข้อ 5 → บันทึก → "บันทึกแล้ว 14:20" → GET /api/survey คืนคำใหม่ → ล้างช่อง → บันทึก → overrides กลับเป็น null คำเดิมกลับมา · ข้อ 4 บนพรอดเหลือ 7 ตัวเลือก ไม่มี "อื่น ๆ" · ยังไม่มีใครตอบ (0/41)
 - ค้าง: CHANGELOG/ops-log ใน working tree ของอีก session ไม่มี entry พวกนี้ (เขาแก้ค้างอยู่) — ถ้าเขา `git add` ทับ entry ของผมจะหาย ต้องเช็กตอน merge
+
+## 2026-11-05 — v1.280.2 แบบสำรวจ ข้อ 5 ไม่มีคำอธิบาย · ชื่อทีม agn = "Video Production" · deployed (14:35)
+- นัท: "/admin/survey แก้ไขแล้วบันทึกไม่ได้" → เป็นบั๊ก v1.279.3 ที่อีกแชตแก้แล้วใน v1.280.1 (deploy ~14:19) · ทดสอบบันทึกผ่านหน้าเว็บจริงบนพรอดแล้ว: โหลดค่าที่เก็บไว้ → กดบันทึก → เก็บครบ "บันทึกแล้ว 14:21"
+- "เปลี่ยนชื่อทีม Content Agency เป็น Video Production" → ทำผ่านหน้าแก้คำ (ไม่ใช่โค้ด) · survey-text:satisfaction-2026-11 = {"questions":{"team":{"options":{"agn":"Video Production"}}}} · ชื่อ outlet AGN ในระบบ/โฟลเดอร์ Drive ไม่ได้เปลี่ยน
+- "ข้อ 5 เอา 'พร้อมรับทุกความเห็น… · ข้อความจะแสดงตามที่พิมพ์ (ไม่มีชื่อกำกับ)' ออก" → หน้าแก้คำถือช่องว่าง = ใช้คำในโค้ด จึงต้องลบในโค้ด → v1.280.2 (b7eb7e3) gate 1271/1271 · CI+Docker ผ่าน · backup-2026-11-05T072939.sql.gz · จุดถอย sha-62991e8 · ตรวจ /survey บนพรอด: ข้อ 5 ไม่มีบรรทัดอธิบาย, dropdown agn = Video Production
+- ตั้ง Hermes one-shot `b6bc10d1dd41` 6 พ.ย. 10:00 สร้าง D3-261106 ให้ AGN-261104-01 (CAM-A/B/C/AUDIO) + EVT-EVT-261104-01 (CAM-A) · ผลเข้า Discord hermes-agent
