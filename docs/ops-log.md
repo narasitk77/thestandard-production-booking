@@ -4115,3 +4115,12 @@ problem and not a deployment problem.
 - รอบแรก 0c164dc CI ล้ม 5 เทสต์ใน `src/lib/__tests__/survey.test.ts` (ผูกสเปกเดิม: na ในข้อ 2 / useful ไม่บังคับ) — ลืม grep เทสต์ก่อน push → แก้เทสต์ให้ตรงสเปกใหม่ 455ebf2 · CI + Docker ผ่าน · tsc ในเครื่องผ่าน (รวม WIP ของอีก session)
 - backup-2026-11-05T061000.sql.gz 1.36MB · deploy 13:12–13:15 (502 ~1.5 นาที) · จุดถอย sha-3c2c9f5 · /api/version 1.279.2 in-sync · หน้า /survey บนพรอด (session นัท = โหมดตัวอย่าง) โชว์ข้อความใหม่ครบทั้ง 3 ข้อ
 - นัทพูดระหว่างรอ: "เปิดเป็นให้กูแก้ปรับคำถาม ปรับโจทย์เลยก็ได้นะ" → ยังไม่ทำ รอยืนยัน (ต้องเพิ่มที่เก็บ override คำ/ป้าย/required ฝั่ง DB + ช่องแก้ใน /admin/survey + GET /api/survey คืนชุดคำถามที่ผสานแล้ว)
+
+## 2026-11-05 — v1.280.0 = โฟลเดอร์วันสำหรับงานหลายวัน + hold การ์ดซ้อนการ์ด · deployed (14:05)
+- ที่มา: AGN-261104-01 (4–6 พ.ย. EP เดียว) — การ์ดวัน 2 ที่เทลง CAM-X เดิม ทำให้ MEDIAPRO.XML ซ้อนกัน/SONYCARD.IND ค้าง landing ถาวร · นัทสั่ง "go ทำ v1.280.0 ด้วย แต่ไม่ต้องส่งข้อความ" แล้ว "เสร็จแล้ว deploy เลย" / "ok ผ่านแล้ว deploy เลย"
+- โค้ด: workflow implement 1 + รีวิวแย้ง 3 รอบ (3+2+2 reviewer) + ผมแก้รอบสุดท้าย (CARD_HOLD kill switch, MEDIAPRO 0 ไบต์ = ไม่มี index, ล้าง fingerprint เมื่อไม่มี hold, ปุ่มการ์ดโชว์ error) · gate 1271/1271 + tsc + lint · CI + Docker ผ่าน (2f5aa13)
+- อีกแชตกำลัง deploy v1.279.3 (แบบสำรวจ) พอดี → รอให้ขึ้นครบ (13:58) ก่อน แล้วค่อย deploy · v1.279.3 อยู่ใต้ v1.280.0 บน main · CHANGELOG รวมไม่ทับของเขา
+- backup-2026-11-05T065917.sql.gz · จุดถอย sha-2606a34 (v1.279.3) · deploy 14:02–14:05
+- ตรวจหลัง deploy: /api/version 1.280.0 in-sync · env คอนเทนเนอร์ LANDING_DAY_FOLDERS=1 CARD_HOLD=1 · log ไม่มี error (footage-ready/prep-folders/folder-integrity errors=0) · video-merge dryRun AGN-261104-01 / KND-TMH-261104-01 / EVT-EVT-261104-01 = moved 0 err 0 cardHolds [] (โฟลเดอร์ D2 ว่าง = shell ไม่ถูกย้าย) · landing dryRun offset=7 → "create landing … (AGN-261112-01) + โฟลเดอร์วัน D1-261112, D2-261113, D3-261114, D4-261115" (ไม่มี WARN = เจอกล่อง+EP)
+- งานที่ landing สร้างก่อน deploy (3 ใบที่ถ่ายอยู่) ไม่ได้โฟลเดอร์วันย้อนหลัง — ใช้โฟลเดอร์ที่สร้างมือไว้แล้ว · D3-261106 ของ AGN-261104-01 / EVT-EVT ยังต้องสร้างมือพรุ่งนี้
+- ทางถอยไม่ต้อง deploy: LANDING_DAY_FOLDERS=0 (ปิดโฟลเดอร์วัน) · CARD_HOLD=0 (merge แบบเดิม) — ตั้งใน env ของ service app
