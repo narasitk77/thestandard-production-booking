@@ -117,9 +117,14 @@ test('summary: teams at or above the minimum are shown when nothing is left over
   assert.equal(t.smallTeams, 3)
 })
 
-test('the privacy promise shown to respondents quotes the same minimum the summary enforces', () => {
-  assert.ok(SURVEY.privacy.includes(`${TEAM_MIN} คน`))
+// v1.280.3 — the per-team sentence was removed from the respondent's screen (Nat). The promise that remains must
+// still be true, and the small-team suppression still runs even though it is no longer advertised.
+test('the privacy text keeps only the not-linked promise; a team below TEAM_MIN is still never shown on its own', () => {
+  assert.ok(SURVEY.privacy.includes('ไม่เก็บว่าใครตอบอะไร'))
+  assert.ok(!SURVEY.privacy.includes('แยกรายทีม'))
   assert.equal(summarize([{ group: 'nws', answers: { efficiency: '3', satisfaction: '3' } }]).teams.length, 0)
+  const belowMin = Array.from({ length: TEAM_MIN - 1 }, () => ({ group: 'nws', answers: { efficiency: '3', satisfaction: '3' } }))
+  assert.equal(summarize(belowMin).teams.length, 0)
 })
 
 test('summary of nothing is empty, not NaN', () => {
