@@ -5,29 +5,34 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { validateAnswers, summarize, SURVEY, TEAMS, TEAM_MIN, TEXT_MAX, OTHER_MAX } from '../survey'
 
-const BASE = { team: 'nws', efficiency: '4', satisfaction: '3' }
+// v1.279.2 — `useful` (strengths to keep) is required too, so the base answer carries one pick
+const BASE = { team: 'nws', efficiency: '4', satisfaction: '3', useful: ['status'] }
 
 test('a complete answer passes; team goes to group, unknown keys are stripped', () => {
   const r = validateAnswers({ ...BASE, smuggled: 'x', role: 'queue' })
   assert.equal(r.ok, true)
   if (!r.ok) return
   assert.equal(r.group, 'nws')
-  assert.deepEqual(r.answers, { efficiency: '4', satisfaction: '3' })
+  assert.deepEqual(r.answers, { efficiency: '4', satisfaction: '3', useful: ['status'] })
 })
 
-test('team and both scales are required; optional questions may be left out', () => {
+test('team, both scales and the strengths pick are required; free text may be left out', () => {
   const { team, ...noTeam } = BASE
   assert.equal(validateAnswers(noTeam).ok, false)
   const { efficiency, ...noEff } = BASE
   assert.equal(validateAnswers(noEff).ok, false)
   const { satisfaction, ...noSat } = BASE
   assert.equal(validateAnswers(noSat).ok, false)
-  assert.equal(validateAnswers({ ...BASE, useful: [], improve: '' }).ok, true)
+  assert.equal(validateAnswers({ ...BASE, useful: [] }).ok, false)
+  const { useful, ...noUseful } = BASE
+  assert.equal(validateAnswers(noUseful).ok, false)
+  assert.equal(validateAnswers({ ...noUseful, useful_other: 'ลิงก์' }).ok, true)   // "อื่น ๆ" alone satisfies it
+  assert.equal(validateAnswers({ ...BASE, improve: '' }).ok, true)
 })
 
-test('scale values: 1–5 only, "na" only where the question offers it', () => {
+test('scale values: 1–5 only; "na" refused since v1.279.2 (no question offers it any more)', () => {
   for (const v of ['1', '2', '3', '4', '5']) assert.equal(validateAnswers({ ...BASE, satisfaction: v }).ok, true, v)
-  assert.equal(validateAnswers({ ...BASE, efficiency: 'na' }).ok, true)
+  assert.equal(validateAnswers({ ...BASE, efficiency: 'na' }).ok, false)
   assert.equal(validateAnswers({ ...BASE, satisfaction: 'na' }).ok, false)
   for (const bad of ['0', '6', 4, '4.5', ['4']]) assert.equal(validateAnswers({ ...BASE, satisfaction: bad }).ok, false, String(bad))
 })
