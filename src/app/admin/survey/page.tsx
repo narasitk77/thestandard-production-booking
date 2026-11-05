@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import BackButton from '@/app/_components/BackButton'
 import { Loader2 } from 'lucide-react'
-import { SURVEY, type ScaleStat, type Summary } from '@/lib/survey'
+import { SURVEY, type Overrides, type ScaleStat, type Summary, type SurveyDef } from '@/lib/survey'
 
 /* =============================================================================
    /admin/survey — ผลแบบสำรวจการใช้งาน + เปิด/ปิดรับคำตอบ (v1.279 ชุดคำถามใหม่)
    ผลโชว์หลังปิดรับเท่านั้น · แยกทีมเฉพาะทีมที่มีคนตอบ ≥ teamMin
+   v1.279.3 — แก้คำบนจอได้ (คำนำ / หัวข้อ / คำอธิบาย / บังคับตอบ / ป้ายสเกล / ป้ายตัวเลือก) ไม่ต้อง deploy
+   โครง (เพิ่ม-ลดข้อ/ตัวเลือก, id) ยังอยู่ในโค้ด — เปลี่ยนแล้วผลที่เก็บไปแล้วจะอ่านไม่ออก
    ============================================================================= */
 
 type Payload = {
@@ -16,15 +18,35 @@ type Payload = {
   /** null ระหว่างเปิดรับ — ผลรวมโชว์หลังปิดรับเท่านั้น (กันเทียบก่อน/หลังว่าใครตอบอะไร) */
   summary: Summary | null
   teamMin: number
+  overrides: Overrides | null
+  /** ชุดคำถามที่ใช้จริง = โค้ด + overrides */
+  survey: SurveyDef
+}
+
+/** สถานะฟอร์มแก้คำ — ทุกช่องเป็นข้อความ (ว่าง = ใช้ของโค้ด) · required เป็น boolean */
+type Draft = { intro: string; questions: Record<string, { title: string; help: string; required: boolean; scale: string[]; options: Record<string, string> }> }
+function toDraft(ov: Overrides | null): Draft {
+  return {
+    intro: ov?.intro ?? '',
+    questions: Object.fromEntries(SURVEY.questions.map(q => {
+      const o = ov?.questions?.[q.id]
+      return [q.id, {
+        title: o?.title ?? '', help: o?.help ?? '', required: o?.required ?? q.required,
+        scale: q.scale ? q.scale.map((_, i) => o?.scale?.[i] ?? '') : [],
+        options: Object.fromEntries((q.options || []).map(x => [x.id, o?.options?.[x.id] ?? ''])),
+      }]
+    })),
+  }
 }
 
 const fmt = (n: number | null, d = 1) => (n === null ? '–' : n.toLocaleString('th-TH', { maximumFractionDigits: d }))
-const SCALES = SURVEY.questions.filter(q => q.kind === 'scale')
 
 export default function AdminSurveyPage() {
   const [data, setData] = useState<Payload | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [saved, setSaved] = useState('')
 
   const load = useCallback(async () => {
     setError('')
@@ -33,6 +55,7 @@ export default function AdminSurveyPage() {
       const d = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
       setData(d)
+      setDraft(toDraft(d.overrides))
     } catch (e: any) { setError(e.message) }
   }, [])
   useEffect(() => { load() }, [load])
@@ -50,10 +73,25 @@ export default function AdminSurveyPage() {
     } catch (e: any) { setError(e.message) } finally { setBusy(false) }
   }
 
+  /** บันทึกคำที่แก้ · null = กลับไปใช้คำในโค้ดทั้งหมด · server ตัดช่องว่าง/ช่องเปล่าให้ (validateOverrides) */
+  const saveText = async (overrides: Draft | null) => {
+    if (overrides === null && !confirm('ล้างคำที่แก้ไว้ทั้งหมด กลับไปใช้คำในโค้ด?')) return
+    setBusy(true); setError(''); setSaved('')
+    try {
+      const r = await fetch('/api/admin/survey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overrides }) })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
+      await load()
+      setSaved(`บันทึกแล้ว ${new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} — หน้า /survey ใช้คำใหม่ทันที`)
+    } catch (e: any) { setError(e.message) } finally { setBusy(false) }
+  }
+
   if (error && !data) return <div className="max-w-3xl mx-auto px-4 py-10 text-sm text-red-700">{error}</div>
   if (!data) return <div className="max-w-3xl mx-auto px-4 py-10 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด…</div>
 
   const s = data.summary
+  const S = data.survey ?? SURVEY
+  const SCALES = S.questions.filter(q => q.kind === 'scale')
   const rate = data.eligible ? (data.participants / data.eligible) * 100 : null
   const responded = <Kpi label="ตอบแล้ว" value={`${data.participants}`} sub={`จาก ${data.eligible} คนที่มีสิทธิ์${rate !== null ? ` · ${fmt(rate, 0)}%` : ''}`} />
 
@@ -123,7 +161,7 @@ export default function AdminSurveyPage() {
           </div>
 
           <div className="gf-card p-4">
-            {SURVEY.questions.filter(q => q.kind === 'multi').map(q => {
+            {S.questions.filter(q => q.kind === 'multi').map(q => {
               const c = s.counts[q.id] || {}
               const max = Math.max(1, ...Object.values(c))
               return (
@@ -137,12 +175,74 @@ export default function AdminSurveyPage() {
             })}
           </div>
 
-          <Texts title="สิ่งที่อยากให้ปรับปรุงหรือพัฒนาเพิ่มเติม" items={s.texts.improve} />
-          <Texts title={'ช่อง "อื่น ๆ"'} items={s.texts.other} />
+          <Texts title={S.questions.find(q => q.kind === 'text')?.title || 'ข้อความ'} items={s.texts.improve} />
+          {(S.questions.some(q => q.other) || s.texts.other.length > 0) && <Texts title={'ช่อง "อื่น ๆ"'} items={s.texts.other} />}
           <p className="text-[11px] text-gray-400">คำตอบไม่มีชื่อ/อีเมล/เวลา และถูกสลับลำดับทุกครั้งที่มีคนตอบ · ข้อความเรียงตามตัวอักษร ไม่แยกตามทีม · ข้อความที่พิมพ์เองอาจบอกตัวคนเขียนได้ — อย่าเอาไปไล่ถามรายคน</p>
         </>
       )}
+
+      {draft && (
+        <div className="gf-card p-4 space-y-4">
+          <div>
+            <div className="text-sm font-medium text-gray-800">✏️ แก้คำบนจอ</div>
+            <p className="text-xs text-gray-500 mt-0.5">ช่องว่าง = ใช้คำในโค้ด (เห็นเป็นตัวจาง) · บันทึกแล้วหน้า /survey เปลี่ยนทันที ไม่ต้อง deploy · เพิ่ม-ลดข้อหรือตัวเลือกต้องแก้โค้ด (ผลที่เก็บไปแล้วผูกกับ id)</p>
+          </div>
+          <Field label="คำนำใต้หัวข้อ" value={draft.intro} placeholder={SURVEY.intro} rows={2}
+            onChange={v => setDraft({ ...draft, intro: v })} />
+          {SURVEY.questions.map((q, i) => {
+            const d = draft.questions[q.id]
+            const setQ = (patch: Partial<Draft['questions'][string]>) => setDraft({ ...draft, questions: { ...draft.questions, [q.id]: { ...d, ...patch } } })
+            return (
+              <div key={q.id} className="border-t border-gray-100 pt-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium text-gray-700">ข้อ {i + 1} <span className="font-mono text-gray-400">{q.id}</span></div>
+                  <label className={`text-xs flex items-center gap-1.5 ${q.id === 'team' ? 'text-gray-400' : 'text-gray-700'}`}>
+                    <input type="checkbox" checked={d.required} disabled={q.id === 'team'} onChange={e => setQ({ required: e.target.checked })} /> บังคับตอบ
+                  </label>
+                </div>
+                <Field label="หัวข้อ" value={d.title} placeholder={q.title} rows={2} onChange={v => setQ({ title: v })} />
+                <Field label="คำอธิบายใต้หัวข้อ" value={d.help} placeholder={q.help || '(ไม่มี)'} onChange={v => setQ({ help: v })} />
+                {q.kind === 'scale' && (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {q.scale!.map((l, k) => (
+                      <input key={k} value={d.scale[k]} placeholder={l} aria-label={`ป้าย ${k + 1}`}
+                        onChange={e => setQ({ scale: d.scale.map((x, j) => (j === k ? e.target.value : x)) })}
+                        className="w-full rounded border border-gray-200 px-1.5 py-1 text-[11px] focus:outline-none focus:border-gray-400" />
+                    ))}
+                  </div>
+                )}
+                {q.options && (
+                  <div className="space-y-1">
+                    {q.options.map(o => (
+                      <input key={o.id} value={d.options[o.id]} placeholder={o.label} aria-label={`ตัวเลือก ${o.id}`}
+                        onChange={e => setQ({ options: { ...d.options, [o.id]: e.target.value } })}
+                        className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:border-gray-400" />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {saved && <div className="text-xs text-green-700">{saved}</div>}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => saveText(draft)} disabled={busy} className="ops-btn-primary text-sm">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'บันทึกคำที่แก้'}</button>
+            <button onClick={() => saveText(null)} disabled={busy || !data.overrides} className="ops-btn-secondary text-sm">กลับไปใช้คำในโค้ด</button>
+            <Link href="/survey" className="text-xs underline text-gray-500">ดูผลบนหน้าแบบสำรวจ</Link>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+function Field({ label, value, placeholder, rows, onChange }: { label: string; value: string; placeholder: string; rows?: number; onChange: (v: string) => void }) {
+  const cls = 'w-full rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:border-gray-400'
+  return (
+    <label className="block">
+      <span className="text-[11px] text-gray-500">{label}</span>
+      {rows ? <textarea value={value} placeholder={placeholder} rows={rows} onChange={e => onChange(e.target.value)} className={cls} />
+        : <input value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} className={cls} />}
+    </label>
   )
 }
 

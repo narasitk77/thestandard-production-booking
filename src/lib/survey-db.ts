@@ -4,9 +4,10 @@
  */
 import { prisma } from './db'
 import { hasConsoleAccess } from './roles'
-import type { Answers } from './survey'
+import { validateOverrides, type Answers, type Overrides } from './survey'
 
 const openKey = (key: string) => `survey-open:${key}`
+const textKey = (key: string) => `survey-text:${key}`
 
 /** ปิดเป็นค่าเริ่มต้น — deploy แล้วยังไม่ชวนใคร จนกว่าแอดมินกดเปิดที่ /admin/survey */
 export async function isSurveyOpen(key: string): Promise<boolean> {
@@ -17,6 +18,26 @@ export async function isSurveyOpen(key: string): Promise<boolean> {
 export async function setSurveyOpen(key: string, open: boolean): Promise<void> {
   const at = new Date(), note = open ? 'open' : 'closed'
   await prisma.systemHeartbeat.upsert({ where: { key: openKey(key) }, create: { key: openKey(key), at, note }, update: { at, note } })
+}
+
+/**
+ * v1.279.3 — คำที่แอดมินแก้บนจอ (ดู Overrides ใน survey.ts) เก็บเป็น JSON ใน system_heartbeats.note คู่กับธงเปิด/ปิด
+ * ponytail: ยืมตาราง heartbeat แทนเพิ่มตาราง — เปลี่ยน schema = ถอยอิมเมจแล้ว DROP (ดู deploy.py) · ย้ายเมื่อมี setting ตัวที่สาม
+ * แถวเสีย (JSON พัง / ไม่ผ่าน validate) = throw ให้หน้า/API ล้มดัง ๆ ไม่ใช่เงียบ ๆ กลับไปใช้คำในโค้ด
+ */
+export async function getSurveyText(key: string): Promise<Overrides | null> {
+  const row = await prisma.systemHeartbeat.findUnique({ where: { key: textKey(key) } })
+  if (!row?.note) return null
+  let parsed: unknown
+  try { parsed = JSON.parse(row.note) } catch { throw new Error(`คำที่แก้ไว้ของแบบสำรวจ (${textKey(key)}) อ่านไม่ออก — ให้แอดมินกด "กลับไปใช้คำในโค้ด"`) }
+  const v = validateOverrides(parsed)
+  if (!v.ok) throw new Error(`คำที่แก้ไว้ของแบบสำรวจไม่ตรงกับชุดคำถามปัจจุบัน: ${v.error}`)
+  return v.value
+}
+
+export async function setSurveyText(key: string, ov: Overrides | null): Promise<void> {
+  const k = textKey(key), at = new Date(), note = ov ? JSON.stringify(ov) : null
+  await prisma.systemHeartbeat.upsert({ where: { key: k }, create: { key: k, at, note }, update: { at, note } })
 }
 
 /** ช่วงเวลาที่นับว่า "เป็นคนจองงาน" — สร้าง หรือเป็น Producer / Co-Producer ของใบที่ถ่ายภายใน 180 วัน */

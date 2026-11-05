@@ -77,7 +77,7 @@ export const SURVEY = {
     { id: 'satisfaction', kind: 'scale', required: true,
       title: 'โดยรวม คุณพึงพอใจกับการใช้งานระบบในระดับใด?',
       scale: ['ไม่พึงพอใจมาก', 'ไม่พึงพอใจ', 'เฉย ๆ', 'พึงพอใจ', 'พึงพอใจมาก'] },
-    { id: 'useful', kind: 'multi', required: true, other: true, exclusive: 'none',
+    { id: 'useful', kind: 'multi', required: true, exclusive: 'none',   // v1.279.3 ตัดช่อง "อื่น ๆ" (นัท 5 พ.ย.)
       title: 'ฟังก์ชันที่คุณคิดว่าเป็นจุดแข็งของระบบ Production Booking และอยากให้รักษาไว้ต่อไป', help: 'เลือกได้หลายข้อ',
       options: [
         { id: 'approved_mail', label: 'เมลและ Calendar invite เมื่อคิวได้รับอนุมัติ' },
@@ -97,17 +97,113 @@ export const TEXT_MAX = 2000
 export const OTHER_MAX = 200
 const SCALE_IDS = ['1', '2', '3', '4', '5']
 
+export type SurveyDef = typeof SURVEY
+
+/**
+ * v1.279.3 — คำบนจอแก้ได้จาก /admin/survey โดยไม่ต้อง deploy (นัท 5 พ.ย.: "เปิดให้กูแก้ปรับคำถามเอง")
+ * เก็บเฉพาะ "ส่วนที่ต่างจากโค้ด" ต่อ id — โครงคำถาม/ตัวเลือก (id, kind, exclusive, other) ยังมาจากโค้ด
+ * เพื่อให้ผลที่เก็บไปแล้วอ่านออกเสมอ · ค่าว่าง = กลับไปใช้ของโค้ด
+ */
+export type QuestionOverride = { title?: string; help?: string; required?: boolean; scale?: string[]; options?: Record<string, string> }
+export type Overrides = { intro?: string; questions?: Record<string, QuestionOverride> }
+const OVERRIDE_TEXT_MAX = 500
+
+/** รับ JSON จากฟอร์มแอดมิน → Overrides ที่สะอาด (ตัดช่องว่าง, ทิ้งช่องว่างเปล่า) หรือบอกว่าผิดตรงไหน */
+export function validateOverrides(raw: unknown): { ok: true; value: Overrides | null } | { ok: false; error: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null }
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'รูปแบบไม่ถูกต้อง' }
+  const r = raw as Record<string, unknown>
+  const str = (v: unknown, where: string): string | undefined | { error: string } => {
+    if (v === undefined || v === null) return undefined
+    if (typeof v !== 'string') return { error: `${where}: ต้องเป็นข้อความ` }
+    const t = v.trim()
+    if (t.length > OVERRIDE_TEXT_MAX) return { error: `${where}: ยาวเกิน ${OVERRIDE_TEXT_MAX} ตัวอักษร` }
+    return t || undefined
+  }
+  const out: Overrides = {}
+  const intro = str(r.intro, 'คำนำ')
+  if (typeof intro === 'object') return { ok: false, error: intro.error }
+  if (intro) out.intro = intro
+  if (r.questions !== undefined && r.questions !== null) {
+    if (typeof r.questions !== 'object' || Array.isArray(r.questions)) return { ok: false, error: 'questions ต้องเป็น object' }
+    for (const [id, qv] of Object.entries(r.questions as Record<string, unknown>)) {
+      const q = SURVEY.questions.find(x => x.id === id)
+      if (!q) return { ok: false, error: `ไม่มีคำถาม id "${id}"` }
+      if (!qv || typeof qv !== 'object' || Array.isArray(qv)) return { ok: false, error: `${q.id}: รูปแบบไม่ถูกต้อง` }
+      const o = qv as Record<string, unknown>
+      const qo: QuestionOverride = {}
+      for (const k of ['title', 'help'] as const) {
+        const v = str(o[k], `${q.id}.${k}`)
+        if (typeof v === 'object') return { ok: false, error: v.error }
+        if (v) qo[k] = v
+      }
+      if (o.required !== undefined && o.required !== null) {
+        if (typeof o.required !== 'boolean') return { ok: false, error: `${q.id}: required ต้องเป็น true/false` }
+        if (q.id === 'team' && !o.required) return { ok: false, error: 'ข้อทีมต้องบังคับตอบ (ผลแยกทีมใช้ค่านี้)' }
+        if (o.required !== q.required) qo.required = o.required
+      }
+      if (o.scale !== undefined && o.scale !== null) {
+        if (q.kind !== 'scale') return { ok: false, error: `${q.id}: ไม่ใช่ข้อสเกล` }
+        if (!Array.isArray(o.scale) || o.scale.length !== 5) return { ok: false, error: `${q.id}: ป้ายสเกลต้องมี 5 ช่อง` }
+        const labels: string[] = []
+        for (const [i, v] of o.scale.entries()) {
+          const t = str(v, `${q.id}.scale[${i + 1}]`)
+          if (typeof t === 'object') return { ok: false, error: t.error }
+          labels.push(t || q.scale![i])
+        }
+        if (labels.some((l, i) => l !== q.scale![i])) qo.scale = labels
+      }
+      if (o.options !== undefined && o.options !== null) {
+        if (!q.options) return { ok: false, error: `${q.id}: ไม่มีตัวเลือกให้แก้` }
+        if (typeof o.options !== 'object' || Array.isArray(o.options)) return { ok: false, error: `${q.id}: options ต้องเป็น object` }
+        const opts: Record<string, string> = {}
+        for (const [oid, v] of Object.entries(o.options as Record<string, unknown>)) {
+          const opt = q.options.find(x => x.id === oid)
+          if (!opt) return { ok: false, error: `${q.id}: ไม่มีตัวเลือก id "${oid}"` }
+          const t = str(v, `${q.id}.${oid}`)
+          if (typeof t === 'object') return { ok: false, error: t.error }
+          if (t && t !== opt.label) opts[oid] = t
+        }
+        if (Object.keys(opts).length) qo.options = opts
+      }
+      if (Object.keys(qo).length) (out.questions ||= {})[id] = qo
+    }
+  }
+  return { ok: true, value: Object.keys(out).length ? out : null }
+}
+
+/** ชุดคำถามที่หน้า /survey และ API ใช้จริง = โค้ด + ส่วนที่แอดมินแก้ (ไม่แก้ SURVEY ตัวจริง) */
+export function applyOverrides(ov: Overrides | null | undefined): SurveyDef {
+  if (!ov) return SURVEY
+  return {
+    ...SURVEY,
+    intro: ov.intro ?? SURVEY.intro,
+    questions: SURVEY.questions.map(q => {
+      const o = ov.questions?.[q.id]
+      if (!o) return q
+      return {
+        ...q,
+        title: o.title ?? q.title,
+        help: o.help ?? q.help,
+        required: o.required ?? q.required,
+        scale: o.scale ?? q.scale,
+        options: q.options && o.options ? q.options.map(x => ({ ...x, label: o.options![x.id] ?? x.label })) : q.options,
+      }
+    }),
+  }
+}
+
 /**
  * ตรวจคำตอบทั้งชุดก่อนบันทึก — คืนทีมแยกออกมา (ลงคอลัมน์ group) + คำตอบที่เหลือ
  * ตัวเลือกต้องเป็น id ที่มีอยู่ · ข้อบังคับต้องตอบ · ข้อความยาวไม่เกินเพดาน · คีย์แปลกถูกตัดทิ้ง
  */
-export function validateAnswers(raw: unknown):
+export function validateAnswers(raw: unknown, survey: SurveyDef = SURVEY):
   { ok: true; group: string; answers: Answers } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'คำตอบไม่ถูกรูปแบบ' }
   const a = raw as Record<string, unknown>
   const out: Answers = {}
   let group = ''
-  for (const q of SURVEY.questions) {
+  for (const q of survey.questions) {
     const v = a[q.id]
     const empty = v === undefined || v === null || v === ''
     if (q.kind === 'text') {

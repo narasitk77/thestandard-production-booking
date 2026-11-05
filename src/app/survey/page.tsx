@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Check, Loader2 } from 'lucide-react'
-import { SURVEY, OTHER_MAX, TEXT_MAX, type Question } from '@/lib/survey'
+import { SURVEY, OTHER_MAX, TEXT_MAX, type Question, type SurveyDef } from '@/lib/survey'
 
 /* =============================================================================
    /survey — แบบสำรวจการใช้งาน (v1.279: ทุกข้อในหน้าเดียว · เดิม v1.278 ทีละคำถาม)
@@ -12,7 +12,8 @@ import { SURVEY, OTHER_MAX, TEXT_MAX, type Question } from '@/lib/survey'
    คนจองคิวตอนปิดรับเห็นจอ "ไม่ได้เปิดรับ" (เดิมได้โหมดตัวอย่างแล้วขึ้น "ส่งแล้ว ขอบคุณ" ทั้งที่ไม่ได้บันทึก)
    ============================================================================= */
 
-type Status = { key: string; open: boolean; eligible: boolean; answered: boolean; canPreview?: boolean }
+/** survey = ชุดคำถามที่ใช้จริง (โค้ด + คำที่แอดมินแก้ v1.279.3) — API เก่าไม่ส่งมาก็ใช้ของโค้ด */
+type Status = { key: string; open: boolean; eligible: boolean; answered: boolean; canPreview?: boolean; survey?: SurveyDef }
 type Answers = Record<string, string | string[]>
 
 const BRAND = '#0b8043'
@@ -49,6 +50,7 @@ export default function SurveyPage() {
   if (!status) {
     return <Shell><div className="text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด…</div></Shell>
   }
+  const S = status.survey ?? SURVEY
   const preview = !!status.canPreview && (!status.open || !status.eligible)
   if (!preview && !status.open) {
     return <Shell><Center emoji="🕒" title="ตอนนี้แบบสำรวจไม่ได้เปิดรับคำตอบ" /></Shell>
@@ -67,12 +69,12 @@ export default function SurveyPage() {
 
   const set = (a: Answers) => {
     setAnswers(a)
-    if (missing.length) setMissing(missing.filter(id => !isAnswered(SURVEY.questions.find(q => q.id === id)!, a)))
+    if (missing.length) setMissing(missing.filter(id => !isAnswered(S.questions.find(q => q.id === id)!, a)))
   }
 
   const submit = async () => {
     setError('')
-    const miss = SURVEY.questions.filter(q => q.required && !isAnswered(q, answers)).map(q => q.id)
+    const miss = S.questions.filter(q => q.required && !isAnswered(q, answers)).map(q => q.id)
     setMissing(miss)
     if (miss.length) {
       refs.current[miss[0]]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -97,15 +99,15 @@ export default function SurveyPage() {
       {preview && <PreviewNote text={status.open
         ? '🧪 โหมดดูตัวอย่างสำหรับทีมจัดคิว — กรอกได้ แต่ไม่มีอะไรถูกบันทึก'
         : '🧪 ยังไม่เปิดรับคำตอบ — นี่คือหน้าตัวอย่าง กรอกได้ แต่ไม่มีอะไรถูกบันทึก'} />}
-      <h1 className="text-xl font-semibold text-gray-900 leading-snug">{SURVEY.title}</h1>
-      <p className="mt-2 text-[15px] text-gray-700 leading-relaxed">{SURVEY.intro}</p>
+      <h1 className="text-xl font-semibold text-gray-900 leading-snug">{S.title}</h1>
+      <p className="mt-2 text-[15px] text-gray-700 leading-relaxed">{S.intro}</p>
       <div className="mt-3 flex flex-wrap gap-2">
-        {SURVEY.facts.map(f => <span key={f} className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-700">{f}</span>)}
+        {S.facts.map(f => <span key={f} className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-700">{f}</span>)}
       </div>
-      <p className="mt-3 text-xs text-gray-500">🔒 {SURVEY.privacy}</p>
+      <p className="mt-3 text-xs text-gray-500">🔒 {S.privacy}</p>
 
       <div className="mt-6 space-y-4">
-        {SURVEY.questions.map((q, i) => {
+        {S.questions.map((q, i) => {
           const miss = missing.includes(q.id)
           return (
             <div key={q.id} ref={el => { refs.current[q.id] = el }}

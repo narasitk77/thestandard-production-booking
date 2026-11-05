@@ -3,7 +3,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateAnswers, summarize, SURVEY, TEAMS, TEAM_MIN, TEXT_MAX, OTHER_MAX } from '../survey'
+import { validateAnswers, summarize, applyOverrides, validateOverrides, SURVEY, TEAMS, TEAM_MIN, TEXT_MAX, OTHER_MAX } from '../survey'
 
 // v1.279.2 — `useful` (strengths to keep) is required too, so the base answer carries one pick
 const BASE = { team: 'nws', efficiency: '4', satisfaction: '3', useful: ['status'] }
@@ -26,7 +26,7 @@ test('team, both scales and the strengths pick are required; free text may be le
   assert.equal(validateAnswers({ ...BASE, useful: [] }).ok, false)
   const { useful, ...noUseful } = BASE
   assert.equal(validateAnswers(noUseful).ok, false)
-  assert.equal(validateAnswers({ ...noUseful, useful_other: 'ลิงก์' }).ok, true)   // "อื่น ๆ" alone satisfies it
+  assert.equal(validateAnswers({ ...noUseful, useful_other: 'ลิงก์' }).ok, false)  // no "อื่น ๆ" box since v1.279.3 — free text can't stand in
   assert.equal(validateAnswers({ ...BASE, improve: '' }).ok, true)
 })
 
@@ -45,16 +45,18 @@ test('unknown teams, unknown options, wrong types and non-objects are refused', 
   assert.equal(validateAnswers([BASE]).ok, false)
 })
 
-test('multi choices: deduped, "none" is exclusive, other text kept and capped', () => {
+test('multi choices: deduped, "none" is exclusive, stray other-text is dropped (no "อื่น ๆ" since v1.279.3)', () => {
   const r = validateAnswers({ ...BASE, useful: ['status', 'status', 'calendar'], useful_other: '  ลิงก์ Drive  ' })
   assert.equal(r.ok, true)
   if (r.ok) {
     assert.deepEqual(r.answers.useful, ['status', 'calendar'])
-    assert.equal(r.answers.useful_other, 'ลิงก์ Drive')
+    assert.equal(r.answers.useful_other, undefined)
   }
   assert.equal(validateAnswers({ ...BASE, useful: ['none', 'status'] }).ok, false)
-  assert.equal(validateAnswers({ ...BASE, useful: ['none'], useful_other: 'x' }).ok, false)
-  assert.equal(validateAnswers({ ...BASE, useful_other: 'x'.repeat(OTHER_MAX + 1) }).ok, false)
+  assert.equal(validateAnswers({ ...BASE, useful: ['none'] }).ok, true)
+  // the gate still enforces the cap where a question offers the box
+  const withOther = { ...SURVEY, questions: SURVEY.questions.map(q => q.id === 'useful' ? { ...q, other: true } : q) }
+  assert.equal(validateAnswers({ ...BASE, useful_other: 'x'.repeat(OTHER_MAX + 1) }, withOther).ok, false)
 })
 
 test('free text is trimmed, optional, and capped', () => {
@@ -126,4 +128,40 @@ test('summary of nothing is empty, not NaN', () => {
   assert.equal(s.scales.satisfaction.avg, null)
   assert.equal(s.scales.satisfaction.topPct, null)
   assert.deepEqual(s.teams, [])
+})
+
+// v1.279.3 — admin-edited wording
+test('overrides: only known ids, trimmed, empty = back to code, team stays required, scale needs 5', () => {
+  assert.deepEqual(validateOverrides(null), { ok: true, value: null })
+  assert.deepEqual(validateOverrides({ intro: '  ', questions: { useful: { title: '' } } }), { ok: true, value: null })
+  const v = validateOverrides({ intro: ' สวัสดี ', questions: { useful: { title: ' จุดแข็ง ', required: false, options: { status: 'My Bookings', calendar: '' } }, efficiency: { scale: ['', 'b', 'c', 'd', 'e'] } } })
+  assert.equal(v.ok, true)
+  if (v.ok) assert.deepEqual(v.value, { intro: 'สวัสดี', questions: {
+    useful: { title: 'จุดแข็ง', required: false, options: { status: 'My Bookings' } },
+    efficiency: { scale: ['ไม่เห็นด้วยอย่างยิ่ง', 'b', 'c', 'd', 'e'] },
+  } })
+  assert.equal(validateOverrides({ questions: { nope: { title: 'x' } } }).ok, false)
+  assert.equal(validateOverrides({ questions: { useful: { options: { hack: 'x' } } } }).ok, false)
+  assert.equal(validateOverrides({ questions: { team: { required: false } } }).ok, false)
+  assert.equal(validateOverrides({ questions: { efficiency: { scale: ['a', 'b'] } } }).ok, false)
+  assert.equal(validateOverrides({ questions: { improve: { scale: ['a', 'b', 'c', 'd', 'e'] } } }).ok, false)
+  assert.equal(validateOverrides({ questions: { useful: { title: 'x'.repeat(501) } } }).ok, false)
+  assert.equal(validateOverrides([]).ok, false)
+})
+
+test('applyOverrides: wording changes, structure (ids, kind, exclusive) does not; the gate follows required', () => {
+  const S = applyOverrides({ intro: 'สวัสดี', questions: { useful: { title: 'จุดแข็ง', required: false, options: { status: 'My Bookings' } }, efficiency: { help: 'ช่วย' } } })
+  assert.equal(S.intro, 'สวัสดี')
+  const useful = S.questions.find(q => q.id === 'useful')!
+  assert.equal(useful.title, 'จุดแข็ง')
+  assert.equal(useful.required, false)
+  assert.equal(useful.exclusive, 'none')
+  assert.deepEqual(useful.options!.map(o => o.id), SURVEY.questions.find(q => q.id === 'useful')!.options!.map(o => o.id))
+  assert.equal(useful.options!.find(o => o.id === 'status')!.label, 'My Bookings')
+  assert.equal(S.questions.find(q => q.id === 'efficiency')!.help, 'ช่วย')
+  assert.equal(SURVEY.questions.find(q => q.id === 'useful')!.title.startsWith('ฟังก์ชัน'), true)   // code untouched
+  const { useful: _u, ...noUseful } = BASE
+  assert.equal(validateAnswers(noUseful, S).ok, true)
+  assert.equal(validateAnswers(noUseful).ok, false)
+  assert.equal(applyOverrides(null), SURVEY)
 })
