@@ -4095,4 +4095,6 @@ problem and not a deployment problem.
 - GitHub ไม่สร้าง run จาก push ของ 687d3c7 และ 3f67c50 (Actions status ปกติ) → สั่ง `gh workflow run docker-build.yml` เอง (run 41834566245 ผ่าน, ใน Dockerfile มี `npm run build`) · CI ไม่มี workflow_dispatch จึงไม่มีผล CI ของ 3f67c50 — gate ในเครื่องผ่าน (1228/1228, tsc, lint, `AUTH_DISABLED=0 npm run build`)
 - backup-2026-11-04T130958.sql.gz 1.35MB · deploy 20:12–20:14 (502 ~1.5 นาที) · จุดถอย sha-670ce47
 - ตรวจหลัง deploy: /api/version 1.279.0 in-sync · ไม่ล็อกอิน `/survey?openExternalBrowser=1` = 307 → login (คง query) · `/api/survey` ของนัท = open:false canPreview:true · หน้าจอมือถือ 390px: ข้อบังคับว่าง → ขอบแดง + "ยังขาด 3 ข้อ" · กรอกครบแล้วกดส่ง → 🧪 "ไม่ได้ถูกบันทึก" ไม่มี POST · /admin/survey 0/40 ปิดรับ
-- รอนัทดูหน้าแล้วสั่งเปิด (ปุ่ม "เปิดรับคำตอบ" ที่ /admin/survey)
+- 5 พ.ย. ~10:45 นัทดูหน้าแล้วสั่ง "เปิดลิงก์นี้ public เอา survey เก่าออกเลย" →
+  · ลบรอบเก่า `time-2026-11` บนพรอด (transaction เดียว): survey_responses 1 · survey_participants 1 · system_heartbeats `survey-open:time-2026-11` 1 → เหลือ 0/0/0 · ถ้าต้องกู้ อยู่ใน backup-2026-11-04T130958.sql.gz
+  · เปิดรับ `satisfaction-2026-11` ผ่าน POST /api/admin/survey (session นัท) → open:true · 0/40 · ลิงก์ไม่ล็อกอินยัง 307 → login (ต้องล็อกอินตามเดิม — ระบบต้องรู้ว่าใครตอบแล้วเพื่อกันตอบซ้ำ)
