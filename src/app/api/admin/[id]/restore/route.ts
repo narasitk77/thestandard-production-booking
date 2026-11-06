@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT } from '@/lib/ot-sync'
+import { logAudit } from '@/lib/audit'
 
 /**
  * Restore a CANCELLED booking back to live (status = REQUESTED).
@@ -14,7 +15,8 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    if (!(await requireConsole())) {
+    const session = await requireConsole()
+    if (!session) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
 
@@ -45,6 +47,23 @@ export async function POST(
         outlet: true,
         program: true,
         episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+      },
+    })
+
+    // v1.281 — เส้นนี้ล้าง approvedAt/approvedByEmail ทิ้ง แต่ไม่เคยเขียน audit ⇒ ใบที่ถูกกู้
+    // แล้วอนุมัติใหม่ "ลืม" ว่ารอบก่อนใครอนุมัติ และไม่รู้ว่าใครกดกู้ · เก็บค่าเดิมไว้ที่นี่ที่เดียว
+    await logAudit({
+      actorEmail: session.email,
+      action: 'booking.restore',
+      entityType: 'Booking',
+      entityId: existing.id,
+      bookingCode: existing.bookingCode,
+      fromStatus: existing.status,
+      toStatus: 'REQUESTED',
+      changes: {
+        approvedAt: { from: existing.approvedAt, to: null },
+        approvedByEmail: { from: existing.approvedByEmail, to: null },
+        calendarEventId: { from: existing.calendarEventId, to: null },
       },
     })
 
