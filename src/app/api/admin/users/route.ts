@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess, canEditUser, assignableRoles, canAddUser, isRole } from '@/lib/roles'
 import { OUTLET_MAP } from '@/lib/data'
+import { logAudit, diffFields } from '@/lib/audit'
 
 // v1.50 — never ship signaturePng to the client: it's the base64 e-signature
 // used to sign OT records, and no caller of these routes renders it.
@@ -39,6 +40,29 @@ function canSetPosition(actorRole: string | null | undefined, position: unknown)
   return actorRole === 'ADMIN' || actorRole === 'MANAGER'
 }
 
+// v1.281 — role / access edits had no audit trail at all: a promotion to ADMIN
+// or a "manager" position (= OT approver, see canSetPosition) left no record of
+// who granted it. One row per edit that actually changed something; entityType
+// 'User' never reaches a booking timeline, so nothing here is shown to non-staff.
+const USER_AUDIT_FIELDS = ['role', 'active', 'thaiName', 'employeeId', 'position', 'producerOutlets'] as const
+const USER_AUDIT_SELECT = { id: true, email: true, role: true, active: true, thaiName: true, employeeId: true, position: true, producerOutlets: true } as const
+
+async function auditUserChange(
+  actorEmail: string,
+  before: Record<string, any> | null,
+  after: { id: string; email: string; role: string } & Record<string, any>,
+) {
+  const diff = before ? diffFields(before, after, USER_AUDIT_FIELDS) : null
+  if (before && !diff) return
+  await logAudit({
+    actorEmail,
+    action: before ? 'user.update' : 'user.add',
+    entityType: 'User',
+    entityId: after.id,
+    changes: { email: after.email, ...(diff ?? { role: { from: null, to: after.role } }) },
+  })
+}
+
 // Viewing the roster: any console tier (Admin / Support / Manager / Coordinator).
 export async function GET() {
   const me = await getSession()
@@ -70,7 +94,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'producerOutlets must be an array of valid outlet codes' }, { status: 400 })
   }
 
-  const target = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } })
+  const target = await prisma.user.findUnique({ where: { id }, select: USER_AUDIT_SELECT })
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
   // Self-protection: never let someone demote or disable themselves (lockout).
@@ -106,6 +130,7 @@ export async function PATCH(request: NextRequest) {
     },
     select: USER_SELECT,
   })
+  await auditUserChange(me.email, target, user)
   return NextResponse.json({ user })
 }
 
@@ -124,7 +149,7 @@ export async function POST(request: NextRequest) {
 
   const existing = await prisma.user.findUnique({
     where: { email: email.toLowerCase() },
-    select: { id: true, role: true },
+    select: USER_AUDIT_SELECT,
   })
 
   if (existing) {
@@ -160,6 +185,7 @@ export async function POST(request: NextRequest) {
     },
     select: USER_SELECT,
   })
+  await auditUserChange(me.email, existing, user)
   return NextResponse.json({ user })
 }
 
@@ -176,7 +202,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Cannot delete yourself' }, { status: 400 })
   }
 
-  const target = await prisma.user.findUnique({ where: { id }, select: { role: true } })
+  const target = await prisma.user.findUnique({ where: { id }, select: USER_AUDIT_SELECT })
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
   if (!canEditUser(me.role, target.role)) {
     return NextResponse.json({ error: `Your role (${me.role}) cannot deactivate a ${target.role} user` }, { status: 403 })
@@ -184,5 +210,6 @@ export async function DELETE(request: NextRequest) {
 
   // Soft-delete by deactivating (preserves OT history)
   const user = await prisma.user.update({ where: { id }, data: { active: false }, select: USER_SELECT })
+  await auditUserChange(me.email, target, user)
   return NextResponse.json({ user, soft: true })
 }

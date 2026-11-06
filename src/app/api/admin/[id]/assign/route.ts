@@ -19,6 +19,7 @@ import { normalizeFreelancers, freelancerEmails } from '@/lib/freelancers'
 import { format } from 'date-fns'
 import { getToken } from 'next-auth/jwt'
 import { resolveAssignPatch } from '@/lib/assign-patch'
+import { logAudit, diffBooking } from '@/lib/audit'
 
 export async function POST(
   request: NextRequest,
@@ -63,6 +64,13 @@ export async function POST(
     if (existing.deletedAt) {
       return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
     }
+    // v1.281 — CANCELLED is terminal (booking-status.ts); the sanctioned revival
+    // is /restore → REQUESTED. Without this, a direct POST turned a cancelled
+    // shoot into ASSIGNED (nextStatus below falls through to ASSIGNED) and mailed
+    // the crew. Same guard approve has had since v1.54.1.
+    if (existing.status === 'CANCELLED') {
+      return NextResponse.json({ error: 'Booking is cancelled — restore it first' }, { status: 409 })
+    }
 
     // Status logic: don't downgrade a booking that's already progressed. Re-assigning
     // crew on a CONFIRMED *or COMPLETED* booking (e.g. a shoot-day crew swap) must keep
@@ -72,8 +80,11 @@ export async function POST(
       ? existing.status
       : 'ASSIGNED'
 
+    // v1.281 — compare-and-swap on the status we decided from: a cancel (or an
+    // approve) landing between the read above and this write must not be
+    // overwritten. Not matched → P2025 → 409, same contract as approve.
     const booking = await prisma.booking.update({
-      where: { id: params.id },
+      where: { id: params.id, status: existing.status, deletedAt: null },
       data: {
         assignedEmails: emailRecipients,
         mainVideographerEmail: mainVdo,
@@ -86,6 +97,34 @@ export async function POST(
         program: true,
         episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
       },
+    }).catch((e: any) => {
+      if (e?.code === 'P2025') return null
+      throw e
+    })
+    if (!booking) {
+      return NextResponse.json(
+        { error: 'Booking changed state — reload the page (cancelled, approved, or deleted meanwhile)' },
+        { status: 409 },
+      )
+    }
+
+    // v1.281 — ใครจัดทีม เมื่อไร · เดิมเส้นนี้ไม่เขียน audit เลย ⇒ ขั้น REQUESTED → ASSIGNED
+    // ไม่มีร่องรอยใน audit_logs ตั้งแต่ 22 พ.ค. (ตรวจรายงานการใช้งาน 5 พ.ย. 2569)
+    // เขียนทุกครั้งแม้ทีมไม่เปลี่ยน — ปุ่ม "ส่งอีเมล" ซ้ำก็เป็นการกระทำที่ต้องรู้ว่าใครกด
+    // `emailRequested` = แอดมิน *ขอ* ให้ส่ง ไม่ใช่ "ส่งถึงแล้ว" (ผลส่งจริงอยู่ใน response)
+    // ห้ามใส่ freelancers ทั้งก้อน: มีเบอร์โทร และ prefix `booking.` เปิดให้ทุกคนที่ล็อกอินเห็น
+    // (booking-history-visibility.ts) · อีเมลฟรีแลนซ์อยู่ใน assignedEmails อยู่แล้ว
+    const fieldDiff = { ...diffBooking(existing, booking) }
+    delete fieldDiff.status // already in fromStatus/toStatus
+    await logAudit({
+      actorEmail: session.email,
+      action: 'booking.assign',
+      entityType: 'Booking',
+      entityId: booking.id,
+      bookingCode: booking.bookingCode,
+      fromStatus: existing.status,
+      toStatus: nextStatus,
+      changes: { ...fieldDiff, emailRequested: shouldSendEmail },
     })
 
     // ─── Calendar guest sync ────────────────────────────────────────────────

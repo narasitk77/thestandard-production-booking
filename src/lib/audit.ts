@@ -108,8 +108,17 @@ export function diffBooking(
   before: Record<string, any>,
   after: Record<string, any>,
 ): Diff | null {
+  return diffFields(before, after, EDITABLE_BOOKING_FIELDS)
+}
+
+/** Same shallow diff over any field list (v1.281 — user role/permission edits). */
+export function diffFields(
+  before: Record<string, any>,
+  after: Record<string, any>,
+  fields: readonly string[],
+): Diff | null {
   const diff: Diff = {}
-  for (const f of EDITABLE_BOOKING_FIELDS) {
+  for (const f of fields) {
     if (!(f in after)) continue
     if (!equals(before?.[f], after?.[f])) {
       diff[f] = {
