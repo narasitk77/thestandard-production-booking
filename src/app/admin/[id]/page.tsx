@@ -14,6 +14,7 @@ import NumberStepper from '@/app/_components/NumberStepper'
 import BookingRentals from '@/app/_components/BookingRentals'
 import { isQuPending } from '@/lib/qu-ref'
 import BookingHistoryPanel from '@/app/_components/BookingHistoryPanel'
+import { calendarGuestCheck } from '@/lib/calendar-guest-check'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
 
 interface Episode { id: string; episodeId: string; title: string; program?: { code?: string; name: string } | null }
@@ -359,7 +360,8 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
     setSavedMessage(message)
     setSavedTone(tone)
     setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    // a warning is a paragraph someone must act on — 3 s is not enough to read it
+    setTimeout(() => setSaved(false), tone === 'warning' ? 20000 : 3000)
   }
 
   const handleAssign = async (sendEmail: boolean = true) => {
@@ -486,7 +488,9 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setBooking(prev => prev ? { ...prev, status: data.booking.status } : prev)
-      showSaved(`✓ บังคับสถานะเป็น ${data.booking.status}`)
+      // e.g. out of CANCELLED: calendar/OT/room were NOT restored — a green ✓ hid that
+      if (data.warning) showSaved(`⚠ บังคับสถานะเป็น ${data.booking.status} แล้ว แต่ — ${data.warning}`, 'warning')
+      else showSaved(`✓ บังคับสถานะเป็น ${data.booking.status}`)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -1766,8 +1770,10 @@ function MarkUploadDoneCard({ bookingId, bookingCode, onDone }: {
     setError('')
     try {
       const res = await fetch(`/api/upload/list?bookingId=${bookingId}`)
-      const data = await res.json()
-      if (!res.ok) { setReport(null); return }
+      const data = await res.json().catch(() => ({}))
+      // maint 2026-11-08 (ui-16) — a failed list used to null the report and the
+      // whole card (and its Mark-as-Done button) vanished, same as "nothing here".
+      if (!res.ok) { setReport(null); setError(`โหลดรายการอัปโหลดไม่ได้ — ${data?.error || `HTTP ${res.status}`}`); return }
       // Mirror the server's assessCompleteness logic (simplified — only counts what we need)
       let videoCount = 0, soundCount = 0, inFlightCount = 0, failedCount = 0, totalBytes = 0
       for (const u of (data.uploads || [])) {
@@ -1809,7 +1815,16 @@ function MarkUploadDoneCard({ bookingId, bookingCode, onDone }: {
     }
   }
 
-  if (!report) return null
+  if (!report) {
+    if (!error) return null // still loading
+    return (
+      <div className="gf-card p-3 border-l-4 border-red-400 bg-red-50/30 text-xs text-red-700 space-y-1">
+        <div className="text-sm font-medium">Upload Review · Mark as Done</div>
+        <div>{error}</div>
+        <button onClick={load} className="px-2 py-1 border border-red-300 rounded hover:bg-red-50">ลองใหม่</button>
+      </div>
+    )
+  }
 
   return (
     <div className="gf-card p-3 border-l-4 border-green-400 bg-green-50/30 space-y-2">
@@ -1935,12 +1950,22 @@ function BookingConfirmedCard({
     }
   }
 
-  // Diff display — what's assigned vs what's actually on the event.
-  const assigned = new Set((verif?.assignedEmails || booking.assignedEmails).map(e => e.toLowerCase()))
-  const onEvent = new Set((verif?.calendarAttendees || []).map(e => e.toLowerCase()))
-  const missing = Array.from(assigned).filter(e => !onEvent.has(e))
-  const extra = Array.from(onEvent).filter(e => !assigned.has(e))
-  const allInSync = verif && missing.length === 0 && extra.length === 0 && assigned.size > 0
+  // Diff display — who SHOULD be on the event vs who is. maint 2026-11-08: the
+  // expected list is the reconciler's own (crew + Producer + Co-Producer + AGN
+  // directors, calendar-guest-check.ts) — diffing against crew alone flagged every
+  // producer as "extra" and never noticed a missing one.
+  const assignedCrew = verif?.assignedEmails || booking.assignedEmails || []
+  const guests = calendarGuestCheck({
+    assignedEmails: assignedCrew,
+    producerEmail: booking.producerEmail,
+    coProducerEmail: booking.coProducerEmail,
+    directorEmail: booking.directorEmail,
+    director2Email: booking.director2Email,
+    director3Email: booking.director3Email,
+    outletCode: booking.outlet.code,
+  }, verif?.calendarAttendees)
+  const { missing, extra } = guests
+  const allInSync = !!verif && guests.inSync
 
   return (
     <div className="gf-card p-5 border-l-4 border-green-400">
@@ -2014,15 +2039,22 @@ function BookingConfirmedCard({
             <div className="grid grid-cols-[140px_1fr] gap-2">
               <div className="text-gray-500">Assigned crew</div>
               <div className="text-gray-800 break-words">
-                {assigned.size === 0 ? <span className="text-gray-400">none</span> : Array.from(assigned).join(', ')}
-                <span className="text-xs text-gray-400 ml-2">({assigned.size})</span>
+                {assignedCrew.length === 0 ? <span className="text-gray-400">none</span> : assignedCrew.join(', ')}
+                <span className="text-xs text-gray-400 ml-2">({assignedCrew.length})</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-[140px_1fr] gap-2">
+              <div className="text-gray-500" title="ทีมงาน + Producer + Co-Producer (+ ผู้กำกับ เฉพาะ AGN)">Should be invited</div>
+              <div className="text-gray-800 break-words">
+                {guests.expected.length === 0 ? <span className="text-gray-400">none</span> : guests.expected.join(', ')}
+                <span className="text-xs text-gray-400 ml-2">({guests.expected.length})</span>
               </div>
             </div>
             <div className="grid grid-cols-[140px_1fr] gap-2">
               <div className="text-gray-500">Calendar guests</div>
               <div className="text-gray-800 break-words">
-                {onEvent.size === 0 ? <span className="text-gray-400">none</span> : Array.from(onEvent).join(', ')}
-                <span className="text-xs text-gray-400 ml-2">({onEvent.size})</span>
+                {guests.onEvent.length === 0 ? <span className="text-gray-400">none</span> : guests.onEvent.join(', ')}
+                <span className="text-xs text-gray-400 ml-2">({guests.onEvent.length})</span>
               </div>
             </div>
             {missing.length > 0 && (
@@ -2036,13 +2068,13 @@ function BookingConfirmedCard({
             )}
             {extra.length > 0 && (
               <div className="px-3 py-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                <strong>{extra.length} extra guest{extra.length === 1 ? '' : 's'} on calendar</strong> (not in assigned list): {extra.join(', ')}
+                <strong>{extra.length} extra guest{extra.length === 1 ? '' : 's'} on calendar</strong> (not crew / producer / co-producer): {extra.join(', ')}
               </div>
             )}
             {allInSync && (
               <div className="px-3 py-2 rounded bg-green-50 border border-green-200 text-sm text-green-700 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                ✓ All {assigned.size} crew {assigned.size === 1 ? 'is' : 'are'} on the calendar
+                ✓ All {guests.expected.length} guest{guests.expected.length === 1 ? ' is' : 's are'} on the calendar
               </div>
             )}
           </div>

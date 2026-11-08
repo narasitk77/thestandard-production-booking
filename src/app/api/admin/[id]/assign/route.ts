@@ -20,6 +20,7 @@ import { format } from 'date-fns'
 import { getToken } from 'next-auth/jwt'
 import { resolveAssignPatch } from '@/lib/assign-patch'
 import { logAudit, diffBooking } from '@/lib/audit'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function POST(
   request: NextRequest,
@@ -64,7 +65,7 @@ export async function POST(
     if (existing.deletedAt) {
       return NextResponse.json({ error: 'Booking is deleted — restore it first' }, { status: 409 })
     }
-    // v1.281 — CANCELLED is terminal (booking-status.ts); the sanctioned revival
+    // v1.282 — CANCELLED is terminal (booking-status.ts); the sanctioned revival
     // is /restore → REQUESTED. Without this, a direct POST turned a cancelled
     // shoot into ASSIGNED (nextStatus below falls through to ASSIGNED) and mailed
     // the crew. Same guard approve has had since v1.54.1.
@@ -80,7 +81,7 @@ export async function POST(
       ? existing.status
       : 'ASSIGNED'
 
-    // v1.281 — compare-and-swap on the status we decided from: a cancel (or an
+    // v1.282 — compare-and-swap on the status we decided from: a cancel (or an
     // approve) landing between the read above and this write must not be
     // overwritten. Not matched → P2025 → 409, same contract as approve.
     const booking = await prisma.booking.update({
@@ -95,7 +96,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
       },
     }).catch((e: any) => {
       if (e?.code === 'P2025') return null
@@ -108,7 +109,7 @@ export async function POST(
       )
     }
 
-    // v1.281 — ใครจัดทีม เมื่อไร · เดิมเส้นนี้ไม่เขียน audit เลย ⇒ ขั้น REQUESTED → ASSIGNED
+    // v1.282 — ใครจัดทีม เมื่อไร · เดิมเส้นนี้ไม่เขียน audit เลย ⇒ ขั้น REQUESTED → ASSIGNED
     // ไม่มีร่องรอยใน audit_logs ตั้งแต่ 22 พ.ค. (ตรวจรายงานการใช้งาน 5 พ.ย. 2569)
     // เขียนทุกครั้งแม้ทีมไม่เปลี่ยน — ปุ่ม "ส่งอีเมล" ซ้ำก็เป็นการกระทำที่ต้องรู้ว่าใครกด
     // `emailRequested` = แอดมิน *ขอ* ให้ส่ง ไม่ใช่ "ส่งถึงแล้ว" (ผลส่งจริงอยู่ใน response)
@@ -246,6 +247,9 @@ export async function POST(
           locationName: booking.locationName,
           producer: booking.producer,
           producerEmail: booking.producerEmail,
+          // Co-Producer = guest + description line (same gap as approve/reconciler)
+          coProducer: booking.coProducer,
+          coProducerEmail: booking.coProducerEmail,
           directorEmail: booking.directorEmail,
           director2Email: booking.director2Email,
           director3Email: booking.director3Email,

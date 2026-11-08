@@ -3,7 +3,7 @@ import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { requireAdmin } from '@/lib/session'
 import { prisma } from '@/lib/db'
 import { logAudit } from '@/lib/audit'
-import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { removeCancelledBookingEvent } from '@/lib/calendar-reconcile'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { clearBookingOT } from '@/lib/ot-sync'
 
@@ -17,9 +17,9 @@ export const dynamic = 'force-dynamic'
  * for clearing test queues without burning the episode-ID sequence slots or
  * the audit trail the way the hard delete (admin/[id]/delete) does.
  *
- * Side effects mirror a cancel: the Google Calendar event is removed
- * best-effort (a hidden booking must not keep a live event) and auto-OT rows
- * are cleared. Restore via POST /api/admin/[id]/undelete.
+ * Side effects mirror a cancel: the Google Calendar event is removed (the id
+ * is cleared only on a confirmed delete; failures are retried by the reconcile
+ * sweep) and auto-OT rows are cleared. Restore via POST /api/admin/[id]/undelete.
  */
 export async function POST(
   _request: NextRequest,
@@ -36,11 +36,6 @@ export async function POST(
   if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (booking.deletedAt) return NextResponse.json({ error: 'Already deleted' }, { status: 409 })
 
-  if (booking.calendarEventId) {
-    deleteCalendarEvent(booking.calendarEventId).catch(e =>
-      console.warn(`[soft-delete] calendar event delete failed: ${e}`)
-    )
-  }
   // v1.149 — mirror the cancel flows: the Sheet row must not keep showing a
   // live-looking Status + a now-dead Calendar Event ID (col W) for a hidden
   // booking — PMDC's Airtable sync merges Service Jobs by that event id, so a
@@ -62,9 +57,11 @@ export async function POST(
     where: { id },
     data: {
       deletedAt: new Date(),
-      // The event is gone (or going) — drop the pointer so a later restore +
-      // calendar-resync creates a fresh one instead of patching a dead id.
-      calendarEventId: null,
+      // calendarEventId is NOT nulled here: removeCancelledBookingEvent (below)
+      // clears it only once Google confirms the delete. Blindly nulling it was
+      // how a failed delete left the event on every crew calendar with nothing
+      // pointing back to it. Sync status is still reset as before (undelete
+      // does not recreate the event — Re-sync by hand).
       calendarSyncStatus: null,
       calendarSyncError: null,
     },
@@ -78,6 +75,9 @@ export async function POST(
     bookingCode: booking.bookingCode,
     fromStatus: booking.status,
   })
+  // Google delete LAST and not awaited (googleapis has no timeout). Never throws;
+  // a failure keeps the id + FAILED and the reconcile sweep retries + alerts ops.
+  if (booking.calendarEventId) void removeCancelledBookingEvent(id, booking.calendarEventId)
 
   return NextResponse.json({ ok: true })
 }

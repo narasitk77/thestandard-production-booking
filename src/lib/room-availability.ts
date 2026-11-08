@@ -35,6 +35,7 @@ import { bookingDisplayName } from './display'
 // ฟอร์มแก้ไขเก็บ "ชื่อสถานที่" ไม่ใช่ id — แปลงด้วยตัวเดียวกับที่ create/PATCH ใช้
 // ห้ามให้ฝั่งหน้าเว็บเดาเอง ไม่งั้นจะมีกฎแปลงชื่อ→ห้อง เกิดขึ้นเป็นตัวที่สอง
 import { resolveLocationId } from './location-resolve'
+import { EPISODE_ORDER } from './episode-order'
 
 /** สถานะของห้องที่ถามมา */
 export type RoomAvailability =
@@ -161,7 +162,7 @@ export async function checkRoomAvailability(input: RoomAvailabilityInput): Promi
       program: { select: { name: true } },
       outlet: { select: { code: true } },
       episodes: {
-        orderBy: { sequence: 'asc' as const },
+        orderBy: EPISODE_ORDER,
         select: { title: true, program: { select: { name: true } } },
       },
     },

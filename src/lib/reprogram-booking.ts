@@ -21,6 +21,7 @@ import { progSegmentForId } from './episode-id'
 import { parseEpisodeId, generateEpisodeId, formatShootDateForId } from './episode-id'
 import { getProgram } from './data'
 import type { EpisodeIdChange } from './id-migration'
+import { EPISODE_ORDER } from './episode-order'
 
 export type ReprogramPlan =
   | { ok: false; error: string }
@@ -48,7 +49,7 @@ export async function planReprogram(
     include: {
       outlet: true,
       program: { select: { code: true } },
-      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true } } } },
     },
   })
   if (!booking) return { ok: false, error: 'Booking not found' }

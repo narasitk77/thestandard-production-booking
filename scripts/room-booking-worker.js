@@ -59,7 +59,10 @@ async function runOnce() {
       ` ย้ายห้อง=${(j.wrongRoomReleased || []).length} จองใหม่=${(j.booked || []).length}` +
       ` ค้างปลดไม่ได้=${(j.staleStuck || []).length} ล้ม=${(j.failed || []).length}` +
       // code ก่อน: ใบที่ "ห้องไม่ว่าง" ยังไม่มี bookingNo → เดิมพิมพ์ว่าง ๆ ว่า "ค้าง: " ไม่รู้ว่าใบไหน
-      ((j.staleStuck || []).length ? ` | ค้าง: ${j.staleStuck.map(s => [s.code, s.bookingNo].filter(Boolean).join('/')).join(',')}` : ''),
+      ((j.staleStuck || []).length ? ` | ค้าง: ${j.staleStuck.map(s => [s.code, s.bookingNo].filter(Boolean).join('/')).join(',')}` : '') +
+      // ใบ "ห้องไม่ว่าง" รอลองใหม่ 6 ชม. — ไม่อยู่ใน "ค้าง" แล้ว ต้องมีบรรทัดของตัวเอง ไม่งั้นหายจาก log
+      ` รอห้อง=${(j.conflictWaiting || []).length}` +
+      ((j.conflictWaiting || []).length ? ` (${j.conflictWaiting.join(',')})` : ''),
     )
   } catch (err) {
     console.error('[room-booking] run failed:', err?.message || err)

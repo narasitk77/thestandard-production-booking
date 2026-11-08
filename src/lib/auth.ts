@@ -12,7 +12,23 @@ const INITIAL_ADMINS = (process.env.INITIAL_ADMIN_EMAILS || 'narasit.k@thestanda
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean)
 
+// maint 2026-11-08 — refresh tokens that just failed, so the next request does
+// not hit Google again. Needed in memory because a server-side getServerSession
+// cannot write the JWT cookie back (App Router): whatever this callback returns
+// is lost until /api/auth/session runs, so the old cookie — still carrying the
+// expired access token AND the dead refresh token — retried on EVERY request
+// (prod 2026-11-05: 278 `invalid_grant` in 72 h, 142 in one hour).
+// invalid_grant = revoked/expired for good → never retry (until restart);
+// anything else (network, 5xx) → retry after RETRY_MS.
+// ponytail: per-container map; capped crudely, fine for a few hundred staff.
+const RETRY_MS = 5 * 60 * 1000
+const failedRefresh = new Map<string, number>() // refreshToken → retry-at (Infinity = dead)
+
 async function refreshAccessToken(token: any) {
+  const retryAt = failedRefresh.get(token.refreshToken)
+  if (retryAt !== undefined && Date.now() < retryAt) {
+    return { ...token, refreshToken: retryAt === Infinity ? undefined : token.refreshToken, accessTokenError: 'RefreshAccessTokenError' }
+  }
   try {
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -34,10 +50,15 @@ async function refreshAccessToken(token: any) {
       refreshToken: refreshed.refresh_token ?? token.refreshToken,
       accessTokenError: undefined,
     }
-  } catch (error) {
-    console.error('Google access token refresh failed:', error)
+  } catch (error: any) {
+    const dead = error?.error === 'invalid_grant'
+    if (failedRefresh.size > 1000) failedRefresh.clear()
+    failedRefresh.set(token.refreshToken, dead ? Infinity : Date.now() + RETRY_MS)
+    console.error(`Google access token refresh failed (${dead ? 'refresh token revoked — not retrying; user must sign in again for Gmail send' : `retry in ${RETRY_MS / 60000} min`}):`, error)
     return {
       ...token,
+      // dropped once the cookie is rewritten, so the jwt callback stops trying
+      refreshToken: dead ? undefined : token.refreshToken,
       accessTokenError: 'RefreshAccessTokenError',
     }
   }

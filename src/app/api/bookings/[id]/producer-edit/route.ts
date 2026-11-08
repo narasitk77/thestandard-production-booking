@@ -29,7 +29,7 @@ import { FIELD_LABELS, fmt, diffEditable } from '@/lib/producer-edit-fields'
 import { isValidHHMM } from '@/lib/shoot-window'
 // v1.150.1 — post-approval location edits must flow to the calendar event and
 // the _SHOOT.txt marker (same recipe as the admin PATCH's live-edit path).
-import { updateCalendarEventDetails } from '@/lib/google-calendar'
+import { pushCalendarDetails } from '@/lib/calendar-reconcile'
 import { resyncRoomForBooking, roomScheduleChanges } from '@/lib/room-booking-sync'
 import { refreshShootMarker } from '@/lib/shoot-marker'
 import { hasDriveCredentials } from '@/lib/google-drive'
@@ -181,8 +181,9 @@ export async function PATCH(
     // PATCH (a sync blip must never fail the save; nightly jobs backstop).
     if (locationOnly && fieldChanges.locationName) {
       if (booking.calendarEventId) {
-        updateCalendarEventDetails(booking.calendarEventId, booking).catch(e =>
-          console.error('[producer-edit] calendar details update failed (non-fatal):', e?.message || e))
+        // never throws; a failed patch marks the row FAILED (red chip) and the
+        // reconciler retries it with sendUpdates 'all' — it used to vanish into a log line
+        void pushCalendarDetails(booking.calendarEventId, booking)
       }
       if (hasDriveCredentials()) {
         refreshShootMarker(booking).catch(e =>

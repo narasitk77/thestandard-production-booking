@@ -16,6 +16,7 @@ import {
 } from '@/lib/google-drive'
 import { getDriveLink } from '@/lib/drive-links'
 import { isDriveAccessError } from '@/lib/drive-access'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
         // Drive "program / รายการ" folder layer via bookingShowName().
         program: { select: { name: true } },
         episodes: {
-          orderBy: { sequence: 'asc' },
+          orderBy: EPISODE_ORDER,
           select: { id: true, episodeId: true, title: true, sequence: true, program: { select: { name: true } } },
         },
       },

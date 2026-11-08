@@ -103,6 +103,7 @@ DONE_RE = re.compile(r"[A-Za-z]=\d|\] skipped: ")   # `] skipped:` = บรร�
 NOT_DONE_RE = re.compile(r"worker started|running merge|next run in"
                          r"|\] page \d+ offset="        # footage-integrity ระหว่างรอบ
                          r"|\bINCOMPLETE\b|=FAILED\b"    # จบแต่บอกเองว่าไม่ครบ
+                         r"|\bTRUNCATED\b"               # calendar-reconcile ชนเพดาน = ท้ายคิวไม่ได้ตรวจ (2026-11-08)
                          r"|prune off|inaccessible")     # บรรทัดตอนสตาร์ต / ล้มที่แต่งตัวเป็น skip
 BAD_RE = re.compile(
     r"run failed|no activity for|route error|\] [45]\d\d:"
@@ -750,8 +751,19 @@ def main():
         data = json.loads(body)
         workers = data.get("workers", [])
     except Exception:
+        data = {}
         workers = []
         lines.append(f"⚠️ /api/health-summary ตอบ HTTP {status} แต่อ่าน JSON ไม่ได้: {body[:120]}")
+
+    # 2026-11-08 — evaluateWorkers() throw (DB สะดุด) → route ตอบ 503 {ok:false,error} ที่ไม่มี workers
+    # เดิมได้ workers=[] โดยไม่มีบรรทัดเตือน แล้วรอบเช้าประกาศ "✅ ปกติ 0/0" = เช็กไม่ได้แต่รายงานว่าปกติ
+    # workers ว่าง/ไม่ใช่ลิสต์ = เราเช็ก worker ไม่ได้รอบนี้ (ไม่ใช่ "ไม่มี worker")
+    if not lines and (data.get("error") or not isinstance(workers, list) or not workers):
+        self_fail("health-summary error")
+        lines.append(f"⚠️ /api/health-summary ตอบ HTTP {status} แต่ไม่มีรายชื่อ worker — เช็ก worker ไม่ได้รอบนี้"
+                     + (f": {str(data.get('error'))[:120]}" if data.get("error") else ""))
+    if not isinstance(workers, list):
+        workers = []
 
     if status not in (200, 503) and not lines:
         lines.append(f"⚠️ /api/health-summary ตอบ HTTP {status} (คาด 200 หรือ 503)")
@@ -870,7 +882,7 @@ def selftest():
         f.write(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 3600))
                 + " [info] [CCDScheduledTasks] Spawning new session for scheduled task probook-nightly-check { x }\n")
 
-    sim = {"down": False, "footage404": False}
+    sim = {"down": False, "footage404": False, "healthErr": False}
 
     class Resp:
         def __init__(self, status, body):
@@ -888,6 +900,8 @@ def selftest():
         if sim["down"]:
             raise urllib.error.URLError("simulated DNS failure")
         if "/api/health-summary" in url:
+            if sim["healthErr"]:   # evaluateWorkers() throw → 503 {ok:false,error} ไม่มี workers
+                raise urllib.error.HTTPError(url, 503, "x", {}, io.BytesIO(b'{"ok":false,"error":"db blip"}'))
             return Resp(200, json.dumps({"workers": [{"key": "w", "enabled": True, "lastTickAgoSec": 60}]}))
         if "/api/version" in url:
             return Resp(200, json.dumps({"version": "v-selftest"}))
@@ -938,6 +952,14 @@ def selftest():
     sim["down"] = False
     g["net_down"] = lambda: sim["down"]
     print("ok (a2) prod-down -> outbox + exit 1")
+
+    # (a3) health-summary ตอบ 503 {ok:false,error} (DB สะดุด) → ต้องดัง ไม่ใช่ "✅ ปกติ 0/0"
+    jobs(None)
+    sim["healthErr"] = True
+    code, out = run()
+    assert code == 1 and "เช็ก worker ไม่ได้รอบนี้" in out and "db blip" in out and "✅" not in out, (code, out)
+    sim["healthErr"] = False
+    print("ok (a3) health-summary error -> loud + exit 1, no ✅ 0/0")
 
     # (b) outbox ค้างจากรอบก่อน → ส่งซ้ำครั้งเดียว · รอบถัดไปที่ส่งถึงแล้ว → ล้าง
     jobs("simulated delivery failure")
@@ -1042,6 +1064,7 @@ def selftest():
               "[footage-integrity] done boxes=12 ok=10 issues=1 waiting=1 unreadable=0 nobox=0 docs=on INCOMPLETE",
               "[landing-prune] LANDING_PRUNE_ENABLED=0 — noon prune off.",
               "[lark-export] archive=FAILED file=x.json rows=3",
+              "[calendar-reconcile] checked=200 ok=200 patched=0 created=0 failed=0 TRUNCATED — ยังมีใบที่ไม่ได้ตรวจในรอบนี้ (cap=200)",
               "[video-merge] skipped: Production Team landing empty / inaccessible"):
         assert not is_done(l), l
     print("ok (f) only a worker's own run-summary line counts as a recovery")

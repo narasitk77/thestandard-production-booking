@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { ArrowLeft, Loader2, Search } from 'lucide-react'
 import UploadSection from '@/app/_components/booking/UploadSection'
 import { categoryCardClass, AdBadge } from '@/app/_components/StatusPill'
+import { fetchBookingList, addDaysStr } from '@/lib/booking-list'
+import { todayBangkokStr } from '@/lib/bangkok-day'
 
 interface BookingRow {
   id: string
@@ -86,6 +88,9 @@ function UploadPage() {
   const [search, setSearch] = useState('')
   // v1.85 — per-booking upload status for the "ยังไม่อัป / อัปบางกล้อง / ครบ" badge
   const [uploadStatus, setUploadStatus] = useState<Record<string, { epSlots: number; flatCams: number; files: number }>>({})
+  // maint 2026-11-08 — list-mode retry + "this list is capped" note (bug-classes §2/§4)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [capNote, setCapNote] = useState('')
 
   useEffect(() => {
     fetch('/api/me')
@@ -126,19 +131,32 @@ function UploadPage() {
     // list before the effect re-fires with the correct admin scope.
     if (!meLoaded) return
     setLoading(true)
+    setCapNote('')
     const isAdmin = me?.role === 'ADMIN'
-    const urls = isAdmin
+    const tomorrow = addDaysStr(todayBangkokStr(), 1)
+    // maint 2026-11-08 — `fetch(u).then(r => r.json())` + `d.bookings || []` turned a
+    // 401/500 into "ยังไม่มี booking ที่ถูก assign" (bug-classes §2); fetchBookingList throws.
+    // Admin CONFIRMED used to be the newest-100 by shootDate DESC — with routine
+    // rows CONFIRMED out to Mar 2027 those 100 were all far-future and today's
+    // shoot (the one that needs footage) fell off the list (§4). Split at today:
+    // shot up to today newest-first + the soonest upcoming — nothing that showed
+    // before is excluded except the furthest-future overflow, which is now named.
+    const queries: Array<{ label: string; q: Record<string, string> }> = isAdmin
       ? [
-          '/api/bookings?limit=100&status=CONFIRMED',
-          '/api/bookings?limit=100&status=COMPLETED',
+          { label: 'CONFIRMED ที่ถ่ายแล้ว', q: { status: 'CONFIRMED', to: tomorrow, limit: '100' } },
+          { label: 'CONFIRMED ที่จะถึง', q: { status: 'CONFIRMED', from: tomorrow, order: 'asc', limit: '100' } },
+          { label: 'COMPLETED', q: { status: 'COMPLETED', limit: '100' } },
         ]
-      : ['/api/bookings?scope=mine&limit=200']
-    Promise.all(urls.map(u => fetch(u).then(r => r.json())))
+      : [{ label: 'งานของคุณ', q: { scope: 'mine', limit: '200' } }]
+    Promise.all(queries.map(x => fetchBookingList<BookingRow>(x.q)))
       .then(results => {
+        setCapNote(results
+          .map((r, i) => r.truncated ? `${queries[i].label} ${r.bookings.length}/${r.total}` : '')
+          .filter(Boolean).join(' · '))
         const seen = new Set<string>()
         const merged: BookingRow[] = []
         for (const d of results) {
-          for (const b of (d.bookings || []) as BookingRow[]) {
+          for (const b of d.bookings) {
             if (seen.has(b.id)) continue
             seen.add(b.id)
             if (b.status === 'CONFIRMED' || b.status === 'COMPLETED') merged.push(b)
@@ -155,9 +173,9 @@ function UploadPage() {
             .catch(() => {})
         }
       })
-      .catch(e => setError(String(e?.message || e)))
+      .catch(e => { setBookings([]); setError(`โหลดรายการงานไม่ได้ — ${String(e?.message || e)}`) })
       .finally(() => setLoading(false))
-  }, [requestedBookingId, meLoaded, me?.role])
+  }, [requestedBookingId, meLoaded, me?.role, reloadKey])
 
   // Match by id — right after a list→booking navigation, `bookings` still holds
   // the whole list for one render, so bookings[0] would be the newest booking,
@@ -185,7 +203,8 @@ function UploadPage() {
         </p>
       </div>
 
-      {error && (
+      {/* list mode renders its error (with ลองใหม่) in place of the list below */}
+      {error && requestedBookingId && (
         <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400">{error}</div>
       )}
 
@@ -266,9 +285,24 @@ function UploadPage() {
               {me?.role === 'ADMIN' ? 'แสดงทุก booking ที่ CONFIRMED/COMPLETED' : 'แสดงเฉพาะที่คุณถูก assign'}
             </span>
           </div>
+          {meLoaded && !me && (
+            <div className="gf-card p-2 text-xs text-amber-800 bg-amber-50 border-amber-200">
+              โหลดข้อมูลผู้ใช้ไม่ได้ — แสดงแบบ &quot;งานของคุณ&quot; ไว้ก่อน (แอดมินจะไม่เห็นทุกงาน) ลองรีเฟรชหน้า
+            </div>
+          )}
+          {capNote && !loading && !error && (
+            <div className="gf-card p-2 text-xs text-amber-800 bg-amber-50 border-amber-200">
+              ⚠️ รายการนี้ไม่ครบ (โหลดได้/ทั้งหมด: {capNote}) — ค้นหาด้านบนค้นได้เฉพาะที่โหลดมา ถ้าไม่เจอ เปิดจากหน้าใบจองแล้วกด Upload
+            </div>
+          )}
 
           {loading ? (
             <div className="gf-card p-12 text-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" /></div>
+          ) : error ? (
+            <div className="gf-card p-6 text-center text-sm text-red-600 space-y-2">
+              <div>{error}</div>
+              <button onClick={() => setReloadKey(k => k + 1)} className="text-xs px-3 py-1.5 border border-red-300 rounded hover:bg-red-50">ลองใหม่</button>
+            </div>
           ) : filtered.length === 0 ? (
             <div className="gf-card p-8 text-center text-sm text-gray-500">
               {bookings.length === 0

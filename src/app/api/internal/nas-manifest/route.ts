@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
+import { internalSecretAllowed } from '@/lib/internal-auth'
 import { ingestNasManifest, type NasManifest } from '@/lib/nas-sync'
 
 export const dynamic = 'force-dynamic'
@@ -12,16 +13,9 @@ export const maxDuration = 120 // diffs every landing folder against Drive
  * emails. Auth: shared secret header (x-nas-secret) or admin session — same
  * pattern as the other internal endpoints.
  */
-function expectedSecret(): string | undefined {
-  return process.env.NAS_MANIFEST_SECRET?.trim()
-    || process.env.NEXTAUTH_SECRET?.trim()
-    || process.env.AUTH_SECRET?.trim()
-}
-
+// maint 2026-11-08 — any configured secret, constant-time (was first-set chain + ===).
 async function isAllowed(request: NextRequest): Promise<boolean> {
-  const secret = expectedSecret()
-  const headerSecret = request.headers.get('x-nas-secret')?.trim()
-  if (secret && headerSecret === secret) return true
+  if (internalSecretAllowed(request, 'x-nas-secret', ['NAS_MANIFEST_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) return true
   const session = await getSession()
   return session?.role === 'ADMIN'
 }

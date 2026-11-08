@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
-import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
+import { cleanStr, dateOrNull, decOrNull, inEnum, InvalidMoneyError } from '@/lib/admin-parse'
 import { PaymentStatus, RentalStatus } from '@prisma/client'
 import { resolveOutletId } from '@/lib/rental-helpers'
 
@@ -50,6 +50,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     })
     return NextResponse.json({ rental })
   } catch (e: any) {
+    // A bad amount is the user's typo, not a server fault — 400 with the Thai message.
+    if (e instanceof InvalidMoneyError) return NextResponse.json({ error: e.message }, { status: 400 })
     console.error('PATCH /api/admin/rentals/[id] error:', e)
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })
   }

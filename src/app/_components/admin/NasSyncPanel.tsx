@@ -60,7 +60,7 @@ export default function NasSyncPanel() {
             </div>
           )}
           <div className="text-[11px] text-gray-500">
-            ข้อมูล NAS ล่าสุด: {report.nasAt ? new Date(report.nasAt).toLocaleString('th-TH') : '—'} · 🔄 กำลังส่ง <b>{report.sendingCount}</b> · ✅ ส่งครบ <b>{report.sentCount}</b> / {report.folders.length}
+            ข้อมูล NAS ล่าสุด: {report.nasAt ? new Date(report.nasAt).toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }) : '—'} · 🔄 กำลังส่ง <b>{report.sendingCount}</b> · ✅ ส่งครบ <b>{report.sentCount}</b> / {report.folders.length}
           </div>
           <div className="space-y-1">
             {report.folders.map(f => (

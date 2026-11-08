@@ -2,9 +2,10 @@
 
 import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { formatDisplayDate } from '@/lib/utils'
+import { fetchBookingList, addDaysStr } from '@/lib/booking-list'
 import { OUTLETS } from '@/lib/data'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { Download, Search, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react'
@@ -99,13 +100,48 @@ export default function DashboardPage() {
   const [sheetSearch, setSheetSearch] = useState('')
   const [sheetFilter, setSheetFilter] = useState<'all' | 'active' | 'unbooked'>('all')
 
-  useEffect(() => {
+  // maint 2026-11-08 — `.then(r => r.json()).then(d => setBookings(d.bookings || []))`
+  // with no .catch: a 401/502 left every chart at "No data" and the table at "No
+  // bookings match" (bug-classes §2), and the newest-500 cap was never mentioned (§4/§7).
+  const [listError, setListError] = useState('')
+  const [listTotal, setListTotal] = useState<number | null>(null)
+  const loadBookings = useCallback(() => {
     setLoading(true)
-    fetch('/api/bookings?limit=500&withCrew=1')
-      .then(r => r.json())
-      .then(d => setBookings(d.bookings || []))
+    setListError('')
+    fetchBookingList<Booking>({ limit: '500', withCrew: '1' })
+      .then(r => { setBookings(r.bookings); setListTotal(r.total) })
+      .catch(e => setListError(e?.message || String(e)))
       .finally(() => setLoading(false))
   }, [])
+  useEffect(() => { loadBookings() }, [loadBookings])
+
+  // Team Workload reads its OWN range from the API. It used to filter the
+  // newest-500 above client-side, so any range older than those 500 rows read
+  // as "No assignments" and the CSV undercounted with no hint. Same start-date
+  // rule as before ([from, to] inclusive on shootDate); only the source changed.
+  const TEAM_LIMIT = 2000
+  const [teamBookings, setTeamBookings] = useState<Booking[] | null>(null)
+  const [teamLoading, setTeamLoading] = useState(true)
+  const [teamError, setTeamError] = useState('')
+  const [teamCap, setTeamCap] = useState<{ shown: number; total: number } | null>(null)
+  const teamSeq = useRef(0)
+  const loadTeam = useCallback(() => {
+    const seq = ++teamSeq.current // a slower response for an older range must not land last
+    setTeamLoading(true)
+    setTeamError('')
+    const q: Record<string, string> = { order: 'asc', limit: String(TEAM_LIMIT) }
+    if (rangeFrom) q.from = rangeFrom
+    if (rangeTo) q.to = addDaysStr(rangeTo, 1)
+    fetchBookingList<Booking>(q)
+      .then(r => {
+        if (seq !== teamSeq.current) return
+        setTeamBookings(r.bookings)
+        setTeamCap(r.truncated ? { shown: r.bookings.length, total: r.total } : null)
+      })
+      .catch(e => { if (seq === teamSeq.current) { setTeamBookings(null); setTeamError(e?.message || String(e)) } })
+      .finally(() => { if (seq === teamSeq.current) setTeamLoading(false) })
+  }, [rangeFrom, rangeTo])
+  useEffect(() => { loadTeam() }, [loadTeam])
 
   const fetchSheetMonitor = useCallback((refresh = false) => {
     setSheetLoading(true)
@@ -162,7 +198,7 @@ export default function DashboardPage() {
       ? ['REQUESTED', 'CONFIRMED', 'COMPLETED']
       : ['CONFIRMED', 'COMPLETED']
 
-    const inRange = bookings.filter(b => {
+    const inRange = (teamBookings || []).filter(b => {
       const d = b.shootDate.slice(0, 10)
       if (rangeFrom && d < rangeFrom) return false
       if (rangeTo && d > rangeTo) return false
@@ -191,7 +227,7 @@ export default function DashboardPage() {
       ? b.totalHours - a.totalHours
       : b.bookingCount - a.bookingCount)
     return rows
-  }, [bookings, rangeFrom, rangeTo, includeRequested, teamSort])
+  }, [teamBookings, rangeFrom, rangeTo, includeRequested, teamSort])
 
   const teamTotals = useMemo(() => ({
     bookings: teamData.reduce((s, r) => s + r.bookingCount, 0),
@@ -200,6 +236,9 @@ export default function DashboardPage() {
   }), [teamData])
 
   const exportTeamCSV = () => {
+    // an export of a failed / capped load is a file that looks complete — refuse / say so
+    if (teamError || teamLoading || !teamBookings) { alert(`ยังโหลดข้อมูลช่วงนี้ไม่สำเร็จ — ${teamError || 'กำลังโหลด ลองอีกครั้งในไม่กี่วินาที'}`); return }
+    if (teamCap && !confirm(`ช่วงนี้มี ${teamCap.total} ใบ แต่โหลดได้ ${teamCap.shown} ใบ — CSV จะไม่ครบ ส่งออกต่อไหม?\n(ทางที่ดีคือเลือกช่วงให้แคบลง)`)) return
     const header = ['Email', 'Bookings Assigned', 'Total Hours', 'Avg Hours per Booking', 'Date Range', 'Production IDs']
     const rows = teamData.map(r => [
       r.email,
@@ -222,6 +261,7 @@ export default function DashboardPage() {
   }
 
   const exportBookingsCSV = () => {
+    if (listError) { alert(`โหลดรายการงานไม่สำเร็จ — ${listError}`); return }
     const header = ['Date', 'Call Time', 'Wrap', 'Status', 'Outlet', 'Program', 'Shoot Type', 'Producer', 'Episodes', 'Assigned', 'Production ID']
     const rows = filtered.map(b => [
       b.shootDate.slice(0, 10),
@@ -261,7 +301,9 @@ export default function DashboardPage() {
     })
   }, [bookings, statusFilter, outletFilter, search])
 
-  const total = bookings.length
+  // the server's count, not the length of a capped slice
+  const total = listTotal ?? bookings.length
+  const listCapped = listTotal !== null && bookings.length < listTotal
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
@@ -272,6 +314,17 @@ export default function DashboardPage() {
           <p className="text-xs text-gray-500 mt-0.5">
             Org-wide booking metrics, team workload, and exports · {total} total · {filtered.length} shown
           </p>
+          {listError && (
+            <div className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 inline-flex items-center gap-2">
+              โหลดรายการงานไม่ได้ — {listError}
+              <button onClick={loadBookings} className="underline">ลองใหม่</button>
+            </div>
+          )}
+          {listCapped && !listError && (
+            <div className="mt-1 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">
+              ⚠️ กราฟ ตาราง และ Export Bookings ใช้ {bookings.length} ใบล่าสุดตามวันถ่าย จาก {listTotal} ใบ — ใบที่เก่ากว่านั้นไม่ได้นับ
+            </div>
+          )}
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={exportBookingsCSV} className="ops-btn-secondary ops-btn-sm">
@@ -293,6 +346,8 @@ export default function DashboardPage() {
           <div className="text-sm font-medium text-gray-700 mb-3">Bookings by Status</div>
           {loading ? (
             <div className="h-64 flex items-center justify-center text-sm text-gray-400">Loading…</div>
+          ) : listError ? (
+            <div className="h-64 flex items-center justify-center text-sm text-red-600">โหลดไม่ได้ — ดูข้อความด้านบน</div>
           ) : statusData.length === 0 ? (
             <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
           ) : (
@@ -340,6 +395,8 @@ export default function DashboardPage() {
           <div className="text-sm font-medium text-gray-700 mb-3">Bookings by Outlet</div>
           {loading ? (
             <div className="h-64 flex items-center justify-center text-sm text-gray-400">Loading…</div>
+          ) : listError ? (
+            <div className="h-64 flex items-center justify-center text-sm text-red-600">โหลดไม่ได้ — ดูข้อความด้านบน</div>
           ) : outletData.length === 0 ? (
             <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
           ) : (
@@ -419,7 +476,18 @@ export default function DashboardPage() {
           </span>
         </div>
 
-        {teamData.length === 0 ? (
+        {teamCap && !teamError && (
+          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-3">
+            ⚠️ ช่วงนี้มี {teamCap.total} ใบ แต่โหลดได้ {teamCap.shown} ใบแรก — ตัวเลขและ CSV ไม่ครบ เลือกช่วงให้แคบลง
+          </div>
+        )}
+        {teamLoading && !teamBookings ? (
+          <div className="py-10 text-center text-sm text-gray-400">Loading…</div>
+        ) : teamError ? (
+          <div className="py-10 text-center text-sm text-red-600">
+            โหลดงานในช่วงนี้ไม่ได้ — {teamError} <button onClick={loadTeam} className="underline ml-1">ลองใหม่</button>
+          </div>
+        ) : teamData.length === 0 ? (
           <div className="py-10 text-center text-sm text-gray-400">
             No assignments in the selected range.
           </div>
@@ -511,6 +579,10 @@ export default function DashboardPage() {
       <div className="ops-card overflow-hidden">
         {loading ? (
           <div className="ops-empty">Loading…</div>
+        ) : listError ? (
+          <div className="ops-empty text-red-600">
+            โหลดรายการงานไม่ได้ — {listError} <button onClick={loadBookings} className="underline ml-1">ลองใหม่</button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="ops-empty">No bookings match these filters.</div>
         ) : (

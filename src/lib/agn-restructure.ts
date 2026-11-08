@@ -33,6 +33,7 @@ import { CANONICAL_MARKER_NAME } from './shoot-marker'
 // unknown folder (and never trashed-as-empty). Names remain the fallback.
 import { getDriveLink, rememberDriveLinks } from './drive-links'
 import { noteResolve } from './id-first-metrics'
+import { EPISODE_ORDER } from './episode-order'
 
 /** A pre-v1.112 box-level marker file ("_SHOOT-<code>.txt"). These must not
  *  survive under their legacy name after the move: the crawler matches
@@ -78,7 +79,7 @@ export async function runAgnRestructure(opts: { dryRun?: boolean; projectId?: st
     select: {
       id: true, driveFolders: true, // v1.157 — id-first recognition + self-heal
       bookingCode: true, status: true, projectId: true, projectName: true, category: true,
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, title: true } },
     },
   })
 

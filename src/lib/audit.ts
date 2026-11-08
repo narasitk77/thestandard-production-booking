@@ -111,7 +111,7 @@ export function diffBooking(
   return diffFields(before, after, EDITABLE_BOOKING_FIELDS)
 }
 
-/** Same shallow diff over any field list (v1.281 — user role/permission edits). */
+/** Same shallow diff over any field list (v1.282 — user role/permission edits). */
 export function diffFields(
   before: Record<string, any>,
   after: Record<string, any>,

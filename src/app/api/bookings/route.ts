@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { myBookingsWhere } from '@/lib/my-bookings-scope'
+import { myBookingsWhere, assignedBookingIdsCI } from '@/lib/my-bookings-scope'
 import { getSession } from '@/lib/session'
 import { autoCompleteBookings } from '@/lib/booking-complete'
 import { createBookingFromPayload } from '@/lib/create-booking'
 import { makeCrewNameResolver, makeProducerNickResolver, shortPersonName } from '@/lib/crew-names'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,6 +27,15 @@ export async function GET(request: NextRequest) {
     // the visible week (not the newest-N), so it's correct for any week + size.
     const from = searchParams.get('from')
     const to = searchParams.get('to')
+    // maint 2026-11-08 — span=1: date/from/to match every day a booking OCCUPIES
+    // (shootDate..shootEndDate), not just its first day. Without it a 3-day shoot
+    // vanished from the room schedule / day views on days 2–3 (ui-5). Opt-in so
+    // Week Plan and every existing caller keep the start-date semantics.
+    const span = searchParams.get('span') === '1'
+    // order=asc → soonest first. The default (shootDate DESC) + `take` hands a
+    // "today / this week" view the FURTHEST-future rows and drops today first
+    // (ui-4, bug-class 4).
+    const order = searchParams.get('order') === 'asc' ? 'asc' as const : 'desc' as const
     const scope = searchParams.get('scope') // 'mine' | 'all' | 'producer'
     // v1.51 — deleted=1 (ADMIN only) lists soft-deleted bookings for the
     // Deleted tab on /admin; every other request filters them out.
@@ -61,7 +71,10 @@ export async function GET(request: NextRequest) {
     const userFilter = scope === 'producer'
       ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
       : scope === 'mine'
-        ? myBookingsWhere(session.email)
+        // maint 2026-11-08 — + the bookings whose assignedEmails spell my address in
+        // another case ('Name.S@…'): Prisma `has` is case-sensitive, so that crew
+        // could upload to the job but never saw it in /my-bookings (bug-class 10)
+        ? myBookingsWhere(session.email, await assignedBookingIdsCI(session.email))
         : {}
 
     // ?cancelRequested=1 — the "ขอยกเลิก" tab: bookings someone asked to cancel
@@ -98,6 +111,21 @@ export async function GET(request: NextRequest) {
         }
       : null
 
+    // span=1 — overlap of [lo, hi) with [shootDate, shootEndDate]. Lives in AND
+    // because userFilter (scope=mine) is itself a top-level OR.
+    const DAY_MS = 86_400_000
+    const lo = span ? (date ? new Date(date) : from ? new Date(from) : null) : null
+    const hi = span ? (date ? new Date(new Date(date).getTime() + DAY_MS) : to ? new Date(to) : null) : null
+    const spanClause = lo || hi
+      ? {
+          AND: [
+            ...(hi ? [{ shootDate: { lt: hi } }] : []),
+            ...(lo ? [{ OR: [{ shootDate: { gte: lo } }, { shootEndDate: { gte: lo } }] }] : []),
+          ],
+        }
+      : null
+    const andClauses = [searchClause, spanClause].filter((c): c is NonNullable<typeof c> => !!c)
+
     const where = {
       ...userFilter,
       deletedAt: showDeleted ? { not: null } : null,
@@ -106,13 +134,13 @@ export async function GET(request: NextRequest) {
       ...(cancelRequested && { cancelRequestedAt: { not: null }, status: { not: 'CANCELLED' as const } }),
       ...(status && { status: status as any }),
       ...(outlet && { outlet: { code: outlet } }),
-      ...(date && { shootDate: new Date(date) }),
-      ...((from || to) && !date && { shootDate: { ...(from && { gte: new Date(from) }), ...(to && { lt: new Date(to) }) } }),
+      ...(!span && date && { shootDate: new Date(date) }),
+      ...(!span && (from || to) && !date && { shootDate: { ...(from && { gte: new Date(from) }), ...(to && { lt: new Date(to) }) } }),
       // v1.144 — ?hasCode=1: only bookings with a Production ID. Filtering here
       // (not client-side after `take`) keeps null-code legacy rows from eating
       // result slots — a post-pagination filter made matches unreachable.
       ...(searchParams.get('hasCode') === '1' && { bookingCode: { not: null } }),
-      ...(searchClause && { AND: [searchClause] }),
+      ...(andClauses.length > 0 && { AND: andClauses }),
     }
 
     const [bookings, total] = await Promise.all([
@@ -121,9 +149,9 @@ export async function GET(request: NextRequest) {
         include: {
           outlet: true,
           program: true,
-          episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+          episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
         },
-        orderBy: [{ shootDate: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ shootDate: order }, { createdAt: order }],
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -164,7 +192,10 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    return NextResponse.json({ bookings: outBookings, total, page, limit })
+    // truncated — rows exist past this page. Read by fetchBookingList
+    // (src/lib/booking-list.ts) so a capped list is never shown as complete.
+    const truncated = (page - 1) * limit + bookings.length < total
+    return NextResponse.json({ bookings: outBookings, total, page, limit, truncated })
   } catch (error) {
     console.error('GET /api/bookings error:', error)
     return NextResponse.json({ error: 'Failed to fetch bookings' }, { status: 500 })

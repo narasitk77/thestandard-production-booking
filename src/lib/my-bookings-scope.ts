@@ -42,8 +42,12 @@ export function isMyBooking(b: MyBookingParty, email: string | null | undefined)
 /**
  * Prisma where-clause ของ `scope=mine` — ต้องให้ผลตรงกับ isMyBooking
  * (เทสล็อกไว้ว่าทุกบทบาทใน isMyBooking มีสาขาใน OR นี้)
+ *
+ * `assignedIds` = ผลของ assignedBookingIdsCI(email) — ส่งมาเมื่อไหร่ใบที่ชื่อครู
+ * เก็บเป็นตัวพิมพ์ใหญ่ปน ('Name.S@…') ถึงจะโผล่ด้วย · ไม่ส่ง = `has` ตรงตัวพิมพ์อย่างเดียว
+ * (มีสิทธิ์อัปโหลดแต่มองไม่เห็นใบ — คลาส 10)
  */
-export function myBookingsWhere(email: string) {
+export function myBookingsWhere(email: string, assignedIds: string[] = []) {
   const me = email.trim().toLowerCase()
   const ci = { equals: me, mode: 'insensitive' as const }
   return {
@@ -52,8 +56,28 @@ export function myBookingsWhere(email: string) {
       { producerEmail: ci },
       { coProducerEmail: ci },
       { assignedEmails: { has: me } },
+      ...(assignedIds.length ? [{ id: { in: assignedIds } }] : []),
     ],
   }
+}
+
+/**
+ * maint 2026-11-08 — ใบที่ฉันอยู่ใน assignedEmails แต่สะกดตัวพิมพ์ต่างจากอีเมลล็อกอิน
+ *
+ * Prisma `has` บน text[] สนตัวพิมพ์ และ cleanEmailList (email-list.ts) ตั้งใจไม่
+ * lowercase ตอนเก็บ (พรอดมีทั้ง sound@ / Sound@) ขณะที่ isMyBooking และ
+ * canUploadToBooking ไม่สนตัวพิมพ์ ⇒ ครูอัปโหลดได้แต่ใบไม่โผล่ใน scope=mine
+ * คืนเฉพาะใบที่ `has` จับไม่ได้ ลิสต์จึงสั้น (ปกติว่าง)
+ */
+export async function assignedBookingIdsCI(email: string): Promise<string[]> {
+  const me = email.trim().toLowerCase()
+  if (!me) return []
+  const { prisma } = await import('./db')
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM bookings
+    WHERE NOT (${me} = ANY("assignedEmails"))
+      AND EXISTS (SELECT 1 FROM unnest("assignedEmails") AS e WHERE lower(trim(e)) = ${me})`
+  return rows.map(r => r.id)
 }
 
 /** ชื่อบทบาทที่นับว่าเป็น "งานของฉัน" — ใช้ในเทสกันสองฝั่งหลุดจากกัน */

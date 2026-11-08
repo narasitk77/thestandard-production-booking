@@ -349,7 +349,10 @@ END $$;
 SQL
 
 echo "==> Seeding database (idempotent)..."
-npx tsx prisma/seed.ts || echo "Seed skipped or already done"
+# The seed is idempotent and exits 0 when it succeeds; a non-zero exit is a real
+# failure (new outlets/programs not written) — say so in a line the Hermes log
+# scan catches (`run failed`) instead of "skipped". Boot continues either way.
+npx tsx prisma/seed.ts || echo "[seed] run failed (exit $?) — boot continues; outlets/programs from src/lib/data.ts may be missing until the next boot"
 
 else
 # ══ WORKER ROLE ═════════════════════════════════════════════════════════════

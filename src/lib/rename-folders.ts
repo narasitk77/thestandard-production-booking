@@ -28,6 +28,7 @@ import { bookingShowName } from './display'
 import { getDriveLink, rememberDriveLinks, type DriveLinkKey } from './drive-links'
 import { noteResolve } from './id-first-metrics'
 import { isAppShapedName } from './folder-integrity'
+import { EPISODE_ORDER } from './episode-order'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
 
@@ -71,7 +72,7 @@ export async function runFolderRename(opts: { dryRun?: boolean } = {}): Promise<
       bookingCode: true, projectId: true, projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, select: { title: true, program: { select: { code: true, name: true } } } },
     },
   })
   const metas: Meta[] = bookings.map(b => ({

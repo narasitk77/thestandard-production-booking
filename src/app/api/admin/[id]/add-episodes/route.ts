@@ -19,7 +19,9 @@ import { requireConsole } from '@/lib/session'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { planEpisodesToLink, type ProjectEp } from '@/lib/link-episodes'
 import { logAudit } from '@/lib/audit'
-import { updateCalendarEventDetails } from '@/lib/google-calendar'
+import { pushCalendarDetails } from '@/lib/calendar-reconcile'
+import { updateBookingRow, joinEpisodeTitles } from '@/lib/google-sheets'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function POST(
   request: NextRequest,
@@ -43,6 +45,14 @@ export async function POST(
       include: { outlet: true, episodes: { select: { episodeId: true, sequence: true } } },
     })
     if (!booking) return NextResponse.json({ error: 'ไม่พบ booking' }, { status: 404 })
+    // Prod behaviour: EPs can still be added to a CANCELLED or soft-deleted booking
+    // (refusing it is pending Nat's decision) — but say so loudly, in the reply and
+    // the audit row, because its calendar event / sheet row are gone or going.
+    const deadWarning = booking.deletedAt
+      ? 'ใบจองนี้ถูกลบแล้ว — เพิ่ม EP ในฐานข้อมูลแล้ว แต่ปฏิทิน/ชีทของใบนี้ไม่ได้ถูกอัปเดต'
+      : booking.status === 'CANCELLED'
+        ? 'ใบจองนี้ถูกยกเลิกแล้ว — เพิ่ม EP ในฐานข้อมูลแล้ว แต่ปฏิทิน/ชีทของใบนี้ไม่ได้ถูกอัปเดต'
+        : null
 
     // Safe path only: Content Agency, where episodes come from the project Sheet.
     if (booking.outlet?.code !== 'AGN' || !booking.projectId) {
@@ -112,7 +122,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
       },
     })
 
@@ -124,17 +134,30 @@ export async function POST(
       entityType: 'Booking',
       entityId: booking.id,
       bookingCode: booking.bookingCode,
-      changes: { episodeIds: created.map(e => e.episodeId), count: created.length },
+      changes: { episodeIds: created.map(e => e.episodeId), count: created.length, ...(deadWarning ? { bookingStatus: booking.status, deleted: !!booking.deletedAt } : {}) },
     })
 
-    // Re-sync the live Google Calendar event so its title + episode list reflect
-    // the added EPs (same fire-and-forget patch the booking PATCH path uses).
-    if (updated?.calendarEventId) {
-      updateCalendarEventDetails(updated.calendarEventId, updated as Parameters<typeof updateCalendarEventDetails>[1])
-        .catch(e => console.error('updateCalendarEventDetails error:', e?.message || e))
+    // Sheet: Episode IDs (col Q) + Episode Titles (col AH) must list the EPs the
+    // booking now has — the twin remove-episodes writes them ("otherwise PMDC still
+    // sees IDs that no longer exist"); this add path never did, so PMDC's Airtable
+    // sync never mapped the added EPs to this Production ID. updateBookingRow never
+    // throws — check its result.
+    if (updated && created.length > 0) {
+      updateBookingRow(updated.bookingCode || updated.id, {
+        episodeIds: updated.episodes.map(e => e.episodeId).join(', '),
+        episodeTitles: joinEpisodeTitles(updated.episodes),
+      }).then(r => {
+        if (r === 'error' || r === 'not-found') console.error(`[add-episodes] sheet Episode IDs/Titles ${r} for ${updated.bookingCode}`)
+      })
     }
 
-    return NextResponse.json({ ok: true, added: created.length, skipped, booking: updated })
+    // Re-sync the live Google Calendar event so its title + episode list reflect
+    // the added EPs. A failed patch marks the booking FAILED (reconciler retries).
+    if (updated?.calendarEventId) {
+      void pushCalendarDetails(updated.calendarEventId, updated as Parameters<typeof pushCalendarDetails>[1])
+    }
+
+    return NextResponse.json({ ok: true, added: created.length, skipped, booking: updated, ...(deadWarning ? { warning: deadWarning } : {}) })
   } catch (e) {
     console.error('POST /api/admin/[id]/add-episodes error:', e)
     return NextResponse.json({ error: 'เพิ่ม episode ไม่สำเร็จ' }, { status: 500 })

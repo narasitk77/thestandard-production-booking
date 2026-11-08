@@ -25,6 +25,9 @@ interface PersonSummary {
   // SUBMITTED + REJECTED — anything that's "in flight, not yet approved".
   // Safe to remove once all clients are on the new field names.
   pendingRecords: number
+  // ids of the SUBMITTED rows counted above — /ot/admin approves exactly these
+  // (what the approver saw), never "whatever is SUBMITTED at click time".
+  submittedRecordIds: string[]
 }
 
 export async function GET(request: NextRequest) {
@@ -56,8 +59,8 @@ export async function GET(request: NextRequest) {
     // qualifying-day logic). "totalRecords" includes both qualifying and
     // non-qualifying entries so the admin sees every record the user logged,
     // not just paid days.
-    type StatusCounts = { total: number; draft: number; submitted: number; approved: number; rejected: number }
-    const emptyCounts = (): StatusCounts => ({ total: 0, draft: 0, submitted: 0, approved: 0, rejected: 0 })
+    type StatusCounts = { total: number; draft: number; submitted: number; approved: number; rejected: number; submittedIds: string[] }
+    const emptyCounts = (): StatusCounts => ({ total: 0, draft: 0, submitted: 0, approved: 0, rejected: 0, submittedIds: [] })
     const personRecordCounts = new Map<string, StatusCounts>()
     for (const r of records) {
       const key = r.userEmail.toLowerCase()
@@ -66,7 +69,7 @@ export async function GET(request: NextRequest) {
       c.total += 1
       switch (r.approvalStatus) {
         case 'DRAFT':     c.draft += 1; break
-        case 'SUBMITTED': c.submitted += 1; break
+        case 'SUBMITTED': c.submitted += 1; c.submittedIds.push(r.id); break
         case 'APPROVED':  c.approved += 1; break
         case 'REJECTED':  c.rejected += 1; break
       }
@@ -114,13 +117,23 @@ export async function GET(request: NextRequest) {
         approvedRecords: c.approved,
         rejectedRecords: c.rejected,
         pendingRecords: c.submitted + c.rejected,
+        submittedRecordIds: c.submittedIds,
       }
     })
 
-    // Include orphan records (entries whose userEmail has no User row)
+    // Include orphan records (entries whose userEmail has no User row — or whose
+    // user is disabled while includeInactive is off). Qualifying days as before,
+    // PLUS anyone with a SUBMITTED row: those used to be listed nowhere, so the
+    // approver could never see them, and "อนุมัติทุกคน" approved them unseen
+    // (maintenance 2026-11-08 — the page now approves only the ids it shows).
     const userEmails = new Set(users.map(u => u.email.toLowerCase()))
-    Array.from(personTotals.entries()).forEach(([email, t]) => {
+    const orphanEmails = new Set([
+      ...Array.from(personTotals.keys()),
+      ...Array.from(personRecordCounts.entries()).filter(([, c]) => c.submitted > 0).map(([e]) => e),
+    ])
+    Array.from(orphanEmails).forEach(email => {
       if (!userEmails.has(email)) {
+        const t = personTotals.get(email) || { wh: 0, wd: 0, amt: 0 }
         const c = personRecordCounts.get(email) || emptyCounts()
         summary.push({
           userId: null,
@@ -140,6 +153,7 @@ export async function GET(request: NextRequest) {
           approvedRecords: c.approved,
           rejectedRecords: c.rejected,
           pendingRecords: c.submitted + c.rejected,
+          submittedRecordIds: c.submittedIds,
         })
       }
     })

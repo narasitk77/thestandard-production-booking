@@ -43,7 +43,9 @@ export async function GET(request: NextRequest) {
     const result = await reconcileRoomBookings({ dryRun, days, max })
     if (!dryRun) {
       recordHeartbeat('room-booking-reconcile',
-        `ค้าง ${result.staleStuck.length} · ปลดแล้ว ${result.staleCancelled.length} · จองใหม่ ${result.booked.length}`,
+        // ล้ม + รอห้อง ต้องอยู่ในโน้ต — ใบ CONFLICT ไม่อยู่ใน "ค้าง" แล้ว (ย้ายไป conflictWaiting)
+        `ค้าง ${result.staleStuck.length} · ปลดแล้ว ${result.staleCancelled.length} · จองใหม่ ${result.booked.length}` +
+        ` · ล้ม ${result.failed.length} · รอห้อง ${result.conflictWaiting.length}`,
       ).catch(() => {})
     }
     return NextResponse.json(result)

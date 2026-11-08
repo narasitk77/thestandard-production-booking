@@ -11,9 +11,12 @@ import { LOCATIONS, LOCATION_GROUPS } from '@/lib/locations'
 import { effectiveWrap } from '@/lib/shoot-window'
 import { bookingDisplayName } from '@/lib/display'
 import StatusPill, { statusDotClass, AdBadge } from '@/app/_components/StatusPill'
+import { fetchBookingList, bookingDays, heldMinutesOnDay } from '@/lib/booking-list'
 
 interface Row {
   id: string
+  shootDate: string
+  shootEndDate?: string | null
   status: string
   category?: string | null
   callTime: string
@@ -56,19 +59,24 @@ export default function RoomSchedulePage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [capped, setCapped] = useState('')
 
+  // maint 2026-11-08 (ui-5) — span=1: every booking that OCCUPIES this day, not
+  // just the ones that start on it. `date=` alone is shootDate equality, so day
+  // 2–3 of a 3-day Studio 2 shoot showed "ว่างทั้งวัน" — inviting a double booking
+  // in the very view people use to check that.
   useEffect(() => {
     let dead = false
     setLoading(true)
     setError('')
-    fetch(`/api/bookings?date=${date}&limit=300`, { credentials: 'include' })
-      .then(r => r.json())
-      .then(d => {
+    setCapped('')
+    fetchBookingList<Row>({ date, span: '1', limit: '300' })
+      .then(r => {
         if (dead) return
-        if (d.error) { setError(d.error); setRows([]); return }
-        setRows((d.bookings || []).filter((b: Row) => b.status !== 'CANCELLED'))
+        setRows(r.bookings.filter(b => b.status !== 'CANCELLED'))
+        if (r.truncated) setCapped(`⚠️ วันนี้มีงาน ${r.total} ใบ แสดงได้ ${r.bookings.length} — ตารางนี้อาจไม่ครบ`)
       })
-      .catch(e => { if (!dead) setError(e?.message || 'โหลดไม่สำเร็จ') })
+      .catch(e => { if (!dead) { setRows([]); setError(e?.message || 'โหลดไม่สำเร็จ') } })
       .finally(() => { if (!dead) setLoading(false) })
     return () => { dead = true }
   }, [date])
@@ -120,15 +128,17 @@ export default function RoomSchedulePage() {
           </button>
         )}
         <span className="text-xs text-gray-400 ml-auto">
-          {new Date(date + 'T00:00:00').toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          {/* ui-19 — Gregorian year like the rest of the app (plain th-TH printed 2569) */}
+          {new Date(date + 'T00:00:00').toLocaleDateString('th-TH-u-ca-gregory', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </span>
       </div>
 
       {error && <div className="gf-card p-3 text-sm text-red-600 border-l-4 border-red-400">{error}</div>}
+      {capped && <div className="gf-card p-3 text-sm text-amber-700 border-l-4 border-amber-400">{capped}</div>}
 
       {loading ? (
         <div className="gf-card p-12 text-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" /></div>
-      ) : (
+      ) : error ? null : (
         <div className="gf-card p-4 space-y-5">
           {/* Hour ruler — same left-spacer + relative/absolute layout as the room
               rows below, so labels line up exactly with the gridlines. */}
@@ -162,12 +172,18 @@ export default function RoomSchedulePage() {
                         <div className="absolute inset-0 flex items-center pl-2 text-[11px] text-green-600">ว่างทั้งวัน</div>
                       ) : (
                         bookings.map(b => {
-                          const start = Math.max(WINDOW_START_MIN, Math.min(WINDOW_END_MIN, toMinutes(b.callTime) ?? WINDOW_START_MIN))
+                          // A multi-day booking holds the room continuously (day 1
+                          // from call, middle days all day, last day until wrap).
+                          const call = toMinutes(b.callTime) ?? WINDOW_START_MIN
                           const { end: wrap } = effectiveWrap(b.callTime, b.estimatedWrap)
-                          const end = Math.max(start + 20, Math.min(WINDOW_END_MIN, toMinutes(wrap) ?? start + 20))
+                          const held = heldMinutesOnDay(b, date, call, toMinutes(wrap) ?? call + 20) ?? { start: call, end: call + 20 }
+                          const start = Math.max(WINDOW_START_MIN, Math.min(WINDOW_END_MIN, held.start))
+                          const end = Math.max(start + 20, Math.min(WINDOW_END_MIN, held.end))
                           const left = ((start - WINDOW_START_MIN) / WINDOW_SPAN) * 100
                           const width = Math.max(2, ((end - start) / WINDOW_SPAN) * 100)
-                          const label = `[${b.outlet.code}] ${bookingDisplayName(b)} · ${b.callTime}${b.estimatedWrap ? `→${b.estimatedWrap}` : ''}`
+                          const { start: d1, end: dN } = bookingDays(b)
+                          const multi = d1 !== dN ? ` · ถ่ายต่อเนื่อง ${d1} → ${dN}` : ''
+                          const label = `[${b.outlet.code}] ${bookingDisplayName(b)} · ${b.callTime}${b.estimatedWrap ? `→${b.estimatedWrap}` : ''}${multi}`
                           return (
                             <Link key={b.id} href={`/dashboard/${b.id}`} title={label}
                               className={`absolute top-0.5 bottom-0.5 rounded px-1.5 flex items-center gap-1 overflow-hidden text-white text-[10px] font-medium hover:brightness-95 transition ${statusDotClass(b.status)}`}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
-import { cleanStr, decOrNull, dateOrNull, intOr } from '@/lib/admin-parse'
+import { cleanStr, decOrNull, dateOrNull, intOr, InvalidMoneyError } from '@/lib/admin-parse'
 import { MONTH_RE, isBatchEditable, batchTotal } from '@/lib/purchase-batch'
 
 export const dynamic = 'force-dynamic'
@@ -98,6 +98,8 @@ export async function POST(request: NextRequest) {
     logAudit({ actorEmail: session.email, action: 'purchase.item.create', entityType: 'Purchase', entityId: purchase.id, changes: { month, item } })
     return NextResponse.json({ purchase }, { status: 201 })
   } catch (e: any) {
+    // A bad amount is the user's typo, not a server fault — 400 with the Thai message.
+    if (e instanceof InvalidMoneyError) return NextResponse.json({ error: e.message }, { status: 400 })
     console.error('POST /api/admin/purchases error:', e)
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })
   }

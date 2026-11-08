@@ -15,6 +15,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
+import { parseTimeToMinutes, dateOffsetDays } from '@/lib/ot-calc'
+import { todayBangkokStr } from '@/lib/bangkok-day'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +41,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const url = new URL(request.url)
-  const month = url.searchParams.get('month') || new Date().toISOString().slice(0, 7)
+  const month = url.searchParams.get('month') || todayBangkokStr().slice(0, 7)
   const range = monthRange(month)
   if (!range) return NextResponse.json({ error: 'month ต้องเป็น YYYY-MM' }, { status: 400 })
   const { start, end } = range
@@ -67,15 +69,34 @@ export async function GET(request: NextRequest) {
       select: {
         userEmail: true, createdAt: true, updatedAt: true,
         submittedAt: true, approvalStatus: true, approvedAt: true,
-        hours: true, bookingId: true,
+        date: true, endDate: true, startTime: true, endTime: true, bookingId: true,
       },
     })
     const otPeople = new Set(ot.map(r => r.userEmail.toLowerCase()))
     const openedOt = new Set(
       events.filter(e => e.path === '/ot').map(e => e.email.toLowerCase()),
     )
-    // "แก้ร่าง" = แถวถูกเขียนทับหลังสร้าง (เผื่อ 5 วิ กัน timestamp ชนกันตอน create)
-    const edited = ot.filter(r => r.updatedAt.getTime() > r.createdAt.getTime() + 5000)
+    // "แก้ร่าง" = คนแก้แถวเองหลังสร้าง (เผื่อ 5 วิ กัน timestamp ชนกันตอน create)
+    // · นับเฉพาะแถว manual: แถว auto (bookingId) แก้ไม่ได้ (PATCH ตอบ 400) — updatedAt
+    //   ของมันขยับเพราะส่ง/อนุมัติ/ตีกลับเท่านั้น
+    // · ไม่นับแถวที่ updatedAt คือเวลากดส่ง/อนุมัติพอดี (updateMany ของสองอันนั้นขยับ updatedAt)
+    // ที่ยังนับเกิน: แถว manual ที่ถูกตีกลับ (reject ไม่มี timestamp ของตัวเอง)
+    const near = (a: Date, b: Date | null) => !!b && Math.abs(a.getTime() - b.getTime()) <= 5000
+    const isEdited = (r: (typeof ot)[number]) =>
+      r.bookingId === null
+      && r.updatedAt.getTime() > r.createdAt.getTime() + 5000
+      && !near(r.updatedAt, r.submittedAt) && !near(r.updatedAt, r.approvedAt)
+    // ชั่วโมงจากเวลาเริ่ม-จบจริง — ฟิลด์ legacy `hours` (@default(0)) ไม่มีโค้ดไหนเขียนแล้ว
+    // เดิมรายงานนี้รวม `hours` จึงได้ 0 ทุกเดือน
+    const hoursOf = (r: (typeof ot)[number]) => {
+      const s = parseTimeToMinutes(r.startTime)
+      const e = parseTimeToMinutes(r.endTime)
+      if (s === null || e === null) return 0
+      const day = r.date.toISOString().slice(0, 10)
+      const mins = dateOffsetDays(day, r.endDate ? r.endDate.toISOString() : null) * 1440 + e - s
+      return mins > 0 ? mins / 60 : 0
+    }
+    const edited = ot.filter(isEdited)
     const submitted = ot.filter(r => r.submittedAt !== null)
     const approved = ot.filter(r => r.approvalStatus === 'APPROVED')
     const rejected = ot.filter(r => r.approvalStatus === 'REJECTED')
@@ -89,10 +110,10 @@ export async function GET(request: NextRequest) {
         email,
         drafts: mine.length,
         openedPage: openedOt.has(email),
-        edited: mine.filter(r => r.updatedAt.getTime() > r.createdAt.getTime() + 5000).length,
+        edited: mine.filter(isEdited).length,
         submitted: mine.filter(r => r.submittedAt !== null).length,
         approved: mine.filter(r => r.approvalStatus === 'APPROVED').length,
-        hours: Math.round(mine.reduce((s, r) => s + (r.hours || 0), 0) * 10) / 10,
+        hours: Math.round(mine.reduce((s, r) => s + hoursOf(r), 0) * 10) / 10,
       }
     }).sort((a, b) => b.drafts - a.drafts)
 
@@ -116,7 +137,7 @@ export async function GET(request: NextRequest) {
           submitted: submitted.length,
           approved: approved.length,
           rejected: rejected.length,
-          hoursApproved: Math.round(approved.reduce((s, r) => s + (r.hours || 0), 0) * 10) / 10,
+          hoursApproved: Math.round(approved.reduce((s, r) => s + hoursOf(r), 0) * 10) / 10,
         },
         // คนที่เปิดหน้า /ot แต่ไม่มีร่างเลย — สนใจแต่ไม่มีอะไรให้ทำ (หรือหาไม่เจอ)
         openedButNoDraft: Array.from(openedOt).filter(e => !otPeople.has(e)),

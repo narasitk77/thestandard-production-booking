@@ -68,7 +68,7 @@ async function runOnce() {
     if (!res.ok) { console.error(`[landing] ${res.status}: ${body.slice(0, 500)}`); return }
     const j = JSON.parse(body)
     if (j.skipped) { console.log(`[landing] skipped: ${j.reason}`); return }
-    console.log(`[landing] ${j.targetDay}: created=${j.created} removedPastEmpty=${j.removedPastEmpty} keptRecent=${j.keptRecent} errors=${(j.createErrors || 0) + (j.removeErrors || 0)}`)
+    console.log(`[landing] ${j.targetDay}: created=${j.created} removedPastEmpty=${j.removedPastEmpty} keptRecent=${j.keptRecent} keptNoFootage=${(j.keptNoFootage || []).length} errors=${(j.createErrors || 0) + (j.removeErrors || 0)}`)
   } catch (err) {
     console.error('[landing] run failed:', err?.message || err)
   } finally {
@@ -87,7 +87,9 @@ async function pruneOnce() {
     const j = JSON.parse(body)
     if (j.skipped) { console.log(`[landing-prune] skipped: ${j.reason}`); return }
     const stale = (j.keptWithFiles || []).length + (j.keptManual || []).length
-    console.log(`[landing-prune] ${j.today}: trashed=${j.trashed} keptToday=${j.keptToday} stale=${stale} keptFuture=${(j.keptFuture || []).length} errors=${j.errors}`)
+    console.log(`[landing-prune] ${j.today}: trashed=${j.trashed} keptToday=${j.keptToday} stale=${stale} keptFuture=${(j.keptFuture || []).length} noFootage=${(j.keptNoFootage || []).length} chat=${j.chatDelivered} errors=${j.errors}`)
+    // chatDelivered: null = nothing to say · false = a notice was due and no chat channel took it
+    if (j.chatDelivered === false) console.error('[landing-prune] run failed: stale/no-footage notice reached no chat channel (Discord/Lark)')
   } catch (err) {
     console.error('[landing-prune] run failed:', err?.message || err)
   } finally {

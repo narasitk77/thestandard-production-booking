@@ -5,6 +5,7 @@ import Link from 'next/link'
 import BackButton from '@/app/_components/BackButton'
 import { Download, Loader2, Pencil, Save, X, UserPlus, ShieldOff, Shield, Trash2, RotateCcw, Users, CheckCircle2, Inbox, FileSignature, Eye } from 'lucide-react'
 import { WEEKDAY_THRESHOLD_HOURS } from '@/lib/ot-calc'
+import { todayBangkokStr } from '@/lib/bangkok-day'
 
 interface PersonSummary {
   userId: string | null
@@ -25,14 +26,19 @@ interface PersonSummary {
   rejectedRecords?: number
   pendingRecords: number   // legacy alias = submitted + rejected; kept for safety
   approvedRecords: number
+  submittedRecordIds?: string[]  // the SUBMITTED rows counted above — what bulk approve sends
 }
 
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
 
-function currentMonth(): string { return new Date().toISOString().slice(0, 7) }
+// Bangkok month (see /ot page) — UTC was last month until 07:00 on the 1st.
+function currentMonth(): string { return todayBangkokStr().slice(0, 7) }
 function prevMonth(): string {
-  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1)
-  return d.toISOString().slice(0, 7)
+  // Arithmetic on the Bangkok 'YYYY-MM' — a local Date + setMonth + toISOString
+  // jumped TWO months back between 00:00 and 06:59 Bangkok (UTC still yesterday).
+  const [y, m] = currentMonth().split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 2, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 function monthLabel(yyyymm: string): string {
   const [y, m] = yyyymm.split('-')
@@ -154,59 +160,55 @@ export default function OTAdminPage() {
     else setSelected(new Set(selectableRows.map(s => s.userId!)))
   }
 
-  // Bulk approve the selected people. For each selected user with
-  // SUBMITTED records this month, fire a {email, month} approve. We do
-  // these in parallel — the approve endpoint is idempotent so a partial
-  // failure leaves clean state.
-  const approveSelected = async () => {
-    const targets = summary.filter(s => s.userId && selected.has(s.userId!) && (s.submittedRecords ?? s.pendingRecords) > 0)
-    if (targets.length === 0) return
-    const totalRows = targets.reduce((a, s) => a + (s.submittedRecords ?? s.pendingRecords), 0)
-    if (!confirm(`อนุมัติ OT ${totalRows} รายการจาก ${targets.length} คน (${monthLabel(month)})?`)) return
+  // Approve exactly the SUBMITTED rows this page rendered (maintenance 2026-11-08).
+  // {email, month} / allSubmitted approved whatever was SUBMITTED at click time —
+  // incl. rows resubmitted after the page loaded, which the approver never saw.
+  // The server approves the ids still SUBMITTED and reports the rest; a short
+  // count is said out loud, never shown as success.
+  const approveIds = async (ids: string[]) => {
     setBulkActing(true)
     setError('')
-    try {
-      const results = await Promise.allSettled(targets.map(s =>
-        fetch('/api/ot/admin/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: s.email, month }),
-        }).then(r => r.ok ? r.json() : r.json().then(d => { throw new Error(d.error) }))
-      ))
-      const failed = results.filter(r => r.status === 'rejected')
-      if (failed.length > 0) {
-        setError(`${failed.length} จาก ${results.length} คน อนุมัติไม่สำเร็จ — ลองอีกครั้ง`)
-      }
-      setSelected(new Set())
-      load()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setBulkActing(false)
-    }
-  }
-
-  // One-click "approve every SUBMITTED row in this month across all users"
-  const approveEveryone = async () => {
-    if (inbox.pendingRows === 0) return
-    if (!confirm(`อนุมัติ OT ทั้งหมด ${inbox.pendingRows} รายการของ ${inbox.pendingPeople} คน (${monthLabel(month)})?\n\nการกระทำนี้จะ snapshot ลายเซ็นของคุณใส่ทุกแถว`)) return
-    setBulkActing(true)
-    setError('')
+    let msg = ''
     try {
       const res = await fetch('/api/ot/admin/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month, allSubmitted: true }),
+        body: JSON.stringify({ recordIds: ids }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setSelected(new Set())
-      load()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `อนุมัติไม่สำเร็จ (HTTP ${res.status})`)
+      const approved = Number(data.approved) || 0
+      if (approved !== ids.length) {
+        msg = `อนุมัติได้ ${approved} จาก ${ids.length} รายการ — ${ids.length - approved} รายการเปลี่ยนสถานะระหว่างที่เปิดหน้านี้ (ไม่ได้อนุมัติ) ตารางโหลดใหม่แล้ว ตรวจอีกครั้ง`
+      }
     } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setBulkActing(false)
+      msg = e.message || 'อนุมัติไม่สำเร็จ'
     }
+    setSelected(new Set())
+    // load() clears the error banner first — reload, THEN say what was not approved
+    // (before, the shortfall/failure message was wiped by the reload it triggered).
+    await load()
+    if (msg) setError(prev => (prev ? `${msg} · ${prev}` : msg))
+    setBulkActing(false)
+  }
+  const submittedIdsOf = (rows: PersonSummary[]) => rows.flatMap(s => s.submittedRecordIds ?? [])
+
+  // Bulk approve the selected people — every SUBMITTED row of theirs shown on this page.
+  const approveSelected = async () => {
+    const targets = summary.filter(s => s.userId && selected.has(s.userId!) && (s.submittedRecords ?? s.pendingRecords) > 0)
+    const ids = submittedIdsOf(targets)
+    if (ids.length === 0) return
+    if (!confirm(`อนุมัติ OT ${ids.length} รายการจาก ${targets.length} คน (${monthLabel(month)})?`)) return
+    await approveIds(ids)
+  }
+
+  // One-click "approve every SUBMITTED row shown for this month" — the summary lists
+  // every person with a SUBMITTED row (no-account / disabled ones as orphan rows).
+  const approveEveryone = async () => {
+    const ids = submittedIdsOf(summary)
+    if (ids.length === 0) return
+    if (!confirm(`อนุมัติ OT ทั้งหมด ${ids.length} รายการของ ${inbox.pendingPeople} คน (${monthLabel(month)})?\n\nการกระทำนี้จะ snapshot ลายเซ็นของคุณใส่ทุกแถว`)) return
+    await approveIds(ids)
   }
 
   const startEdit = (s: PersonSummary) => {

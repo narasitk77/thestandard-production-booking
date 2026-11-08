@@ -24,17 +24,19 @@ import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { bookingDisplayName } from '@/lib/display'
 import { createBookingFromPayload } from '@/lib/create-booking'
 import { logAudit } from '@/lib/audit'
-import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { removeCancelledBookingEvent } from '@/lib/calendar-reconcile'
+import { updateBookingRow } from '@/lib/google-sheets'
 import { releaseRoomForBooking } from '@/lib/room-booking-sync'
 import { clearBookingOT } from '@/lib/ot-sync'
 import { McpToolError, type McpRegistry } from './server'
+import { EPISODE_ORDER } from '../episode-order'
 
 export { mcpActorEmail } from '@/lib/mcp/auth'
 
 const bookingInclude = {
   outlet: true,
   program: true,
-  episodes: { orderBy: { sequence: 'asc' as const }, include: { program: { select: { code: true, name: true } } } },
+  episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
 }
 
 function compactBooking(b: any) {
@@ -466,12 +468,22 @@ export function buildMcpRegistry(ctx: { scope?: McpKeyScope; label?: string } = 
       async cancel_booking(args) {
         const b = await findBookingByCode(String(args.code))
         if (b.status === 'CANCELLED') return { cancelled: false, note: 'Already cancelled', bookingCode: b.bookingCode }
-        await prisma.booking.update({ where: { id: b.id }, data: { status: 'CANCELLED' } })
-        if (b.calendarEventId) {
-          deleteCalendarEvent(b.calendarEventId).catch(e =>
-            console.warn(`[mcp cancel] calendar event delete failed: ${e?.message || e}`))
-        }
-        clearBookingOT(b.id).catch(() => {})
+        // A COMPLETED shoot is still cancelled here (prod behaviour — the web
+        // DELETE refuses it; whether MCP should too is Nat's call), but loudly:
+        // the reply carries `warning`, the audit row `wasCompleted`. clearBookingOT
+        // keeps the crew's signed OT in closed months (ot-sync), so finalised pay
+        // records survive; every other OT row of the booking is still deleted.
+        const wasCompleted = b.status === 'COMPLETED'
+        // CAS: a concurrent auto-complete / edit between the read and this write → refuse, don't overwrite
+        const cas = await prisma.booking.updateMany({
+          where: { id: b.id, status: b.status, deletedAt: null },
+          data: { status: 'CANCELLED' },
+        })
+        if (cas.count === 0) throw new McpToolError('Booking status changed while cancelling — read it again and retry')
+        // Local cleanup first (none of it waits on Google), the Calendar delete
+        // last: googleapis has no request timeout, so a hung call must not hold
+        // up OT / room / audit.
+        clearBookingOT(b.id).catch(e => console.error(`[mcp cancel] clearBookingOT failed for ${b.bookingCode}:`, e?.message || e))
         // v1.222 — ยกเลิกทางไหนก็ต้องคืนห้อง ไม่งั้นห้องค้างโดยไม่มีใครรู้
         releaseRoomForBooking(b.id, 'mcp-cancel')
         logAudit({
@@ -482,9 +494,28 @@ export function buildMcpRegistry(ctx: { scope?: McpKeyScope; label?: string } = 
           bookingCode: b.bookingCode,
           fromStatus: b.status,
           toStatus: 'CANCELLED',
-          changes: { via: 'mcp', reason: args.reason ?? null },
+          changes: { via: 'mcp', reason: args.reason ?? null, ...(wasCompleted ? { wasCompleted: true } : {}) },
         })
-        return { cancelled: true, bookingCode: b.bookingCode, previousStatus: b.status }
+        if (wasCompleted) console.warn(`[mcp cancel] ${b.bookingCode}: cancelled a COMPLETED booking (shoot already happened) via MCP`)
+        // Awaited only because the reply reports them. Sheet: web DELETE writes it
+        // too; without it the Producer Dashboard kept saying CONFIRMED. Event: id
+        // cleared only once Google confirms; a failure stays for the reconcile sweep.
+        const [sheet, calendarEventDeleted] = await Promise.all([
+          updateBookingRow(b.bookingCode || b.id, { status: 'CANCELLED', calendarEventId: '' }),
+          b.calendarEventId ? removeCancelledBookingEvent(b.id, b.calendarEventId) : Promise.resolve(null),
+        ])
+        if (sheet === 'error') console.error(`[mcp cancel] sheet write failed for ${b.bookingCode}`)
+        const warnings = [
+          wasCompleted && 'This booking was COMPLETED — the shoot already happened. It is now CANCELLED anyway (the web app refuses this). ' +
+            'Its crew OT rows were deleted, except signed ones in already-closed months (kept); signed OT in an OPEN month is gone — check /ot/admin. ' +
+            'If this was a mistake, an admin can force-status it back to COMPLETED.',
+          calendarEventDeleted === false && 'Calendar event could NOT be deleted yet — it is still on the crew calendars; the reconciler retries every 10 minutes and alerts ops if it keeps failing.',
+        ].filter(Boolean)
+        return {
+          cancelled: true, bookingCode: b.bookingCode, previousStatus: b.status,
+          ...(warnings.length ? { warning: warnings.join(' · ') } : {}),
+          ...(sheet === 'error' ? { sheetWarning: 'Producer Dashboard sheet row was not updated (Sheets error).' } : {}),
+        }
       },
 
       async list_reminders() {

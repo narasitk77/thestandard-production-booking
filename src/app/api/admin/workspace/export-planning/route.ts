@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { buildCSVHeader, rowToCSV, csvFilename } from '@/lib/csv'
 import { bkkAt, durationHours } from '@/lib/planning'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
       status: { not: 'CANCELLED' },
       ...(from || to ? { shootDate } : {}),
     },
-    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' } } },
+    include: { outlet: true, program: true, episodes: { orderBy: EPISODE_ORDER } },
     orderBy: { shootDate: 'asc' },
   })
 

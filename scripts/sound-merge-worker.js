@@ -44,7 +44,8 @@ async function runOnce() {
     }
     const json = JSON.parse(text)
     if (json.skipped) {
-      console.log(`[sound-merge] skipped: ${json.reason}`)
+      // maint 2026-11-08 — a skipped real run merged nothing (env unset / no _SOUND-STAGING): Hermes' BAD_RE must see it
+      console.error(`[sound-merge] run failed: skipped — ${json.reason}`)
     } else {
       console.log(`[sound-merge] bookings=${json.bookings} staged=${json.staged} merged=${json.merged} errors=${json.errors}`)
     }

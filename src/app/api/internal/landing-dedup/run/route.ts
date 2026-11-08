@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { dedupeLandingFolders } from '@/lib/landing-dedup'
 import { logAudit } from '@/lib/audit'
+import { runGuard, MERGE_LOCK_MAX_MS } from '@/lib/merge-lock'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -9,7 +10,9 @@ export const maxDuration = 300
 // v1.146 review fix — same reentrancy guard as video-merge/sound-merge: a
 // proxy-timeout-driven retry must not overlap two real (non-dryRun) passes,
 // since the underlying Drive folder primitives are non-atomic.
-let landingDedupRunning = false
+// maint 2026-11-08 — the guard EXPIRES (a boolean latched forever on one hung Drive call; see runGuard), but only
+// after MERGE_LOCK_MAX_MS: hang recovery, never an overlap of a slow live pass.
+const guard = runGuard('landing-dedup', MERGE_LOCK_MAX_MS)
 
 /**
  * GET /api/internal/landing-dedup/run[?dryRun=1]
@@ -42,11 +45,10 @@ export async function GET(request: NextRequest) {
   const dryRunParam = new URL(request.url).searchParams.get('dryRun')
   const dryRun = !(dryRunParam === '0' || dryRunParam === 'false')
 
+  let token = 0
   if (!dryRun) {
-    if (landingDedupRunning) {
-      return NextResponse.json({ error: 'landing-dedup กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
-    }
-    landingDedupRunning = true
+    token = guard.start()
+    if (!token) return NextResponse.json({ error: 'landing-dedup กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
   }
   try {
     const result = await dedupeLandingFolders({ dryRun })
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/internal/landing-dedup/run error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
   } finally {
-    if (!dryRun) landingDedupRunning = false
+    if (token) guard.end(token)
   }
 }
 

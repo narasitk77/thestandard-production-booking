@@ -36,6 +36,7 @@ mock.module('../google-drive', {
     moveFileToFolder: (id: string, t: string, r: string) => drive.moveFileToFolder(id, t, r),
     ensureFolderPath: (root: string, segs: string[]) => drive.ensureFolderPath(root, segs),
     isFolderAlive: (id: string) => drive.isFolderAlive(id),
+    folderLiveness: (id: string) => drive.folderLiveness(id), // video-merge's stored-id check (unknown ≠ dead)
     hasDriveCredentials: () => true,
     findEpisodeFolderUrls: async () => ({}),
     SOUND_STAGING_DIR: '_SOUND-STAGING',

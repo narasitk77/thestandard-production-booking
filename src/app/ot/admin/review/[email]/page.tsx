@@ -6,6 +6,7 @@ import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, Lock, Send, Download } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { summarizeDay, formatTHB, dateOffsetDays, type DaySummary } from '@/lib/ot-calc'
+import { todayBangkokStr } from '@/lib/bangkok-day'
 
 type ApprovalStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
 
@@ -25,10 +26,16 @@ interface OTRecord {
   approvedByEmail: string | null
   rejectionNote: string | null
   bookingId: string | null
+  updatedAt: string
 }
 
+// What approve sends: the row as this page loaded it. The route refuses a row that
+// was edited/resubmitted since (same id, new hours) instead of signing unseen numbers.
+const stampOf = (r: OTRecord) => ({ id: r.id, updatedAt: r.updatedAt })
+
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
-function currentMonth(): string { return new Date().toISOString().slice(0, 7) }
+// Bangkok month (see /ot page) — UTC was last month until 07:00 on the 1st.
+function currentMonth(): string { return todayBangkokStr().slice(0, 7) }
 function monthLabel(yyyymm: string): string {
   const [y, m] = yyyymm.split('-')
   return `${THAI_MONTHS[parseInt(m) - 1]} ${y}`
@@ -99,17 +106,23 @@ export default function OTReviewPage() {
   const totalAmount = useMemo(() => days.reduce((a, d) => a + (d.summary.qualifies ? d.summary.otAmountTHB : 0), 0), [days])
 
   const approveOne = async (id: string) => {
+    const rec = records.find(r => r.id === id)
+    if (!rec) return
     setActing(true)
     setError('')
     try {
       const res = await fetch('/api/ot/admin/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordIds: [id] }),
+        body: JSON.stringify({ recordIds: [stampOf(rec)] }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      load()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `อนุมัติไม่สำเร็จ (HTTP ${res.status})`)
+      // load() clears the error banner first — reload, THEN say what was not approved.
+      await load()
+      if (data.approved !== 1) {
+        setError('ไม่ได้อนุมัติรายการนี้ — ถูกแก้ไข/ส่งใหม่/เปลี่ยนสถานะระหว่างที่เปิดหน้านี้ ตารางโหลดใหม่แล้ว ตรวจอีกครั้ง')
+      }
     } catch (e: any) { setError(e.message) }
     finally { setActing(false) }
   }
@@ -120,14 +133,19 @@ export default function OTReviewPage() {
     setActing(true)
     setError('')
     try {
+      // Approve exactly the rows on screen — {email, month} approved whatever was
+      // SUBMITTED at click time, incl. rows resubmitted after this page loaded.
       const res = await fetch('/api/ot/admin/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, month }),
+        body: JSON.stringify({ recordIds: submittedRecords.map(stampOf) }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      load()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `อนุมัติไม่สำเร็จ (HTTP ${res.status})`)
+      await load()
+      if (data.approved !== submittedRecords.length) {
+        setError(`อนุมัติได้ ${data.approved ?? 0} จาก ${submittedRecords.length} รายการ — บางรายการถูกแก้ไข/ส่งใหม่/เปลี่ยนสถานะระหว่างที่เปิดหน้านี้ (ไม่ได้อนุมัติ) ตารางโหลดใหม่แล้ว ตรวจอีกครั้ง`)
+      }
     } catch (e: any) { setError(e.message) }
     finally { setActing(false) }
   }

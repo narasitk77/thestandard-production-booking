@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
+import { internalSecretAllowed } from '@/lib/internal-auth'
+import { logAudit } from '@/lib/audit'
 import { mergeDriveLinks } from '@/lib/drive-links'
 import {
   findEpisodeFolderUrls, listChildFolders, findChildFolder, hasDriveCredentials, SOUND_STAGING_DIR,
@@ -11,6 +13,7 @@ import {
   buildEpisodeFolderName, episodeLeadUsesId, folderNameMatchesCode, isPhotoAlbumBooking,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -29,14 +32,22 @@ const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '
  */
 export async function POST(request: NextRequest) {
   try {
-    // Auth: admin session OR the internal shared secret (same one the NAS
-    // agent uses) — this is an id-linkage tool, it cannot read footage.
-    const headerSecret = request.headers.get('x-internal-secret')?.trim()
-    const wantSecret = process.env.NAS_MANIFEST_SECRET?.trim() || process.env.NEXTAUTH_SECRET?.trim()
-    if (!headerSecret || !wantSecret || headerSecret !== wantSecret) {
+    // Auth: admin session OR an internal shared secret. It cannot read footage,
+    // but it DOES choose where video-merge moves a booking's footage (box id),
+    // so every applied change is audited below.
+    // maint 2026-11-08 — constant-time + any configured secret (was first-set
+    // `NAS || NEXTAUTH` with !==, so NEXTAUTH_SECRET silently stopped working the
+    // day NAS_MANIFEST_SECRET was set). NAS_MANIFEST_SECRET stays accepted for
+    // now (documented ops path) although it also lives on the DSM box — see
+    // internal-auth.ts; dropping it is Nat's call.
+    let actor = 'internal-secret'
+    if (!internalSecretAllowed(request, 'x-internal-secret', ['NAS_MANIFEST_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) {
       const session = await requireAdmin()
       if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+      actor = session.email
     }
+    const audit = (b: { id: string; driveFolders: unknown }, code: string, mode: 'set' | 'backfill', next: unknown) =>
+      logAudit({ actorEmail: actor, action: 'drive.links_backfill', entityType: 'Booking', entityId: b.id, bookingCode: code, changes: { mode, before: b.driveFolders ?? null, after: next } })
     const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
     if (!root || !hasDriveCredentials()) return NextResponse.json({ error: 'Drive not configured' }, { status: 400 })
 
@@ -60,7 +71,10 @@ export async function POST(request: NextRequest) {
         if (!b) { out.push({ code: it.code, note: 'booking not found' }); continue }
         const next = mergeDriveLinks(b.driveFolders, it.links as any)
         if (!next) { out.push({ code: it.code, note: 'no change (junk ids are dropped)' }); continue }
-        if (apply) await prisma.booking.update({ where: { id: b.id }, data: { driveFolders: next } })
+        if (apply) {
+          await prisma.booking.update({ where: { id: b.id }, data: { driveFolders: next } })
+          await audit(b, it.code, 'set', next)
+        }
         out.push({ code: it.code, links: next })
       }
       return NextResponse.json({ ok: true, dryRun: !apply, mode: 'set', results: out })
@@ -78,7 +92,7 @@ export async function POST(request: NextRequest) {
         outlet: { select: { code: true } },
         program: { select: { name: true } },
         // program.code is needed by isPhotoAlbumBooking (v1.155 photo backfill).
-        episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
       },
     })
 
@@ -131,7 +145,10 @@ export async function POST(request: NextRequest) {
         }
         const next = mergeDriveLinks(b.driveFolders, patch)
         if (!next) { results.push({ code, note: 'no change' }); continue }
-        if (apply) await prisma.booking.update({ where: { id: b.id }, data: { driveFolders: next } })
+        if (apply) {
+          await prisma.booking.update({ where: { id: b.id }, data: { driveFolders: next } })
+          await audit(b, code, 'backfill', next)
+        }
         stored++
         results.push({ code, links: next })
       } catch (e: any) {

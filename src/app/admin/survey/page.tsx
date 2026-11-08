@@ -48,14 +48,16 @@ export default function AdminSurveyPage() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saved, setSaved] = useState('')
 
-  const load = useCallback(async () => {
+  // keepDraft — maint 2026-11-08 (ui-18): toggling open/closed reloads the stats
+  // but must not throw away wording the admin typed and hasn't saved yet.
+  const load = useCallback(async (opts: { keepDraft?: boolean } = {}) => {
     setError('')
     try {
       const r = await fetch('/api/admin/survey')
       const d = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
       setData(d)
-      setDraft(toDraft(d.overrides))
+      setDraft(prev => (opts.keepDraft && prev ? prev : toDraft(d.overrides)))
     } catch (e: any) { setError(e.message) }
   }, [])
   useEffect(() => { load() }, [load])
@@ -69,7 +71,7 @@ export default function AdminSurveyPage() {
       const r = await fetch('/api/admin/survey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ open }) })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
-      await load()
+      await load({ keepDraft: true })
     } catch (e: any) { setError(e.message) } finally { setBusy(false) }
   }
 

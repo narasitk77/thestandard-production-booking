@@ -15,7 +15,8 @@
 //                    (start.sh) and from /api/audit/purge
 //   • ot_records   — everything older than the 10-day archive window, lazily on
 //                    every GET /api/ot (src/lib/ot-cleanup.ts)
-//   • ot_records   — deleteMany + recreate on each booking edit (ot-sync.ts)
+//   • ot_records   — DRAFT rows deleted + recreated on each booking edit (ot-sync.ts;
+//                    signed rows kept since 2026-11-08)
 //   • bookings     — an admin delete takes that booking's audit_logs,
 //                    footage_log and ot_records with it (api/admin/[id]/delete)
 //
@@ -77,6 +78,36 @@ export const SENSITIVE_DEFAULT_OFF: readonly string[] = [
   'feedback_tickets',
   'feedback_messages',
 ] as const
+
+/**
+ * audit_logs rows that are really a copy of another table's data, mapped to that
+ * table. They follow THAT table's export decision.
+ *
+ * WHY (maintenance 2026-11-08): `audit_logs` is exported in full, and
+ * POST /api/feedback writes `feedback.submitted` with the reporter's email and
+ * the first 500 characters of the complaint in `changes`. The operator decision
+ * above keeps feedback out of Lark — through audit_logs it went anyway. Same for
+ * the other Tier 2 tables' audit rows (opting a table in with LARK_EXPORT_INCLUDE
+ * brings its audit rows along). Keyed by entityType (what the row is about), plus
+ * the action prefix as a second net for feedback. Review audit rows are already
+ * written stripped (review/[token]/route.ts) and are not listed here.
+ */
+export const AUDIT_ENTITY_TABLE: Readonly<Record<string, string>> = {
+  Feedback: 'feedback_tickets',
+  FeedbackTicket: 'feedback_tickets',
+  FeedbackMessage: 'feedback_messages',
+  OTRecord: 'ot_records',
+  User: 'users',
+  PageEvent: 'page_events',
+}
+
+/** True when this audit_logs row must not leave because its table does not. */
+export function auditRowWithheld(row: Record<string, unknown>, includedTables: ReadonlySet<string>): boolean {
+  const entity = String(row.entityType ?? '')
+  const action = String(row.action ?? '').toLowerCase()
+  const table = AUDIT_ENTITY_TABLE[entity] ?? (action.startsWith('feedback.') ? 'feedback_tickets' : null)
+  return table !== null && !includedTables.has(table)
+}
 
 /** Postgres bookkeeping that is not our data. */
 export const INFRASTRUCTURE_TABLES: readonly string[] = [

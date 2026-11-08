@@ -107,6 +107,10 @@ export async function computeSlotLoad(candidate: OverlapCandidate): Promise<Slot
     estimatedWrap: b.estimatedWrap,
     shootType: b.shootType,
     multiDay: spansMultipleDays(b.shootDate, b.shootEndDate),
+    // calendar days → resource-load takes the peak PER DAY: a multi-day candidate
+    // must not stack a Monday job on a Wednesday job as if they ran at once
+    shootDate: b.shootDate,
+    shootEndDate: b.shootEndDate,
     cameraCount: b.cameraCount,
     videographerCount: b.videographerCount,
     switcherCount: b.switcherCount,
@@ -118,6 +122,8 @@ export async function computeSlotLoad(candidate: OverlapCandidate): Promise<Slot
     estimatedWrap: candidate.estimatedWrap,
     shootType: candidate.shootType,
     multiDay: spansMultipleDays(candStart, candEndDate),
+    shootDate: candStart,
+    shootEndDate: candEndDate,
     cameraCount: candidate.cameraCount,
     videographerCount: candidate.videographerCount,
     switcherCount: candidate.switcherCount,

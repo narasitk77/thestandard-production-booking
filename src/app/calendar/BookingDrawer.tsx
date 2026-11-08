@@ -6,7 +6,7 @@
 // queue cards (camera/mic tag, footage badge, crew-gap warning, who's going).
 // Identity fields (outlet/show/shoot date/episode identity) stay admin-page-only.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import { ChevronLeft, Loader2, X, MapPin, User, Tag, Pencil, Save, Users } from 'lucide-react'
@@ -79,7 +79,9 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
   const [assignMsg, setAssignMsg] = useState<string | null>(null)
 
   const bookingFreelancers = useMemo(() => normalizeFreelancers(booking?.freelancers), [booking?.freelancers])
-  const bookingFreelancerEmails = useMemo(() => freelancerEmails(bookingFreelancers), [bookingFreelancers])
+  // which booking is open NOW — startAssign awaits a re-read and must not land on another one
+  const openIdRef = useRef<string | undefined>(undefined)
+  openIdRef.current = booking?.id
 
   // Reset per-booking state when switching to another booking (or closing).
   // producers included — a list fetched for another booking's outlet must not
@@ -211,10 +213,25 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
 
   /* ── assign ───────────────────────────────────────────────────────────── */
 
-  const startAssign = () => {
+  // maint 2026-11-08 (ui-7) — `b` is the calendar's list snapshot from page load.
+  // Start from the booking AS IT IS NOW, so crew another coordinator assigned
+  // since then isn't silently dropped by this save. If the re-read fails we say
+  // so and fall back to the snapshot.
+  const startAssign = async () => {
     setAssignMsg(null); setSaveError(null)
-    setAssignEmails((b.assignedEmails || []).filter(e => !bookingFreelancerEmails.includes(e)))
-    setLeadVideographer(b.mainVideographerEmail || '')
+    let cur: Pick<Booking, 'assignedEmails' | 'mainVideographerEmail' | 'freelancers'> = b
+    try {
+      const r = await fetch(`/api/bookings/${b.id}`, { credentials: 'include', cache: 'no-store' })
+      const d = await r.json().catch(() => null)
+      if (!r.ok || !d?.booking) throw new Error(d?.error || `HTTP ${r.status}`)
+      cur = d.booking
+    } catch (e: any) {
+      setAssignMsg(`⚠️ โหลดทีมล่าสุดไม่ได้ (${e?.message || e}) — รายชื่อด้านล่างอาจเก่า`)
+    }
+    if (openIdRef.current !== b.id) return // drawer moved to another booking meanwhile
+    const freelancerMails = freelancerEmails(normalizeFreelancers(cur.freelancers))
+    setAssignEmails((cur.assignedEmails || []).filter(e => !freelancerMails.includes(e)))
+    setLeadVideographer(cur.mainVideographerEmail || '')
     setMode('assign')
     if (!roster) {
       fetch('/api/admin/team', { credentials: 'include' })
@@ -235,8 +252,10 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           assignedEmails: assignEmails,
-          adminNotes: b.adminNotes || '',
-          freelancers: bookingFreelancers, // pass through untouched — edit them on the admin page
+          // adminNotes / freelancers deliberately NOT sent: the assign route keeps a
+          // missing key as-is (assign-patch.ts). Sending them from the page-load
+          // snapshot wiped notes + freelancers added elsewhere since — and a dropped
+          // freelancer got a calendar cancellation (ui-7).
           mainVideographerEmail: leadVideographer && assignEmails.includes(leadVideographer) ? leadVideographer : null,
           sendEmail,
         }),

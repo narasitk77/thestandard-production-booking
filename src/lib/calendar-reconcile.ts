@@ -1,13 +1,184 @@
+import { createHash } from 'crypto'
 import { prisma } from './db'
 import { logAudit } from './audit'
 import {
+  computeEventTimes,
   createCalendarEvent,
   deleteCalendarEvent,
   getCalendarEventAttendees,
   updateCalendarEventAttendees,
+  updateCalendarEventDetails,
 } from './google-calendar'
 import { updateBookingRow } from './google-sheets'
 import { bookingCalendarAttendees } from './calendar-attendees'
+import { alertOps } from './ops-alert'
+import { EPISODE_ORDER } from './episode-order'
+
+const CANCELLED_EVENT_DELETE_FAILED =
+  'งานถูกยกเลิก/ลบแล้ว แต่ลบ event ในปฏิทินไม่สำเร็จ — event ยังอยู่ในปฏิทินของทุกคน · reconciler ลองลบใหม่ทุก 10 นาที'
+const DETAILS_PATCH_FAILED =
+  'แก้ใบจองแล้วแต่ patch เวลา/ชื่อ/สถานที่ ของ event ในปฏิทินไม่สำเร็จ — ปฏิทินยังเป็นค่าเดิม · reconciler ลองใหม่ทุก 10 นาที'
+
+/**
+ * Delete the event of a booking that was just cancelled / soft-deleted, and
+ * clear calendarEventId ONLY when Google confirms (404/410 count as gone).
+ *
+ * WHY. deleteCalendarEvent returns false on 429/5xx/unauthorized_client and
+ * never throws, so every cancel path's `.catch(() => {})` saw nothing and then
+ * nulled calendarEventId anyway — the event (all crew invited) stayed on every
+ * calendar with nothing pointing back to it, and crew could turn up for a
+ * cancelled shoot. Now a failed delete keeps the id + marks FAILED, and
+ * sweepCancelledEvents (every reconcile tick) retries it and alerts ops.
+ * Never throws.
+ */
+export async function removeCancelledBookingEvent(bookingId: string, eventId: string): Promise<boolean> {
+  let ok = false
+  try {
+    ok = await deleteCalendarEvent(eventId)
+  } catch (e: any) {
+    console.error(`[calendar] delete of cancelled booking ${bookingId}'s event ${eventId} threw:`, e?.message || e)
+  }
+  if (!ok) console.error(`[calendar] cancelled booking ${bookingId}: event ${eventId} NOT deleted — kept the id for the reconcile sweep`)
+  // CAS on the id: never clobber an event that something else re-pointed meanwhile
+  const where = { id: bookingId, calendarEventId: eventId }
+  try {
+    if (!ok) {
+      await prisma.booking.updateMany({
+        where,
+        data: { calendarSyncStatus: 'FAILED', calendarSyncError: CANCELLED_EVENT_DELETE_FAILED, calendarLastSyncedAt: new Date() },
+      })
+    } else {
+      // Success clears the id + error but leaves calendarSyncStatus ALONE (prod
+      // parity): PATCH/DELETE/MCP cancel always kept 'OK', soft-delete/routine
+      // write NULL in their own update. A later force-status CANCELLED→CONFIRMED
+      // relies on it — a CONFIRMED row with a sync status (or calendarLastSyncedAt)
+      // and no event id is the reconciler's "create it + invite the crew" case,
+      // which is how prod brings the event back today. The status is reset only
+      // when it is this helper's OWN failure marker (a sweep retry that worked).
+      const own = await prisma.booking.updateMany({
+        where: { ...where, calendarSyncStatus: 'FAILED', calendarSyncError: CANCELLED_EVENT_DELETE_FAILED },
+        data: { calendarEventId: null, calendarSyncError: null, calendarSyncStatus: null },
+      })
+      if (own.count === 0) {
+        await prisma.booking.updateMany({ where, data: { calendarEventId: null, calendarSyncError: null } })
+      }
+    }
+  } catch (e: any) {
+    console.error(`[calendar] cancelled booking ${bookingId}: saving the event-delete result failed:`, e?.message || e)
+  }
+  return ok
+}
+
+/**
+ * Edit paths patch the event's title/time/location fire-and-forget. A false
+ * return (Google error — the function never throws) used to vanish: the save
+ * showed success, calendarSyncStatus stayed OK, and the event kept the OLD time
+ * for good. Now it marks FAILED (red chip + Re-sync on the admin card) and
+ * processBooking re-pushes the details on the next tick. Never throws.
+ */
+export async function pushCalendarDetails(
+  eventId: string,
+  booking: Parameters<typeof updateCalendarEventDetails>[1],
+  opts?: Parameters<typeof updateCalendarEventDetails>[2],
+): Promise<boolean> {
+  const ok = await updateCalendarEventDetails(eventId, booking, opts).catch(() => false)
+  if (!ok) {
+    console.error(`[calendar] details patch failed for ${booking.bookingCode || booking.id} (event ${eventId}) — marked FAILED`)
+    await prisma.booking.updateMany({
+      where: { id: booking.id, calendarEventId: eventId },
+      data: { calendarSyncStatus: 'FAILED', calendarSyncError: DETAILS_PATCH_FAILED, calendarLastSyncedAt: new Date() },
+    }).catch(e => console.error('[calendar] save FAILED (details) error:', e?.message || e))
+  }
+  return ok
+}
+
+function sameInstant(a: string, b: string | null | undefined): boolean {
+  return !!b && new Date(a).getTime() === new Date(b).getTime()
+}
+
+type TimeDrift = { event: { start: string; end: string }; booking: { start: string; end: string } }
+const DRIFT_SETTLE_MS = 5 * 60_000
+/** the SAME drifting set is re-alerted once a day; a changed set is news at once (its own alertOps key) */
+export const DRIFT_SAME_SET_EVERY_MS = 24 * 3_600_000
+
+/** Fingerprint of the drifting set (codes + both sides' times) — the alertOps key suffix. */
+export function driftSetKey(items: Array<Pick<ReconcileItem, 'bookingId' | 'bookingCode' | 'timeDrift'>>): string {
+  const lines = items.map(i => {
+    const d = i.timeDrift!
+    return [i.bookingCode || i.bookingId, d.event.start, d.event.end, d.booking.start, d.booking.end].join('|')
+  })
+  return createHash('sha1').update(lines.sort().join('\n')).digest('hex').slice(0, 16)
+}
+
+/**
+ * The reconciler retried an edit's failed details patch and Google refused again.
+ * Keep the marker (next tick retries) — but ONE reconcile_failed audit row per
+ * failing streak, not one every 10 minutes: skip when the newest of this
+ * booking's failed/details_patched rows is already this same failure.
+ * Never throws.
+ */
+async function markDetailsRetryFailed(
+  booking: { id: string; bookingCode: string | null; calendarEventId?: string | null },
+  assignedEmails: string[],
+  options: ProcessOptions,
+) {
+  await prisma.booking.update({
+    where: { id: booking.id },
+    data: { calendarSyncStatus: 'FAILED', calendarSyncError: DETAILS_PATCH_FAILED, calendarLastSyncedAt: new Date() },
+  }).catch(e => console.error('[calendar-reconcile] save FAILED (details retry) error:', e?.message || e))
+  try {
+    const last = await prisma.auditLog.findFirst({
+      where: { entityType: 'Booking', entityId: booking.id, action: { in: ['calendar.reconcile_failed', 'calendar.reconcile_details_patched'] } },
+      orderBy: { at: 'desc' },
+      select: { action: true, changes: true },
+    })
+    const c: any = last?.changes
+    if (last?.action === 'calendar.reconcile_failed' && c?.reason === 'details-retry-failed' && c?.eventId === (booking.calendarEventId ?? null)) return
+  } catch (e: any) {
+    console.warn(`[calendar-reconcile] details-retry audit lookup failed for ${booking.bookingCode || booking.id} — logging anyway:`, e?.message || e)
+  }
+  await logAudit({
+    actorEmail: options.actorEmail ?? 'calendar-reconcile',
+    action: 'calendar.reconcile_failed',
+    entityType: 'Booking',
+    entityId: booking.id,
+    bookingCode: booking.bookingCode,
+    changes: { eventId: booking.calendarEventId ?? null, assignedEmails, error: DETAILS_PATCH_FAILED, reason: 'details-retry-failed' },
+  }).catch(e => console.error('[calendar-reconcile] details-retry audit write failed:', e?.message || e))
+}
+
+/**
+ * One audit row per DISTINCT drift (same event times vs same booking times =
+ * already recorded), not one per 10-minute tick. Never throws — reporting must
+ * not turn the booking's reconcile into 'failed'.
+ */
+async function auditTimeDrift(
+  booking: { id: string; bookingCode: string | null; calendarEventId?: string | null },
+  drift: TimeDrift,
+  options: ProcessOptions,
+) {
+  const changes = { eventId: booking.calendarEventId ?? null, ...drift }
+  // field-by-field: jsonb reorders keys, so JSON.stringify of the stored row never matches
+  const sig = (c: any) => [c?.eventId, c?.event?.start, c?.event?.end, c?.booking?.start, c?.booking?.end].join('|')
+  try {
+    const last = await prisma.auditLog.findFirst({
+      where: { entityType: 'Booking', entityId: booking.id, action: 'calendar.reconcile_time_drift' },
+      orderBy: { at: 'desc' },
+      select: { changes: true },
+    })
+    if (last && sig(last.changes) === sig(changes)) return
+  } catch (e: any) {
+    console.warn(`[calendar-reconcile] drift audit lookup failed for ${booking.bookingCode || booking.id} — logging anyway:`, e?.message || e)
+  }
+  await logAudit({
+    actorEmail: options.actorEmail ?? 'calendar-reconcile',
+    action: 'calendar.reconcile_time_drift',
+    entityType: 'Booking',
+    entityId: booking.id,
+    bookingCode: booking.bookingCode,
+    changes,
+  })
+}
 
 type ReconcileAction = 'ok' | 'patched' | 'created' | 'failed' | 'skipped'
 
@@ -37,6 +208,8 @@ export type ReconcileItem = {
   assignedEmails: string[]
   calendarAttendees?: string[]
   error?: string
+  /** event start/end ≠ the booking's — reported (audit + alertOps), NOT patched */
+  timeDrift?: TimeDrift
 }
 
 export type ReconcileResult = {
@@ -49,6 +222,8 @@ export type ReconcileResult = {
   items: ReconcileItem[]
   /** v1.185.2 — true = ชนเพดาน limit; ยังมีงานที่วันถ่ายไกลกว่านี้ที่ยังไม่ถูกตรวจ */
   truncated?: boolean
+  /** ใบที่ยกเลิก/ลบแล้วแต่ยังถือ event อยู่ (ลบไม่สำเร็จตอนยกเลิก) — ดู sweepCancelledEvents */
+  cancelledEvents?: { found: number; deleted: number; failed: number }
 }
 
 const DEFAULT_LIMIT = 200   // v1.233 — 65 ใบเข้าเงื่อนไขวันนี้ cap 50 = 15 ใบท้ายไม่เคยถูกแตะ
@@ -85,10 +260,20 @@ type BookingForReconcile = {
   locationName?: string | null
   producer: string
   producerEmail?: string | null
+  // Co-Producer is a guest (calendar-attendees) AND a description line — the
+  // three create payloads below used to drop both, so a reconciler-created event
+  // invited the Co-Producer only on the NEXT tick's attendee patch (re-notifying
+  // every guest) and never got the "Co-Producer:" line.
+  coProducer?: string | null
+  coProducerEmail?: string | null
   directorEmail?: string | null
   director2Email?: string | null
   director3Email?: string | null
   calendarSyncStatus?: string | null
+  /** DETAILS_PATCH_FAILED here = an edit's details patch never reached Google → retried with sendUpdates 'all' */
+  calendarSyncError?: string | null
+  /** a row saved in the last few minutes may have its edit patch in flight — not drift yet */
+  updatedAt?: Date | string | null
   cameraCount?: number | null
   micCount?: number | null
   vanCount?: number | null
@@ -140,6 +325,8 @@ async function createVerifiedCalendarEvent(booking: {
   locationName?: string | null
   producer: string
   producerEmail?: string | null
+  coProducer?: string | null
+  coProducerEmail?: string | null
   directorEmail?: string | null
   director2Email?: string | null
   director3Email?: string | null
@@ -182,7 +369,7 @@ async function createVerifiedCalendarEvent(booking: {
   const wantedAttendees = bookingCalendarAttendees({
     assignedEmails: booking.assignedEmails,
     producerEmail: booking.producerEmail,
-    coProducerEmail: (booking as any).coProducerEmail,
+    coProducerEmail: booking.coProducerEmail,
     directorEmail: booking.directorEmail,
     // v1.231 — ผู้กำกับคนที่ 2/3 อยู่ใต้การ์ด AGN-only เดียวกันใน calendar-attendees
     director2Email: booking.director2Email,
@@ -220,7 +407,7 @@ async function processBooking(
   const calendarAttendees = cleanEmails(bookingCalendarAttendees({
     assignedEmails,
     producerEmail: booking.producerEmail,
-    coProducerEmail: (booking as any).coProducerEmail,
+    coProducerEmail: booking.coProducerEmail,
     directorEmail: booking.directorEmail,
     // v1.231 — ผู้กำกับคนที่ 2/3 อยู่ใต้การ์ด AGN-only เดียวกันใน calendar-attendees
     director2Email: booking.director2Email,
@@ -234,6 +421,8 @@ async function processBooking(
     action: 'skipped',
     assignedEmails,
   }
+  /** an edit's failed details patch was retried this tick and failed again */
+  let detailsRetryFailed = false
 
   try {
     // v1.233 — เดิมเช็ค assignedEmails (ครูอย่างเดียว) ทั้งที่บรรทัดบนเพิ่งประกอบ
@@ -272,6 +461,8 @@ async function processBooking(
         locationName: booking.locationName,
         producer: booking.producer,
         producerEmail: booking.producerEmail,
+        coProducer: booking.coProducer,
+        coProducerEmail: booking.coProducerEmail,
         directorEmail: booking.directorEmail,
         director2Email: booking.director2Email,
         director3Email: booking.director3Email,
@@ -354,6 +545,8 @@ async function processBooking(
         locationName: booking.locationName,
         producer: booking.producer,
         producerEmail: booking.producerEmail,
+        coProducer: booking.coProducer,
+        coProducerEmail: booking.coProducerEmail,
         directorEmail: booking.directorEmail,
         director2Email: booking.director2Email,
         director3Email: booking.director3Email,
@@ -412,21 +605,91 @@ async function processBooking(
       return item
     }
 
+    // Details (time/title/location), not just guests.
+    //
+    // (a) RETRY a failed edit — ONLY a row pushCalendarDetails marked FAILED with
+    //     DETAILS_PATCH_FAILED: the edit (new call time etc.) never reached Google,
+    //     so the crew were never told → sendUpdates 'all', the email the edit path
+    //     meant to send. A failed retry does NOT stop the tick: guests are still
+    //     compared/patched below (a persistent Google 4xx must not lock the booking
+    //     out of crew sync), then the row goes back to FAILED with the SAME marker
+    //     so the next tick retries — one audit row per failing streak
+    //     (markDetailsRetryFailed). Rows FAILED for other reasons (attendee patch,
+    //     create) are NOT re-pushed here.
+    // (b) Pure DRIFT (event start/end ≠ the booking — someone moved the event by
+    //     hand in Google Calendar, or an old version wrote other times) is REPORTED,
+    //     never patched: silently reverting a coordinator's hand move is a behaviour
+    //     change Nat has not approved (maint 2026-11-08 R2). → item.timeDrift, a
+    //     deduped audit row here, one alertOps per tick in reconcileCalendarGuests.
+    //     Title is not compared — formats changed over versions.
+    const wantTimes = computeEventTimes(booking)
+    let detailsPatched = false
+    if (booking.calendarSyncStatus === 'FAILED' && booking.calendarSyncError === DETAILS_PATCH_FAILED) {
+      if (!options.dryRun) {
+        const ok = await updateCalendarEventDetails(booking.calendarEventId, booking, { sendUpdates: 'all' })
+          .catch((e: any) => { console.error(`[calendar-reconcile] details retry threw for ${booking.bookingCode || booking.id}:`, e?.message || e); return false })
+        if (!ok) {
+          detailsRetryFailed = true
+          console.error(`[calendar-reconcile] ${booking.bookingCode || booking.id}: retry of the failed details patch failed again — guests still checked, row stays FAILED`)
+        } else {
+          await logAudit({
+            actorEmail: options.actorEmail ?? 'calendar-reconcile',
+            action: 'calendar.reconcile_details_patched',
+            entityType: 'Booking',
+            entityId: booking.id,
+            bookingCode: booking.bookingCode,
+            changes: {
+              eventId: booking.calendarEventId,
+              reason: 'retry-after-failed-edit',
+              sendUpdates: 'all',
+              from: { start: calendarEvent.start ?? null, end: calendarEvent.end ?? null },
+              to: { start: wantTimes.startTime, end: wantTimes.endTime },
+            },
+          })
+        }
+      }
+      detailsPatched = !detailsRetryFailed
+    } else if (
+      // no start/end from Google = unknown, not drift
+      calendarEvent.start && calendarEvent.end
+      // saved < 5 min ago: the edit path's own patch may still be in flight
+      && !(booking.updatedAt && Date.now() - new Date(booking.updatedAt).getTime() < DRIFT_SETTLE_MS)
+      && (!sameInstant(wantTimes.startTime, calendarEvent.start) || !sameInstant(wantTimes.endTime, calendarEvent.end))
+    ) {
+      item.timeDrift = {
+        event: { start: calendarEvent.start, end: calendarEvent.end },
+        booking: { start: wantTimes.startTime, end: wantTimes.endTime },
+      }
+      if (!options.dryRun) await auditTimeDrift(booking, item.timeDrift, options)
+    }
+
+    // End-of-tick state. 'OK' is written with a CAS on the updatedAt this tick
+    // read: an edit's pushCalendarDetails can mark the row FAILED /
+    // DETAILS_PATCH_FAILED while this tick runs, and an unconditional 'OK'
+    // erased that marker — the edit's title/location never reached Google and
+    // nothing retried it. Lost CAS = the row changed; the next tick re-checks.
+    const finish = async () => {
+      if (detailsRetryFailed) {
+        await markDetailsRetryFailed(booking, assignedEmails, options)
+        item.action = 'failed'
+        item.error = DETAILS_PATCH_FAILED
+        return
+      }
+      const saved = await prisma.booking.updateMany({
+        where: { id: booking.id, ...(booking.updatedAt ? { updatedAt: new Date(booking.updatedAt) } : {}) },
+        data: { calendarSyncStatus: 'OK', calendarSyncError: null, calendarLastSyncedAt: new Date() },
+      })
+      if (saved.count === 0) {
+        console.warn(`[calendar-reconcile] ${booking.bookingCode || booking.id} changed during this tick — 'OK' not written (a concurrent edit's FAILED marker wins); next tick re-checks`)
+      }
+    }
+
     if (sameEmails(calendarAttendees, calendarEvent.attendees)) {
+      item.action = detailsPatched ? 'patched' : 'ok'
       // Even when nothing changes, refresh the OK timestamp so the UI
       // can show "last verified N min ago" and the stale-PENDING
       // reconciler clause works correctly.
-      if (!options.dryRun) {
-        await prisma.booking.update({
-          where: { id: booking.id },
-          data: {
-            calendarSyncStatus: 'OK',
-            calendarSyncError: null,
-            calendarLastSyncedAt: new Date(),
-          },
-        })
-      }
-      item.action = 'ok'
+      if (!options.dryRun) await finish()
       return item
     }
 
@@ -451,6 +714,8 @@ async function processBooking(
           locationName: booking.locationName,
           producer: booking.producer,
           producerEmail: booking.producerEmail,
+          coProducer: booking.coProducer,
+          coProducerEmail: booking.coProducerEmail,
           directorEmail: booking.directorEmail,
           director2Email: booking.director2Email,
           director3Email: booking.director3Email,
@@ -497,6 +762,7 @@ async function processBooking(
         await deleteCalendarEvent(oldEventId)
 
         item.action = 'created'
+        delete item.timeDrift // the new event carries the booking's times
         item.eventId = eventId
         item.htmlLink = htmlLink
         syncEventIdToSheet(booking, eventId)
@@ -519,34 +785,30 @@ async function processBooking(
 
     item.action = 'patched'
     if (!options.dryRun) {
-      await prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          calendarSyncStatus: 'OK',
-          calendarSyncError: null,
-          calendarLastSyncedAt: new Date(),
+      // the guests WERE patched; a failed details retry still turns the item 'failed'
+      await finish()
+      // dryRun = the read-only check /admin/<id> runs on EVERY page load: it must
+      // not write "patched" rows for a patch that never happened (offboard.py
+      // counts reconcile_patched rows to verify a leaver was removed).
+      await logAudit({
+        actorEmail: options.actorEmail ?? 'calendar-reconcile',
+        action: 'calendar.reconcile_patched',
+        entityType: 'Booking',
+        entityId: booking.id,
+        bookingCode: booking.bookingCode,
+        changes: {
+          eventId: booking.calendarEventId,
+          fromAttendees: calendarEvent.attendees,
+          // v1.185.1 — เคยบันทึก `assignedEmails` (ลิสต์ครูเปล่า ๆ) ทั้งที่ค่าที่ patch
+          // ไปจริงคือ `calendarAttendees` (ครู + Producer + Co-Producer + Director)
+          // ผลคือ audit บอกว่า Producer/Co-Producer ไม่ได้อยู่ในลิสต์แขก ทั้งที่อยู่ —
+          // เจอเพราะไล่เคส "แก้วมาปฏิทินหรือยัง" แล้ว audit ตอบว่าไม่มา แต่ปฏิทินจริงมี
+          // audit ที่รายงานไม่ตรงของจริงแย่กว่าไม่มี audit เพราะมันทำให้สรุปผิด
+          toAttendees: calendarAttendees,
+          crewOnly: assignedEmails,
         },
       })
     }
-    await logAudit({
-      actorEmail: options.actorEmail ?? 'calendar-reconcile',
-      action: 'calendar.reconcile_patched',
-      entityType: 'Booking',
-      entityId: booking.id,
-      bookingCode: booking.bookingCode,
-      changes: {
-        eventId: booking.calendarEventId,
-        fromAttendees: calendarEvent.attendees,
-        // v1.185.1 — เคยบันทึก `assignedEmails` (ลิสต์ครูเปล่า ๆ) ทั้งที่ค่าที่ patch
-        // ไปจริงคือ `calendarAttendees` (ครู + Producer + Co-Producer + Director)
-        // ผลคือ audit บอกว่า Producer/Co-Producer ไม่ได้อยู่ในลิสต์แขก ทั้งที่อยู่ —
-        // เจอเพราะไล่เคส "แก้วมาปฏิทินหรือยัง" แล้ว audit ตอบว่าไม่มา แต่ปฏิทินจริงมี
-        // audit ที่รายงานไม่ตรงของจริงแย่กว่าไม่มี audit เพราะมันทำให้สรุปผิด
-        toAttendees: calendarAttendees,
-        crewOnly: assignedEmails,
-        dryRun: Boolean(options.dryRun),
-      },
-    })
     return item
   } catch (e: any) {
     item.action = 'failed'
@@ -559,23 +821,28 @@ async function processBooking(
         where: { id: booking.id },
         data: {
           calendarSyncStatus: 'FAILED',
-          calendarSyncError: errMsg.slice(0, 500),
+          // the details marker is what makes the next tick re-push the edit —
+          // a later step's error (guests/recreate, retried every tick anyway)
+          // must not overwrite it; the real error is in the audit row
+          calendarSyncError: (detailsRetryFailed ? DETAILS_PATCH_FAILED : errMsg).slice(0, 500),
           calendarLastSyncedAt: new Date(),
         },
       }).catch(err => console.error('save FAILED status error:', err?.message))
+      // dryRun (admin page view) reports the error in the item; it is not a
+      // reconciler failure and must not read like one in the audit log.
+      await logAudit({
+        actorEmail: options.actorEmail ?? 'calendar-reconcile',
+        action: 'calendar.reconcile_failed',
+        entityType: 'Booking',
+        entityId: booking.id,
+        bookingCode: booking.bookingCode,
+        changes: {
+          eventId: booking.calendarEventId,
+          assignedEmails,
+          error: item.error,
+        },
+      })
     }
-    await logAudit({
-      actorEmail: options.actorEmail ?? 'calendar-reconcile',
-      action: 'calendar.reconcile_failed',
-      entityType: 'Booking',
-      entityId: booking.id,
-      bookingCode: booking.bookingCode,
-      changes: {
-        eventId: booking.calendarEventId,
-        assignedEmails,
-        error: item.error,
-      },
-    })
     return item
   }
 }
@@ -632,7 +899,7 @@ export async function reconcileCalendarGuests(options: {
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
     },
     orderBy: [{ shootDate: 'asc' }, { updatedAt: 'desc' }],
     take: limit,
@@ -663,7 +930,87 @@ export async function reconcileCalendarGuests(options: {
     )
   }
 
+  // Pure time drift is reported, never auto-patched (see processBooking). One
+  // alert per tick listing every drifted job, keyed by a fingerprint of the
+  // drifting SET: a changed set (new job, or an event moved again) is news at
+  // once; the same set repeats only once a day (a fixed key re-sent the same
+  // list every 6 h until someone fixed every legacy event).
+  const drifted = result.items.filter(i => i.timeDrift)
+  if (drifted.length > 0 && !options.dryRun) {
+    const fmt = (s: string) => new Date(s).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'short' })
+    const lines = drifted.slice(0, 20).map(i =>
+      `${i.bookingCode || i.bookingId}: ปฏิทิน ${fmt(i.timeDrift!.event.start)}–${fmt(i.timeDrift!.event.end)} · ใบจอง ${fmt(i.timeDrift!.booking.start)}–${fmt(i.timeDrift!.booking.end)}`)
+    if (drifted.length > 20) lines.push(`…และอีก ${drifted.length - 20} ใบ`)
+    await alertOps(`calendar-time-drift:${driftSetKey(drifted)}`,
+      `⚠️ เวลาใน Google Calendar ไม่ตรงใบจอง — ${drifted.length} ใบ`,
+      `เวลา event ในปฏิทินไม่ตรงกับใบจอง (มีคนย้าย event ในปฏิทินเอง หรือแก้ใบจองแล้วปฏิทินไม่ตาม) — ระบบไม่แก้ให้เอง ` +
+      `เพราะไม่รู้ว่าฝั่งไหนถูก:\n  ${lines.join('\n  ')}\n` +
+      `ถ้าใบจองถูก → แก้เวลาใบจองแล้วบันทึกซ้ำ (ส่งเวลาเข้า event + เมลแจ้งทีม) · ถ้าปฏิทินถูก → แก้เวลาในใบจองให้ตรง\n` +
+      `(ชุดเดิมเตือนซ้ำวันละครั้ง · ชุดเปลี่ยน = เตือนใหม่)`,
+      DRIFT_SAME_SET_EVERY_MS)
+  }
+
+  await sweepCancelledEvents(result, options)
   return result
+}
+
+const CANCELLED_SWEEP_LIMIT = 50
+
+/**
+ * Cancelled / soft-deleted bookings that still hold a calendarEventId = the
+ * cancel-time delete failed (removeCancelledBookingEvent kept the id). Nothing
+ * else ever looks at these rows (the main query is CONFIRMED-only and
+ * calendar-dedupe leaves CANCELLED alone), so this is the only retry. A failure
+ * here is loud: alertOps, plus result.failed so the worker log line fires.
+ * Rotates by updatedAt (a failed retry bumps it) so a stuck row can't starve the rest.
+ */
+async function sweepCancelledEvents(result: ReconcileResult, options: { actorEmail?: string | null; dryRun?: boolean }) {
+  const rows = await prisma.booking.findMany({
+    where: {
+      calendarEventId: { not: null },
+      OR: [{ status: 'CANCELLED' }, { deletedAt: { not: null } }],
+    },
+    select: { id: true, bookingCode: true, calendarEventId: true, assignedEmails: true },
+    orderBy: { updatedAt: 'asc' },
+    take: CANCELLED_SWEEP_LIMIT,
+  })
+  const stats = { found: rows.length, deleted: 0, failed: 0 }
+  result.cancelledEvents = stats
+  if (rows.length === 0 || options.dryRun) return
+
+  const failedCodes: string[] = []
+  for (const r of rows) {
+    const ok = await removeCancelledBookingEvent(r.id, r.calendarEventId!)
+    if (ok) {
+      stats.deleted += 1
+      await logAudit({
+        actorEmail: options.actorEmail ?? 'calendar-reconcile',
+        action: 'calendar.cancelled_event_deleted',
+        entityType: 'Booking',
+        entityId: r.id,
+        bookingCode: r.bookingCode,
+        changes: { eventId: r.calendarEventId },
+      })
+      continue
+    }
+    stats.failed += 1
+    failedCodes.push(r.bookingCode || r.id)
+    result.failed += 1
+    result.items.push({
+      bookingId: r.id,
+      bookingCode: r.bookingCode,
+      eventId: r.calendarEventId,
+      action: 'failed',
+      assignedEmails: cleanEmails(r.assignedEmails),
+      error: CANCELLED_EVENT_DELETE_FAILED,
+    })
+  }
+  if (failedCodes.length > 0) {
+    await alertOps('calendar-cancelled-events',
+      `⚠️ งานยกเลิกแล้วแต่ event ยังอยู่ในปฏิทิน — ${failedCodes.length} ใบ`,
+      `ลบ event ของงานที่ยกเลิก/ลบแล้วไม่สำเร็จ (Google ตอบ error) — ทีมยังเห็นงานในปฏิทินและอาจไปถ่ายงานที่ยกเลิก:\n  ${failedCodes.join('\n  ')}` +
+      `\nreconciler ลองใหม่ทุก 10 นาทีเอง · ถ้ายังค้าง ลบ event ในปฏิทินด้วยมือ (Production ID อยู่ในรายละเอียด event)`)
+  }
 }
 
 // Reconcile a single booking by id. Powers /api/admin/[id]/calendar-resync
@@ -680,7 +1027,7 @@ export async function reconcileSingleBooking(
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
     },
   })
   if (!booking) return null

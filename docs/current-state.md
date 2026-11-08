@@ -447,8 +447,11 @@ M src/app/switcher/page.tsx    # default outlet 'TSS' → 'NWS' บรรทั�
    ก่อนจะ "ทำความสะอาด" คอมเมนต์ยาว ๆ ให้อ่านก่อนว่ามันกันอะไรอยู่
 4. ก่อนสรุปสถานะอะไรก็ตาม **ถาม DB/container จริง** — `system_heartbeats`, `docker inspect` env,
    `/api/version` · บทเรียนจาก v1.185/v1.186: เชื่อ DB ไม่เชื่อสรุปที่ตัวเองแปลงมาอีกทอด
-5. ทดสอบเรื่องสิทธิ์ให้ทำแบบเป็นคนอื่น (`SEED_ADMIN_EMAIL` + `AUTH_DISABLED` = ได้ role จริงจาก DB)
-   — บั๊กสิทธิ์ที่เจ็บที่สุดมองไม่เห็นจากตาแอดมิน
+5. ทดสอบเรื่องสิทธิ์ให้ทำแบบเป็นคนอื่น — บั๊กสิทธิ์ที่เจ็บที่สุดมองไม่เห็นจากตาแอดมิน ·
+   ⚠️ `SEED_ADMIN_EMAIL` + `AUTH_DISABLED` ได้แค่ **อีเมล** ของคนนั้น ส่วน `session.role` เป็น `ADMIN` ตายตัว
+   และ middleware ข้าม gate หน้าทั้งหมด ⇒ ทดสอบได้เฉพาะ gate ที่อ่าน `User`/`TeamMember` จาก DB ซ้ำ
+   (`getProducerAccess`, `getSwitcherAccess`, `getSoundAccess`, `canUploadToBooking`, `getOTApproverAccess`)
+   — `requireAdmin`/`requireConsole` ผ่านเสมอ ทดสอบด้วยวิธีนี้ไม่ได้ (ล็อกอินจริงเป็นคนนั้น หรือพิสูจน์ด้วย SQL)
 
 **ข้อห้ามที่ไม่มีข้อยกเว้น:** repo นี้ public — ห้ามเขียน secret / token / ปลายทางของบอทแจ้งเตือน
 (ชื่อหรือไอดีห้องแชท) / เนื้อหาจาก `CLAUDE.local.md` / เบอร์โทรหรือที่อยู่ส่วนตัว ลงไฟล์ใด ๆ ในรีโป

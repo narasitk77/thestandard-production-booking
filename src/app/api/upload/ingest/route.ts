@@ -20,6 +20,7 @@ import {
   CARD_PREFIX, HEARTBEAT_PHASES, cardFileName, newTicket, hashTicket, parseNotes, decideStart, decideComplete, isCardRow,
   type IngestManifest, type IngestNotes,
 } from '@/lib/ingest'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,7 +58,7 @@ const BOOKING_SELECT = {
   outlet: { select: { code: true, name: true } },
   program: { select: { name: true } },
   episodes: {
-    orderBy: { sequence: 'asc' as const },
+    orderBy: EPISODE_ORDER,
     select: { id: true, episodeId: true, title: true, sequence: true, program: { select: { name: true } } },
   },
 } as const

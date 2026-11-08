@@ -73,7 +73,9 @@ export async function POST(request: NextRequest) {
   const noBoxCodes = Array.isArray(body.noBoxCodes) ? body.noBoxCodes.filter((c: unknown) => typeof c === 'string').slice(0, 10) : []
 
   try {
-    const text = formatRunSummary({ boxes, noBox, noBoxCodes, since: body.since, until: body.until, docs, failure })
+    // maint 2026-11-08 — which news boxes the text actually names (the 1,900-char budget cuts the rest)
+    const named = new Set<string>()
+    const text = formatRunSummary({ boxes, noBox, noBoxCodes, since: body.since, until: body.until, docs, failure }, named)
     // Per-channel results, not one boolean — "sent" must mean a channel took it.
     const chat = text && !quiet ? await notifyChatDetailed(text, 'footage') : null
     if (chat && !chat.any) console.error('[footage-integrity] run failed: summary reached no chat channel')
@@ -98,13 +100,20 @@ export async function POST(request: NextRequest) {
 
     // Mark what was announced ONLY after delivery. A box whose issues cleared is marked
     // too (nothing to deliver), so the same issue coming back later is news again.
+    // maint 2026-11-08 — and only a news box the message NAMED: one cut to "…อีก N ใบ" was never announced,
+    // so it stays news and is named on a later run (it used to become "ค้างเดิม" — a number — for good).
     let marked = 0
     let markFailed = 0
+    let unnamed = 0
     if (docs && !quiet) {
       const delivered = !!chat?.any
       for (const b of boxes) {
         if (!b.doc.id || typeof b.issueKey !== 'string' || b.doc.announced === b.issueKey || b.state === 'unreadable') continue
-        if (isNews(b) ? !delivered : b.state === 'issues') continue
+        // state check here too, not only inside isNews: the summary names only `issues` boxes, so a box whose
+        // issues CLEARED must never land in the skips below (it would stay un-marked, and the issue's return be no news)
+        const news = b.state === 'issues' && isNews(b)
+        if (news && delivered && !named.has(b.bookingCode)) { unnamed++; continue }
+        if (news ? !delivered : b.state === 'issues') continue
         try { await markFootageCheckAnnounced(b.doc.id, b.issueKey); marked++ }
         catch (e: any) { markFailed++; console.error(`[footage-integrity] mark announced ${b.bookingCode} failed (will re-announce):`, e?.message || e) }
       }
@@ -113,9 +122,9 @@ export async function POST(request: NextRequest) {
     if (allowed.isWorker) {
       const issues = boxes.filter(b => b.state === 'issues').length
       await recordHeartbeat('footage-integrity',
-        `${issues}/${boxes.length}${noBox ? ` nobox=${noBox}` : ''}${failure ? ' INCOMPLETE' : ''} discord=${chat?.discord ?? '-'} lark=${chat?.lark ?? '-'}`)
+        `${issues}/${boxes.length}${noBox ? ` nobox=${noBox}` : ''}${unnamed ? ` unnamed=${unnamed}` : ''}${failure ? ' INCOMPLETE' : ''} discord=${chat?.discord ?? '-'} lark=${chat?.lark ?? '-'}`)
     }
-    return NextResponse.json({ success: true, report: text || null, chat, ops, marked, markFailed })
+    return NextResponse.json({ success: true, report: text || null, chat, ops, marked, markFailed, unnamed })
   } catch (e: any) {
     console.error('POST /api/internal/footage-integrity/run error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })

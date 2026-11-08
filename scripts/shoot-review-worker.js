@@ -68,7 +68,10 @@ async function runOnce() {
     }
     const json = JSON.parse(body)
     if (json.skipped) { console.log(`[shoot-review] skipped: ${json.reason}`); return }
-    console.log(`[shoot-review] shootDate=${json.shootDate} scanned=${json.bookingsScanned} invited=${json.invited} mailed=${json.mailed} errors=${(json.errors || []).length}`)
+    // route ไม่เคยส่ง shootDate (v1.173 เปลี่ยนเป็นหน้าต่าง lookback) — เดิมพิมพ์ undefined ทุกวัน
+    const w = json.window || {}
+    console.log(`[shoot-review] window=${w.from}..${w.to} scanned=${json.bookingsScanned} invited=${json.invited} mailed=${json.mailed}` +
+      ` deferred=${json.deferred} dropped=${(json.dropped || []).length} errors=${(json.errors || []).length}`)
     for (const e of (json.errors || []).slice(0, 10)) console.error(`[shoot-review]   ${e}`)
   } catch (err) {
     console.error('[shoot-review] run failed:', err?.message || err)

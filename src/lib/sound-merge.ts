@@ -23,8 +23,11 @@ import { bookingShowName } from '@/lib/display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
 import { getDriveLink, rememberDriveLinks } from '@/lib/drive-links'
 import { noteResolve } from '@/lib/id-first-metrics'
-import { isFolderAlive } from '@/lib/google-drive'
+// maint 2026-11-08 — a stored id falls back to the name walk only when Drive says it is GONE ('unknown' — a 403
+// rateLimitExceeded is not retried — used to read as dead via isFolderAlive and walk names into a twin box/staging).
+import { storedFolder } from '@/lib/video-merge'
 import { tryLockMerge, unlockMerge, soundMergeKey } from '@/lib/merge-lock'
+import { EPISODE_ORDER } from './episode-order'
 
 export interface SoundMergeResult {
   skipped: boolean
@@ -114,7 +117,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       bookingCode: true, projectId: true, projectName: true, category: true, crewRequired: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
     },
   })
 
@@ -127,13 +130,13 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
     const bookingFolderName = buildBookingFolderName(b.bookingCode, jobName, showName)
     // v1.268.1 — the per-booking button may be merging this booking right now (merge-lock.ts).
     const lock = [soundMergeKey(b.id)]
-    if (!opts.dryRun && !tryLockMerge(lock)) { base.results.push({ bookingCode: b.bookingCode, skipped: 'merge already running for this booking (per-booking button)' }); continue }
+    const token = opts.dryRun ? 0 : tryLockMerge(lock)
+    if (!opts.dryRun && !token) { base.results.push({ bookingCode: b.bookingCode, skipped: 'merge already running for this booking (per-booking button)' }); continue }
     try {
       // v1.110 — match by immutable Production ID, tolerating both the legacy
       // "<code> · …" and the new "<show> · … (<code>)" folder shapes.
       const code = b.bookingCode
-      const stagingLink = getDriveLink(b.driveFolders, 'staging')
-      let stagingId: string | null = stagingLink && await isFolderAlive(stagingLink) ? stagingLink : null
+      let stagingId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'staging'))
       const stagingViaStored = !!stagingId
       if (!stagingId) {
         const byName = stagingChildren.filter(c => folderNameMatchesCode(c.name, code))
@@ -152,9 +155,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // Resolve the video box (read-only). If it hasn't landed yet → skip (try next run).
       // v1.112 — AGN merges too: AUDIO goes inside the per-booking layer of the
       // project box, so bookings' audio can't mix anymore.
-      let boxTargetId: string | null = null
-      const boxLink = getDriveLink(b.driveFolders, 'box')
-      if (boxLink && await isFolderAlive(boxLink)) boxTargetId = boxLink
+      let boxTargetId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'box'))
       const boxViaStored = !!boxTargetId
       if (!boxTargetId) {
         const layers = shootFolderLayers({
@@ -209,7 +210,7 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       base.errors++
       base.results.push({ bookingCode: b.bookingCode, error: e?.message || String(e) })
     } finally {
-      if (!opts.dryRun) unlockMerge(lock)
+      if (token) unlockMerge(lock, token) // a run that outlived its lock must not free the run that took it over
     }
   }
 
@@ -251,8 +252,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   const code = b.bookingCode
   if (!code) return { skipped: true, reason: 'ไม่มี Production ID', ...zero }
   if (!bookingNeedsSound(b.crewRequired)) return { skipped: true, reason: 'งานนี้ไม่มีทีมเสียง', ...zero }
-  const stagingLink = getDriveLink(b.driveFolders, 'staging')
-  let stagingId: string | null = stagingLink && await isFolderAlive(stagingLink) ? stagingLink : null
+  let stagingId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'staging'))
   const stagingViaStored = !!stagingId
   let stagingUnique = false
   if (!stagingId) {
@@ -270,9 +270,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
 
   const jobName = b.projectName?.trim() || b.episodes[0]?.title?.trim() || null
   const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
-  let boxTargetId: string | null = null
-  const boxLink = getDriveLink(b.driveFolders, 'box')
-  if (boxLink && await isFolderAlive(boxLink)) boxTargetId = boxLink
+  let boxTargetId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'box'))
   const boxViaStored = !!boxTargetId
   if (!boxTargetId) {
     // v1.112 — AGN merges too (AUDIO inside the per-booking layer of the project box).

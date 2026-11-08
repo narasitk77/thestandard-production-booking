@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { bookingDisplayName } from '@/lib/display'
 import { latestNasState, nasManifestAge } from '@/lib/nas-sync'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
           select: {
             id: true, bookingCode: true, projectName: true, driveFolders: true,
             program: { select: { name: true } },
-            episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { name: true } } } },
+            episodes: { orderBy: EPISODE_ORDER, select: { title: true, program: { select: { name: true } } } },
           },
         })
       : []

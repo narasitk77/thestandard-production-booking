@@ -9,6 +9,46 @@
 import { useState } from 'react'
 import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
 
+// ── maint 2026-11-08 — pure readers of the two server replies (tested in
+// src/lib/__tests__/maint-B5-ui-card-actions.test.ts). UploadSection imports
+// both, so the 📦 poll and 📣 result read the same way on the card and the page.
+
+/**
+ * One poll of GET /merge. A REAL reset is 200 {job:{running:false, done:false}}
+ * (booking-merge.ts getMergeJobStatus). A 502/504 proxy page, a 401 after the
+ * session expired, or a 500 is "could not read" — the move is still running
+ * server-side, so the poll must keep going instead of announcing a reset (ui-12).
+ */
+export type MergePoll = 'done' | 'running' | 'reset' | 'unreadable'
+export function mergePollState(httpOk: boolean, body: any): MergePoll {
+  const job = httpOk && body && typeof body === 'object' ? body.job : null
+  if (!job || typeof job !== 'object') return 'unreadable'
+  if (job.done) return 'done'
+  if (job.running) return 'running'
+  return 'reset'
+}
+
+/**
+ * The result line after POST /notify-ready. The 200 reply carries `recipients`
+ * = DELIVERED addresses only and `failedRecipients` = the ones SMTP rejected,
+ * so the intended count is their sum; `emailed` is how many sends succeeded.
+ * Nothing delivered / email unconfigured come back as 502 / 503 with `error`.
+ * The card used to print "✓ ส่งแล้ว N คน" from the recipient list even when
+ * SMTP was down (ui-1, bug-classes §1) — ✓ only when every send went out.
+ */
+export function notifyResultMessage(httpOk: boolean, status: number, d: any): { ok: boolean; text: string } {
+  if (!httpOk || !d || d.ok === false) return { ok: false, text: d?.error || `ส่งเมลไม่สำเร็จ (HTTP ${status})` }
+  const failed: string[] = Array.isArray(d.failedRecipients) ? d.failedRecipients : []
+  const n = Array.isArray(d.recipients) ? d.recipients.length + failed.length : null
+  if (d.emailConfigured === false) return { ok: false, text: `⚠️ ระบบอีเมลยังไม่ได้ตั้งค่า — ไม่มีใครได้รับเมล${n !== null ? ` (ตั้งใจส่ง ${n} คน)` : ''}` }
+  if (typeof d.emailed !== 'number' || n === null) return { ok: false, text: '⚠️ ส่งคำสั่งแล้ว แต่อ่านผลการส่งไม่ได้ — ตรวจกับทีมก่อนส่งซ้ำ' }
+  // emailError already names who missed it; fall back to the list if it is absent
+  const err = d.emailError ? ` — ${d.emailError}` : failed.length ? ` — ส่งไม่ถึง: ${failed.join(', ')}` : ''
+  if (d.emailed === 0 && n > 0) return { ok: false, text: `❌ ส่งเมลไม่สำเร็จ ไม่มีใครได้รับ (0/${n})${err}` }
+  if (d.emailed < n || d.emailError) return { ok: false, text: `⚠️ เมลถึง ${d.emailed}/${n} คน${err}` }
+  return { ok: true, text: `✓ ส่งแล้ว ${d.emailed} คน` }
+}
+
 export default function CardFootageActions({
   bookingId,
   canMerge = true,
@@ -29,12 +69,22 @@ export default function CardFootageActions({
       const r = await fetch(`/api/bookings/${bookingId}/merge`, { method: 'POST', credentials: 'include' })
       const d = await r.json().catch(() => ({}))
       if (!r.ok && r.status !== 202) { setMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`); return }
+      let unreadable = 0
       for (let i = 1; i <= 180; i++) {
-        setMsg(`⏳ กำลังย้าย…${i > 12 ? ` (~${Math.round((i * 5) / 60)} นาที)` : ''}`)
+        setMsg(unreadable
+          ? `⚠️ อ่านสถานะไม่ได้ ${unreadable} ครั้งติด — งานยังย้ายอยู่เบื้องหลัง กำลังลองอ่านใหม่…`
+          : `⏳ กำลังย้าย…${i > 12 ? ` (~${Math.round((i * 5) / 60)} นาที)` : ''}`)
         await new Promise(res => setTimeout(res, 5000))
-        const sd = await (await fetch(`/api/bookings/${bookingId}/merge`, { credentials: 'include' })).json().catch(() => ({}))
-        const job = sd.job || {}
-        if (job.done) {
+        let state: MergePoll = 'unreadable', sd: any = null
+        try {
+          const sr = await fetch(`/api/bookings/${bookingId}/merge`, { credentials: 'include' })
+          sd = await sr.json().catch(() => null)
+          state = mergePollState(sr.ok, sd)
+        } catch { /* network blip — same as an unreadable poll */ }
+        if (state === 'unreadable') { unreadable++; continue }
+        unreadable = 0
+        const job = sd.job
+        if (state === 'done') {
           if (job.error) { setMsg(`❌ ${job.error}`); return }
           const v = job.result?.video || {}, s = job.result?.sound || {}
           const held = v.cardHolds?.length ?? 0 // v1.280 — a held card is not "moved 0"
@@ -46,9 +96,11 @@ export default function CardFootageActions({
           onChanged?.()
           return
         }
-        if (!job.running) { setMsg('งานย้ายถูกรีเซ็ต — กดใหม่เพื่อย้ายส่วนที่เหลือ'); return }
+        if (state === 'reset') { setMsg('งานย้ายถูกรีเซ็ต — กดใหม่เพื่อย้ายส่วนที่เหลือ'); return }
       }
-      setMsg('งานใหญ่มาก ยังย้ายอยู่เบื้องหลัง — กดตรวจภายหลัง')
+      setMsg(unreadable
+        ? `⚠️ อ่านสถานะงานย้ายไม่ได้ (${unreadable} ครั้งล่าสุด) — งานอาจยังวิ่งอยู่ เปิดหน้า Upload ของงานนี้เพื่อดูผล`
+        : 'งานใหญ่มาก ยังย้ายอยู่เบื้องหลัง — กดตรวจภายหลัง')
     } catch (e: any) {
       setMsg(e?.message || 'รวมไฟล์ไม่สำเร็จ')
     } finally {
@@ -60,7 +112,11 @@ export default function CardFootageActions({
     if (busy) return
     setBusy('notify'); setMsg('⏳ ตรวจผู้รับ…')
     try {
-      const p = await (await fetch(`/api/bookings/${bookingId}/notify-ready?preview=1`, { method: 'POST', credentials: 'include' })).json().catch(() => ({}))
+      // ui-1 — a non-OK preview (502 HTML, 401) used to parse to {} and read as
+      // "ไม่มีผู้รับ (ยังไม่ได้ assign)": an error dressed as an empty crew.
+      const pr = await fetch(`/api/bookings/${bookingId}/notify-ready?preview=1`, { method: 'POST', credentials: 'include' })
+      const p = await pr.json().catch(() => null)
+      if (!pr.ok || !p) { setMsg(p?.error || `ตรวจผู้รับไม่สำเร็จ (HTTP ${pr.status})`); return }
       if (p.error) { setMsg(p.error); return }
       const recips: string[] = p.recipients || p.to || []
       const folders = p.folderCount ?? p.folders ?? '?'
@@ -70,9 +126,8 @@ export default function CardFootageActions({
       if (!confirm(`${heldWarn}ส่งเมล "ไฟล์พร้อม" ให้ ${recips.length} คน?\n\n${recips.join('\n')}\n\nโฟลเดอร์ที่แนบ: ${folders}`)) { setMsg(null); return }
       setMsg('⏳ กำลังส่งเมล…')
       const r = await fetch(`/api/bookings/${bookingId}/notify-ready`, { method: 'POST', credentials: 'include' })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok) { setMsg(d.error || `ส่งเมลไม่สำเร็จ (HTTP ${r.status})`); return }
-      setMsg(`✓ ส่งแล้ว ${(d.recipients || d.to || recips).length} คน`)
+      const d = await r.json().catch(() => null)
+      setMsg(notifyResultMessage(r.ok, r.status, d).text)
     } catch (e: any) {
       setMsg(e?.message || 'ส่งเมลไม่สำเร็จ')
     } finally {

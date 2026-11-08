@@ -31,16 +31,26 @@ import {
   buildInviteMail,
 } from '@/lib/shoot-review'
 import { startOfTodayBangkok } from '@/lib/bangkok-day'
+import { internalSecretAllowed } from '@/lib/internal-auth'
+import { alertOps } from '@/lib/ops-alert'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// 2026-11-08 — any configured secret, not "the first one set" (internal-auth.ts,
+// v1.123). The old `RECONCILE_SECRET || NEXTAUTH_SECRET` chain 403'd the worker
+// the moment RECONCILE_SECRET reached one container but not the other (compose
+// gave it only to the `worker` service), and ignored AUTH_SECRET, which the
+// worker itself falls back to.
+const SECRET_ENVS = ['RECONCILE_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET']
 function authorised(request: NextRequest): boolean {
-  const want = (process.env.RECONCILE_SECRET || process.env.NEXTAUTH_SECRET || '').trim()
-  if (!want) return false
-  const got = request.headers.get('x-reconcile-secret') || request.headers.get('x-review-secret') || ''
-  return got === want
+  return internalSecretAllowed(request, 'x-reconcile-secret', SECRET_ENVS)
+    || internalSecretAllowed(request, 'x-review-secret', SECRET_ENVS)
 }
+
+/** The LAST shoot day — what the window and the survey are keyed on. */
+const lastShootDay = (b: { shootDate: Date; shootEndDate: Date | null }) => (b.shootEndDate ?? b.shootDate).getTime()
 
 export async function POST(request: NextRequest) {
   if (!authorised(request)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -81,8 +91,10 @@ export async function POST(request: NextRequest) {
   }
 
   // Survey after the LAST shoot day: a multi-day shoot must not get the form
-  // while the crew is still on set tomorrow. Oldest first so a backlog drains in
-  // order rather than the newest jobs starving the older ones out.
+  // while the crew is still on set tomorrow. Oldest LAST day first (sorted below,
+  // Prisma cannot order by COALESCE): the job closest to leaving the window gets
+  // the cap first. Ordering by shootDate put a multi-day job that ended yesterday
+  // ahead of a one-day job about to drop out.
   const bookings = await prisma.booking.findMany({
     where: {
       deletedAt: null,
@@ -94,14 +106,16 @@ export async function POST(request: NextRequest) {
     },
     orderBy: { shootDate: 'asc' },
     select: {
-      id: true, bookingCode: true, shootDate: true, status: true, deletedAt: true,
+      id: true, bookingCode: true, shootDate: true, shootEndDate: true, status: true, deletedAt: true,
       producerEmail: true, createdByEmail: true, assignedEmails: true,
       mainVideographerEmail: true, crewRequired: true,
       program: { select: { name: true } },
       outlet: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { title: true } },
+      episodes: { orderBy: EPISODE_ORDER, select: { title: true } },
     },
   })
+
+  bookings.sort((a, b) => lastShootDay(a) - lastShootDay(b))
 
   const roster = await prisma.teamMember.findMany({ select: { email: true, role: true } }).catch(() => [])
   const rosterRoleByEmail: Record<string, string> = {}
@@ -110,6 +124,12 @@ export async function POST(request: NextRequest) {
   const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
   const maxPerRun = reviewMaxBookingsPerRun()
   let invited = 0, mailed = 0, skippedExisting = 0, worked = 0, deferred = 0
+  // 2026-11-08 — "deferred to the next run" was untrue for jobs whose last shoot day
+  // is the window's oldest day: tomorrow's window starts a day later, so they are
+  // never surveyed (prod lookback=1 · max=3 vs 5–7 jobs a day: 13 jobs 22 ต.ค.–3 พ.ย.
+  // without a single invite row). Assumes the daily cadence of shoot-review-worker.
+  const nextRunFrom = from.getTime() + 86_400_000
+  const dropped: string[] = []
   const errors: string[] = []
   const details: Array<{ code: string | null; invites: number; resend?: number; emails?: string[] }> = []
   let sampleEmail: { to: string; role: string; subject: string; text: string } | null = null
@@ -159,8 +179,13 @@ export async function POST(request: NextRequest) {
     // bookings scanned: a lookback window full of already-invited jobs would
     // otherwise spend the whole budget on no-ops and defer the real work
     // forever. Whatever is left over is reported, never dropped silently — the
-    // next run picks it up because nothing was written for it.
-    if (worked >= maxPerRun) { deferred++; continue }
+    // next run picks it up because nothing was written for it, UNLESS its last
+    // shoot day leaves the window first: that one is `dropped` and alerted below.
+    if (worked >= maxPerRun) {
+      deferred++
+      if (lastShootDay(b) < nextRunFrom) dropped.push(b.bookingCode || b.id)
+      continue
+    }
     worked++
 
     details.push({ code: b.bookingCode, invites: fresh.length, resend: retry.length, ...(dryRun ? { emails: fresh.map(f => f.email) } : {}) })
@@ -221,7 +246,16 @@ export async function POST(request: NextRequest) {
 
   // A cap that nobody can see reads as "we covered everything".
   if (deferred > 0) {
-    console.log(`[shoot-review] ${deferred} booking(s) over the ${maxPerRun}/run cap — deferred to the next run (nothing written for them).`)
+    console.log(`[shoot-review] ${deferred} booking(s) over the ${maxPerRun}/run cap — `
+      + `${deferred - dropped.length} still inside the window next run, ${dropped.length} leave it first (nothing written for them).`)
+  }
+  if (dropped.length > 0 && !dryRun) {
+    console.error(`[shoot-review] run failed: ${dropped.length} booking(s) over the cap leave the lookback window before the next run — never surveyed: ${dropped.join(', ')}`)
+    await alertOps('shoot-review-dropped',
+      `⚠️ แบบประเมินหลังงานถ่ายหลุด ${dropped.length} งาน — ไม่มีใครได้รับเลย`,
+      `รอบนี้ชนเพดาน ${maxPerRun} งาน/รอบ และ ${dropped.length} งานจะหลุดหน้าต่าง lookback (${lookback} วัน) ก่อนรอบพรุ่งนี้ `
+      + `= ไม่มีวันได้ส่งแบบประเมิน:\n${dropped.map((c) => `• ${c}`).join('\n')}\n\n`
+      + `แก้: ตั้ง SHOOT_REVIEW_MAX_BOOKINGS ให้มากกว่างานต่อวัน หรือเพิ่ม SHOOT_REVIEW_LOOKBACK_DAYS บน stack`)
   }
 
   if (!dryRun && invited > 0) {
@@ -236,7 +270,7 @@ export async function POST(request: NextRequest) {
       entityId: 'batch',
       changes: {
         window: `${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`,
-        bookings: details.length, invited, mailed, deferred, autoCompleted,
+        bookings: details.length, invited, mailed, deferred, dropped: dropped.length, autoCompleted,
       },
     })
   }
@@ -248,7 +282,7 @@ export async function POST(request: NextRequest) {
     window: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
     delayDays: delay, lookbackDays: lookback, maxPerRun,
     autoCompleted, bookingsScanned: bookings.length,
-    invited, mailed, skippedExisting, deferred,
+    invited, mailed, skippedExisting, deferred, dropped,
     skippedRecipients: skipped,
     errors, emailConfigured: isEmailConfigured(), details,
   })

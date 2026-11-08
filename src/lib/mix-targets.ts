@@ -10,6 +10,7 @@ import {
   OPEN_MIX_STATUSES, formatMixNumber, normalizeMixQuery,
   type MixTargetBooking, type MixTargetPick,
 } from './mix-jobs'
+import { EPISODE_ORDER } from './episode-order'
 
 export const MIX_TARGET_SELECT = {
   id: true,
@@ -26,7 +27,7 @@ export const MIX_TARGET_SELECT = {
   outlet: { select: { code: true, name: true } },
   program: { select: { name: true } },
   episodes: {
-    orderBy: { sequence: 'asc' as const },
+    orderBy: EPISODE_ORDER,
     select: { id: true, episodeId: true, title: true, sequence: true, program: { select: { name: true } } },
   },
 } as const

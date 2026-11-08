@@ -45,7 +45,8 @@ async function runOnce() {
     }
     const json = JSON.parse(text)
     if (json.skipped) {
-      console.log(`[prep-folders] skipped: ${json.reason}`)
+      // maint 2026-11-08 — a skipped real run prepped nothing (env unset): Hermes' BAD_RE must see it
+      console.error(`[prep-folders] run failed: skipped — ${json.reason}`)
     } else {
       console.log(`[prep-folders] today=${json.total} prepared=${json.prepared} errors=${json.errors} prodTeamErrors=${json.prodTeamErrors}`)
     }

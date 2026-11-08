@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { bookingDisplayName } from '@/lib/display'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -38,7 +39,7 @@ export async function GET() {
           projectName: true,
           outlet: { select: { code: true, name: true } },
           program: { select: { name: true } },
-          episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { name: true } } } },
+          episodes: { orderBy: EPISODE_ORDER, select: { title: true, program: { select: { name: true } } } },
         },
       })
     : []

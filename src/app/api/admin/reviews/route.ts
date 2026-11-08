@@ -16,6 +16,8 @@ import { canReadReviewContent } from '@/lib/review-access'
 
 export const dynamic = 'force-dynamic'
 
+const LIST_LIMIT = 1000
+
 export async function GET(request: NextRequest) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -27,10 +29,11 @@ export async function GET(request: NextRequest) {
   const days = Math.min(365, Math.max(1, Number(sp.get('days') ?? 90)))
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
+  const where = { createdAt: { gte: since } }
   const reviews = await prisma.shootReview.findMany({
-    where: { createdAt: { gte: since } },
+    where,
     orderBy: { createdAt: 'desc' },
-    take: 1000,
+    take: LIST_LIMIT,
     select: {
       id: true, bookingId: true, bookingCode: true, shootDate: true,
       raterEmail: true, raterRole: true,
@@ -51,15 +54,17 @@ export async function GET(request: NextRequest) {
   const ctx = new Map(ctxRows.map(b => [b.id, b]))
 
   // Per-team averages over the window, so the page opens on the trend rather
-  // than on individual comments.
-  const byTarget: Record<string, { n: number; sum: number }> = {}
-  for (const r of reviews) {
-    const t = (byTarget[r.targetRole] ||= { n: 0, sum: 0 })
-    t.n++; t.sum += r.score
-  }
-  const summary = Object.entries(byTarget).map(([role, v]) => ({
-    role, count: v.n, average: Math.round((v.sum / v.n) * 100) / 100,
+  // than on individual comments. maint 2026-11-08 — aggregated in the DB over
+  // the WHOLE window: it used to average the capped list, so past LIST_LIMIT rows
+  // the averages and the response rate (full counts) described different
+  // populations (bug-class 4).
+  const groups = await prisma.shootReview.groupBy({
+    by: ['targetRole'], where, _count: { _all: true }, _avg: { score: true }, orderBy: { targetRole: 'asc' },
+  })
+  const summary = groups.map(g => ({
+    role: g.targetRole, count: g._count._all, average: Math.round((g._avg.score ?? 0) * 100) / 100,
   }))
+  const total = groups.reduce((n, g) => n + g._count._all, 0)
 
   const invites = await prisma.shootReviewInvite.count({ where: { sentAt: { gte: since } } })
   const answered = await prisma.shootReviewInvite.count({ where: { sentAt: { gte: since }, submittedAt: { not: null } } })
@@ -76,6 +81,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     days, summary, reviews: withCtx,
+    // the list is capped; `total` is the window's real size (summary counts it all)
+    total, truncated: total > reviews.length,
     responseRate: invites > 0 ? Math.round((answered / invites) * 100) : null,
     invites, answered,
   })

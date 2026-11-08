@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
+import { internalSecretAllowed } from '@/lib/internal-auth'
 import { runFolderIntegrity, maybeSendDailyDigest } from '@/lib/folder-integrity'
 import { recordHeartbeat } from '@/lib/heartbeat'
 import { sendEmail } from '@/lib/email'
@@ -34,11 +35,6 @@ const DIGEST_HEARTBEAT_MS = 12 * 60 * 60 * 1000
  * it with the shared secret; an ADMIN session can also trigger it from the
  * browser (dry run) to see what it WOULD fix.
  */
-function expectedSecret(): string | undefined {
-  return process.env.PREP_FOLDERS_SECRET?.trim()
-    || process.env.NEXTAUTH_SECRET?.trim()
-    || process.env.AUTH_SECRET?.trim()
-}
 function reportEmail(): string {
   return process.env.FOLDER_INTEGRITY_REPORT_EMAIL?.trim()
     || process.env.FEEDBACK_EMAIL?.trim()
@@ -46,10 +42,11 @@ function reportEmail(): string {
 }
 
 async function isAllowed(request: NextRequest): Promise<{ ok: boolean; isWorker: boolean }> {
-  const secret = expectedSecret()
-  const header = request.headers.get('x-reconcile-secret')?.trim() || request.headers.get('x-prep-folders-secret')?.trim()
-  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim()
-  if (secret && (header === secret || bearer === secret)) return { ok: true, isWorker: true }
+  // 2026-11-08 — ANY configured secret, not the first-set chain (internal-auth.ts v1.123):
+  // `X || NEXTAUTH || AUTH` + `===` 401'd every caller still sending NEXTAUTH the day X was set.
+  const keys = ['PREP_FOLDERS_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET']
+  if (internalSecretAllowed(request, 'x-reconcile-secret', keys)
+    || internalSecretAllowed(request, 'x-prep-folders-secret', keys)) return { ok: true, isWorker: true }
   const session = await getSession()
   if (session?.role === 'ADMIN') return { ok: true, isWorker: false }
   return { ok: false, isWorker: false }

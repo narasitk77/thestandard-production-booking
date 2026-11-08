@@ -138,7 +138,9 @@ async function runMerge(why) {
       return
     }
     const json = JSON.parse(text)
-    if (json.skipped) console.log(`[video-merge] skipped: ${json.reason}`)
+    // maint 2026-11-08 — a skipped real run merged nothing (env unset / landing unreadable; a readable empty landing
+    // is skipped:false): an error line Hermes' BAD_RE catches, not a quiet log
+    if (json.skipped) console.error(`[video-merge] run failed: skipped — ${json.reason}`)
     else {
       const held = json.cardHolds || []
       console.log(`[video-merge] bookings=${json.bookings} files=${json.moved} folders=${json.movedFolders} dupLeft=${(json.landed ?? 0) - (json.moved ?? 0)} errors=${json.errors} cardHolds=${held.length}`)

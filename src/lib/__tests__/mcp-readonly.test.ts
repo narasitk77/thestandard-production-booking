@@ -149,6 +149,9 @@ mock.module('../create-booking', { namedExports: { createBookingFromPayload: asy
   return { ok: true, booking: b }
 } } })
 mock.module('../google-calendar', { namedExports: { deleteCalendarEvent: async () => undefined } })
+// cancel_booking now goes through the shared cancel-event helper + writes the sheet (maint B2a)
+mock.module('../calendar-reconcile', { namedExports: { removeCancelledBookingEvent: async () => true } })
+mock.module('../google-sheets', { namedExports: { updateBookingRow: async () => 'updated' } })
 mock.module('../audit', { namedExports: { logAudit: async () => undefined } })
 mock.module('../room-booking-sync', { namedExports: { releaseRoomForBooking: async () => undefined } })
 mock.module('../ot-sync', { namedExports: { clearBookingOT: async () => undefined } })

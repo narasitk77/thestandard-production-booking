@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { buildCSVHeader, rowToCSV, csvFilename } from '@/lib/csv'
 import { WORKSPACE_COLUMN_MAP, type WorkspaceBooking } from '@/lib/workspace-columns'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
     },
   })
 

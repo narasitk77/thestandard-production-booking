@@ -87,24 +87,32 @@ export async function GET(request: NextRequest) {
       days.get(dateStr)!.push(r)
     }
 
-    const personSummary = new Map<string, { wh: number; wd: number; amt: number }>()
+    // `pending` = the part of `amt` no manager has approved (DRAFT/SUBMITTED/REJECTED).
+    // The totals still count every status (what is payable is Nat's call — see
+    // maintenance 2026-11-08), but the sheet says so in หมายเหตุ instead of
+    // presenting unapproved days as signed-off.
+    const toTasks = (dateStr: string, recs: typeof records) => recs.map(r => ({
+      startTime: r.startTime || '',
+      endTime: r.endTime || '',
+      endOffsetDays: dateOffsetDays(dateStr, r.endDate ? r.endDate.toISOString() : null),
+      jobTask: r.jobTask,
+      justification: r.justification,
+    }))
+    const personSummary = new Map<string, { wh: number; wd: number; amt: number; pending: number }>()
     Array.from(byPersonDay.entries()).forEach(([email, days]) => {
-      let wh = 0, wd = 0, amt = 0
+      let wh = 0, wd = 0, amt = 0, pending = 0
       Array.from(days.entries()).forEach(([dateStr, recs]) => {
-        const sum = summarizeDay(dateStr, recs.map(r => ({
-          startTime: r.startTime || '',
-          endTime: r.endTime || '',
-          endOffsetDays: dateOffsetDays(dateStr, r.endDate ? r.endDate.toISOString() : null),
-          jobTask: r.jobTask,
-          justification: r.justification,
-        })))
+        const sum = summarizeDay(dateStr, toTasks(dateStr, recs))
         if (!sum.qualifies) return
         if (sum.dayType === 'WEEKDAY') wd += 1
         else wh += 1
         amt += sum.otAmountTHB
+        const ok = summarizeDay(dateStr, toTasks(dateStr, recs.filter(r => r.approvalStatus === 'APPROVED')))
+        pending += sum.otAmountTHB - (ok.qualifies ? ok.otAmountTHB : 0)
       })
-      personSummary.set(email, { wh, wd, amt })
+      personSummary.set(email, { wh, wd, amt, pending })
     })
+    const pendingNote = (p: number) => p > 0 ? `ยังไม่อนุมัติ ${p} THB` : ''
 
     const rows: string[][] = []
     rows.push(['', '', '', '', '', '', '', ''])
@@ -118,10 +126,10 @@ export async function GET(request: NextRequest) {
     ])
 
     let i = 1
-    let totalWH = 0, totalWD = 0, totalAmt = 0
+    let totalWH = 0, totalWD = 0, totalAmt = 0, totalPending = 0
     for (const u of users) {
       const email = u.email.toLowerCase()
-      const s = personSummary.get(email) || { wh: 0, wd: 0, amt: 0 }
+      const s = personSummary.get(email) || { wh: 0, wd: 0, amt: 0, pending: 0 }
       rows.push([
         String(i++),
         u.thaiName || email,
@@ -130,21 +138,26 @@ export async function GET(request: NextRequest) {
         String(s.wh),
         String(s.wd),
         String(s.amt),
-        '',
+        pendingNote(s.pending),
       ])
-      totalWH += s.wh; totalWD += s.wd; totalAmt += s.amt
+      totalWH += s.wh; totalWD += s.wd; totalAmt += s.amt; totalPending += s.pending
     }
 
     // Orphan emails
     const userEmails = new Set(users.map(u => u.email.toLowerCase()))
     Array.from(personSummary.entries()).forEach(([email, s]) => {
       if (userEmails.has(email)) return
-      rows.push([String(i++), email, '', '', String(s.wh), String(s.wd), String(s.amt), '(unknown user)'])
-      totalWH += s.wh; totalWD += s.wd; totalAmt += s.amt
+      rows.push([String(i++), email, '', '', String(s.wh), String(s.wd), String(s.amt), ['(unknown user)', pendingNote(s.pending)].filter(Boolean).join(' · ')])
+      totalWH += s.wh; totalWD += s.wd; totalAmt += s.amt; totalPending += s.pending
     })
 
     rows.push(['รวมจำนวนวัน', '', '', '', String(totalWH), String(totalWD), '', ''])
-    rows.push(['รวมจำนวนเงิน (THB)', '', '', '', '', '', String(totalAmt), 'ห้ามแก้ตัวเลขเอง'])
+    // Footer layout is fixed (finance sums column G): the unapproved part goes in
+    // หมายเหตุ only — never as a second THB figure under the total.
+    rows.push(['รวมจำนวนเงิน (THB)', '', '', '', '', '', String(totalAmt), [
+      'ห้ามแก้ตัวเลขเอง',
+      totalPending > 0 ? `ในยอดนี้ยังไม่อนุมัติ ${totalPending} THB (อนุมัติแล้ว ${totalAmt - totalPending} THB)` : '',
+    ].filter(Boolean).join(' · ')])
     rows.push(['', '', '', '', '', '', '', ''])
     rows.push(['', 'ลายเซ็นผู้บังคับบัญชา', '', '', 'ลายเซ็นผู้มีอำนาจอนุมัติ', '', '', ''])
 

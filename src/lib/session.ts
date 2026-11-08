@@ -1,5 +1,7 @@
 import { getServerSession } from 'next-auth'
+import { headers } from 'next/headers'
 import { authOptions } from './auth'
+import { isCrossSiteRequest } from './internal-auth'
 import { prisma } from './db'
 import { hasConsoleAccess, positionGrantsOT, type Role } from './roles'
 
@@ -14,8 +16,28 @@ if (AUTH_DISABLED) {
   console.warn(`⚠️  AUTH_DISABLED=1 — login bypassed; every request runs as ADMIN <${SEED_ADMIN_EMAIL}>. Do NOT use on a public deploy.`)
 }
 
+// maint 2026-11-08 — no session for a request another site made the browser send
+// (CSRF; rule + reasoning in isCrossSiteRequest). Outside a request (scripts,
+// tests) headers() throws → nothing to check; any OTHER throw is Next's
+// static-bailout control flow and must propagate. Logged so a legit flow this
+// breaks is findable, not a mystery 401.
+function refusedCrossSite(): boolean {
+  let h: ReturnType<typeof headers>
+  try { h = headers() } catch (e: any) {
+    if (/outside a request scope/.test(String(e?.message))) return false
+    throw e
+  }
+  if (!isCrossSiteRequest(h)) return false
+  console.warn(`[session] refused cross-site session use: site=${h.get('sec-fetch-site')} mode=${h.get('sec-fetch-mode')} dest=${h.get('sec-fetch-dest')} origin=${h.get('origin') || '-'}`)
+  return true
+}
+
 export async function getSession() {
+  if (refusedCrossSite()) return null
   // ponytail: trusted-LAN/dev bypass — skip OAuth, act as the seeded admin.
+  // Role is ALWAYS 'ADMIN' here (SEED_ADMIN_EMAIL only sets the email): gates
+  // that read session.role (requireAdmin/requireConsole) pass for anyone — only
+  // gates that re-read User/TeamMember from the DB see the seeded person's role.
   if (AUTH_DISABLED) {
     return { email: SEED_ADMIN_EMAIL, name: 'LAN Admin', role: 'ADMIN' as Role, id: undefined }
   }

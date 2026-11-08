@@ -2,6 +2,7 @@
 
 import { bookingDisplayName } from '@/lib/display'
 import { hasConsoleAccess } from '@/lib/roles'
+import { isMyBooking } from '@/lib/my-bookings-scope'
 import EquipmentRequest from './EquipmentRequest'
 import MixRequests from './MixRequests'
 import { useEffect, useState } from 'react'
@@ -65,6 +66,11 @@ interface BookingDetail {
   cancelRequestedAt?: string | null
   cancelReason?: string | null
   cancelRequestedBy?: string | null
+  // the people on the booking — isMyBooking() reads these (GET returns every scalar)
+  createdByEmail?: string | null
+  producerEmail?: string | null
+  coProducerEmail?: string | null
+  assignedEmails?: string[] | null
 }
 
 export default function BookingDetailPage({ params }: { params: { id: string } }) {
@@ -80,9 +86,18 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const [isStaff, setIsStaff] = useState(false)
   const [canUpload, setCanUpload] = useState(false)
   const [myEmail, setMyEmail] = useState('')
+  // /api/me failing used to be swallowed: isStaff/myEmail stayed empty and the
+  // per-user buttons below silently vanished (bug-classes §2, "error removes affordance")
+  const [meError, setMeError] = useState('')
   // v1.100 — per-EP "open footage on Drive" links, resolved from the EP's folder
   // path (works for footage moved from NAS into the boxes, not just uploads).
   const [epFolders, setEpFolders] = useState<Record<string, string | null>>({})
+  // maint 2026-11-08 (ui-14) — the real id-first box link (same response). null =
+  // not resolved yet / no box; epFoldersError = the lookup itself failed, which
+  // used to look exactly like "no footage links" (bug-classes §2).
+  const [boxUrl, setBoxUrl] = useState<string | null>(null)
+  const [epFoldersError, setEpFoldersError] = useState('')
+  const [epFoldersLoaded, setEpFoldersLoaded] = useState(false)
   // Request-cancellation (owner/producer asks; staff actually cancels).
   const [showCancelForm, setShowCancelForm] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -101,18 +116,29 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       .catch(e => setError(e?.message || 'Failed to load booking'))
       .finally(() => setLoading(false))
     fetch('/api/me')
-      .then(r => r.json())
-      .then(d => { setIsStaff(hasConsoleAccess(d?.user?.role)); setCanUpload(!!d?.user?.canUpload); setMyEmail(d?.user?.email || '') })
-      .catch(() => {})
-    // best-effort, non-blocking — Drive folder links per EP (incl. NAS-moved footage)
+      .then(async r => {
+        const d = await r.json().catch(() => null)
+        if (!r.ok || !d) throw new Error(d?.error ? `${d.error} (HTTP ${r.status})` : `HTTP ${r.status}`)
+        if (!d.user) throw new Error('ไม่พบบัญชีผู้ใช้ของคุณในระบบ')
+        return d
+      })
+      .then(d => { setIsStaff(hasConsoleAccess(d.user.role)); setCanUpload(!!d.user.canUpload); setMyEmail(d.user.email || '') })
+      .catch(e => setMeError(e?.message || String(e)))
+    // non-blocking — Drive folder links per EP (incl. NAS-moved footage) + the box
     fetch(`/api/bookings/${id}/ep-folders`)
-      .then(r => (r.ok ? r.json() : { episodes: [] }))
+      .then(async r => {
+        const d = await r.json().catch(() => null)
+        if (!r.ok || !d) throw new Error(d?.error ? `${d.error} (HTTP ${r.status})` : `HTTP ${r.status}`)
+        return d
+      })
       .then(d => {
         const m: Record<string, string | null> = {}
         for (const e of d.episodes || []) m[e.id] = e.url // keyed by Episode.id (unique)
         setEpFolders(m)
+        setBoxUrl(d.bookingFolderUrl || null)
       })
-      .catch(() => {})
+      .catch(e => setEpFoldersError(e?.message || String(e)))
+      .finally(() => setEpFoldersLoaded(true))
   }, [id])
 
   const backHref = isStaff ? '/dashboard' : '/my-bookings'
@@ -120,6 +146,12 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
 
   const handleStatusChange = async (newStatus: string) => {
     if (!booking) return
+    // maint 2026-11-08 (ui-8) — Cancel sits next to Mark Complete and fires the
+    // calendar delete + central room release + OT clear immediately; the queue's
+    // CancelButton already asks first. Restore only returns it to REQUESTED.
+    if (newStatus === 'CANCELLED' && !confirm(
+      'ยกเลิกงานนี้?\n\n• ลบ event ใน Google Calendar (ทีมได้แจ้งยกเลิก)\n• คืนห้องในระบบจองห้องกลาง (คนอื่นจองไปได้ทันที)\n• ล้างร่าง OT ของงานนี้\n\nกู้คืนได้แค่กลับเป็น REQUESTED — ต้องอนุมัติ/จองห้องใหม่',
+    )) return
     setUpdating(true)
     try {
       const res = await fetch(`/api/bookings/${id}`, {
@@ -200,27 +232,27 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     calendarPacket = '(calendar packet unavailable)'
   }
 
+  // request-cancel and equipment-request accept any signed-in user (prod; who may
+  // is Nat's open decision) — so the buttons are not gated on being on the booking.
+  // Instead a cancel request filed by someone NOT on the booking is labelled here.
+  const cancelByOutsider = !!booking.cancelRequestedBy && !isMyBooking(booking, booking.cancelRequestedBy)
+
   const handleCopy = () => {
     navigator.clipboard.writeText(calendarPacket)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const d = new Date(booking.shootDate)
-  const validDate = !isNaN(d.getTime())
-  const yy = validDate ? String(d.getFullYear()).slice(-2) : '--'
-  const mm = validDate ? String(d.getMonth() + 1).padStart(2, '0') : '--'
-  const dd = validDate ? String(d.getDate()).padStart(2, '0') : '--'
-  const yyyy = validDate ? d.getFullYear() : '----'
-  // Folder named after the first Episode ID (matches the real IDs, e.g. PP-26-006-T02).
-  const firstEpisodeId = booking.episodes[0]?.episodeId || `${booking.outlet.code}-${booking.program.code}`
-  const driveFolder = `Production/${yyyy}/${mm}/${firstEpisodeId}/`
-
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-3">
       <BackButton fallback={backHref} />
 
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {meError && (
+        <p className="text-xs text-red-600">
+          โหลดข้อมูลผู้ใช้ไม่ได้ ({meError}) — ปุ่มที่ขึ้นกับสิทธิ์ (ปุ่มแอดมิน / อัปโหลด / ยกเลิกคำขอเบิกของตัวเอง) อาจไม่แสดง ลองรีเฟรชหน้า
+        </p>
+      )}
 
       {/* Header */}
       <div className="gf-header p-6">
@@ -312,6 +344,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div className="text-sm text-red-800 font-medium">🚫 มีการขอยกเลิกงานนี้</div>
           <div className="text-xs text-gray-600 mt-1">เหตุผล: {booking.cancelReason}</div>
           {booking.cancelRequestedBy && <div className="text-xs text-gray-400 mt-0.5">โดย {booking.cancelRequestedBy}</div>}
+          {cancelByOutsider && (
+            <div className="text-xs text-amber-700 mt-0.5">⚠️ ผู้ขอไม่ได้อยู่ในรายชื่อของงานนี้ (ไม่ใช่ผู้จอง / Producer / Co-Producer / ทีม) — ตรวจกับ Producer ก่อนยกเลิกจริง</div>
+          )}
           {isStaff && <div className="text-xs text-gray-500 mt-1">กด Cancel ด้านบนเพื่อยกเลิกจริง</div>}
         </div>
       ) : (!isStaff && booking.status !== 'CANCELLED' && booking.status !== 'COMPLETED') ? (
@@ -361,20 +396,40 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         </div>
       </div>
 
-      {/* Drive path */}
+      {/* Drive box — maint 2026-11-08 (ui-14): this card used to print a made-up
+          `Production/<yyyy>/<mm>/<EP>/` + `01_Source/Cam1 · 02_Proxy …` that exists
+          nowhere; people following it made hand-named folders merge never picks up.
+          Now: the real id-first box `<Show> · <Job> (<Production ID>)` from ep-folders. */}
       <div className="gf-card p-4 flex items-start gap-3">
         <Folder className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
         <div className="min-w-0 flex-1">
-          <div className="text-xs text-gray-500 mb-1">Drive / NAS Folder Path</div>
-          <code className="text-xs text-gray-800 font-mono break-all">{driveFolder}</code>
+          <div className="text-xs text-gray-500 mb-1">กล่องงานบน Drive</div>
+          {epFoldersError ? (
+            <div className="text-xs text-red-700">หาโฟลเดอร์บน Drive ไม่ได้ — {epFoldersError} (ลิงก์ footage รายตอนด้านบนจึงไม่ขึ้น)</div>
+          ) : !epFoldersLoaded ? (
+            <div className="text-xs text-gray-400">กำลังหา…</div>
+          ) : boxUrl ? (
+            <a href={boxUrl} target="_blank" rel="noreferrer" className="text-sm text-[#673ab7] hover:underline break-all">
+              เปิดกล่องงาน{booking.bookingCode ? ` (${booking.bookingCode})` : ''} ↗
+            </a>
+          ) : (
+            <div className="text-xs text-gray-500">ยังไม่พบกล่องงานบน Drive{booking.bookingCode ? '' : ' (งานนี้ยังไม่มี Production ID)'}</div>
+          )}
           <div className="mt-2 text-xs text-gray-400">
-            Subfolders: 01_Source/Cam1 · 01_Source/Cam2 · 02_Proxy · 03_Edit · 04_Export · 05_Asset · 06_Document
+            ในกล่องแยกโฟลเดอร์ตามตอน (EP) → CAM-A / CAM-B … / AUDIO — ไฟล์เข้ากล่องผ่านระบบ ไม่ต้องสร้างโฟลเดอร์เอง
           </div>
         </div>
       </div>
 
-      {/* Crew equipment requisition (เบิกอุปกรณ์) — gated by canViewBooking at the API */}
-      <EquipmentRequest bookingId={id} myEmail={myEmail} />
+      {/* Crew equipment requisition (เบิกอุปกรณ์) — open to anyone who can view the
+          booking, any status (prod; the POST accepts the same). On a CANCELLED
+          booking the POST still opens the loan — say so before anyone clicks. */}
+      {booking.status === 'CANCELLED' && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          ⚠️ งานนี้ถูกยกเลิกแล้ว — ถ้าเบิกอุปกรณ์ตอนนี้ คำขอจะเข้าคิวผู้ดูแลอุปกรณ์ทั้งที่ไม่มีงานถ่ายรองรับ
+        </div>
+      )}
+      <EquipmentRequest bookingId={id} myEmail={myEmail} canRequest />
 
       {/* v1.219 — คิวมิกซ์ของงานนี้ · วางต่อจากเบิกอุปกรณ์เพราะเป็นของประเภทเดียวกัน
           คือ "ขออะไรเพิ่มสำหรับงานใบนี้" ไม่ใช่ข้อมูลของตัวใบจองเอง */}

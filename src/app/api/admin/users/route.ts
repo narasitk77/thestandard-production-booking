@@ -40,11 +40,14 @@ function canSetPosition(actorRole: string | null | undefined, position: unknown)
   return actorRole === 'ADMIN' || actorRole === 'MANAGER'
 }
 
-// v1.281 — role / access edits had no audit trail at all: a promotion to ADMIN
+// v1.282 — role / access edits had no audit trail at all: a promotion to ADMIN
 // or a "manager" position (= OT approver, see canSetPosition) left no record of
 // who granted it. One row per edit that actually changed something; entityType
 // 'User' never reaches a booking timeline, so nothing here is shown to non-staff.
 const USER_AUDIT_FIELDS = ['role', 'active', 'thaiName', 'employeeId', 'position', 'producerOutlets'] as const
+// A new account diffs against a blank one, so a position (manager = OT approver)
+// or name set at creation is on the user.add row too, not just the role.
+const BLANK_USER = { role: null, active: true, thaiName: null, employeeId: null, position: null, producerOutlets: [] }
 const USER_AUDIT_SELECT = { id: true, email: true, role: true, active: true, thaiName: true, employeeId: true, position: true, producerOutlets: true } as const
 
 async function auditUserChange(
@@ -52,14 +55,14 @@ async function auditUserChange(
   before: Record<string, any> | null,
   after: { id: string; email: string; role: string } & Record<string, any>,
 ) {
-  const diff = before ? diffFields(before, after, USER_AUDIT_FIELDS) : null
+  const diff = diffFields(before ?? BLANK_USER, after, USER_AUDIT_FIELDS)
   if (before && !diff) return
   await logAudit({
     actorEmail,
     action: before ? 'user.update' : 'user.add',
     entityType: 'User',
     entityId: after.id,
-    changes: { email: after.email, ...(diff ?? { role: { from: null, to: after.role } }) },
+    changes: { email: after.email, ...diff },
   })
 }
 

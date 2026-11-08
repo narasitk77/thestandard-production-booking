@@ -53,11 +53,12 @@ import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
 import { ADMIN_DIGEST, readHeld } from './footage-ready-health'
-import { mediaproGate } from './mediapro'
+import { mediaproGate, expectsCameraVideo } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
 import { isQuarantined, sonyClipPart, type FootageFileLike } from './footage-completeness'
 import { alertOps } from './ops-alert'
 import { CARD_PREFIX, isStaleCard, cardHoldsNotice } from './ingest'
+import { EPISODE_ORDER } from './episode-order'
 
 const DAY = 86_400_000
 
@@ -113,7 +114,7 @@ export function cameraCoverage(
     else if (!path.some(s => EXTRA_DIR.test(s.trim()))) uncounted = true
   }
   const expected = b.cameraCount || 0
-  const expectVideo = expected > 0 || (b.crewRequired || []).some(r => /video|camera|กล้อง|ช่างภาพ/i.test(r))
+  const expectVideo = expectsCameraVideo(b)
   const list = [...cams].sort()
   let gap = ''
   if (expectVideo && video === 0) gap = 'ยังไม่มีไฟล์ภาพจากกล้องเลย (มีแต่ไฟล์อื่น เช่น เสียง)'
@@ -364,7 +365,8 @@ const CANDIDATE_SELECT = {
   outlet: { select: { code: true, name: true } },
   program: { select: { name: true, code: true } },
   episodes: {
-    orderBy: { sequence: 'asc' as const },
+    // maint 2026-11-08 — total order (sequence ties on multi-item bookings → the show name in the mail flipped run to run)
+    orderBy: EPISODE_ORDER,
     select: { episodeId: true, sequence: true, title: true, program: { select: { name: true, code: true } } },
   },
 }
@@ -484,7 +486,8 @@ async function runReadySweep(
   const eligible: CandidateRow[] = []
   for (const b of rows) {
     const code = b.bookingCode as string
-    if (!isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap }, now)) {
+    // callTime — an overnight single-day shoot (wrap ≤ call) is not over on its own shoot day's morning
+    if (!isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap, callTime: b.callTime }, now)) {
       result.skipped.push({ code, reason: 'shoot-not-over' }); continue
     }
     // v1.179 — also honour the BOOKING's own program. isPhotoAlbumBooking reads
@@ -518,7 +521,8 @@ async function runReadySweep(
   // caller named at most FORCED_MAX codes and is waiting for all of them.
   const toWalk = forced.length > 0 ? ordered : ordered.slice(0, maxPerRun)
   result.deferred = ordered.length - toWalk.length
-  result.deferredCodes = ordered.slice(maxPerRun).map(r => r.bookingCode as string)
+  // what was NOT walked — a forced run walks all of them, so it defers none (it used to name walked codes as deferred)
+  result.deferredCodes = ordered.slice(toWalk.length).map(r => r.bookingCode as string)
 
   for (const b of toWalk) {
     const code = b.bookingCode as string
@@ -616,6 +620,7 @@ async function runReadySweep(
         changes: {
           audience,
           recipients: sent.recipients,
+          ...(sent.failedRecipients.length ? { failedRecipients: sent.failedRecipients } : {}),
           ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
           folderCount: payload.folders.length,
           fileCount: payload.fileCount,
@@ -630,6 +635,7 @@ async function runReadySweep(
         },
       })
       result.notified.push(code)
+      await notifyPartialMail(code, 'Footage พร้อม', sent.failedRecipients, sent.error)
     } catch (e: any) {
       result.errors.push({ code, error: e?.message || String(e) })
     }
@@ -737,13 +743,16 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
         if (!sent.delivered) { result.errors.push({ code, error: `follow-up: ${sent.error || 'no channel'}` }); continue } // retried next sweep
         followUpSent.add(w.entityId!)
         result.followedUp.push(code)
+        await notifyPartialMail(code, 'Footage ครบแล้ว', sent.failedRecipients, sent.error)
         try {
           // awaited + throwing (not logAudit, which swallows): this row is the send-once record
           await prisma.auditLog.create({
             data: {
               actorEmail: 'footage-ready-worker', action: 'booking.ready_followup', entityType: 'Booking', entityId: b.id, bookingCode: code,
               changes: JSON.parse(JSON.stringify({
-                audience: result.audience, recipients: sent.recipients, ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
+                audience: result.audience, recipients: sent.recipients,
+                ...(sent.failedRecipients.length ? { failedRecipients: sent.failedRecipients } : {}),
+                ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
                 cameraGapBefore: first.gap, cams: cov.cams, fileCount: gate.files?.length || 0, mediapro: gate.text,
                 emailError: sent.error, operatorChannels: sent.operatorChannels,
               })),
@@ -768,7 +777,7 @@ async function sendCameraFollowUp(
   cov: CameraCoverage,
   verified: string,
   fileCount: number,
-): Promise<{ delivered: boolean; recipients: string[]; skippedInactive: string[]; operatorChannels: { digestOk: boolean; discordOk: boolean; larkOk: boolean }; error: string | null }> {
+): Promise<{ delivered: boolean; recipients: string[]; failedRecipients: string[]; skippedInactive: string[]; operatorChannels: { digestOk: boolean; discordOk: boolean; larkOk: boolean }; error: string | null }> {
   const code = b.bookingCode as string
   const show = bookingDisplayName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
   const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
@@ -787,19 +796,21 @@ ${typeof box === 'string' ? `\nเปิดกล่องงาน: https://dri
 THE STANDARD Production Booking`
   const audience = footageReadyAudience()
   const { people, digest, inactive } = footageReadyRecipients(audience, b, process.env.REMINDER_ADMIN_EMAIL || process.env.EMAIL_FROM, await inactiveUserEmails())
-  let emailed = 0
+  let mail: MailEachResult = { sent: [], failed: [] }
   let error: string | null = null
   if (people.length && isEmailConfigured()) {
-    const results = await Promise.allSettled(people.map(to => sendEmail({ to: [to], subject, text })))
-    emailed = results.filter(r => r.status === 'fulfilled').length
-    if (emailed < results.length) error = `${results.length - emailed}/${results.length} ส่งไม่สำเร็จ`
+    mail = await emailEach(people, subject, text)
+    if (mail.failed.length) error = `${mail.failed.length}/${people.length} ส่งไม่สำเร็จ`
   } else if (!people.length) error = 'ไม่มีคนในทีมให้แจ้ง'
   else error = 'email not configured'
+  const emailed = mail.sent.length
   const digestOk = digest || !people.length ? await notifyEmailDigest(subject, text) : false
   const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`✅ กล้องตามมาครบ: ${code} — ${show} (${cov.cams.join(', ') || 'ไฟล์ภาพครบ'}) → ${emailed}/${people.length} อีเมล`)
   return {
     delivered: emailed > 0 || (!isEmailConfigured() && chatOk) || (people.length === 0 && (digestOk || chatOk)),
-    recipients: digestOk ? [...people, ADMIN_DIGEST] : people,
+    // maint 2026-11-08 — only the addresses the provider accepted (see emailEach)
+    recipients: digestOk ? [...mail.sent, ADMIN_DIGEST] : mail.sent,
+    failedRecipients: mail.failed,
     skippedInactive: inactive,
     operatorChannels: { digestOk, discordOk, larkOk },
     error,
@@ -807,6 +818,35 @@ THE STANDARD Production Booking`
 }
 
 // ── Delivery ────────────────────────────────────────────────────────────────
+
+type MailEachResult = { sent: string[]; failed: string[] }
+
+/**
+ * maint 2026-11-08 — one mail per person, split by what the provider ACCEPTED (class 1 "a record is not delivery",
+ * per person). The audit used to record every INTENDED address while `emailed` counted only the fulfilled sends: one
+ * success stamped readyNotifiedAt (send-once), /stats counted the people whose mail hit an SMTP 421/timeout as reached,
+ * and nobody ever re-sent to them. Now they are named (`failedRecipients`) and ops is told (notifyPartialMail).
+ */
+async function emailEach(people: string[], subject: string, text: string): Promise<MailEachResult> {
+  const results = await Promise.allSettled(people.map(to => sendEmail({ to: [to], subject, text })))
+  return {
+    sent: people.filter((_, i) => results[i].status === 'fulfilled'),
+    failed: people.filter((_, i) => results[i].status === 'rejected'),
+  }
+}
+
+/**
+ * The booking is stamped (send-once) because at least one person on the job heard; the ones who did not are NOT retried
+ * automatically (a re-send needs per-person state this table does not have) — so a human must hear who, now.
+ * ponytail: ops alert + audit field, no auto re-send; add a per-recipient retry if partial failures turn out common.
+ */
+async function notifyPartialMail(code: string, what: string, failed: string[], error: string | null): Promise<void> {
+  if (!failed.length) return
+  console.error(`[footage-ready] ${code}: ${what} ส่งไม่ถึง ${failed.length} คน: ${failed.join(', ')}`)
+  await alertOps(`ready-mail-partial:${code}`, `เมล ${what} ส่งไม่ถึงบางคน — ${code}`,
+    `${code}: เมล "${what}" ส่งไม่ถึง ${failed.join(', ')} (${error || 'ส่งไม่สำเร็จ'})\n` +
+    'คนอื่นในใบได้รับแล้ว ใบนี้จึงถูกบันทึกว่าแจ้งแล้ว และระบบจะไม่ส่งซ้ำเอง — ส่งต่อให้คนที่ตกหล่นด้วยมือ')
+}
 
 async function sendFootageReadyNotification(
   b: CandidateRow,
@@ -816,7 +856,10 @@ async function sendFootageReadyNotification(
   inactiveEmails: string[],
 ): Promise<{
   delivered: boolean
+  /** maint 2026-11-08 — addresses the mail provider ACCEPTED (+ ADMIN_DIGEST when that went through) — not the intent */
   recipients: string[]
+  /** maint 2026-11-08 — addresses whose mail was rejected/timed out: recorded + told to ops, never counted as reached */
+  failedRecipients: string[]
   /** v1.264 — คนในใบที่ปิดบัญชีแล้ว ไม่ได้ส่ง (บันทึกลง audit) */
   skippedInactive: string[]
   /**
@@ -863,6 +906,7 @@ THE STANDARD Production Booking`
       delivered: emailOk || chatOk,
       // ใส่ ADMIN_DIGEST เฉพาะเมื่อส่งผ่านจริง — ไม่ใช่เพราะ "ตั้งใจจะส่ง"
       recipients: emailOk ? [ADMIN_DIGEST] : [],
+      failedRecipients: [],
       skippedInactive: [],
       operatorChannels: { digestOk: emailOk, discordOk, larkOk },
       error: emailOk || chatOk ? null : 'admin digest + chat (discord/lark) both unavailable',
@@ -886,23 +930,24 @@ THE STANDARD Production Booking`
     return {
       delivered: warned || chatOk,
       recipients: [],
+      failedRecipients: [],
       skippedInactive,
       operatorChannels: { digestOk: warned, discordOk, larkOk },
       error: skippedInactive.length ? 'all team members inactive' : 'no producer email',
     }
   }
 
-  let emailed = 0
+  let mail: MailEachResult = { sent: [], failed: [] }
   let error: string | null = null
   if (isEmailConfigured()) {
     // One email PER recipient — assignedEmails can include external freelancers'
     // personal addresses (same privacy rule as the manual notify-ready).
-    const results = await Promise.allSettled(recipients.map(to => sendEmail({ to: [to], subject, text })))
-    emailed = results.filter(r => r.status === 'fulfilled').length
-    if (emailed < results.length) error = `${results.length - emailed}/${results.length} ส่งไม่สำเร็จ`
+    mail = await emailEach(recipients, subject, text)
+    if (mail.failed.length) error = `${mail.failed.length}/${recipients.length} ส่งไม่สำเร็จ`
   } else {
     error = 'email not configured'
   }
+  const emailed = mail.sent.length
   // The operator keeps his overview copy on top of the team's mails (v1.178).
   // Best-effort and never counted as delivery: if the digest is the ONLY thing
   // that got through, the team still did not hear about it, and reporting that
@@ -919,7 +964,9 @@ THE STANDARD Production Booking`
     delivered: emailed > 0 || (!isEmailConfigured() && chatOk),
     // v1.186 — ADMIN_DIGEST เข้ารายชื่อเฉพาะเมื่อส่งผ่านจริง (เดิมใส่ตาม alsoDigest
     // ล้วน ๆ ทำให้ /stats นับว่า operator ได้รับ ทั้งที่ไม่เคยได้)
-    recipients: digestOk ? [...recipients, ADMIN_DIGEST] : recipients,
+    // maint 2026-11-08 — and only the people whose mail the provider accepted (see emailEach)
+    recipients: digestOk ? [...mail.sent, ADMIN_DIGEST] : mail.sent,
+    failedRecipients: mail.failed,
     skippedInactive,
     operatorChannels: { digestOk, discordOk, larkOk },
     error,

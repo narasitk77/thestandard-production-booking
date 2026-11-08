@@ -10,7 +10,9 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
+import { myBookingsWhere, assignedBookingIdsCI } from '@/lib/my-bookings-scope'
 import { buildCSVHeader, rowToCSV, csvFilename } from '@/lib/csv'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 const COLUMNS = [
   'Production ID',
@@ -47,13 +49,15 @@ export async function GET(request: NextRequest) {
       ? { producerEmail: { equals: session.email, mode: 'insensitive' as const } }
       : hasConsoleAccess(session.role)
         ? {}
-        : { OR: [{ createdByEmail: session.email }, { assignedEmails: { has: session.email } }] }
+        // maint 2026-11-08 — the one "mine" rule (was a pre-v1.196 copy: no producer/
+        // coProducer, case-sensitive createdByEmail — bug-class 9)
+        : myBookingsWhere(session.email, await assignedBookingIdsCI(session.email))
   // v1.51 — soft-deleted bookings never export
   const where = { deletedAt: null, ...scopeFilter }
 
   const bookings = await prisma.booking.findMany({
     where,
-    include: { outlet: true, program: true, episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } } },
+    include: { outlet: true, program: true, episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } } },
     orderBy: [{ shootDate: 'desc' }, { createdAt: 'desc' }],
     take: 2000,
   })

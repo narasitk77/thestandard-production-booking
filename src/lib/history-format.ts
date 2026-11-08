@@ -32,7 +32,7 @@ const FIELD_LABELS: Record<string, string> = {
   rentalGearNote: 'Rental gear note',
   itinerary: 'Itinerary',
   assignedEquipmentIds: 'อุปกรณ์ที่ assign',
-  // v1.281 — booking.assign / booking.restore
+  // v1.282 — booking.assign / booking.restore
   emailRequested: 'ขอให้ส่งอีเมลแจ้งทีม',
   approvedAt: 'อนุมัติเมื่อ',
   approvedByEmail: 'ผู้อนุมัติ',

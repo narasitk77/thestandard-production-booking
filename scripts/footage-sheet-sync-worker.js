@@ -54,8 +54,11 @@ async function runOnce() {
     }
     const json = JSON.parse(body)
     if (json.reason) {
-      // Idle reason (e.g. env var unset) — log once per tick, not as error
-      console.log(`[footage-sync] idle: ${json.reason}`)
+      // Only "not configured" (env / credentials unset — footage-sync.ts ends those
+      // with 'worker idle') is idle. probeSheet / Drive list failures are a run that
+      // could not do its job and must hit Hermes' BAD_RE, not hide as 'idle'.
+      if (/worker idle$/.test(json.reason)) console.log(`[footage-sync] idle: ${json.reason}`)
+      else console.error(`[footage-sync] run failed: ${json.reason}`)
       return
     }
     const changed = (json.matched || 0) + (json.parsedNoBooking || 0) + (json.unparsed || 0)

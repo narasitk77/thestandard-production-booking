@@ -17,8 +17,17 @@ const CATS: { code: string; label: string }[] = [
   { code: 'POWER', label: 'แบต/ไฟ' }, { code: 'STORAGE_MEDIA', label: 'การ์ด/สตอเรจ' },
 ]
 
-export default function EquipmentRequest({ bookingId, myEmail }: { bookingId: string; myEmail: string }) {
-  const [requests, setRequests] = useState<Loan[]>([])
+export default function EquipmentRequest({ bookingId, myEmail, canRequest, blockedReason }: {
+  bookingId: string
+  myEmail: string
+  /** may open a NEW request (on the booking or staff, booking not cancelled) — the POST enforces the same */
+  canRequest: boolean
+  blockedReason?: string
+}) {
+  // null = not loaded yet / load failed — never shown as "ยังไม่ได้เบิก" (bug-classes §2:
+  // an empty list on a failed load made people request the same gear twice)
+  const [requests, setRequests] = useState<Loan[] | null>(null)
+  const [loadError, setLoadError] = useState('')
   const [available, setAvailable] = useState<Eq[]>([])
   const [picking, setPicking] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -28,18 +37,32 @@ export default function EquipmentRequest({ bookingId, myEmail }: { bookingId: st
   const [error, setError] = useState('')
 
   const loadRequests = useCallback(async () => {
-    const r = await fetch(`/api/bookings/${bookingId}/equipment-request`)
-    const j = await r.json().catch(() => ({}))
-    if (r.ok) setRequests(j.requests || [])
+    setLoadError('')
+    try {
+      const r = await fetch(`/api/bookings/${bookingId}/equipment-request`)
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j || !Array.isArray(j.requests)) throw new Error(j?.error || `HTTP ${r.status}`)
+      setRequests(j.requests)
+    } catch (e: any) {
+      setLoadError(`โหลดรายการเบิกไม่ได้ — ${e?.message || String(e)}`)
+    }
   }, [bookingId])
 
+  const [availableError, setAvailableError] = useState('')
   const loadAvailable = useCallback(async () => {
     const p = new URLSearchParams()
     if (search.trim()) p.set('q', search.trim())
     if (category) p.set('category', category)
-    const r = await fetch(`/api/bookings/${bookingId}/equipment-request?${p}`)
-    const j = await r.json().catch(() => ({}))
-    if (r.ok) setAvailable(j.available || [])
+    setAvailableError('')
+    try {
+      const r = await fetch(`/api/bookings/${bookingId}/equipment-request?${p}`)
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j || !Array.isArray(j.available)) throw new Error(j?.error || `HTTP ${r.status}`)
+      setAvailable(j.available)
+    } catch (e: any) {
+      setAvailable([])
+      setAvailableError(`โหลดรายการอุปกรณ์ไม่ได้ — ${e?.message || String(e)}`)
+    }
   }, [bookingId, search, category])
 
   useEffect(() => { loadRequests() }, [loadRequests])
@@ -70,17 +93,25 @@ export default function EquipmentRequest({ bookingId, myEmail }: { bookingId: st
     <div className="gf-card p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs text-gray-500 font-medium uppercase tracking-wide">🎒 เบิกอุปกรณ์</div>
-        {!picking && (
+        {!picking && canRequest && (
           <button onClick={() => setPicking(true)} className="text-sm px-3 py-1.5 rounded bg-[#673ab7] text-white hover:bg-[#5e35b1]">+ เบิกอุปกรณ์</button>
         )}
       </div>
 
       {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 mb-2">{error}</div>}
+      {loadError && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 mb-2 flex items-center gap-2">
+          <span className="flex-1">{loadError} — อย่าเพิ่งเบิกซ้ำ อาจมีคำขอเดิมอยู่แล้ว</span>
+          <button onClick={() => loadRequests()} className="underline shrink-0">ลองใหม่</button>
+        </div>
+      )}
+      {!canRequest && blockedReason && <div className="text-xs text-gray-400 mb-2">{blockedReason}</div>}
 
       {/* current requests */}
-      {requests.length === 0 && !picking && <div className="text-sm text-gray-400">ยังไม่ได้เบิกอุปกรณ์สำหรับงานนี้</div>}
+      {requests === null && !loadError && <div className="text-sm text-gray-400">กำลังโหลด…</div>}
+      {requests !== null && requests.length === 0 && !picking && <div className="text-sm text-gray-400">ยังไม่ได้เบิกอุปกรณ์สำหรับงานนี้</div>}
       <div className="space-y-2">
-        {requests.map(l => {
+        {(requests || []).map(l => {
           const st = STATUS[l.status] || STATUS.REQUESTED
           return (
             <div key={l.id} className="border border-gray-100 rounded px-3 py-2 text-sm">
@@ -98,7 +129,7 @@ export default function EquipmentRequest({ bookingId, myEmail }: { bookingId: st
       </div>
 
       {/* picker */}
-      {picking && (
+      {picking && canRequest && (
         <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
           <div className="flex gap-2 flex-wrap items-center">
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาอุปกรณ์ / serial"
@@ -111,7 +142,11 @@ export default function EquipmentRequest({ bookingId, myEmail }: { bookingId: st
             ))}
           </div>
           <div className="max-h-64 overflow-y-auto border border-gray-100 rounded divide-y divide-gray-100">
-            {available.length === 0 ? (
+            {availableError ? (
+              <div className="px-3 py-4 text-center text-xs text-red-600">
+                {availableError} <button onClick={() => loadAvailable()} className="underline ml-1">ลองใหม่</button>
+              </div>
+            ) : available.length === 0 ? (
               <div className="px-3 py-4 text-center text-xs text-gray-400">ไม่มีอุปกรณ์ว่างตรงเงื่อนไข</div>
             ) : available.map(e => (
               <label key={e.id} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50 cursor-pointer">

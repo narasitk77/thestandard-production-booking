@@ -4140,3 +4140,40 @@ problem and not a deployment problem.
 - "ข้อ 5 เอา 'พร้อมรับทุกความเห็น… · ข้อความจะแสดงตามที่พิมพ์ (ไม่มีชื่อกำกับ)' ออก" → หน้าแก้คำถือช่องว่าง = ใช้คำในโค้ด จึงต้องลบในโค้ด → v1.280.2 (b7eb7e3) gate 1271/1271 · CI+Docker ผ่าน · backup-2026-11-05T072939.sql.gz · จุดถอย sha-62991e8 · ตรวจ /survey บนพรอด: ข้อ 5 ไม่มีบรรทัดอธิบาย, dropdown agn = Video Production
 - ตั้ง Hermes one-shot `b6bc10d1dd41` 6 พ.ย. 10:00 สร้าง D3-261106 ให้ AGN-261104-01 (CAM-A/B/C/AUDIO) + EVT-EVT-261104-01 (CAM-A) · ผลเข้า Discord hermes-agent
 - v1.280.3 (2b81ead) deployed 15:05 · ข้อความ 🔒 บน /survey เหลือ "ระบบจำแค่ว่าคุณตอบแล้ว (จะได้ไม่ชวนซ้ำ) แต่ไม่เก็บว่าใครตอบอะไร" (นัทสั่งเอาประโยคผลแยกรายทีมออก · กฎซ่อนทีม <3 คนในหน้าผลยังทำงาน) · backup-2026-11-05T080103.sql.gz · จุดถอย sha-b7eb7e3 · ตรวจบนพรอดแล้ว: 🔒 ตรง, ข้อ 5 ไม่มีคำอธิบาย, agn = Video Production
+
+## 2026-11-08 — v1.281.0 maintenance ("maintain ระบบ … ตรวจหาบัคและแก้ไขให้หมด") · deployed 14:22
+- ตรวจ: prod health 1 agent + bug hunter 6 ระบบ (footage, booking, auth, workers, UI, อื่น ๆ) ทุก finding ผ่านผู้ตรวจแย้ง → 82 บั๊กยืนยัน + 6 จาก prod health · แก้ 3 รอบ (ไฟล์ไม่ทับกัน) + รีวิวแย้งทุกรอบ · รอบ 3 ครั้งแรกล้มเพราะชน weekly limit (02:15) — รันใหม่ 13:40 หลังรีเซ็ต · gate สุดท้าย 1592/1592 + next build + tsc + lint + node --check + py_compile · CI+Docker ผ่าน (c638ebe)
+- สิ่งที่ถอดพฤติกรรม prod ถูกคืนเป็นแบบเดิม แล้วยกเป็นเรื่องให้นัทตัดสิน (ดู CHANGELOG [1.281.0] หัวข้อ "รอนัทตัดสิน")
+- `.github/workflows/docker-build.yml` (APP_GIT_SHA → /api/version commit) push ไม่ได้: token ไม่มี scope `workflow` → เก็บเป็น docs/patches/2026-11-08-docker-build-app-git-sha.patch
+- ก่อน deploy นับ: ใบ CANCELLED/ลบที่ยังถือ calendarEventId = 0 → sweep ใหม่ไม่ลบ event ใคร
+- backup-2026-11-08T071814.sql.gz · จุดถอย sha-2b81ead (v1.280.3) · ไม่มี schema change (เฉพาะ seed.ts/start.sh)
+- ตรวจหลัง deploy: boot สะอาด (seed complete, worker 16 ตัวสตาร์ต) · หน้า /, /admin, /calendar, /my-bookings, /producer, /ot, /upload, /admin/* = 200 ไม่มี console error · API list ส่ง truncated · health-summary ok:true · worker ผ่าน secret ได้ (video-merge/landing dryRun) · heartbeat ครบ · room-booking "รอห้อง 1" (NWS-TSN-261203-01) + alert room-conflict-waiting ส่งทางเมล · folder-integrity 14:29 rename ครั้งสุดท้ายตามลำดับใหม่ 2 ใบ (TSS-TSG-261029-01, TSS-TSG-261103-01)
+- Hermes: ติดตั้ง scripts/hermes/probook-worker-check.py ใหม่ใน ~/.hermes/scripts (สำรอง .bak-20261108) · selftest ผ่าน
+- ต้องให้คนจัดการ (ไม่ใช่โค้ด): NWS-TSN-261203-01 ห้องชน · KND-ENU-261105-01 ไม่มี MEDIAPRO · SPT-OTH-261106-02 REQUESTED เลยวันถ่าย · feedback #2/#3 · คิว NAS PM-PMG-260916-01 · AGN-261104-01 ไม่มีไฟล์เสียง
+
+## 2026-11-08 — SHOOT_REVIEW_MAX_BOOKINGS 3 → 8 (นัทสั่ง) · redeploy 17:35
+- เหตุ: lookback 1 วัน แต่เพดาน 3 ใบ/รอบ ขณะที่งานจบวันละ 5–7 ใบ → ใบที่เกินหลุดหน้าต่างถาวร (v1.281.0 เริ่มเตือน 'dropped' รายวัน) · 8 ครอบวันปกติ
+- `deploy.py c638ebe --set SHOOT_REVIEW_MAX_BOOKINGS=8` (อิมเมจเดิม) · ครั้งแรก 17:33 Portainer ตอบ 500 "Unable to clone git repository … lookup github.com on 127.0.0.11:53: server misbehaving" = ล้มก่อนแตะคอนเทนเนอร์ (StartedAt/stack ไม่เปลี่ยน) · ทดสอบ git ของ Portainer ด้วย `POST /api/gitops/repo/file/preview` (อ่านอย่างเดียว) ผ่าน → ยิงใหม่ 17:34 สำเร็จ
+- backup-2026-11-08T103452.sql.gz · 502 ~1.5 นาที · ตรวจครบสามชั้น: stack env = 8 · container env = 8 (StartedAt 17:35:56) · /api/version 1.281.0 in-sync · boot log worker สตาร์ตครบ (shoot-review daily 10:00) · จุดถอยยังเป็น sha-2b81ead
+- ผลจริงดูได้รอบ 10:00 พรุ่งนี้ (9 พ.ย.) — ไม่ควรมี alert 'dropped' ถ้างานต่อวัน ≤ 8
+
+## 2026-11-08 — AGN-261104-01 วันที่ 1 อยู่ใน D1-261104 ครบแล้ว (นัทสั่ง "go AGN")
+- dry-run ใหม่ก่อน apply (18:29): ทั้ง 7 โฟลเดอร์การ์ด (CAM-A SONY/XDROOT · CAM-B XDROOT/SONY · CAM-C M4ROOT/SONY/PRIVATE) **อยู่ใน CAM-X/D1-261104 แล้ว** → SKIP ทุกบรรทัด · ไม่ได้ apply อะไร (manifest plan-AGN-261104-01-D1.dry.20261108-182929.json)
+- ใครย้าย: ไม่ใช่ fix.py ของ session ไหน (ไม่มี id ในทรานสคริปต์อื่น) และไม่มีโค้ดแอปที่ย้ายของในกล่องเข้า D1 (moveFileToFolder เรียกจาก video-merge landing→box / audio-relocate / regenerate-id / shoot-marker เท่านั้น) = น่าจะคนย้ายเองบน Drive · เครื่องมือ read-only ดูผู้ย้ายไม่ได้ (move ไม่เปลี่ยน modifiedTime)
+- นับกล่องสด: D1-261104 = 542 (A 33 · B 346 · C 163 ตรงกับก่อนย้าย) · D2-261105 = 362 (A 53 · B 163 · C 146) · D3-261106 = 12 (CAM-A เท่านั้น) · ไม่มีไฟล์ค้างที่ราก CAM · AUDIO ว่างทุกวัน · landing ถูกทิ้งแล้ว (ว่าง) · _SOUND-STAGING ว่าง
+- นอกโครง: `/อ.เชน เช้านี้/IMG_2852.MOV` (26.7 MB, 6 พ.ย. 09:38) อยู่ที่รากกล่อง ไม่อยู่ใต้ EP/CAM — ไม่แตะ รอนัทว่าจะเก็บที่ไหน
+- footage-ready แจ้งแล้ว 6 พ.ย. 23:37 "ครบตาม MEDIAPRO 7 การ์ด · 884 ไฟล์" (3+3+1 การ์ด)
+
+## 2026-11-08 20:32 — AGN-261104-01 คลิปมือถือนอกโครง → CAM-A/D3-261106 (นัทสั่ง "ย้ายเข้า CAM-A/D3-261106")
+
+- `IMG_2852.MOV` (26.7 MB, md5 b05fc8de…, อัปโดย nuttapong.k@ 6 พ.ย. 09:38) จาก `/อ.เชน เช้านี้/` ที่รากกล่อง → `PP-26-077-S01 …/CAM-A/D3-261106/` (ข้าง XDROOT) · ปลายทางไม่มีชื่อซ้ำ
+- fix.py dry-run 1/1 would do → apply ok=True · ตรวจสด: chain ใหม่ถูก, md5/size เดิม · manifest `footage-check/audit-2026-11-06/plan-AGN-261104-01-strayMOV.{dry.20261108-203210,applied.20261108-203221}.json`
+- โฟลเดอร์ `อ.เชน เช้านี้` (1nGeGzmE…) ว่างแล้ว ยังอยู่ที่รากกล่อง — ไม่ได้ทิ้ง (นัทไม่ได้สั่ง)
+- 20:34 นัทสั่ง "ทิ้งโฟลเดอร์ว่างได้เลย" → fix.py `trashshell` (walk สดตอน apply: 0 ไฟล์, parent = กล่อง) dry-run → apply ok=True · ทิ้งลงถัง (กู้ได้ 30 วัน) ไม่ได้ลบถาวร · รากกล่องเหลือ `_FOOTAGE-CHECK`, `_SHOOT.txt`, โฟลเดอร์ EP · manifest `plan-AGN-261104-01-trash-empty-folder.{dry.20261108-203407,applied.20261108-203416}.json`
+
+## 2026-11-08 — KND-TMH-261104-01 ปล่อยตามที่ siranat.k@ จัดกล้อง (นัทสั่ง "ปล่อยตามที่ siranat จัด ไม่ต้องย้าย")
+
+- ไม่เขียน Drive อะไรเลย · คำถามเดิม (วิธี 1/2 · ย้ายเข้า D1-261104/D2-261105 · Sound→AUDIO/D2 · ทิ้ง `Day 5112026`) ปิดแล้ว
+- สภาพที่ siranat.k@ (ไม่อยู่ใน probook users) จัดเอง: 5 พ.ย. 15:53 สลับชื่อ CAM-A↔CAM-B วันที่ 1 → CAM-A = `B006…` 32 คลิป, CAM-B = `A008…` 28 คลิป · 6 พ.ย. ~15:00 วันที่ 2 ใน `Day 5112026`: "Cam A"→`Cam-B` (`B001…` 33), "Cam B"→`Cam-A` (`A001…` 36) · เสียงวันที่ 2 อยู่ `Day 5112026/Sound` (6+3 WAV) · AUDIO ว่าง · เสียงวันที่ 1 ไม่มีบน Drive
+- ชื่อที่เขาแก้อยู่รอดผ่าน folder-integrity รายชั่วโมงมา 2 วัน (อ่านสด 8 พ.ย.) = worker ไม่สลับกลับ
+- ตาราง 6 พ.ย. ที่ส่งนัท คอลัมน์วันที่ 1 ใช้ข้อมูล 5 พ.ย. 11:53 (ก่อน siranat สลับ) = ผิดตอนส่ง — แจ้งนัทแล้ว

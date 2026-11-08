@@ -13,6 +13,20 @@
 import { prisma } from './db'
 import { notifyEmail, notifyLine } from './notify'
 import { isEmailConfigured } from './email'
+import { alertOps } from './ops-alert'
+
+/**
+ * The rush alert reached nobody. maybeAlertUrgentBooking runs ONCE, from
+ * create-booking — there is no retry or sweep — so "release the claim so the
+ * alert isn't silently lost" lost it anyway (only a console line). Hand it to the
+ * ops channel (separate from the team's footage-only Discord) so a human still
+ * hears that a rush job came in. Per-booking key → one alert per booking.
+ */
+async function alertUndelivered(b: UrgentBookingInput, leadDays: number, why: string): Promise<void> {
+  const { subject, text } = buildMessage(b, leadDays)
+  await alertOps(`urgent-booking:${b.bookingCode || b.id}`, `⚠️ แจ้งงานด่วนไม่ถึงผู้ประสานงาน — ${b.bookingCode || b.id}`,
+    `${why} — ผู้ประสานงานไม่ได้รับแจ้งงานด่วนนี้ ส่งต่อให้ด้วย:\n\n${subject}\n${text}`)
+}
 
 /** BKK calendar-day index (days since epoch in Asia/Bangkok, tz-fixed +07:00). */
 function bkkDayIndex(d: Date): number {
@@ -114,6 +128,7 @@ export async function maybeAlertUrgentBooking(b: UrgentBookingInput): Promise<Ur
     // no-op and the alert lost forever once email IS configured).
     if (!anyChannelConfigured()) {
       console.warn('[urgent-booking] no delivery channel configured — alert skipped:', b.bookingCode || b.id)
+      await alertUndelivered(b, leadDays, 'ยังไม่ได้ตั้งช่องทางส่ง (อีเมล/LINE)')
       return { alerted: false, reason: 'no-channel', leadDays }
     }
 
@@ -140,6 +155,7 @@ export async function maybeAlertUrgentBooking(b: UrgentBookingInput): Promise<Ur
       // lost behind a stamped urgentAlertedAt (review finding, v1.156.1).
       await prisma.booking.updateMany({ where: { id: b.id }, data: { urgentAlertedAt: null } }).catch(() => {})
       console.error('[urgent-booking] delivery failed on every channel — claim released:', b.bookingCode || b.id)
+      await alertUndelivered(b, leadDays, 'ส่งอีเมล/LINE ไม่สำเร็จทุกช่องทาง')
       return { alerted: false, reason: 'delivery-failed', leadDays }
     }
     return { alerted: true, leadDays }

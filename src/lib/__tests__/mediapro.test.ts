@@ -263,3 +263,58 @@ test('รีวิว: gate — กล่องว่าง/อยู่ใน�
   assert.equal(gopro.ok, true, 'กล้องอื่นไม่มี MEDIAPRO ให้เทียบ — ด่านนี้ไม่กั้น')
   assert.match(gopro.text, /ไม่มีการ์ด Sony/)
 })
+
+// ── maint 2026-11-08 — การ์ดคนละใบที่ path เดียวกัน (box + landing ที่ถูก hold) ───────────────
+// footage-ready เดิน box กับโฟลเดอร์ drop รวมกัน · การ์ดที่ video-merge hold ไว้ใน landing อยู่ที่ path สัมพัทธ์เดียวกับการ์ดในกล่อง
+// ชื่อ C0001 เริ่มใหม่ทุกการ์ด → byPath/dedupe (path+ชื่อ) ให้ C0001 ที่ดีของการ์ด 1 แทน C0001 ที่ 0 ไบต์ของการ์ด 2 = "ครบ" ปลอม
+
+const m4card = (umid: string, ...clips: Array<[string, number]>) => xml(...clips.map(([c, dur]) =>
+  material(c, dur, '50p', 'AVC50_1920_1080_H422P@L42', 'CLIP', 'SUB').replace(/\.MXF/g, '.MP4').replace('./Thmbnl/', './THMBNL/').replace('umid="x"', `umid="${umid}-${c}"`)))
+const M4 = ['EP01 · สัมภาษณ์', 'CAM-B', 'PRIVATE', 'M4ROOT']
+const m4files = (clip: string, size: number) =>
+  [f([...M4, 'CLIP'], `${clip}.MP4`, size), f([...M4, 'SUB'], `${clip}S03.MP4`, 500), f([...M4, 'CLIP'], `${clip}M01.XML`, 10), f([...M4, 'THMBNL'], `${clip}T01.JPG`, 10)]
+
+test('maint: การ์ดคนละใบ (umid ต่าง) ที่ path เดียวกัน ชื่อ C0001 ชนกัน → ตรวจไม่ได้ ไม่ใช่ "ครบ" (C0001 0 ไบต์ของการ์ด 2 ถูกบัง)', () => {
+  const files = [...m4files('C0001', 1_000_000), ...m4files('C0001', 0)]
+  const r = mp.mediaproCheck(files, [
+    { folderPath: M4, materials: mp.parseMediapro(m4card('card1', ['C0001', 500])) },
+    { folderPath: M4, materials: mp.parseMediapro(m4card('card2', ['C0001', 700])) },
+  ])
+  assert.deepEqual(r.mixed, [M4.join('/')])
+  assert.equal(mp.mediaproComplete(r), false)
+  assert.match(mp.mediaproGapText(r), /การ์ดคนละใบอยู่ที่ path เดียวกัน 1 ที่/)
+})
+
+test('maint: การ์ดเดียวกันก็อปสองรอบ (คลิปร่วมกัน · MEDIAPRO โตขึ้น) ที่ path เดียวกัน → ไม่ใช่ mixed (ครบตามเดิม)', () => {
+  const files = [...m4files('C0001', 1_000_000), ...m4files('C0002', 1_000_000)]
+  const r = mp.mediaproCheck(files, [
+    { folderPath: M4, materials: mp.parseMediapro(m4card('card1', ['C0001', 500])) },
+    { folderPath: M4, materials: mp.parseMediapro(m4card('card1', ['C0001', 500], ['C0002', 500])) },
+  ])
+  assert.deepEqual(r.mixed, [])
+  assert.equal(mp.mediaproComplete(r), true)
+})
+
+test('maint: การ์ดคนละใบที่ชื่อไม่ชนกัน (FX6 reel+วันที่) → ไม่ใช่ mixed', () => {
+  const root = ['EP.1', 'CAM-A', 'XDROOT']
+  const files = [...card(root, 'A001C001_261101AA'), ...card(root, 'A002C001_261102BB')]
+  const r = mp.mediaproCheck(files, [
+    { folderPath: root, materials: mp.parseMediapro(xml(material('A001C001_261101AA')).replace('umid="x"', 'umid="d1"')) },
+    { folderPath: root, materials: mp.parseMediapro(xml(material('A002C001_261102BB')).replace('umid="x"', 'umid="d2"')) },
+  ])
+  assert.deepEqual(r.mixed, [])
+  assert.equal(mp.mediaproComplete(r), true)
+})
+
+test('maint: mediaproGate box + landing — การ์ดที่ถูก hold ใน landing (C0001 ชนกัน) → ไม่ ok พร้อมเหตุผล', async () => {
+  const boxIdx = { ...f(M4, 'MEDIAPRO.XML', 500), md5: 'idx-card1' }
+  const landIdx = { ...f(M4, 'MEDIAPRO.XML', 600), md5: 'idx-card2' } // a different card's index = different bytes
+  xmls[boxIdx.id] = m4card('card1', ['C0001', 500])
+  xmls[landIdx.id] = m4card('card2', ['C0001', 700])
+  trees.box = [...m4files('C0001', 1_000_000), boxIdx]
+  trees.land = [...m4files('C0001', 0), landIdx]
+  const g = await mp.mediaproGate(['box', 'land'])
+  assert.equal(g.ok, false)
+  assert.match(g.text, /การ์ดคนละใบ/)
+  assert.ok(g.check, 'a comparison that ran (the hold is evidence, not "could not check")')
+})

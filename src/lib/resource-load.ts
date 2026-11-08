@@ -49,6 +49,14 @@ export interface LoadSlot {
    * the WHOLE day, not just call→wrap.
    */
   multiDay?: boolean
+  /**
+   * Calendar days of the booking. Optional: when BOTH the candidate and a row
+   * carry them, the peak is taken per day — a multi-day candidate (00:00–23:59
+   * on every day) must not add up a Monday job and a Wednesday job as if they
+   * ran at once. Without them, every row is read as the candidate's own day.
+   */
+  shootDate?: Date | string | null
+  shootEndDate?: Date | string | null
 }
 
 export interface LoadDemand extends LoadSlot {
@@ -174,8 +182,67 @@ export interface LoadSummary {
   travelTight: { wrap: string; call: string } | null
 }
 
+const ymd = (d: Date | string) => new Date(d).toISOString().slice(0, 10)
+
+/** YYYY-MM-DD of every day a slot covers, or null when it carries no date. */
+function daysOf(slot: LoadSlot): string[] | null {
+  if (!slot.shootDate) return null
+  const out: string[] = []
+  const start = Date.parse(`${ymd(slot.shootDate)}T00:00:00Z`)
+  const end = Date.parse(`${ymd(slot.shootEndDate || slot.shootDate)}T00:00:00Z`)
+  for (let t = start; t <= end && out.length < 62; t += 86_400_000) out.push(new Date(t).toISOString().slice(0, 10))
+  return out
+}
+
 /**
- * Sum each pool across the candidate plus every competing booking.
+ * Highest number of `others` units in use AT THE SAME MOMENT inside the
+ * candidate's window (per day when dates are known).
+ *
+ * WHY. This used to be a plain sum over every competing booking: a 09:00–18:00
+ * candidate with 3 cameras, plus 09:00–11:00 (4) and 14:00–16:00 (4), read
+ * 3+4+4 = 11 > 9 "กล้องเต็ม ขาด 2" although never more than 7 are out at once —
+ * and a multi-day candidate summed jobs from different days. A false shortage
+ * trains producers to ignore the warning on the day it is real.
+ * Touching edges do not overlap (an end at 12:00 frees the unit for a 12:00
+ * start), same as timeWindowsOverlap.
+ */
+function peakConcurrent(
+  candidate: LoadDemand,
+  rows: Array<{ occ: Occupancy; days: string[] | null; n: number }>,
+): number {
+  const cand = occupancyOf(candidate)
+  const candDays = daysOf(candidate)
+  // ponytail: an overnight candidate (end ≤ start as HH:MM) can't be swept on one
+  // clock face — fall back to the old sum (over-warns, never under-warns).
+  if (cand.end <= cand.start) return rows.reduce((sum, r) => sum + r.n, 0)
+  const byDay = new Map<string, Array<[string, number]>>()
+  for (const r of rows) {
+    if (r.n <= 0) continue
+    let s = r.occ.start > cand.start ? r.occ.start : cand.start
+    let e = r.occ.end < cand.end ? r.occ.end : cand.end
+    // An odd row window (overnight wrap) still competes — count it across the
+    // whole candidate window rather than silently dropping it.
+    if (e <= s) { s = cand.start; e = cand.end }
+    const days = candDays && r.days ? r.days.filter(d => candDays.includes(d)) : ['*']
+    for (const d of days) {
+      const evs = byDay.get(d) ?? []
+      evs.push([s, r.n], [e, -r.n])
+      byDay.set(d, evs)
+    }
+  }
+  let peak = 0
+  for (const evs of Array.from(byDay.values())) {
+    // at the same minute, releases (-n) go before starts (+n): touching ≠ overlapping
+    evs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]))
+    let cur = 0
+    for (const [, delta] of evs) { cur += delta; if (cur > peak) peak = cur }
+  }
+  return peak
+}
+
+/**
+ * The candidate's own need plus the PEAK concurrent use of every competing
+ * booking (see peakConcurrent), per pool.
  * `others` must already exclude the candidate itself (and cancelled/completed
  * work) — this function trusts the caller's row set and only does the math.
  */
@@ -192,9 +259,10 @@ export function summariseLoad(candidate: LoadDemand, others: LoadDemand[], pools
     }
   }
 
+  const occs = competing.map(o => ({ o, occ: occupancyOf(o), days: daysOf(o) }))
   const lines = RESOURCES.map(r => {
     const own = r.of(candidate)
-    const otherSum = competing.reduce((sum, o) => sum + r.of(o), 0)
+    const otherSum = peakConcurrent(candidate, occs.map(x => ({ occ: x.occ, days: x.days, n: r.of(x.o) })))
     const total = own + otherSum
     const pool = Math.max(0, Math.floor(pools[r.key] ?? 0))
     // Two guards, both learned from the first live run:

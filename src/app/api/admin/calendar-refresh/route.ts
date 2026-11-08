@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { listCalendarEvents, buildEventTitle, updateCalendarEventDetails } from '@/lib/google-calendar'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
           include: {
             outlet: true,
             program: true,
-            episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+            episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
           },
         })
       : []

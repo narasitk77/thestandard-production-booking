@@ -28,6 +28,7 @@ import { prisma } from './db'
 import { todayBangkokStr } from './bangkok-day'
 import {
   classifyTables, serializeRow, buildKeyIndex, diffTombstones, snapshotFileName,
+  auditRowWithheld, rowKey,
   type KeyIndex, type TableDecision, type Tombstone,
 } from './lark-export-policy'
 import {
@@ -237,6 +238,10 @@ export type LarkExportResult = {
   vanished: number
   tombstones: Tombstone[]
   droppedTables: string[]
+  /** Tables that could not be read this run — the archive is missing them. */
+  failedTables: string[]
+  /** audit_logs rows left out because they belong to a table that does not leave (feedback, OT, users …). */
+  withheldAuditRows: number
   tombstoneTruncated: Record<string, number>
   errors: string[]
   dryRun: boolean
@@ -254,17 +259,38 @@ export async function runLarkExport(opts: { dryRun?: boolean } = {}): Promise<La
     exclude: process.env.LARK_EXPORT_EXCLUDE,
   })
   const included = decisions.filter((d) => d.included).map((d) => d.table)
+  const includedSet = new Set(included)
   const metaByTable = new Map(meta.map((m) => [m.table, m]))
 
   // ── 3. read + serialise ───────────────────────────────────────────────────
   const tables: Record<string, Record<string, unknown>[]> = {}
   const counts: Record<string, number> = {}
+  const failedTables: string[] = []
+  let withheldAuditRows = 0
+  // Keys of audit rows that still EXIST but are withheld — so the diff below does
+  // not read "withheld" as "deleted" (see step 5).
+  const withheldAuditKeys = new Set<string>()
   for (const t of included) {
     try {
-      const rows = await readTable(t)
+      let rows = await readTable(t)
+      // An audit row is a copy of its entity (bug class 14): `feedback.submitted`
+      // carries the reporter's email + the complaint text. Rows about a table that
+      // does not leave for Lark do not leave through audit_logs either.
+      if (t === 'audit_logs') {
+        const pk = metaByTable.get(t)?.keyColumns ?? ['id']
+        const kept: typeof rows = []
+        for (const r of rows) {
+          if (!auditRowWithheld(r, includedSet)) { kept.push(r); continue }
+          const k = rowKey(serializeRow(r), pk)
+          if (k !== null) withheldAuditKeys.add(k)
+        }
+        withheldAuditRows = rows.length - kept.length
+        rows = kept
+      }
       tables[t] = rows.map(serializeRow)
       counts[t] = rows.length
     } catch (e: any) {
+      failedTables.push(t)
       errors.push(`read ${t}: ${e?.message || e}`)
     }
   }
@@ -280,7 +306,11 @@ export async function runLarkExport(opts: { dryRun?: boolean } = {}): Promise<La
       // Written into the file so a reader years later knows what is NOT here
       // and does not mistake the archive for the whole database.
       excludedTables: decisions.filter((d) => !d.included).map((d) => ({ table: d.table, reason: d.reason })),
-      note: 'Rows are verbatim table dumps with credential-shaped columns removed. Excluded tables are listed above with the reason.',
+      // Tables that SHOULD be here but could not be read tonight — without this a
+      // partial file reads as the whole database (maintenance 2026-11-08).
+      failedTables,
+      withheldAuditRows,
+      note: 'Rows are verbatim table dumps with credential-shaped columns removed. Excluded tables are listed above with the reason; failedTables were meant to be here but could not be read; audit_logs rows about excluded tables (feedback, OT, users …) are withheld and counted in withheldAuditRows.',
     },
     counts,
     tables,
@@ -290,23 +320,36 @@ export async function runLarkExport(opts: { dryRun?: boolean } = {}): Promise<La
   const result: LarkExportResult = {
     ok: false, day, archiveOk: false, fileName, fileToken: null, sizeBytes: gz.length,
     mirrorOk: null, tables: decisions, counts, mirrored: {}, vanished: 0,
-    tombstones: [], droppedTables: [], tombstoneTruncated: {}, errors, dryRun,
+    tombstones: [], droppedTables: [], failedTables, withheldAuditRows, tombstoneTruncated: {}, errors, dryRun,
   }
 
   // ── 5. tombstones (computed even on a dry run — it is read-only) ──────────
   const prev = await loadPreviousKeys()
+  // Index nights before 2026-11-08 hold every audit_logs key, incl. rows now
+  // withheld. Those rows are still in our DB — only no longer sent — so they must
+  // not become tombstones ("deleted", pointing at a file, and tripping the
+  // >200 vanished alert). A withheld row already deleted from the DB is not in
+  // this set, so it still tombstones (it WAS in that older file). From tonight on
+  // the stored index holds exported rows only, so this filter is a no-op later.
+  if (prev.keys?.audit_logs && withheldAuditKeys.size) {
+    const kept: Record<string, string> = {}
+    for (const [k, label] of Object.entries(prev.keys.audit_logs)) if (!withheldAuditKeys.has(k)) kept[k] = label
+    prev.keys = { ...prev.keys, audit_logs: kept }
+  }
   const diff = diffTombstones(prev.keys, keys, {
     lastSeenIn: prev.fileName || 'ไม่ทราบไฟล์',
     vanishedAt: new Date().toISOString(),
     maxPerTable: envInt('LARK_TOMBSTONE_MAX_PER_TABLE', 500),
   })
   result.tombstones = diff.tombstones
-  result.droppedTables = diff.droppedTables
+  // A table we failed to read is not a config change — it is reported in failedTables.
+  result.droppedTables = diff.droppedTables.filter((t) => !failedTables.includes(t))
   result.tombstoneTruncated = diff.truncated
   result.vanished = diff.tombstones.length
 
   if (dryRun) {
-    result.ok = errors.length === 0
+    // Same rule as the real run below, minus the upload a dry run never makes.
+    result.ok = failedTables.length === 0
     return result
   }
 
@@ -357,9 +400,12 @@ export async function runLarkExport(opts: { dryRun?: boolean } = {}): Promise<La
     }
   }
 
-  // The run is OK when the ARCHIVE landed. A failed mirror is reported and
-  // visible, but it does not make the night a loss — the file is the promise.
-  result.ok = result.archiveOk
+  // The run is OK when the ARCHIVE landed COMPLETE. A failed mirror is reported
+  // (larkExportStats alerts on it) but does not make the night a loss — the file
+  // is the promise. A file missing a table is not that promise: it was ok:true
+  // before 2026-11-08, so a read failure never reached an alert, and its key
+  // index became the next night's diff basis without that table.
+  result.ok = result.archiveOk && failedTables.length === 0
 
   // ── bookkeeping ───────────────────────────────────────────────────────────
   try {
@@ -369,10 +415,12 @@ export async function runLarkExport(opts: { dryRun?: boolean } = {}): Promise<La
         fileToken: result.fileToken, sizeBytes: gz.length,
         counts: counts as any, mirrored: result.mirrored as any,
         vanished: result.vanished,
-        // Only store the diff basis when the archive landed: if the file is not
-        // in Lark, next run's tombstones would point at a snapshot that does
-        // not exist, and a tombstone you cannot follow is worse than none.
-        keysGz: result.archiveOk ? gzipSync(Buffer.from(JSON.stringify(keys), 'utf8'), { level: 9 }) : null,
+        // Only store the diff basis when the archive landed complete: if the file
+        // is not in Lark (or lacks a table), next run's tombstones would point at
+        // a snapshot that does not hold the row, and a tombstone you cannot follow
+        // is worse than none. loadPreviousKeys reads ok runs only, so the next
+        // night diffs against the last complete one.
+        keysGz: result.ok ? gzipSync(Buffer.from(JSON.stringify(keys), 'utf8'), { level: 9 }) : null,
         error: errors.length ? errors.join(' | ').slice(0, 2000) : null,
       },
     })
@@ -407,6 +455,7 @@ export function heartbeatNote(r: LarkExportResult): string {
     `archive=${r.archiveOk ? 'ok' : 'FAILED'}`,
     `mirror=${r.mirrorOk === null ? 'off' : r.mirrorOk ? 'ok' : 'FAILED'}`,
     `vanished=${r.vanished}`,
+    ...(r.failedTables.length ? [`unreadTables=${r.failedTables.join(',')}`] : []),
   ].join(' ')
 }
 
@@ -467,6 +516,9 @@ export async function larkExportStats(): Promise<LarkExportStats> {
       alerts.push('🟠 ยังไม่เคยรันสำเร็จสักครั้ง')
     } else {
       if (!last.ok) alerts.push(`🔴 รอบล่าสุด (${last.at}) ล้มเหลว: ${last.error || 'ไม่ระบุสาเหตุ'}`)
+      // ok but with errors = the archive landed and something else (the Base
+      // mirror, bookkeeping) failed. It used to be stored and shown nowhere.
+      if (last.ok && last.error) alerts.push(`🟠 รอบล่าสุดไฟล์ลงแล้ว แต่มีส่วนที่ล้ม: ${last.error}`)
       if (last.ageHours > 26) alerts.push(`🔴 ไม่มี snapshot ใหม่มา ${last.ageHours} ชม. (ควรทุก 24 ชม.)`)
       if (last.ok && !last.fileToken) alerts.push('🔴 รอบล่าสุดบอกว่าสำเร็จแต่ไม่มี file_token — ไฟล์อาจไม่ได้ลงจริง')
       if (last.vanished > 200) alerts.push(`🟠 รอบล่าสุดพบแถวหายไป ${last.vanished} แถว — ผิดปกติ ตรวจว่ามีใครลบอะไรไหม`)

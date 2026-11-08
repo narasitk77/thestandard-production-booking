@@ -16,6 +16,8 @@ import { PAYMENT_STATUS, RENTAL_STATUS } from '../_components/badges'
 import { baht, ymd } from '../_components/CrudTable'
 import { OUTLETS } from '@/lib/data'
 import { bookingDisplayName } from '@/lib/display'
+import { todayBangkokStr } from '@/lib/bangkok-day'
+import { fetchBookingList, addDaysStr } from '@/lib/booking-list'
 
 // ── types ───────────────────────────────────────────────────────────────────
 type DocRef = { id: string; kind: string; fileName: string; driveUrl?: string | null }
@@ -184,6 +186,7 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [fetched, setFetched] = useState(false) // ≥1 fetch done — gates the "ไม่พบ" state so it can't flash pre-fetch
+  const [fetchError, setFetchError] = useState('') // a failed search must not read as "ไม่พบ Booking"
   const rootRef = useRef<HTMLDivElement | null>(null)
   const prevDateRef = useRef(dateFilter)
 
@@ -205,22 +208,32 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
     if (prevDateRef.current !== dateFilter) { prevDateRef.current = dateFilter; setResults([]) }
     let cancelled = false
     const query = q.trim()
-    // Empty/1-char → show the most-recent bookings straight away (no typing
+    // Empty/1-char → show the bookings around TODAY straight away (no typing
     // needed, "เลือกได้เลย"); ≥2 chars → debounced search; a date filter narrows
-    // either mode to that shoot day. /api/bookings orders by shootDate desc.
+    // either mode to that shoot day (span=1: day 2 of a multi-day shoot counts).
+    // maint 2026-11-08 (ui-17) — the empty list used to be limit=15 of the API's
+    // shootDate DESC order = the 15 furthest-future rows (Mar 2027 routine), never
+    // this week's shoot. Now: ±14 days, nearest to today first.
     const t = setTimeout(async () => {
       setLoading(true)
+      setFetchError('')
       try {
         // hasCode=1 — only bookings with a Production ID (filtered SERVER-side,
         // so null-code legacy rows can't eat pagination slots; the client
         // .filter below stays as a type-narrowing safety net).
-        const p = new URLSearchParams({ scope: 'all', hasCode: '1', limit: dateFilter ? '50' : (query.length >= 2 ? '12' : '15') })
+        const browsing = query.length < 2 && !dateFilter
+        const today = todayBangkokStr()
+        const p = new URLSearchParams({ scope: 'all', hasCode: '1', limit: dateFilter ? '50' : (query.length >= 2 ? '12' : '200') })
         if (query.length >= 2) p.set('search', query)
-        if (dateFilter) p.set('date', dateFilter)
-        const res = await fetch(`/api/bookings?${p.toString()}`)
-        const json = await res.json().catch(() => ({}))
+        if (dateFilter) { p.set('date', dateFilter); p.set('span', '1') }
+        if (browsing) { p.set('from', addDaysStr(today, -14)); p.set('to', addDaysStr(today, 15)) }
+        const { bookings } = await fetchBookingList<PickerBooking>(p)
+        const dist = (b: PickerBooking) => Math.abs(Date.parse(`${(b.shootDate || '').slice(0, 10)}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`))
+        const rows = browsing ? [...bookings].sort((a, b) => dist(a) - dist(b)) : bookings
         // rentals link by Production ID — rows without one can't be picked
-        if (!cancelled) setResults((json.bookings || []).filter((b: PickerBooking) => b.bookingCode)) // ignore a stale response that lost the race
+        if (!cancelled) setResults(rows.filter(b => b.bookingCode)) // ignore a stale response that lost the race
+      } catch (e: any) {
+        if (!cancelled) { setResults([]); setFetchError(e?.message || String(e)) }
       } finally { if (!cancelled) { setLoading(false); setFetched(true) } }
     }, query.length >= 2 || dateFilter ? 250 : 0)
     return () => { cancelled = true; clearTimeout(t) }
@@ -262,7 +275,7 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
       {open && results.length > 0 && (
         <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
           <div className="sticky top-0 bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-400 border-b border-gray-100">
-            {dateFilter ? `งานวันที่ ${dateFilter}` : 'เลือกงาน'} · พิมพ์เพื่อค้นหา
+            {dateFilter ? `งานวันที่ ${dateFilter}` : q.trim().length >= 2 ? 'ผลค้นหา' : 'งานช่วง ±14 วัน (ใกล้วันนี้ก่อน)'} · พิมพ์เพื่อค้นหา
           </div>
           {results.map((b) => {
             const name = bookingDisplayName(b)
@@ -287,8 +300,8 @@ function BookingPicker({ value, label, onChange }: { value: string | null; label
         </div>
       )}
       {open && !loading && fetched && results.length === 0 && (
-        <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg px-3 py-2 text-sm text-gray-400">
-          {dateFilter ? `ไม่พบงานวันที่ ${dateFilter}` : 'ไม่พบ Booking'}
+        <div className={`absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg px-3 py-2 text-sm ${fetchError ? 'text-red-700' : 'text-gray-400'}`}>
+          {fetchError ? `ค้นหาไม่สำเร็จ — ${fetchError}` : dateFilter ? `ไม่พบงานวันที่ ${dateFilter}` : 'ไม่พบ Booking'}
         </div>
       )}
     </div>

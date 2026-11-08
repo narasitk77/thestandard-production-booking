@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { bookingDisplayName } from '@/lib/display'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
       booking: {
         include: {
           program: { select: { code: true, name: true } },
-          episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { code: true, name: true } } } },
+          episodes: { orderBy: EPISODE_ORDER, select: { title: true, program: { select: { code: true, name: true } } } },
         },
       },
     },

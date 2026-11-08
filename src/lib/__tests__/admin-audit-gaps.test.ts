@@ -1,7 +1,7 @@
 import { test, mock, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
-// v1.281 — ช่องที่ตรวจรายงานการใช้งาน (5 พ.ย. 2569) เจอ: ใบที่อนุมัติแล้ว 762 ใบ รู้ผู้อนุมัติ 170
+// v1.282 — ช่องที่ตรวจรายงานการใช้งาน (5 พ.ย. 2569) เจอ: ใบที่อนุมัติแล้ว 762 ใบ รู้ผู้อนุมัติ 170
 // และขั้น REQUESTED → ASSIGNED ไม่มีใน audit_logs เลยตั้งแต่ 22 พ.ค. เพราะ:
 //   1) /api/admin/[id]/assign ไม่เขียน audit
 //   2) assign ไม่กันใบ CANCELLED (ยิง API ตรง = CANCELLED → ASSIGNED + ส่งเมลหาทีม)
@@ -16,6 +16,9 @@ let bookingRow: any // what the DB holds right now
 let readSnapshot: any = null // what the route's first read sees (null = same as bookingRow)
 let users: Record<string, any> = {}
 let session: any
+// v1.281.0 (main): restore deletes a cancelled run's leftover event first and
+// refuses (409) when Google won't — deleteCalendarEvent returns true on success
+let calendarDeleteOk = true
 
 const p2025 = () => Object.assign(new Error('Record to update not found.'), { code: 'P2025' })
 
@@ -62,7 +65,7 @@ mock.module('../google-sheets', { namedExports: { updateBookingRow: async () => 
 mock.module('../google-calendar', { namedExports: {
   buildEventDescription: () => '',
   createCalendarEvent: async () => null,
-  deleteCalendarEvent: async () => {},
+  deleteCalendarEvent: async () => calendarDeleteOk,
   getCalendarImpersonateSubject: () => null,
   getCalendarEventLink: async () => null,
   updateCalendarEventAttendees: async () => true,
@@ -108,7 +111,7 @@ const ctx = { params: { id: 'b1' } }
 
 beforeEach(() => {
   audits.length = 0; bookingWrites.length = 0; mailed.length = 0
-  bookingRow = baseBooking(); readSnapshot = null; users = {}
+  bookingRow = baseBooking(); readSnapshot = null; users = {}; calendarDeleteOk = true
   session = COORD
 })
 
@@ -187,6 +190,18 @@ test('restore: เก็บผู้อนุมัติ/เวลาอนุ�
   assert.deepEqual(a.changes.calendarEventId, { from: 'ev-old', to: null })
 })
 
+test('restore: ลบ event ของรอบที่ยกเลิกไม่สำเร็จ → 409 ไม่กู้ ไม่มี audit (ไม่จดว่ากู้ทั้งที่ไม่ได้กู้)', async () => {
+  calendarDeleteOk = false
+  bookingRow = baseBooking({ status: 'CANCELLED', approvedByEmail: 'approver@thestandard.co', calendarEventId: 'ev-old' })
+  const res = await restore(post({}), ctx)
+  assert.equal(res.status, 409)
+  assert.equal((await res.json()).code, 'CALENDAR_DELETE_FAILED')
+  assert.equal(bookingRow.status, 'CANCELLED')
+  assert.equal(bookingRow.approvedByEmail, 'approver@thestandard.co')
+  assert.equal(bookingWrites.length, 0)
+  assert.equal(audits.length, 0)
+})
+
 test('restore: ใบที่ไม่ใช่ CANCELLED → 400 ไม่มี audit', async () => {
   const res = await restore(post({}), ctx)
   assert.equal(res.status, 400)
@@ -247,6 +262,18 @@ test('users POST: เพิ่มคนใหม่ = user.add · อีเม�
   assert.equal(audits[0].action, 'user.update')
   assert.deepEqual(audits[0].changes.role, { from: 'USER', to: 'MANAGER' })
   assert.deepEqual(audits[0].changes.active, { from: false, to: true })
+})
+
+test('users POST: คนใหม่ที่ได้ position manager (= อนุมัติ OT) ตั้งแต่ตอนเพิ่ม — user.add มี position ด้วย', async () => {
+  session = ADMIN
+  await usersRoute.POST(send('POST', { email: 'pm@thestandard.co', role: 'USER', position: 'Production Manager', thaiName: 'พีเอ็ม' }))
+  assert.equal(audits[0].action, 'user.add')
+  assert.deepEqual(audits[0].changes, {
+    email: 'pm@thestandard.co',
+    role: { from: null, to: 'USER' },
+    position: { from: null, to: 'Production Manager' },
+    thaiName: { from: null, to: 'พีเอ็ม' },
+  })
 })
 
 test('users DELETE: ปิดบัญชีมีร่องรอย active true → false', async () => {
