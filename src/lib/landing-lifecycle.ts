@@ -35,6 +35,7 @@ import { rememberDriveLinks, getDriveLink } from './drive-links'
 import { computeTypeDroppedId } from './id-migration'
 import { landingMayBeTrashed, isShootMarkerFile, isFootageCheckReport } from './reconciler/guards'
 import { boxFootageState } from './landing-duplicates'
+import { EPISODE_ORDER } from './episode-order'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
 const SHOOT_STUB_RE = /^_SHOOT\b.*\.txt$/i
@@ -351,7 +352,7 @@ export async function manageLandingFolders(
       shootEndDate: true, callTime: true, estimatedWrap: true, driveFolders: true, // v1.280 — day folders
       projectName: true, outlet: { select: { code: true } },
       program: { select: { code: true, name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
     },
   })
   for (const b of nextDay) {
@@ -468,7 +469,7 @@ export async function ensureLandingForBooking(
       shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true, driveFolders: true, // v1.280 — day folders
       projectName: true, outlet: { select: { code: true } },
       program: { select: { code: true, name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
     },
   })
   if (!b || !b.bookingCode) return { ok: false, dryRun, bookingCode: code, reason: 'booking not found' }

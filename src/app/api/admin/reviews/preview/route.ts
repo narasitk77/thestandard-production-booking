@@ -21,6 +21,7 @@ import { canSeeReviewActivity, REVIEW_TARGET_ROLES, targetsFor } from '@/lib/rev
 import { newInviteToken, classifyRater, presentRoles, buildInviteMail } from '@/lib/shoot-review'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
   const withJobName = {
     program: { select: { name: true } },
     outlet: { select: { name: true } },
-    episodes: { orderBy: { sequence: 'asc' as const }, select: { title: true }, take: 1 },
+    episodes: { orderBy: EPISODE_ORDER, select: { title: true }, take: 1 },
   }
   const booking = code
     ? await prisma.booking.findFirst({ where: { bookingCode: code, deletedAt: null }, include: withJobName })

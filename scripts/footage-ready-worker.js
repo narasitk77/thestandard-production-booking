@@ -61,6 +61,9 @@ async function runOnce() {
     // v1.268 — warned bookings still waiting for their "cameras complete" follow-up
     for (const w of json.followUpWaiting || []) console.log(`[footage-ready] follow-up waiting ${w.code}: ${String(w.detail || '').slice(0, 200)}`)
     for (const s of blocked) console.log(`[footage-ready] held ${s.code} (${s.reason}): ${String(s.detail || '').slice(0, 300)}`)
+    // maint 2026-11-08 — WHICH booking failed and why (incl. "no delivery channel succeeded"): the count alone left
+    // four errors=1–2 runs (5–7 Nov) untraceable — the reason was only in the HTTP body, which nothing kept
+    for (const e of json.errors || []) console.error(`[footage-ready] error ${e.code}: ${String(e.error || '').slice(0, 300)}`)
   } catch (err) {
     console.error('[footage-ready] run failed:', err?.message || err)
   } finally {

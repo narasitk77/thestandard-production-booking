@@ -1,7 +1,8 @@
 'use client'
 
 import { bookingDisplayName } from '@/lib/display'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { fetchBookingList } from '@/lib/booking-list'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Loader2, X, Copy, Check, ExternalLink, CalendarPlus } from 'lucide-react'
 import {
@@ -79,18 +80,43 @@ export default function CalendarPage() {
       .catch(() => {})
   }, [])
 
-  // Silent refetch (no grid flash) — used after a drawer save.
-  const refresh = () =>
-    fetch('/api/bookings?limit=500&withCrew=1')
-      .then(r => r.json())
-      .then(d => setBookings(d.bookings || []))
-      .catch(() => {})
+  const monthStart = startOfMonth(cursor)
+  const monthEnd = endOfMonth(cursor)
+  const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
+  const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
+  const days = eachDayOfInterval({ start: gridStart, end: gridEnd })
 
-  useEffect(() => {
-    setLoading(true)
-    refresh().finally(() => setLoading(false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // maint 2026-11-08 (ui-3, ui-6) — fetch the days ON SCREEN, not the newest-500
+  // by shootDate DESC: with >500 live bookings that slice held ~2 months + the
+  // future, so paging back to Aug/Sep showed "No bookings on this day." with no
+  // hint. span=1 brings in multi-day shoots that started before the range.
+  // A failed fetch is a banner + retry, never an empty month.
+  const [loadError, setLoadError] = useState('')
+  const [capped, setCapped] = useState<{ shown: number; total: number } | null>(null)
+  const today0 = startOfToday()
+  const rangeFrom = format(view === 'agenda' ? today0 : gridStart, 'yyyy-MM-dd')
+  const rangeTo = format(view === 'agenda' ? addDays(today0, 31) : addDays(gridEnd, 1), 'yyyy-MM-dd')
+  const loadSeq = useRef(0)
+  const load = useCallback((spin: boolean) => {
+    const seq = ++loadSeq.current
+    if (spin) setLoading(true)
+    return fetchBookingList<Booking>({ from: rangeFrom, to: rangeTo, span: '1', order: 'asc', limit: '1000', withCrew: '1' })
+      .then(r => {
+        if (seq !== loadSeq.current) return // a newer range won
+        setBookings(r.bookings)
+        setCapped(r.truncated ? { shown: r.bookings.length, total: r.total } : null)
+        setLoadError('')
+      })
+      .catch(e => {
+        if (seq !== loadSeq.current) return
+        if (spin) setBookings([])
+        setLoadError(e?.message || String(e))
+      })
+      .finally(() => { if (seq === loadSeq.current) setLoading(false) })
+  }, [rangeFrom, rangeTo])
+  useEffect(() => { load(true) }, [load])
+  // Silent refetch (no grid flash) — used after a drawer save.
+  const refresh = () => { load(false) }
 
   // Auto-switch to agenda on first paint if viewport is narrow.
   useEffect(() => {
@@ -100,12 +126,6 @@ export default function CalendarPage() {
     }
     setAutoSwitched(true)
   }, [autoSwitched])
-
-  const monthStart = startOfMonth(cursor)
-  const monthEnd = endOfMonth(cursor)
-  const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
-  const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
-  const days = eachDayOfInterval({ start: gridStart, end: gridEnd })
 
   const bookingsByDay = useMemo(() => {
     const map = new Map<string, Booking[]>()
@@ -211,7 +231,18 @@ export default function CalendarPage() {
 
       {source === 'google' && <GoogleCalendarPanel />}
 
-      {source === 'app' && (view === 'month' ? (
+      {source === 'app' && capped && (
+        <div className="ops-card px-3 py-2 mb-3 text-xs text-amber-800 bg-amber-50 border-amber-200">
+          ⚠️ ช่วงนี้มีงาน {capped.total} ใบ แสดงได้ {capped.shown} — บางวันอาจไม่ครบ
+        </div>
+      )}
+
+      {source === 'app' && loadError ? (
+        <div className="ops-card px-3 py-3 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">
+          โหลดงานในปฏิทินไม่ได้ — {loadError}
+          <button onClick={() => load(true)} className="ml-2 underline text-xs">ลองใหม่</button>
+        </div>
+      ) : source === 'app' && (view === 'month' ? (
         <MonthGrid
           cursor={cursor}
           days={days}

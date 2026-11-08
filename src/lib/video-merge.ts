@@ -38,13 +38,15 @@ import { bookingShowName } from './display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
 import { getDriveLink, rememberDriveLinks } from './drive-links'
 import { noteResolve } from './id-first-metrics'
-import { isFolderAlive } from './google-drive'
+import { folderLiveness } from './google-drive'
 import { alertOps, OPS_ALERT_EVERY_MS } from './ops-alert'
 import { tryLockMerge, unlockMerge, videoMergeKey } from './merge-lock'
 import { CARD_HOLD_FIX } from './reconciler/guards'
 import { OS_JUNK } from './landing-lifecycle'
-import { parseMediapro, isMediaproFile, type MediaproMaterial } from './mediapro'
+// sameClip lives in mediapro: the card-hold verdict here and footage-ready's mixed-card check must agree on "same card"
+import { parseMediapro, isMediaproFile, sameClip, type MediaproMaterial } from './mediapro'
 import { createHash } from 'crypto'
+import { EPISODE_ORDER } from './episode-order'
 
 // "Production Team" landing Shared Drive (NAS drop zone) — mirrors prep-folders.ts.
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
@@ -63,8 +65,9 @@ export interface VideoMergeResult {
   errors: number
   /** v1.280 — "<code>: <card root path>" of every card held in landing this run (see mirrorMove) */
   cardHolds: string[]
-  /** v1.280 — true only when this run's held SET is new and its alert went out: the route's chat gate (see reportCardHolds) */
-  cardHoldsAlerted: boolean
+  /** the team chat has not been given this held SET yet — the route's chat gate (see cardHoldsChatDue). Read-only:
+   *  only the route, after notifyChat delivered, records the set (rememberCardHoldsPosted). */
+  cardHoldsChatDue: boolean
   results: Array<{ bookingCode: string | null; seen?: number; moved?: number; movedFolders?: number; dup?: number; err?: number; conflicts?: number; cardHolds?: number; skipped?: string }>
 }
 
@@ -173,10 +176,6 @@ export async function mirrorMove(srcId: string, destId: string | null, code: str
 
 /** v1.280 — a camera card's own parts at its root (the hold keeps them all in landing together). */
 const CARD_PART_RE = /^(XDROOT|M4ROOT|PRIVATE|SONY|DCIM|AVF_INFO|MISC)$/i
-
-/** v1.280 — the same clip on both cards: by umid when both MEDIAPROs carry one, else by uri AND dur. */
-const sameClip = (a: MediaproMaterial, b: MediaproMaterial) =>
-  a.umid && b.umid ? a.umid === b.umid : a.uri === b.uri && a.dur === b.dur
 
 /** v1.280 — every clip these MEDIAPRO.XML files name (a box XDROOT may already hold two). Throws when one is unreadable. */
 async function mediaproMaterials(files: Array<{ id: string }>): Promise<MediaproMaterial[]> {
@@ -348,50 +347,95 @@ export async function reportConflicts(code: string, conflicts: string[]): Promis
 
 /**
  * v1.280 — a held card is an ops incident, not a counter: log + ONE alertOps per run listing every held card root
- * (see mirrorMove/cardVerdict). alertOps keeps its own 6 h repeat for ops; the team chat (the route) gets the hold
- * only when the held SET is new — a hold persists until a human moves the card, and the hourly + 6 h runs would
- * otherwise repost the same list for days (the v1.266.2 sync-storm lesson). The last reported set is a fingerprint
- * in system_heartbeats `setKey` (one per run for the global merge, `card-hold-set:<code>` for a booking's button).
- * Returns true only when the alert went out AND the set changed — the route's chat gate (cardHoldsAlerted).
+ * (see mirrorMove/cardVerdict). alertOps keeps its own 6 h repeat for ops. The team chat is decided separately
+ * (cardHoldsChatDue / rememberCardHoldsPosted).
+ *
+ * maint 2026-11-08 — this used to also stamp "the team chat has this set" whenever ops' alert was attempted, before
+ * any chat post: the admin "รวมไฟล์วิดีโอ (ทั้งระบบ)" button (no ?notify=1) stamped a new set the team never saw, a
+ * failed notifyChat stamped it too, and the booking button's alert on the same set ate the throttle the hourly
+ * run's chat depended on. Ops only now.
  */
-export async function reportCardHolds(holds: string[], setKey = 'card-hold-set', clearWhenEmpty = true): Promise<boolean> {
-  if (!holds.length) {
-    // nothing held now → forget the last set, so a new card held at the same path later is news again
-    if (clearWhenEmpty) {
-      try { await prisma.systemHeartbeat.updateMany({ where: { key: setKey, NOT: { note: '' } }, data: { note: '' } }) }
-      catch (e: any) { console.warn('[video-merge] ล้างชุดการ์ดค้างไม่ได้:', e?.message || e) }
-    }
-    return false
-  }
+export async function reportCardHolds(holds: string[]): Promise<void> {
+  if (!holds.length) return
   const shown = holds.slice(0, 12).join('\n  ')
   console.warn(`[video-merge] ${holds.length} card(s) held in landing — ${CARD_HOLD_FIX}:\n  ${shown}`)
-  const set = conflictSetKey(holds)
-  let reported: string | null = null
-  try { reported = (await prisma.systemHeartbeat.findUnique({ where: { key: setKey } }))?.note ?? null }
-  catch (e: any) { console.warn('[video-merge] อ่านชุดการ์ดค้างที่เตือนไปแล้วไม่ได้ — ถือว่าชุดใหม่:', e?.message || e) } // louder beats silent
-  const r = await alertOps(`card-hold:${set}`, `⛔ การ์ดซ้อนการ์ดใน landing — video-merge ไม่ย้าย ${holds.length} การ์ด`,
+  await alertOps(`card-hold:${conflictSetKey(holds)}`, `⛔ การ์ดซ้อนการ์ดใน landing — video-merge ไม่ย้าย ${holds.length} การ์ด`,
     `video-merge ไม่ย้าย ${holds.length} การ์ดใน landing (เช่น การ์ดวันที่ 2 เทลง CAM-X เดียวกับวันที่ 1):\n  ${shown}` +
     `${holds.length > 12 ? `\n  … อีก ${holds.length - 12}` : ''}` +
     `\nแก้: ${CARD_HOLD_FIX} — merge รอบหน้าจะย้ายให้เอง`,
     OPS_ALERT_EVERY_MS) // ops: the normal 6 h repeat for a hold nobody has fixed yet
-  const fresh = reported !== set
-  if (r.attempted && fresh) {
-    const at = new Date()
-    try { await prisma.systemHeartbeat.upsert({ where: { key: setKey }, create: { key: setKey, at, note: set }, update: { at, note: set } }) }
-    catch (e: any) { console.warn('[video-merge] บันทึกชุดการ์ดค้างไม่ได้ (รอบหน้าจะโพสต์แชตซ้ำ):', e?.message || e) }
+}
+
+/** system_heartbeats row whose note = fingerprint of the held set the team chat was last GIVEN (delivered post). */
+export const CARD_HOLD_CHAT_SET_KEY = 'card-hold-set'
+const cardHoldChatStampKey = (set: string) => `card-hold-chat:${set}`
+
+/**
+ * v1.280 — the team chat (video-merge route, ?notify=1) gets a hold only when the held SET is new: a hold persists
+ * until a human moves the card, and the hourly + 6 h runs would otherwise repost the same list for days (the
+ * v1.266.2 sync-storm lesson). A set that flaps back to one posted < 6 h ago is not news either (a booking skipped
+ * by the merge lock or a Drive error drops its holds from one run's set).
+ * READ-ONLY apart from forgetting: when nothing is held the last set is cleared, so a new card held at the same
+ * path later is news again. Only the whole-landing run calls this — a one-booking run sees a partial set.
+ * A read failure counts as due (louder beats silent).
+ */
+export async function cardHoldsChatDue(holds: string[]): Promise<boolean> {
+  if (!holds.length) {
+    try { await prisma.systemHeartbeat.updateMany({ where: { key: CARD_HOLD_CHAT_SET_KEY, NOT: { note: '' } }, data: { note: '' } }) }
+    catch (e: any) { console.warn('[video-merge] ล้างชุดการ์ดค้างที่แชตทีมได้รับแล้วไม่ได้:', e?.message || e) }
+    return false
   }
-  return r.attempted && fresh
+  const set = conflictSetKey(holds)
+  try {
+    const [last, posted] = await Promise.all([
+      prisma.systemHeartbeat.findUnique({ where: { key: CARD_HOLD_CHAT_SET_KEY } }),
+      prisma.systemHeartbeat.findUnique({ where: { key: cardHoldChatStampKey(set) } }),
+    ])
+    if (last?.note === set) return false
+    return !(posted && Date.now() - posted.at.getTime() < OPS_ALERT_EVERY_MS)
+  } catch (e: any) {
+    console.warn('[video-merge] อ่านชุดการ์ดค้างที่แชตทีมได้รับแล้วไม่ได้ — ถือว่าชุดใหม่:', e?.message || e)
+    return true
+  }
+}
+
+/** Call ONLY after notifyChat delivered the hold list — a stamp without a post is how the team never heard of it. */
+export async function rememberCardHoldsPosted(holds: string[]): Promise<void> {
+  const set = conflictSetKey(holds)
+  const at = new Date()
+  try {
+    await prisma.systemHeartbeat.upsert({ where: { key: CARD_HOLD_CHAT_SET_KEY }, create: { key: CARD_HOLD_CHAT_SET_KEY, at, note: set }, update: { at, note: set } })
+    await prisma.systemHeartbeat.upsert({ where: { key: cardHoldChatStampKey(set) }, create: { key: cardHoldChatStampKey(set), at, note: null }, update: { at } })
+  } catch (e: any) { console.warn('[video-merge] บันทึกชุดการ์ดค้างที่โพสต์แล้วไม่ได้ (รอบหน้าจะโพสต์แชตซ้ำ):', e?.message || e) }
+}
+
+/**
+ * The stored landing/box id, or null to fall back to the name walk. Only a folder Drive says is GONE falls back:
+ * 'unknown' (a 403 rateLimitExceeded is not retried by withDriveRetry) used to read as dead via isFolderAlive and
+ * sent the merge down the name walk — which can create a fresh AGN booking layer or pick a twin box, MOVE the
+ * footage there and overwrite the stored id (rememberDriveLinks), splitting one shoot across two folders.
+ * Trusting a possibly-stale id fails loudly instead (google-drive.ts folderLiveness contract). sound-merge uses it too.
+ */
+export async function storedFolder(link: string | null | undefined): Promise<string | null> {
+  return link && (await folderLiveness(link)) !== 'dead' ? link : null
 }
 
 export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
-  const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, cardHolds: [] as string[], cardHoldsAlerted: false, results: [] as VideoMergeResult['results'] }
+  const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, cardHolds: [] as string[], cardHoldsChatDue: false, results: [] as VideoMergeResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
   if (!root || !hasDriveCredentials()) return { skipped: true, reason: 'DRIVE_FOOTAGE_ROOT unset or no Drive credentials', ...base }
 
   // List the landing folders ONCE and match each booking by its immutable
   // Production-ID prefix (the folder name embeds the editable job title).
   const flatChildren = await listChildFolders(PRODUCTION_TEAM_ROOT)
-  if (flatChildren.length === 0) return { skipped: true, reason: 'Production Team landing empty / inaccessible', ...base }
+  if (flatChildren.length === 0) {
+    // maint 2026-11-08 — a children query on a drive the service account lost returns [] too: ask Drive which it
+    // is. Only a readable, really-empty landing is a finished run; anything else is `skipped`, which the route
+    // keeps OFF the dead-man heartbeat (it used to tick it — days of nothing merged looked healthy).
+    const live = await folderLiveness(PRODUCTION_TEAM_ROOT)
+    if (live === 'alive') return { skipped: false, reason: 'Production Team landing is empty — nothing to merge', ...base }
+    return { skipped: true, reason: `Production Team landing inaccessible (Drive says: ${live})`, ...base }
+  }
 
   const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000) // 45 days
   const bookings = await prisma.booking.findMany({
@@ -401,7 +445,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       bookingCode: true, projectId: true, projectName: true, category: true,
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
     },
   })
 
@@ -415,13 +459,11 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
     const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
     // v1.268.1 — the per-booking button may be merging this booking right now (merge-lock.ts).
     const lock = [videoMergeKey(b.id)]
-    if (!opts.dryRun && !tryLockMerge(lock)) { base.results.push({ bookingCode: code, skipped: 'merge already running for this booking (per-booking button)' }); continue }
+    const token = opts.dryRun ? 0 : tryLockMerge(lock)
+    if (!opts.dryRun && !token) { base.results.push({ bookingCode: code, skipped: 'merge already running for this booking (per-booking button)' }); continue }
     try {
-      const isAgency = b.outlet.code === 'AGN'
-
       // v1.114 — id-first: stored landing ID wins; name match is the fallback.
-      const landingLink = getDriveLink(b.driveFolders, 'landing')
-      let flatId: string | null = landingLink && await isFolderAlive(landingLink) ? landingLink : null
+      let flatId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'landing'))
       const landingViaStored = !!flatId
       // v1.110 — match the landing folder by Production ID (legacy "<code> · …" OR
       // new "<show> · … (<code>)" shape).
@@ -440,9 +482,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // the destination, so a flat merge can't misplace footage anymore.
       // v1.114 — id-first: a stored box ID (for AGN = the booking layer) skips
       // the whole outlet→program→box name walk.
-      let destId: string | null = null
-      const boxLink = getDriveLink(b.driveFolders, 'box')
-      if (boxLink && await isFolderAlive(boxLink)) destId = boxLink
+      let destId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'box'))
       const boxViaStored = !!destId
       if (!destId) {
         const layers = shootFolderLayers({
@@ -487,11 +527,15 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       base.errors++
       base.results.push({ bookingCode: code, skipped: `error: ${e?.message || String(e)}` })
     } finally {
-      if (!opts.dryRun) unlockMerge(lock)
+      if (token) unlockMerge(lock, token)
     }
   }
 
-  if (!opts.dryRun) base.cardHoldsAlerted = await reportCardHolds(base.cardHolds, 'card-hold-set', !opts.onlyCode) // a one-booking run must not clear the global set
+  if (!opts.dryRun) {
+    await reportCardHolds(base.cardHolds)
+    // a one-booking run (?code=) sees a partial set: it must neither decide nor clear the team chat's
+    if (!opts.onlyCode) base.cardHoldsChatDue = await cardHoldsChatDue(base.cardHolds)
+  }
   return { skipped: false, ...base }
 }
 
@@ -540,8 +584,7 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   const showName = bookingShowName({ projectName: b.projectName, program: b.program, episodes: b.episodes })
 
   // v1.114 — id-first for both sides; names are the fallback.
-  const landingLink = getDriveLink(b.driveFolders, 'landing')
-  let flatId: string | null = landingLink && await isFolderAlive(landingLink) ? landingLink : null
+  let flatId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'landing'))
   const landingViaStored = !!flatId
   let landingUnique = false
   if (!flatId) {
@@ -552,9 +595,7 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   if (!flatId) return { skipped: true, reason: 'ยังไม่มีโฟลเดอร์ใน Production Team (NAS ยังไม่ sync?)', ...zero }
   noteResolve('video-merge', 'landing', code, landingViaStored) // v1.154 — id-first coverage gauge
 
-  let destId: string | null = null
-  const boxLink = getDriveLink(b.driveFolders, 'box')
-  if (boxLink && await isFolderAlive(boxLink)) destId = boxLink
+  let destId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'box'))
   const boxViaStored = !!destId
   if (!destId) {
     // v1.112 — AGN merges too (destination = per-booking layer inside the project box).
@@ -586,6 +627,6 @@ export async function mergeBookingVideo(b: VideoMergeBooking, opts: { dryRun?: b
   const stats: Stats = { seen: 0, moved: 0, movedFolders: 0, dup: 0, err: 0, conflicts: [], cardHolds: [] }
   await mirrorMove(flatId, destId, code, stats, dryRun)
   if (!dryRun) await reportConflicts(code, stats.conflicts)
-  if (!dryRun) await reportCardHolds(stats.cardHolds, `card-hold-set:${code}`)
+  if (!dryRun) await reportCardHolds(stats.cardHolds) // ops only — this button's result shows the holds on screen
   return { ...stats, conflicts: stats.conflicts.length, boxFolderUrl: destId ? `https://drive.google.com/drive/folders/${destId}` : null }
 }

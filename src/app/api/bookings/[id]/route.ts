@@ -6,7 +6,7 @@ import { getSession, requireConsole } from '@/lib/session'
 import { hasConsoleAccess } from '@/lib/roles'
 import { canViewBooking } from '@/lib/booking-access'
 import { resolveBookingCrew } from '@/lib/crew-names'
-import { deleteCalendarEvent, updateCalendarEventDetails } from '@/lib/google-calendar'
+import { removeCancelledBookingEvent, pushCalendarDetails } from '@/lib/calendar-reconcile'
 import { updateBookingRow, joinEpisodeTitles } from '@/lib/google-sheets'
 import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
@@ -15,9 +15,11 @@ import { isShootOver } from '@/lib/booking-complete'
 import { isValidHHMM } from '@/lib/shoot-window'
 import { logAudit, diffBooking } from '@/lib/audit'
 import { normalizeBuddhistYear } from '@/lib/thai-date'
+import { startOfTodayBangkok } from '@/lib/bangkok-day'
 import { refreshShootMarker } from '@/lib/shoot-marker'
 import { hasDriveCredentials } from '@/lib/google-drive'
 import type { BookingStatus } from '@prisma/client'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function GET(
   _request: NextRequest,
@@ -31,7 +33,7 @@ export async function GET(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
         // v1.50.1 — select list: keep the fields the detail pages render, drop
         // storage internals (wasabi keys/multipart ids, sha256) from the wire.
         uploads: {
@@ -238,6 +240,18 @@ export async function PATCH(
             ...(status === 'CONFIRMED' && !existing.approvedAt
               ? { approvedAt: new Date(), approvedByEmail: session.email }
               : {}),
+            // The comment above promises "reconciler creates the event in 10
+            // min" — it didn't: a never-approved row has calendarSyncStatus AND
+            // calendarLastSyncedAt NULL, and the reconciler's
+            // NOT { PENDING, lastSynced >= 5 min ago } is NULL (not TRUE) for
+            // it in SQL, so the row was never selected. Stale PENDING is the
+            // reconciler's own "pick this up" branch (→ event + invites within
+            // ~10 min). Only for a shoot whose last day is today or later: an
+            // older row keeps prod behaviour (sync fields untouched — a
+            // never-synced one gets no event, no invites to a gone date).
+            ...(status === 'CONFIRMED' && (existing.shootEndDate ?? existing.shootDate) >= startOfTodayBangkok()
+              ? { calendarSyncStatus: 'PENDING' as const, calendarSyncError: null, calendarLastSyncedAt: new Date(0) }
+              : {}),
           },
         })
         if (guarded.count === 0) throw new Error('STATUS_CONFLICT')
@@ -300,7 +314,7 @@ export async function PATCH(
         include: {
           outlet: true,
           program: true,
-          episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+          episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
         },
       })
     })
@@ -337,42 +351,44 @@ export async function PATCH(
 
     // On cancellation, remove calendar event, sheet row, and auto-OT records
     if (status === 'CANCELLED') {
-      if (existing.calendarEventId) {
-        deleteCalendarEvent(existing.calendarEventId).catch(() => {})
-      }
-      if (existing.sheetRowIndex) {
-        // v1.148.0 — also blank col W: the event above was just deleted, and a
-        // stale event id on a CANCELLED row can mislead PMDC's Airtable sync
-        // (it merges Service Jobs by Calendar Event ID).
-        // Cancel Reason (col AG) rides along when the booking has one (set by
-        // the request-cancel flow; a direct staff cancel has none).
-        updateBookingRow(existing.bookingCode || '', {
-          status: 'CANCELLED',
-          calendarEventId: '',
-          ...(booking.cancelReason ? { cancelReason: booking.cancelReason } : {}),
-        }).catch(() => {})
-      }
-      await prisma.booking.update({
-        where: { id: params.id },
-        data: { calendarEventId: null },
-      })
+      // v1.148.0 — also blank col W: the event below is being deleted, and a
+      // stale event id on a CANCELLED row can mislead PMDC's Airtable sync
+      // (it merges Service Jobs by Calendar Event ID).
+      // Cancel Reason (col AG) rides along when the booking has one (set by
+      // the request-cancel flow; a direct staff cancel has none).
+      // No sheetRowIndex gate: updateBookingRow finds the row by col A, and the
+      // index is only written after the async append — gating on it skipped
+      // rows that already exist.
+      updateBookingRow(existing.bookingCode || existing.id, {
+        status: 'CANCELLED',
+        calendarEventId: '',
+        ...(booking.cancelReason ? { cancelReason: booking.cancelReason } : {}),
+      }).then(r => { if (r === 'error') console.error(`[booking-patch] sheet cancel write failed for ${existing.bookingCode}`) })
       clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
       // v1.201 — ยกเลิกคิว = ต้องคืนห้องในระบบกลางด้วย (operator 2026-08-25:
       // "เมื่อคิวยกเลิกจาก probook ห้องต้องยกเลิกด้วย") ไม่งั้นห้องถูกยึดค้างไว้
       // โดยไม่มีใครใช้ และไม่มีใครรู้ว่าต้องไปปลดที่ไหน
       // fire-and-forget เส้นเดียวกับปฏิทิน/OT — ยกเลิกคิวต้องไม่ล้มเพราะระบบเขาสะดุด
       releaseRoomForBooking(params.id, 'booking-cancelled')
+      // Google delete LAST and not awaited: googleapis has no request timeout, so
+      // a hung Calendar call must not hold up the sheet/OT/room cleanup above.
+      // removeCancelledBookingEvent never throws; it clears the id only when
+      // Google confirms, else keeps it FAILED for the reconcile sweep (+ ops alert).
+      if (existing.calendarEventId) void removeCancelledBookingEvent(params.id, existing.calendarEventId)
     } else if (booking.calendarEventId) {
       // v1.41.0 — edits to a synced booking (time, episode titles, location,
       // video type, equipment, van) must flow to the Google Calendar event.
       // Previously the DB updated but the event kept its old title/time. Patch
       // the event's core details (NOT attendees) so the calendar stays in sync.
       // Fire-and-forget: the booking is already saved; a calendar blip must not
-      // fail the edit, and the 10-min reconciler is a safety net for guests.
-      updateCalendarEventDetails(booking.calendarEventId, booking).catch(e =>
-        console.error('updateCalendarEventDetails error:', e?.message || e),
-      )
+      // fail the edit. A failed patch marks the row FAILED (red chip) and the
+      // 10-min reconciler re-pushes it — it no longer vanishes into a log line.
+      void pushCalendarDetails(booking.calendarEventId, booking)
     }
+
+    // Only CANCELLED (above) reaches the sheet Status column, as in prod. Writing
+    // COMPLETED/ASSIGNED there is pending Nat's decision: PMDC's Airtable sync reads
+    // that column (maintenance 2026-11-08).
 
     // v1.222 — ห้องในระบบกลางต้องตามการแก้ไขด้วย เหมือนที่ปฏิทินกับ OT ตามอยู่แล้ว
     //
@@ -536,7 +552,9 @@ export async function DELETE(
     // that read and this write. Re-check at write time; 0 rows = state moved → 409.
     const cancelled = await prisma.booking.updateMany({
       where: { id: params.id, status: before.status, deletedAt: null },
-      data: { status: 'CANCELLED', calendarEventId: null },
+      // calendarEventId is cleared by removeCancelledBookingEvent below — only
+      // once Google has actually deleted the event
+      data: { status: 'CANCELLED' },
     })
     if (cancelled.count === 0) {
       return NextResponse.json(
@@ -549,18 +567,13 @@ export async function DELETE(
     // flipped the status but left the Google Calendar event live (the
     // reconciler ignores CANCELLED rows, so it never got cleaned up), kept
     // the sheet row saying CONFIRMED, and let auto-OT rows keep counting.
-    if (before.calendarEventId) {
-      deleteCalendarEvent(before.calendarEventId).catch(() => {})
-    }
-    if (before.sheetRowIndex) {
-      // v1.148.0 — blank col W too (see PATCH cancel path above). Cancel
-      // Reason (col AG) rides along when set by the request-cancel flow.
-      updateBookingRow(before.bookingCode || '', {
-        status: 'CANCELLED',
-        calendarEventId: '',
-        ...(before.cancelReason ? { cancelReason: before.cancelReason } : {}),
-      }).catch(() => {})
-    }
+    // v1.148.0 — blank col W too (see PATCH cancel path above). Cancel
+    // Reason (col AG) rides along when set by the request-cancel flow.
+    updateBookingRow(before.bookingCode || before.id, {
+      status: 'CANCELLED',
+      calendarEventId: '',
+      ...(before.cancelReason ? { cancelReason: before.cancelReason } : {}),
+    }).then(r => { if (r === 'error') console.error(`[booking-delete] sheet cancel write failed for ${before.bookingCode}`) })
     clearBookingOT(params.id).catch(e => console.error('clearBookingOT error:', e))
     // v1.222 — DELETE ก็เป็นการยกเลิกที่สมบูรณ์เส้นหนึ่ง (ตั้ง CANCELLED + ลบ event
     //  + ล้าง OT + เขียนชีท) แต่ไม่เคยคืนห้อง ทั้งที่ import ไว้อยู่หัวไฟล์เดียวกันแล้ว
@@ -575,6 +588,8 @@ export async function DELETE(
       fromStatus: before.status,
       toStatus: 'CANCELLED',
     })
+    // Google delete LAST, not awaited — same reason as the PATCH cancel path.
+    if (before.calendarEventId) void removeCancelledBookingEvent(params.id, before.calendarEventId)
 
     return NextResponse.json({ success: true })
   } catch (error) {

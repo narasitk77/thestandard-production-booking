@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
 import { getCachedFootagePayload } from '@/lib/footage-folders'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // recursive Drive walks can be slow for big bookings
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         outlet: { select: { code: true } },
         program: { select: { name: true } },
         episodes: {
-          orderBy: { sequence: 'asc' },
+          orderBy: EPISODE_ORDER,
           select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } },
         },
       },

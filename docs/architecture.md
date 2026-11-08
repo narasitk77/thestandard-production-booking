@@ -342,9 +342,13 @@ hand, so we do not double-book against ourselves. Plan and endpoint notes:
 
 - **Sign-in**: Google OAuth, `@thestandard.co` only (NextAuth callback in
   `src/lib/auth.ts`). `AUTH_DISABLED=1` is a dev/LAN bypass — never on prod.
-  Paired with `SEED_ADMIN_EMAIL` it is also how you test the app *as another
-  person* with their real DB role, which is the only way to see the permission
-  bugs that are invisible from an admin account.
+  Paired with `SEED_ADMIN_EMAIL` it signs you in *as that email*, but
+  `getSession()` still hands out `role: 'ADMIN'` and middleware skips every page
+  gate — so `requireAdmin`/`requireConsole`/`hasConsoleAccess` pass for anyone.
+  It only tests gates that re-read `User`/`TeamMember` from the DB
+  (`getProducerAccess`, `getSwitcherAccess`, `getSoundAccess`, `getUploadAccess`,
+  `canUploadToBooking`, `getOTApproverAccess`, `/api/me`). To prove "producer X
+  cannot reach `/api/admin/*`", sign in as X for real (or query the role in SQL).
 - **DB roles** (`users.role`, `src/lib/roles.ts`) — 5 tiers ranked
   `ADMIN(0) > SUPPORT(1) > MANAGER(2) > COORDINATOR(3) > USER(4)`. Rank decides
   **who may edit whom** (strictly below you, and only with role-management

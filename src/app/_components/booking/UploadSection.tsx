@@ -5,6 +5,8 @@ import { X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw,
 import { uploadToDrive as driveUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
 import { cameraUploadOptions, buildEpisodeFolderName, episodeLeadUsesId } from '@/lib/outlet-folders'
 import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
+// the queue card's readers of the same two replies — one rule for both screens
+import { mergePollState, notifyResultMessage, type MergePoll } from '@/app/_components/CardFootageActions'
 
 interface BookingContext {
   id: string
@@ -156,6 +158,10 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
   const [folders, setFolders] = useState<Array<{ camera: string; count: number; folderUrl: string | null }>>([])
   // v1.89 — footage report (files + size + duration) + "ส่งงาน" delivery state.
   const [report, setReport] = useState<FootageReportView | null>(null)
+  // bug-classes §2 (listed open at UploadSection:185,190): a failed list/report read
+  // used to look like "ยังไม่มีไฟล์" and made the ส่งงาน button vanish with no reason.
+  const [historyError, setHistoryError] = useState('')
+  const [reportError, setReportError] = useState('')
   const [delivering, setDelivering] = useState(false)
   const [deliverMsg, setDeliverMsg] = useState<{ ok: boolean; text: string } | null>(null)
   // v1.111 — per-booking "รวมไฟล์เข้ากล่องนี้": MOVE this job's NAS footage into
@@ -177,10 +183,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
 
   const fetchHistory = async () => {
     setHistoryLoading(true)
+    setHistoryError('')
     try {
       const res = await fetch(`/api/upload/list?bookingId=${booking.id}`)
-      const data = await res.json()
-      if (res.ok) setHistory(data.uploads || [])
+      const data = await res.json().catch(() => null)
+      if (res.ok && data && Array.isArray(data.uploads)) setHistory(data.uploads)
+      else setHistoryError(data?.error ? `${data.error} (HTTP ${res.status})` : `HTTP ${res.status}`)
       // v1.82 — refresh per-camera Drive folder links (best-effort)
       fetch(`/api/upload/folders?bookingId=${booking.id}`)
         .then(r => (r.ok ? r.json() : { folders: [] }))
@@ -188,9 +196,15 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
         .catch(() => {})
       // v1.89 — footage report (files + size + duration) + delivery state
       fetch(`/api/upload/report?bookingId=${booking.id}`)
-        .then(r => (r.ok ? r.json() : { report: null }))
-        .then(d => setReport(d.report || null))
-        .catch(() => {})
+        .then(async r => {
+          const d = await r.json().catch(() => null)
+          if (!r.ok || !d) throw new Error(d?.error ? `${d.error} (HTTP ${r.status})` : `HTTP ${r.status}`)
+          return d
+        })
+        .then(d => { setReport(d.report || null); setReportError('') })
+        .catch(e => setReportError(e?.message || String(e)))
+    } catch (e: any) {
+      setHistoryError(e?.message || String(e))
     } finally {
       setHistoryLoading(false)
     }
@@ -209,7 +223,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
         const who = (data.recipients || []).join(', ')
         const warn = data.producerMissing ? ' ⚠️ งานนี้ไม่มีอีเมล Producer — ส่งถึงตัวเองอย่างเดียว' : ''
         const noMail = !data.emailConfigured ? ' (ระบบอีเมลยังไม่ตั้งค่า — บันทึกการส่งงานแล้วแต่ยังไม่ได้ส่งเมล)' : ''
-        setDeliverMsg({ ok: true, text: `ส่งงานแล้ว — เมลถึง ${data.emailed} คน${who ? ` (${who})` : ''}${warn}${noMail}` })
+        // the deliver route records the delivery even when SMTP throws and reports
+        // it in emailError — that is "recorded, nobody mailed", not a green ✓
+        const mailFailed = !data.emailConfigured || !!data.emailError || !data.emailed
+        setDeliverMsg(mailFailed
+          ? { ok: false, text: `บันทึกส่งงานแล้ว แต่เมลไม่ถึงใคร (0/${(data.recipients || []).length})${data.emailError ? ` — ${data.emailError}` : ''}${warn}${noMail} — แจ้ง Producer เองหรือกดส่งอีกครั้ง` }
+          : { ok: true, text: `ส่งงานแล้ว — เมลถึง ${data.emailed} คน${who ? ` (${who})` : ''}${warn}` })
         fetchHistory() // refresh deliveredAt
       }
     } catch (e: any) {
@@ -244,20 +263,34 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
       const d = await r.json().catch(() => ({}))
       if (!r.ok && r.status !== 202) { setScanMsg(d.error || `รวมไฟล์ไม่สำเร็จ (HTTP ${r.status})`); return }
       // Poll the background job (up to ~15 min for a huge landing).
+      // maint 2026-11-08 — a 502/401/unparsable poll used to read as `{}` →
+      // "งานย้ายถูกรีเซ็ต" while the MOVE kept running server-side (ui-12). Only a
+      // readable {job:{running:false, done:false}} is a reset; anything else keeps polling.
+      let unreadable = 0
       for (let i = 1; i <= 180; i++) {
-        setScanMsg(`⏳ กำลังย้ายไฟล์อยู่เบื้องหลัง… ${i > 12 ? `(~${Math.round((i * 5) / 60)} นาที) ` : ''}— ปิดหน้านี้ได้ งานไม่หยุด`)
+        setScanMsg(unreadable
+          ? `⚠️ อ่านสถานะไม่ได้ ${unreadable} ครั้งติด — งานยังย้ายอยู่เบื้องหลัง กำลังลองอ่านใหม่…`
+          : `⏳ กำลังย้ายไฟล์อยู่เบื้องหลัง… ${i > 12 ? `(~${Math.round((i * 5) / 60)} นาที) ` : ''}— ปิดหน้านี้ได้ งานไม่หยุด`)
         await new Promise(res => setTimeout(res, 5000))
-        const sr = await fetch(`/api/bookings/${booking.id}/merge`, { credentials: 'include' })
-        const sd = await sr.json().catch(() => ({}))
-        const job = sd.job || {}
-        if (job.done) {
+        let state: MergePoll = 'unreadable', sd: any = null
+        try {
+          const sr = await fetch(`/api/bookings/${booking.id}/merge`, { credentials: 'include' })
+          sd = await sr.json().catch(() => null)
+          state = mergePollState(sr.ok, sd)
+        } catch { /* network blip — same as an unreadable poll */ }
+        if (state === 'unreadable') { unreadable++; continue }
+        unreadable = 0
+        const job = sd.job
+        if (state === 'done') {
           if (job.error) setScanMsg(`รวมไฟล์ไม่สำเร็จ: ${job.error}`)
           else renderMergeResult(job.result)
           return
         }
-        if (!job.running) { setScanMsg('งานย้ายถูกรีเซ็ต (ระบบรีสตาร์ทระหว่างทาง) — กดปุ่มอีกครั้งเพื่อย้ายส่วนที่เหลือ'); return }
+        if (state === 'reset') { setScanMsg('งานย้ายถูกรีเซ็ต (ระบบรีสตาร์ทระหว่างทาง) — กดปุ่มอีกครั้งเพื่อย้ายส่วนที่เหลือ'); return }
       }
-      setScanMsg('งานใหญ่มาก ยังย้ายอยู่เบื้องหลัง — กด Refresh ภายหลังเพื่อดูไฟล์ที่เข้าแล้ว')
+      setScanMsg(unreadable
+        ? `⚠️ อ่านสถานะงานย้ายไม่ได้ (${unreadable} ครั้งล่าสุด) — งานอาจยังวิ่งอยู่ กด Refresh ภายหลังเพื่อดูไฟล์ที่เข้าแล้ว`
+        : 'งานใหญ่มาก ยังย้ายอยู่เบื้องหลัง — กด Refresh ภายหลังเพื่อดูไฟล์ที่เข้าแล้ว')
     } catch (e: any) {
       setScanMsg(e?.message || 'รวมไฟล์ไม่สำเร็จ')
     } finally {
@@ -303,19 +336,25 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     let preview: any
     try {
       const pr = await fetch(`/api/bookings/${booking.id}/notify-ready?preview=1`, { method: 'POST' })
-      preview = await pr.json().catch(() => ({}))
-      if (!pr.ok) { setNotifyMsg({ ok: false, text: preview.error || `ไม่สำเร็จ (HTTP ${pr.status})` }); return }
+      preview = await pr.json().catch(() => null)
+      // an unparsable 200 used to become {} → "ส่งถึง 0 คน?" (error dressed as an empty crew)
+      if (!pr.ok || !preview || !Array.isArray(preview.recipients)) { setNotifyMsg({ ok: false, text: preview?.error || `ตรวจผู้รับไม่สำเร็จ (HTTP ${pr.status})` }); return }
     } catch (e: any) { setNotifyMsg({ ok: false, text: e?.message || 'ไม่สำเร็จ' }); return }
-    const who = (preview.recipients || [])
+    const who: string[] = preview.recipients
+    if (!who.length) { setNotifyMsg({ ok: false, text: 'ไม่มีผู้รับ (ยังไม่ได้ assign / ไม่มีอีเมล)' }); return }
     // v1.274 — the auto path was holding this one back: say why before a human overrides it
     const heldWarn = preview.held?.detail ? `⚠️ ระบบอัตโนมัติยังไม่แจ้ง เพราะไฟล์ไม่ครบ (ตรวจ ${String(preview.held.at || '').slice(0, 10)}): ${preview.held.detail}\nส่งตอนนี้ = ทีมจะได้แจ้งว่าพร้อมทั้งที่ยังขาดไฟล์\n\n` : ''
     if (!confirm(`${heldWarn}ส่งลิงก์แจ้ง "footage พร้อมแล้ว" ถึง ${who.length} คน?\n\n${who.join('\n')}`)) return
     setNotifying(true)
     try {
       const r = await fetch(`/api/bookings/${booking.id}/notify-ready`, { method: 'POST' })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok || !d.ok) setNotifyMsg({ ok: false, text: d.error || `ส่งไม่สำเร็จ (HTTP ${r.status})` })
-      else setNotifyMsg({ ok: true, text: `แจ้งแล้ว — เมลถึง ${d.emailed} คน${(d.recipients || []).length ? ` (${d.recipients.join(', ')})` : ''}${d.emailConfigured ? '' : ' · ⚠️ ระบบอีเมลยังไม่ตั้งค่า (บันทึกแล้วแต่ยังไม่ส่ง)'}` })
+      const d = await r.json().catch(() => null)
+      // maint 2026-11-08 — was ok:true "แจ้งแล้ว — เมลถึง 0 คน" whenever the request
+      // succeeded; now the same reader as the queue card: ✓ only when every send
+      // went out, otherwise x/N + emailError (who missed it). d.recipients = delivered.
+      const res = notifyResultMessage(r.ok, r.status, d)
+      const delivered: string[] = res.ok && Array.isArray(d?.recipients) ? d.recipients : []
+      setNotifyMsg({ ok: res.ok, text: `${res.text}${delivered.length ? ` (${delivered.join(', ')})` : ''}` })
     } catch (e: any) { setNotifyMsg({ ok: false, text: e?.message || 'ส่งไม่สำเร็จ' }) }
     finally { setNotifying(false) }
   }
@@ -535,8 +574,8 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
           </div>
           <div className="flex items-center gap-2">
             {detected?.cachedAt && !detected.error && (
-              <span className="text-[10px] text-gray-400" title={new Date(detected.cachedAt).toLocaleString('th-TH')}>
-                อัปเดต {new Date(detected.cachedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
+              <span className="text-[10px] text-gray-400" title={new Date(detected.cachedAt).toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' })}>
+                อัปเดต {new Date(detected.cachedAt).toLocaleTimeString('th-TH-u-ca-gregory', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' })}
               </span>
             )}
             <button onClick={() => detectFootage(true)} disabled={detecting}
@@ -658,6 +697,12 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
         </div>
       )}
 
+      {reportError && (
+        <div className="gf-card p-3 text-xs text-red-700 bg-red-50 border-red-200 flex items-center gap-2">
+          <span className="flex-1">โหลดรายงานไฟล์ไม่ได้ ({reportError}) — ปุ่ม &quot;ส่งงาน&quot; จึงยังไม่แสดง</span>
+          <button onClick={fetchHistory} className="underline shrink-0">ลองใหม่</button>
+        </div>
+      )}
       {/* v1.89 — footage report + ส่งงาน (email Producer + CC self) */}
       {report && report.totalFiles > 0 && (
         <div className="gf-card p-4 space-y-3">
@@ -669,7 +714,7 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
             <div className="flex items-center gap-2 flex-wrap">
               {report.deliveredAt && (
                 <span className="text-[11px] text-green-700">
-                  ✅ ส่งงานแล้ว {new Date(report.deliveredAt).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short' })}
+                  ✅ ส่งงานแล้ว {new Date(report.deliveredAt).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' })}
                 </span>
               )}
               <button onClick={deliver} disabled={delivering}
@@ -741,10 +786,15 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
           </div>
         </div>
         {scanMsg && <div className="text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded p-2 mb-2">{scanMsg}</div>}
+        {historyError && !historyLoading && (
+          <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-2">
+            โหลดรายการไฟล์ไม่ได้ ({historyError}){history.length ? ' — แสดงรายการจากครั้งก่อน' : ''} · กด Refresh เพื่อลองใหม่
+          </div>
+        )}
         {historyLoading ? (
           <div className="py-6 text-center"><Loader2 className="w-4 h-4 animate-spin text-gray-400 mx-auto" /></div>
         ) : history.length === 0 ? (
-          <div className="py-4 text-center text-xs text-gray-400">ยังไม่มีไฟล์</div>
+          historyError ? null : <div className="py-4 text-center text-xs text-gray-400">ยังไม่มีไฟล์</div>
         ) : (
           <div className="overflow-x-auto -mx-4 px-4">
             <table className="w-full text-xs min-w-[700px]">
@@ -890,7 +940,7 @@ function FieldIngestPanel({ bookingId, camera, episodeRowId, history, onChanged 
                 <span className="text-gray-600">{PHASE_TH[n.phase || ''] || n.phase || '—'}</span>
                 {n.bytes != null && <span className="text-gray-500">{formatSize(n.bytes)}{n.files != null ? ` · ${n.files} ไฟล์` : ''}</span>}
                 {n.eta && <span className="text-gray-500">ETA {n.eta}</span>}
-                {n.at && <span className={`text-[10px] ${stale ? 'text-red-600' : 'text-gray-400'}`}>สัญญาณล่าสุด {new Date(n.at).toLocaleString('th-TH')}{stale ? ' — เงียบเกิน 20 นาที' : ''}</span>}
+                {n.at && <span className={`text-[10px] ${stale ? 'text-red-600' : 'text-gray-400'}`}>สัญญาณล่าสุด {new Date(n.at).toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' })}{stale ? ' — เงียบเกิน 20 นาที' : ''}</span>}
                 {u.failureReason && <span className="text-red-600">{u.failureReason}</span>}
                 {u.driveUrl && <a href={u.driveUrl} target="_blank" rel="noreferrer" className="text-[#673ab7] hover:underline">Drive</a>}
                 {(u.status === 'UPLOADING' || u.status === 'ORPHANED') && (

@@ -55,6 +55,40 @@ function discordTarget(category: NotifyCategory): string | null {
 }
 
 /**
+ * 2026-11-08 — cut `content` to fit a channel cap and SAY it was cut.
+ *
+ * notifyDiscord used to `.slice(0, 1990)` and return true: the tail of a long
+ * message (reminders digest's last sections, the noon landing report's 🚨 +
+ * checksum verdicts) vanished with no mark, and the send still counted as
+ * delivered. `size` measures in the channel's own unit (UTF-16 length for
+ * Discord, UTF-8 bytes for Lark). Cuts on code points so an emoji is never split
+ * (a lone surrogate is what jsonb / some webhooks reject outright).
+ */
+export function clipForChannel(content: string, max: number, size: (s: string) => number): string {
+  if (size(content) <= max) return content
+  const cps = Array.from(content)
+  const marker = (n: number) => `\n…[ตัดท้ายออก ${n} ตัวอักษร — ยาวเกินเพดานของช่องนี้]`
+  // marker of the WHOLE length has the most digits → an upper bound on the real one
+  const room = max - size(marker(cps.length))
+  let used = 0
+  let i = 0
+  for (; i < cps.length; i++) {
+    const s = size(cps[i])
+    if (used + s > room) break
+    used += s
+  }
+  console.warn(`[notify] message cut to fit channel cap ${max}: dropped ${cps.length - i} of ${cps.length} chars`)
+  return cps.slice(0, i).join('') + marker(cps.length - i)
+}
+
+const DISCORD_MAX = 1990  // Discord hard-caps a message at 2000 chars
+// Lark custom bot: sources disagree (20 KB request body vs 30/150 KB) — 18 KB of
+// text stays under every documented figure once JSON escaping + envelope are added.
+const LARK_MAX_BYTES = 18_000
+const utf16 = (s: string) => s.length
+const utf8 = (s: string) => Buffer.byteLength(s, 'utf8')
+
+/**
  * POST a message to the configured Discord webhook. Returns false (not throw)
  * when unset, filtered out by scope, or failed.
  *
@@ -68,8 +102,7 @@ export async function notifyDiscord(content: string, category: NotifyCategory = 
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // Discord hard-caps a single message body at 2000 chars.
-      body: JSON.stringify({ content: content.slice(0, 1990) }),
+      body: JSON.stringify({ content: clipForChannel(content, DISCORD_MAX, utf16) }),
     })
     if (!res.ok) {
       console.error(`[notify] discord ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`)
@@ -126,8 +159,9 @@ export async function notifyLark(content: string, category: NotifyCategory = 'fo
 
   const body: Record<string, unknown> = {
     msg_type: 'text',
-    // Lark's cap is ~30KB per text message; stay well inside it.
-    content: { text: content.slice(0, 20000) },
+    // Measured in BYTES: the old `.slice(0, 20000)` counted UTF-16 units, so a
+    // long Thai message (3 bytes/char) could reach ~60 KB and be refused.
+    content: { text: clipForChannel(content, LARK_MAX_BYTES, utf8) },
   }
   const secret = process.env.LARK_WEBHOOK_SECRET?.trim()
   if (secret) {

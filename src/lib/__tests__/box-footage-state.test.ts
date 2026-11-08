@@ -18,6 +18,8 @@ import assert from 'node:assert/strict'
 type F = { name: string; folderPath: string[] }
 let trees: Record<string, F[] | Error> = {}
 let folders: Array<{ id: string; name: string; parents: string[] }> | Error = []
+/** classifyFootageTreeFolder per folder id — unset = 'in-tree' (the box) */
+let treeOf: Record<string, 'in-tree' | 'not-in-tree' | 'unknown'> = {}
 
 mock.module('../google-drive', {
   namedExports: {
@@ -33,13 +35,14 @@ mock.module('../google-drive', {
       if (folders instanceof Error) throw folders
       return folders
     },
+    classifyFootageTreeFolder: async (id: string) => treeOf[id] ?? 'in-tree',
   },
 })
 
 let boxFootageState: typeof import('../landing-duplicates').boxFootageState
 before(async () => { ({ boxFootageState } = await import('../landing-duplicates')) })
 
-beforeEach(() => { trees = {}; folders = [{ id: 'box', name: 'X (C-1)', parents: [] }] })
+beforeEach(() => { trees = {}; treeOf = {}; folders = [{ id: 'box', name: 'X (C-1)', parents: [] }] })
 
 test('กล่องมีไฟล์กล้อง → has-footage (ทิ้งโฟลเดอร์ drop ได้)', async () => {
   trees = { box: [{ name: 'A001C001.MXF', folderPath: ['EP01', 'CAM-A', 'Clip'] }] }
@@ -125,4 +128,34 @@ test('ผู้ตรวจ 3: กล่องใหญ่ชนเพดาน 
   const r = await boxFootageState('C-1', { maxFiles: 5 }) as any
   assert.equal(r.state, 'unknown')
   assert.match(r.reason, /เกินเพดาน/)
+})
+
+// ── maint 2026-11-08 — โฟลเดอร์ที่ชื่อมี (CODE) แต่ไม่ใช่กล่อง ─────────────────────
+// findFoldersByCode ค้นทุกไดรฟ์ → ได้ _SOUND-STAGING ของงานมาด้วย (ชื่อ "(CODE)" แบบเดียวกัน) · WAV ที่ราก staging
+// ไม่มี segment AUDIO จึงเคยถูกนับเป็นฟุตเทจกล้อง → 'has-footage' → ทิ้งโฟลเดอร์ drop ทั้งที่วิดีโอยังไม่มา
+
+test('maint: WAV ใน _SOUND-STAGING (ชื่อมี CODE) ไม่ใช่หลักฐานว่ากล่องมีฟุตเทจ → no-footage (ห้ามทิ้ง)', async () => {
+  folders = [{ id: 'staging', name: 'Show · Job (C-1)', parents: ['cat'] }]
+  treeOf = { staging: 'not-in-tree' }
+  trees = { staging: [{ name: '20261107 rec pt1.wav', folderPath: [] }] }
+  const r = await boxFootageState('C-1', { excludeFolderId: 'land' }) as any
+  assert.equal(r.state, 'no-footage')
+})
+
+test('maint: staging + กล่องจริงที่มีกล้อง → has-footage นับเฉพาะไฟล์ในกล่อง', async () => {
+  folders = [{ id: 'staging', name: 'Show · Job (C-1)', parents: [] }, { id: 'box', name: 'Show · Job (C-1)', parents: [] }]
+  treeOf = { staging: 'not-in-tree' }
+  trees = { staging: [{ name: 'a.wav', folderPath: [] }], box: [{ name: 'A001C001.MXF', folderPath: ['EP01', 'CAM-A', 'Clip'] }] }
+  const r = await boxFootageState('C-1') as any
+  assert.equal(r.state, 'has-footage')
+  assert.equal(r.files, 1)
+})
+
+test('maint: ตรวจไม่ได้ว่าโฟลเดอร์อยู่ไดรฟ์ไหน → unknown (ห้ามทิ้ง) ไม่ใช่นับเป็นกล่อง', async () => {
+  folders = [{ id: 'staging', name: 'Show · Job (C-1)', parents: [] }]
+  treeOf = { staging: 'unknown' }
+  trees = { staging: [{ name: 'A001C001.MXF', folderPath: [] }] }
+  const r = await boxFootageState('C-1') as any
+  assert.equal(r.state, 'unknown')
+  assert.match(r.reason, /ไดรฟ์ VIDEO/)
 })

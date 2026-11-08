@@ -19,7 +19,26 @@
  * แล้วส่งคำตอบนั้นไปให้คนตัดสินใจ
  */
 import { pendingOriginals } from './footage-completeness'
-import { listFilesRecursive, findFoldersByCode } from './google-drive'
+import { listFilesRecursive, findFoldersByCode, classifyFootageTreeFolder } from './google-drive'
+
+/**
+ * "กล่อง" = โฟลเดอร์ที่ชื่อมี Production ID นี้ **ในไดรฟ์ VIDEO และไม่อยู่ใต้ _SOUND-STAGING** เท่านั้น
+ *
+ * findFoldersByCode ค้นชื่อทุกไดรฟ์ จึงได้โฟลเดอร์ _SOUND-STAGING ของงาน (ชื่อ "(CODE)" แบบเดียวกัน ไดรฟ์เดียวกัน)
+ * กับโฟลเดอร์ drop แฝด "(1)" บน Production Team มาด้วย — WAV ที่รากของ staging ไม่มี segment 'AUDIO' จึงถูกนับเป็น
+ * "ฟุตเทจกล้อง" แล้วโฟลเดอร์ drop ของงานที่วิดีโอยังไม่เคยมาถึงก็ถูกทิ้ง (รูปเดียวกับ POP-7TG-260916-01 แต่มาทาง staging)
+ * กรองแบบเดียวกับ prep-folders/landing-lifecycle · ตัดสินไม่ได้ว่าอยู่ไดรฟ์ไหน = throw (ผู้เรียกแปลงเป็น unknown/undecidable)
+ */
+async function boxFoldersByCode(code: string, excludeFolderId?: string): Promise<Array<{ id: string; name: string }>> {
+  const out: Array<{ id: string; name: string }> = []
+  for (const f of await findFoldersByCode(code)) {
+    if (f.id === excludeFolderId) continue
+    const cls = await classifyFootageTreeFolder(f.id)
+    if (cls === 'unknown') throw new Error(`ตรวจไม่ได้ว่าโฟลเดอร์ "${f.name}" อยู่ในไดรฟ์ VIDEO หรือไม่`)
+    if (cls === 'in-tree') out.push(f)
+  }
+  return out
+}
 
 export interface LandingDupVerdict {
   code: string
@@ -78,10 +97,11 @@ export async function verifyLandingDuplicates(
   base.landingFiles = landing.length
   if (landing.length === 0) return { ...base, verdict: 'safe-to-delete', reason: 'ไม่มีไฟล์เหลือแล้ว' }
 
-  // กล่อง = โฟลเดอร์อื่นทุกอันที่ชื่อมี Production ID นี้ (ยกเว้นตัว drop เอง)
+  // กล่อง = โฟลเดอร์ในไดรฟ์ VIDEO ที่ชื่อมี Production ID นี้ (ไม่นับ staging / drop แฝด "(1)" — md5 ที่อยู่ใน
+  // โฟลเดอร์ drop อีกอันไม่ได้แปลว่าไฟล์อยู่ในกล่อง: สองแฝดจะบอกว่า "ลบได้" โดยอ้างกันเอง)
   let boxFolders
   try {
-    boxFolders = (await findFoldersByCode(code)).filter(f => f.id !== landingFolderId)
+    boxFolders = await boxFoldersByCode(code, landingFolderId)
   } catch (e: any) {
     return { ...base, reason: `หาโฟลเดอร์ในกล่องไม่ได้: ${e?.message || e}` }
   }
@@ -158,11 +178,11 @@ export async function boxFootageState(
   const maxFiles = opts.maxFiles ?? 20000
   let folders
   try {
-    folders = (await findFoldersByCode(code)).filter(f => f.id !== opts.excludeFolderId)
+    folders = await boxFoldersByCode(code, opts.excludeFolderId)
   } catch (e: any) {
     return { state: 'unknown', reason: `หาโฟลเดอร์ในกล่องไม่ได้: ${e?.message || e}` }
   }
-  if (folders.length === 0) return { state: 'no-footage', reason: 'ไม่มีโฟลเดอร์ในกล่องเลย' }
+  if (folders.length === 0) return { state: 'no-footage', reason: 'ไม่มีโฟลเดอร์ในกล่อง (ไดรฟ์ VIDEO) เลย' }
 
   let files = 0
   const camera: Array<{ name: string; folderPath?: string[] }> = []

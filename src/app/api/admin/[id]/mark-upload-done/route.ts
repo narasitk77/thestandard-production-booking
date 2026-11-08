@@ -95,6 +95,10 @@ export async function POST(
       },
     })
 
+    // No Bookings-sheet write: its Status column keeps CONFIRMED for finished
+    // shoots, as in prod. PMDC's Airtable sync reads that column and nobody has
+    // confirmed it accepts COMPLETED — sending it is a decision pending with Nat.
+
     // Audit trail — who confirmed, what they saw, optional note. The
     // logAudit helper is fire-and-forget but we await here so a /admin
     // refresh right after the POST shows the row in the audit list.

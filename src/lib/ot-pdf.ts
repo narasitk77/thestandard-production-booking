@@ -63,10 +63,13 @@ function fmtDateTh(d: string): string {
   return `${dd}/${mm}/${yy}`
 }
 
-function fmtDateTimeTh(iso: string | null): string {
+// Gregorian year + Bangkok day, same as the table (fmtDateTh). Plain 'th-TH' gave a
+// Buddhist 2-digit year ('69') and the app container runs UTC, so a 01:30 submit
+// showed yesterday — the signed sheet contradicted its own table.
+export function fmtDateTimeTh(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
-  return d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' })
+  return d.toLocaleDateString('th-TH-u-ca-gregory', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'Asia/Bangkok' })
 }
 
 /**
@@ -123,7 +126,7 @@ async function renderPersonPage(
   month: string,
   fonts: { regular: PDFFont; bold: PDFFont },
 ): Promise<PDFPage> {
-  const page = pdf.addPage([PAGE_W, PAGE_H])
+  let page = pdf.addPage([PAGE_W, PAGE_H])
   const { regular, bold } = fonts
 
   let y = PAGE_H - MARGIN
@@ -177,6 +180,20 @@ async function renderPersonPage(
   }
   drawHeader()
 
+  // Continue on a fresh page. Before 2026-11-08 this was a `break` out of the
+  // row loop only: ~19 days fitted, every later day got a blank page and no rows,
+  // while the totals still counted the whole month — a signed sheet whose total
+  // could not be checked against its own table.
+  const continuePage = (withTableHeader: boolean) => {
+    page.drawText('(ต่อหน้าถัดไป)', { x: MARGIN, y: 60, font: regular, size: 8, color: MUTED })
+    page = pdf.addPage([PAGE_W, PAGE_H])
+    y = PAGE_H - MARGIN
+    page.drawText(`${nameLine} (ต่อ)`, { x: MARGIN, y, font: bold, size: 11, color: COL })
+    page.drawText(monthLabel(month), { x: PAGE_W - MARGIN - bold.widthOfTextAtSize(monthLabel(month), 10), y, font: bold, size: 10, color: MUTED })
+    y -= 26
+    if (withTableHeader) drawHeader()
+  }
+
   // ── Group records by date so day-level totals are correct ──
   const byDate = new Map<string, OTPdfRecord[]>()
   for (const r of person.records) {
@@ -188,49 +205,43 @@ async function renderPersonPage(
   let totalAmount = 0
   let totalWeekendHolidayDays = 0
   let totalWeekdayOTDays = 0
+  // The part of the total that no manager has approved yet (DRAFT / SUBMITTED /
+  // REJECTED rows). The total itself is unchanged — what counts toward pay is
+  // Nat's call — but the sheet must not present it as all-approved.
+  let notApprovedAmount = 0
+
+  const toTasks = (d: string, recs: OTPdfRecord[]) => recs.map(r => ({
+    startTime: r.startTime || '',
+    endTime: r.endTime || '',
+    endOffsetDays: dateOffsetDays(d, r.endDate),
+    jobTask: r.jobTask,
+    justification: r.justification,
+  }))
 
   const dates = Array.from(byDate.keys()).sort()
   for (const d of dates) {
     const recs = byDate.get(d)!
-    const summary = summarizeDay(d, recs.map(r => ({
-      startTime: r.startTime || '',
-      endTime: r.endTime || '',
-      endOffsetDays: dateOffsetDays(d, r.endDate),
-      jobTask: r.jobTask,
-      justification: r.justification,
-    })))
+    const summary = summarizeDay(d, toTasks(d, recs))
 
     if (summary.qualifies) {
       totalAmount += summary.otAmountTHB
       if (summary.dayType === 'WEEKDAY') totalWeekdayOTDays += 1
       else totalWeekendHolidayDays += 1
+      const approved = summarizeDay(d, toTasks(d, recs.filter(r => r.approvalStatus === 'APPROVED')))
+      notApprovedAmount += summary.otAmountTHB - (approved.qualifies ? approved.otAmountTHB : 0)
     }
 
     for (let i = 0; i < recs.length; i++) {
       const r = recs[i]
       const isFirstRow = i === 0
 
-      // Page-break guard — keep at least 120pt at bottom for signature block
-      if (y < 180) {
-        // Footer line on the partial page (no signature block; signatures
-        // only appear on the LAST page for the person). Add a new page +
-        // re-draw header to continue the table.
-        const cont = pdf.addPage([PAGE_W, PAGE_H])
-        // Switch our page reference and reset y.
-        // Note: pdf-lib doesn't let us swap mid-function cleanly, so we draw
-        // an "เลขรายการต่อหน้าถัดไป" marker instead and break out — for
-        // typical OT volumes (5–20 rows/month) we won't actually hit this.
-        page.drawText('(continued on next page — too many rows for one page)', {
-          x: MARGIN, y: 60, font: regular, size: 8, color: MUTED,
-        })
-        // Continue rendering on the new page from the top.
-        // Reassign by mutating outer closure — simplest: recurse with the
-        // remaining records. For now we just break.
-        break
-      }
+      // Page-break guard — room for this row + its justification line
+      const brokeHere = y < 180
+      if (brokeHere) continuePage(true)
 
-      const dateStr = isFirstRow ? fmtDateTh(d) : ''
-      const dayStr = isFirstRow ? summary.dayLabel : ''
+      // A day split across pages repeats its date on the new page.
+      const dateStr = isFirstRow || brokeHere ? fmtDateTh(d) : ''
+      const dayStr = isFirstRow || brokeHere ? summary.dayLabel : ''
       const nightOffset = dateOffsetDays(d, r.endDate)
       const timeStr = `${r.startTime || '—'}–${r.endTime || '—'}${nightOffset > 0 ? ` +${nightOffset}` : ''}`
       const taskStr = truncate(r.jobTask || '', regular, 8.5, cols.task.w - 4)
@@ -253,9 +264,9 @@ async function renderPersonPage(
       }
       y -= 13
 
-      // Justification (small, indented under the row) — only if present and
-      // there's headroom; otherwise drop to save vertical space.
-      if (r.justification && y > 180) {
+      // Justification (small, indented under the row). The page-break guard above
+      // leaves room for it, so it is never dropped for space any more.
+      if (r.justification) {
         const just = truncate('เหตุผล: ' + r.justification, regular, 7.5, PAGE_W - 2 * MARGIN - 20)
         page.drawText(just, { x: cols.task.x + 2, y, font: regular, size: 7.5, color: MUTED })
         y -= 11
@@ -266,7 +277,10 @@ async function renderPersonPage(
     y -= 4
   }
 
-  // ── Totals strip ──
+  // ── Totals strip + signature block stay together on the person's last page ──
+  // The box is clamped at y>=40, so its top sits at 140 when space is short: the
+  // strip needs y>=160 above it (same fit as before), the note line y>=186.
+  if (y < (notApprovedAmount > 0 ? 186 : 160)) continuePage(false)
   y -= 12
   page.drawRectangle({ x: MARGIN, y: y - 4, width: PAGE_W - 2 * MARGIN, height: 26, color: rgb(0.97, 0.96, 0.99) })
   const totalsLabel = 'รวม'
@@ -275,8 +289,13 @@ async function renderPersonPage(
   page.drawText(totalsLabel, { x: MARGIN + 6, y: y + 6, font: bold, size: 10, color: COL })
   page.drawText(detail, { x: MARGIN + 50, y: y + 6, font: regular, size: 9, color: MUTED })
   const amtW = bold.widthOfTextAtSize(amountStr, 11)
-  page.drawText(amountStr, { x: PAGE_W - MARGIN - amtW - 6, y: y + 5, font: bold, size: 11, color: GREEN })
+  page.drawText(amountStr, { x: PAGE_W - MARGIN - amtW - 6, y: y + 5, font: bold, size: 11, color: notApprovedAmount > 0 ? AMBER : GREEN })
   y -= 36
+  if (notApprovedAmount > 0) {
+    const note = `* ยอดนี้รวมรายการที่ยังไม่อนุมัติ ${formatTHB(notApprovedAmount)} (อนุมัติแล้ว ${formatTHB(totalAmount - notApprovedAmount)})`
+    page.drawText(note, { x: MARGIN + 6, y: y + 8, font: regular, size: 8.5, color: RED })
+    y -= 12
+  }
 
   // ── Signature block (pick the most recent snapshot of each kind) ──
   // For requester: prefer the most recent submittedAt across records
@@ -351,7 +370,7 @@ async function renderPersonPage(
   }
 
   // Footer attribution
-  const footer = `Generated ${new Date().toLocaleString('th-TH')} · Production Booking`
+  const footer = `Generated ${new Date().toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' })} · Production Booking`
   page.drawText(footer, { x: MARGIN, y: 20, font: regular, size: 7, color: MUTED })
 
   return page

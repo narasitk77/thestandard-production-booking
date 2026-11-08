@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { runVideoMerge } from '@/lib/video-merge'
+import { runVideoMerge, rememberCardHoldsPosted } from '@/lib/video-merge'
 import { recordHeartbeat } from '@/lib/heartbeat'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { notifyChat } from '@/lib/notify'
 import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
+import { runGuard, MERGE_LOCK_MAX_MS } from '@/lib/merge-lock'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // walking + moving footage across folders can take a while
@@ -13,10 +14,12 @@ export const maxDuration = 300 // walking + moving footage across folders can ta
 // re-fires while the server keeps running) must not overlap two real passes:
 // the underlying ensureFolderPath/ensureChildFolder Drive primitives are
 // non-atomic, so two concurrent runs can fork duplicate box/camera folders.
-// Single container deployment, so a module-level flag is enough — mirrors the
+// Single container deployment, so module-level state is enough — mirrors the
 // guard already used in sound-staging-restructure/route.ts. dryRun reads are
 // never gated.
-let videoMergeRunning = false
+// maint 2026-11-08 — the guard EXPIRES (a boolean latched forever on one hung Drive call; see runGuard), but only
+// after MERGE_LOCK_MAX_MS: it recovers from a hang, it never lets a slow live pass be overlapped by the next one.
+const guard = runGuard('video-merge', MERGE_LOCK_MAX_MS)
 
 /**
  * v1.109 — Internal endpoint. MOVES NAS footage from the flat "Production Team"
@@ -30,15 +33,16 @@ let videoMergeRunning = false
  *
  * GET /api/internal/video-merge/run[?dryRun=1][&code=<ProductionID>][&notify=1]
  */
-async function isAllowed(request: NextRequest): Promise<boolean> {
+async function isAllowed(request: NextRequest): Promise<{ ok: boolean; isWorker: boolean }> {
   if (internalSecretAllowed(request, 'x-video-merge-secret',
-    ['VIDEO_MERGE_SECRET', 'SOUND_MERGE_SECRET', 'NAS_MANIFEST_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) return true
+    ['VIDEO_MERGE_SECRET', 'SOUND_MERGE_SECRET', 'NAS_MANIFEST_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) return { ok: true, isWorker: true }
   const session = await getSession()
-  return session?.role === 'ADMIN'
+  return { ok: session?.role === 'ADMIN', isWorker: false }
 }
 
 export async function GET(request: NextRequest) {
-  if (!(await isAllowed(request))) {
+  const allowed = await isAllowed(request)
+  if (!allowed.ok) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const { searchParams } = new URL(request.url)
@@ -48,29 +52,36 @@ export async function GET(request: NextRequest) {
   // result, but only when something actually moved or failed — no-op runs stay quiet.
   const notify = searchParams.get('notify') === '1'
 
+  let token = 0
   if (!dryRun) {
-    if (videoMergeRunning) {
-      return NextResponse.json({ error: 'video-merge กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
-    }
-    videoMergeRunning = true
+    token = guard.start()
+    if (!token) return NextResponse.json({ error: 'video-merge กำลังทำงานอยู่แล้ว — รอให้เสร็จก่อนแล้วลองใหม่' }, { status: 409 })
   }
   try {
     const result = await runVideoMerge({ dryRun, onlyCode })
-    if (!dryRun) await recordHeartbeat('video-merge').catch(() => {})
+    // maint 2026-11-08 — the dead-man heartbeat = "the scheduled sweep ran and could do its job". A skipped run
+    // (env unset / landing unreadable) merged nothing, a ?code= run walked one booking, and an admin click must
+    // not stand in for a dead worker (the shoot-markers rule) — none of them tick it.
+    if (!dryRun && result.skipped) console.error(`[video-merge] run failed: skipped — ${result.reason}`)
+    if (allowed.isWorker && !dryRun && !onlyCode && !result.skipped) await recordHeartbeat('video-merge').catch(() => {})
     // v1.280 — a run that only HELD cards (moved nothing) must not stay quiet — but a hold persists until a
-    // human moves the card, so post it only when the held SET is new (cardHoldsAlerted); ops keeps alertOps' 6 h repeat
-    if (notify && !dryRun && !result.skipped && (result.moved + result.movedFolders > 0 || result.errors > 0 || result.cardHoldsAlerted)) {
-      await notifyChat(
+    // human moves the card, so post it only when the team has not been given this held SET (cardHoldsChatDue);
+    // ops keeps alertOps' 6 h repeat
+    if (notify && !dryRun && !result.skipped && (result.moved + result.movedFolders > 0 || result.errors > 0 || result.cardHoldsChatDue)) {
+      const delivered = await notifyChat(
         `🎬 NAS sync เขียวแล้ว → รวมไฟล์วิดีโอ: ย้าย ${result.moved} ไฟล์ + ${result.movedFolders} โฟลเดอร์` +
         ` (${result.bookings} งาน${result.errors ? ` · ⚠️ error ${result.errors}` : ''})` +
-        (result.cardHoldsAlerted ? `\n⛔ ค้าง ${result.cardHolds.length} การ์ด — ${CARD_HOLD_FIX}:\n  ${result.cardHolds.slice(0, 8).join('\n  ')}` : ''),
-      ).catch(() => {})
+        (result.cardHoldsChatDue ? `\n⛔ ค้าง ${result.cardHolds.length} การ์ด — ${CARD_HOLD_FIX}:\n  ${result.cardHolds.slice(0, 8).join('\n  ')}` : ''),
+      ).catch((e: any) => { console.error('[video-merge] notifyChat threw:', e?.message || e); return false })
+      // the set is recorded only once the team actually HAS it — a failed post is retried next run
+      if (!delivered) console.error(`[video-merge] แชตทีม 🎬 ส่งไม่ถึงช่องไหนเลย${result.cardHoldsChatDue ? ' — รายการการ์ดค้างจะโพสต์ใหม่รอบหน้า' : ''}`)
+      else if (result.cardHoldsChatDue) await rememberCardHoldsPosted(result.cardHolds)
     }
     return NextResponse.json(result)
   } catch (e: any) {
     console.error('GET /api/internal/video-merge/run error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
   } finally {
-    if (!dryRun) videoMergeRunning = false
+    if (token) guard.end(token)
   }
 }

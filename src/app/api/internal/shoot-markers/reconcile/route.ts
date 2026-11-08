@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
+import { internalSecretAllowed } from '@/lib/internal-auth'
 import { reconcileShootMarkers, reconcileGenericMarkers, mergeReconcileResults, formatReconcileReport, totalChanges } from '@/lib/shoot-marker-reconcile'
 import { sendEmail } from '@/lib/email'
 import { logAudit } from '@/lib/audit'
@@ -31,13 +32,6 @@ const RECONCILE_GUARD_MAX_MS = 15 * 60 * 1000
  * it (dry-run) from the browser. dryRun defaults TRUE — a mutating run must pass
  * dryRun=0. `report=1` forces the email even from a dry-run/admin trigger.
  */
-function expectedSecret(): string | undefined {
-  return process.env.SHOOT_MARKER_RECONCILE_SECRET?.trim()
-    || process.env.CALENDAR_RECONCILE_SECRET?.trim()
-    || process.env.NEXTAUTH_SECRET?.trim()
-    || process.env.AUTH_SECRET?.trim()
-}
-
 function reportEmail(): string {
   return process.env.SHOOT_MARKER_REPORT_EMAIL?.trim()
     || process.env.FEEDBACK_EMAIL?.trim()
@@ -45,10 +39,10 @@ function reportEmail(): string {
 }
 
 async function isAllowed(request: NextRequest): Promise<{ ok: boolean; actorEmail: string | null; isWorker: boolean }> {
-  const secret = expectedSecret()
-  const headerSecret = request.headers.get('x-reconcile-secret')?.trim()
-  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim()
-  if (secret && (headerSecret === secret || bearer === secret)) {
+  // 2026-11-08 — ANY configured secret, not the first-set chain (internal-auth.ts v1.123):
+  // `X || NEXTAUTH || AUTH` + `===` 401'd every caller still sending NEXTAUTH the day X was set.
+  if (internalSecretAllowed(request, 'x-reconcile-secret',
+    ['SHOOT_MARKER_RECONCILE_SECRET', 'CALENDAR_RECONCILE_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) {
     return { ok: true, actorEmail: 'shoot-marker-worker', isWorker: true }
   }
   const session = await getSession()

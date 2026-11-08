@@ -14,7 +14,8 @@
  */
 import { mergeBookingVideo, type BookingVideoMergeResult } from './video-merge'
 import { mergeBookingSound, type BookingSoundMergeResult } from './sound-merge'
-import { tryLockMerge, unlockMerge, videoMergeKey, soundMergeKey } from './merge-lock'
+import { tryLockMerge, unlockMerge, videoMergeKey, soundMergeKey, MERGE_LOCK_MAX_MS } from './merge-lock'
+import { EPISODE_ORDER } from './episode-order'
 
 // Prisma select for a booking passed to runBookingMerge: the fields both merge
 // steps need, plus the access fields the route uses for canViewBooking().
@@ -32,7 +33,7 @@ export const BOOKING_MERGE_SELECT = {
   outlet: { select: { code: true } },
   program: { select: { name: true } },
   episodes: {
-    orderBy: { sequence: 'asc' },
+    orderBy: EPISODE_ORDER,
     select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } },
   },
 } as const
@@ -98,23 +99,31 @@ export function getMergeJobStatus(bookingId: string): MergeJobStatus {
 /**
  * Start (or join, when one is already running) the background merge.
  * v1.268.1 — null = the hourly video/sound pass is on this booking right now (merge-lock.ts).
+ * maint 2026-11-08 — join only a job younger than MERGE_LOCK_MAX_MS: googleapis has no request timeout, so a job hung
+ * on one Drive call never reaches `finally`, and joining it forever kept the button on "กำลังย้าย" with nothing
+ * moving — even after its lock expired. An older one is given up on (loudly) and a fresh job takes the lock over.
  */
 export function startMergeJob(bookingId: string, booking: MergeBooking, onDone?: () => Promise<void>): MergeJobStatus | null {
   const existing = mergeJobs.get(bookingId)
-  if (existing && !existing.done) return getMergeJobStatus(bookingId) // running — join
+  if (existing && !existing.done) {
+    const ageMs = Date.now() - Date.parse(existing.startedAt)
+    if (ageMs < MERGE_LOCK_MAX_MS) return getMergeJobStatus(bookingId) // running — join
+    console.error(`[booking-merge] งานรวมไฟล์ของ ${bookingId} เริ่มไป ${Math.round(ageMs / 60_000)} นาทีแล้วยังไม่จบ (Drive ค้าง?) — เลิกรอ เริ่มงานใหม่`)
+  }
   const lock = [videoMergeKey(bookingId), soundMergeKey(bookingId)]
-  if (!tryLockMerge(lock)) return null
+  const token = tryLockMerge(lock)
+  if (!token) return null
   const job: MergeJob = { startedAt: new Date().toISOString(), finishedAt: null, done: false }
   mergeJobs.set(bookingId, job)
   ;(async () => {
     try {
       job.result = await runBookingMerge(booking)
-      if (onDone) await onDone().catch(() => {})
+      if (onDone) await onDone().catch((e: any) => console.error('[booking-merge] onDone failed:', bookingId, e?.message || e))
     } catch (e: any) {
       job.error = e?.message || String(e)
       console.error('[booking-merge] background job failed:', bookingId, job.error)
     } finally {
-      unlockMerge(lock)
+      unlockMerge(lock, token) // a job that outlived its lock must not free the run that took it over
       job.done = true
       job.finishedAt = new Date().toISOString()
     }

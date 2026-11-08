@@ -5,6 +5,7 @@ import { canViewBooking } from '@/lib/booking-access'
 import { outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 import { findEpisodeFolderUrls } from '@/lib/google-drive'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +30,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
         outlet: { select: { code: true } },
         program: { select: { name: true } },
         episodes: {
-          orderBy: { sequence: 'asc' },
+          orderBy: EPISODE_ORDER,
           select: { id: true, episodeId: true, sequence: true, title: true, program: { select: { name: true } } },
         },
       },

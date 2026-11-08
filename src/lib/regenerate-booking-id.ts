@@ -69,6 +69,7 @@ export type {
   MigrationPlanEntry,
   MigrationPlanInput,
 } from './id-migration'
+import { EPISODE_ORDER } from './episode-order'
 
 type SideEffect = 'renamed' | 'moved' | 'updated' | 'not-found' | 'skipped' | 'error'
 
@@ -184,7 +185,7 @@ export async function regenerateBookingId(opts: RegenerateOptions): Promise<Rege
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
     },
   })
   if (!booking) {

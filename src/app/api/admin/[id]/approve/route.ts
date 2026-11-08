@@ -21,6 +21,7 @@ import { rememberDriveLinks } from '@/lib/drive-links'
 // nightly 19:00 worker won't come back around for them).
 import { ensureLandingAfterBox, shootIsImminentBkk } from '@/lib/landing-lifecycle'
 import { alertOps } from '@/lib/ops-alert'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function POST(
   request: NextRequest,
@@ -40,7 +41,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
       },
     })
 
@@ -94,7 +95,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
       },
     })
     if (!updated) {
@@ -255,13 +256,15 @@ export async function POST(
             where: { id: params.id },
             data: { calendarSyncStatus: 'OK', calendarLastSyncedAt: new Date() },
           }).catch(e => console.error('save calendarSyncStatus error:', e?.message))
-          if (booking.sheetRowIndex) {
-            await updateBookingRow(booking.bookingCode || '', {
-              status: 'CONFIRMED',
-              calendarEventId: booking.calendarEventId,
-              approvedAt: approvedAt.toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }),
-            }).catch(e => console.error('updateBookingRow error:', e?.message))
-          }
+          // No sheetRowIndex gate (below too): updateBookingRow finds the row by
+          // col A; the index is written only after the async append queue drains,
+          // so the pre-update snapshot skipped rows that already exist.
+          const r = await updateBookingRow(booking.bookingCode || booking.id, {
+            status: 'CONFIRMED',
+            calendarEventId: booking.calendarEventId,
+            approvedAt: approvedAt.toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }),
+          })
+          if (r === 'error' || r === 'not-found') console.error(`[approve] sheet CONFIRMED write ${r} for ${booking.bookingCode}`)
           return
         }
 
@@ -277,6 +280,11 @@ export async function POST(
           locationName: booking.locationName,
           producer: booking.producer,
           producerEmail: booking.producerEmail,
+          // Co-Producer = guest + "Co-Producer:" description line. Omitting them
+          // invited the Co-Producer only on the reconciler's next attendee patch
+          // (re-notifying every guest) and the line never appeared.
+          coProducer: booking.coProducer,
+          coProducerEmail: booking.coProducerEmail,
           directorEmail: booking.directorEmail,
           director2Email: booking.director2Email,
           director3Email: booking.director3Email,
@@ -343,12 +351,13 @@ export async function POST(
           }).catch(e => console.error('save calendarSyncStatus error:', e?.message))
         }
 
-        if (booking.sheetRowIndex) {
-          await updateBookingRow(booking.bookingCode || '', {
+        {
+          const r = await updateBookingRow(booking.bookingCode || booking.id, {
             status: 'CONFIRMED',
             calendarEventId: calendarEventId || '',
             approvedAt: approvedAt.toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }),
-          }).catch(e => console.error('updateBookingRow error:', e?.message))
+          })
+          if (r === 'error' || r === 'not-found') console.error(`[approve] sheet CONFIRMED write ${r} for ${booking.bookingCode}`)
         }
       } catch (e: any) {
         console.error('approve background tasks error:', e)

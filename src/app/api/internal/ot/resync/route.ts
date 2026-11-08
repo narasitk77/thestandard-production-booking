@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { prisma } from '@/lib/db'
 import { syncBookingOT } from '@/lib/ot-sync'
+import { excludeSharedMailboxes } from '@/lib/shared-mailboxes'
 import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -20,9 +21,9 @@ export const maxDuration = 300
  * v1.192) ลบร่างของเดือนถัดไปทิ้งทุกครั้งที่มีคนเปิดหน้า /ot ทำให้ร่างเดือน
  * ก.ย. 2026 หายทั้งเดือน และไม่มีเครื่องมือใดกู้คืนได้เลย
  *
- * ปลอดภัยที่จะรันซ้ำ: syncBookingOT ลบ-แล้ว-สร้างใหม่ต่อใบจอง และไม่แตะใบที่
- * ไม่มีคิวถ่ายรองรับ. แต่ "ลบ-แล้ว-สร้างใหม่" แปลว่าถ้ามีคนแก้ร่างด้วยมือไว้
- * การแก้นั้นจะหาย — จึงข้ามใบที่ไม่ใช่ DRAFT ทิ้งไว้เฉย ๆ
+ * ปลอดภัยที่จะรันซ้ำ: syncBookingOT ลบ-แล้ว-สร้างใหม่เฉพาะแถว DRAFT ต่อใบจอง
+ * (แถวที่เซ็นแล้วเก็บไว้ — ดู planBookingOTSync) และไม่แตะใบที่ไม่มีคิวถ่ายรองรับ
+ * ที่นี่ยังข้ามใบที่มีแถวไม่ใช่ DRAFT ทั้งใบเหมือนเดิม
  */
 async function isAllowed(request: NextRequest): Promise<boolean> {
   if (internalSecretAllowed(request, 'x-ot-resync-secret',
@@ -70,8 +71,10 @@ export async function GET(request: NextRequest) {
       .map(r => r.bookingId).filter((x): x is string => !!x),
   )
 
+  // กรองกล่องกลางด้วยตัวเดียวกับ syncBookingOT — ใบที่มีแต่ video@/sound@ รอบจริงสร้าง 0 แถว
+  // เดิม dry-run นับใบพวกนี้ใน wouldSync (preview เกินของจริง) และมันเป็น candidate ทุกรอบตลอดไป
   const candidates = bookings.filter(b =>
-    (b.assignedEmails || []).length > 0 && !hasRows.has(b.id) && !locked.has(b.id))
+    excludeSharedMailboxes(b.assignedEmails || []).length > 0 && !hasRows.has(b.id) && !locked.has(b.id))
 
   if (dryRun) {
     return NextResponse.json({

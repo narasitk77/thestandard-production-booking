@@ -25,6 +25,7 @@ mock.module('../google-drive', {
     moveFileToFolder: (id: string, t: string, r: string) => drive.moveFileToFolder(id, t, r),
     ensureFolderPath: (root: string, segs: string[]) => drive.ensureFolderPath(root, segs),
     isFolderAlive: (id: string) => drive.isFolderAlive(id),
+    folderLiveness: (id: string) => drive.folderLiveness(id),
     downloadDriveFile: (id: string) => drive.downloadDriveFile(id), // v1.280 — the card hold reads MEDIAPRO.XML
     hasDriveCredentials: () => true,
     // imported by video-merge but unused by mirrorMove — present so the binding exists

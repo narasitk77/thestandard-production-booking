@@ -34,6 +34,7 @@ import {
 } from './outlet-folders'
 import { getDriveLink } from './drive-links'
 import type { EpisodeIdChange } from './id-migration'
+import { EPISODE_ORDER } from './episode-order'
 
 export function moveOutletEnabled(): boolean {
   return process.env.MOVE_OUTLET_ENABLED?.trim() !== '0'
@@ -297,7 +298,7 @@ export async function planOutletMove(input: {
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' }, include: { program: true } },
+      episodes: { orderBy: EPISODE_ORDER, include: { program: true } },
     },
   })
   if (!booking) return { ok: false, error: 'ไม่พบ booking นี้' }

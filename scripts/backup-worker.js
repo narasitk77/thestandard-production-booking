@@ -45,7 +45,15 @@ async function runOnce() {
       return
     }
     const json = JSON.parse(text)
-    console.log(`[backup] ok file=${json.fileName} size=${json.sizeBytes}B pruned=${json.pruned}`)
+    // pruneFailed: k = ทิ้งไฟล์เก่าลงถังไม่สำเร็จ k ไฟล์ · -1 = อ่านรายการโฟลเดอร์ไม่ได้
+    console.log(`[backup] ok file=${json.fileName} size=${json.sizeBytes}B pruned=${json.pruned} pruneFailed=${json.pruneFailed}`)
+    // The 'prune run failed' line lives in the WEB container log; this is the
+    // worker-log line Hermes' BAD_RE can see. The backup itself did upload.
+    if (json.pruneFailed && json.pruneFailed !== 0) {
+      console.error(
+        `[backup] run failed: prune ${json.pruneFailed === -1 ? 'could not list the backup folder' : `${json.pruneFailed} old file(s) not trashed`} (backup ${json.fileName} itself uploaded OK)`,
+      )
+    }
   } catch (err) {
     console.error('[backup] run failed:', err?.message || err)
   } finally {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
-import { cleanStr, dateOrNull, decOrNull, inEnum } from '@/lib/admin-parse'
+import { cleanStr, dateOrNull, decOrNull, inEnum, InvalidMoneyError } from '@/lib/admin-parse'
 import { reconcileEquipmentStatus } from '@/lib/equipment-status'
 import { RepairStatus } from '@prisma/client'
 
@@ -48,6 +48,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     logAudit({ actorEmail: session.email, action: 'repair.update', entityType: 'RepairTicket', entityId: params.id, fromStatus: before.status, toStatus: (data.status as string) ?? undefined, changes: data })
     return NextResponse.json({ ticket })
   } catch (e: any) {
+    // A bad amount is the user's typo, not a server fault — 400 with the Thai message.
+    if (e instanceof InvalidMoneyError) return NextResponse.json({ error: e.message }, { status: 400 })
     console.error('PATCH /api/admin/repairs/[id] error:', e)
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })
   }

@@ -28,8 +28,10 @@ import { renderBookingInfo, bookingInfoInput } from '@/lib/booking-info'
 import { CANONICAL_MARKER_NAME, ensureShootMarkerExists } from '@/lib/shoot-marker'
 // v1.114 — id-first Drive linkage.
 import { rememberDriveLinks } from '@/lib/drive-links'
+import { EPISODE_ORDER } from './episode-order'
 
 const SHOOT_FILE_RE = /^_SHOOT.*\.txt$/i
+const DELIVERED_SKIP = 'footage already delivered — skip empty re-prep'
 
 /** v1.149 — create `_SHOOT.txt` when the folder has NO marker at all. Never
  *  overwrites an existing one (approve/regenerate own the content; the nightly
@@ -71,7 +73,8 @@ export interface PrepResult {
   prepared: number
   errors: number
   prodTeamErrors: number
-  results: Array<{ bookingCode: string | null; created?: string[]; prodTeam?: string; wouldCreate?: string[]; skipped?: string; error?: string }>
+  /** staging = the _SOUND-STAGING folder this booking gets (dryRun: would ensure · real: ensured) */
+  results: Array<{ bookingCode: string | null; created?: string[]; prodTeam?: string; wouldCreate?: string[]; skipped?: string; error?: string; staging?: string }>
 }
 
 export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Promise<PrepResult> {
@@ -100,7 +103,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       mainVideographerEmail: true, assignedEmails: true, agencyRef: true, notes: true,
       outlet: { select: { code: true, name: true } },
       program: { select: { code: true, name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } } },
     },
   })
 
@@ -118,7 +121,9 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     // recreating empty skeletons after ops file the delivered footage away just
     // resurrects "ghost" folders (observed loop 2026-07-02: ops move → next
     // prep tick recreates empty landing/box/generic-program trees).
-    if (!opts.dryRun && b.bookingCode) {
+    // maint 2026-11-08 — the check only READS, so dryRun runs it too: the preview used to report wouldCreate
+    // CAM-A.. for a booking the real run skips (bug class 5). Only the marker repair below is real-run-only.
+    if (b.bookingCode) {
       try {
         let hasFiles = false
         for (const c of await findFoldersByCode(b.bookingCode)) {
@@ -132,6 +137,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
           if (some.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) { hasFiles = true; break }
         }
         if (hasFiles) {
+          if (opts.dryRun) { results.push({ bookingCode: b.bookingCode, skipped: DELIVERED_SKIP }); continue }
           // v1.149 — footage delivered ≠ marker exists: the exact failure this
           // sweep repairs ("approve's marker write failed") often surfaces AFTER
           // crew uploaded. Ensure the marker (create-only, proper box resolution,
@@ -142,7 +148,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
           })
           results.push({
             bookingCode: b.bookingCode,
-            skipped: 'footage already delivered — skip empty re-prep',
+            skipped: DELIVERED_SKIP,
             ...(marker === 'updated' ? { created: [CANONICAL_MARKER_NAME] } : {}),
           })
           continue
@@ -153,52 +159,66 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
     }
     // v1.108 — Sound-crew bookings: keep a staging tree outside the video project
     // folder (additive, best-effort, in addition to whatever video/photo prep runs).
-    if (!opts.dryRun && bookingNeedsSound(b.crewRequired)) {
+    // maint 2026-11-08 — dryRun names it too (it used to say nothing about a folder the real run creates).
+    let staging: string | undefined
+    const push = (r: PrepResult['results'][number]) => { results.push(staging ? { ...r, staging } : r) }
+    if (bookingNeedsSound(b.crewRequired)) {
       // v1.111 — staging is crew-facing (sound team drops files there): use the
       // display-format name, same as the landing folder. Lookups are by code.
-      try {
-        const { stagingFolderId } = await ensureSoundStagingFolder({
-          rootFolderId: root,
-          bookingCode: b.bookingCode!,
-          bookingFolderName: landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes }),
-          // v1.125 — mirrors VIDEO 2026's outlet layer: _SOUND-STAGING/<NN · Outlet>/<รายการ>/<booking>/
-          outletFolderName: outletDriveFolderName(b.outlet.code),
-          categoryName: soundStagingCategoryName({ outletCode: b.outlet.code, projectName: b.projectName, program: b.program, episodes: b.episodes }),
-        })
-        await rememberDriveLinks(b.id, { staging: stagingFolderId })
+      const stagingName = landingBookingFolderName({ bookingCode: b.bookingCode!, projectName: b.projectName, program: b.program, episodes: b.episodes })
+      if (opts.dryRun) staging = stagingName
+      else {
+        try {
+          const { stagingFolderId } = await ensureSoundStagingFolder({
+            rootFolderId: root,
+            bookingCode: b.bookingCode!,
+            bookingFolderName: stagingName,
+            // v1.125 — mirrors VIDEO 2026's outlet layer: _SOUND-STAGING/<NN · Outlet>/<รายการ>/<booking>/
+            outletFolderName: outletDriveFolderName(b.outlet.code),
+            categoryName: soundStagingCategoryName({ outletCode: b.outlet.code, projectName: b.projectName, program: b.program, episodes: b.episodes }),
+          })
+          await rememberDriveLinks(b.id, { staging: stagingFolderId })
+          staging = stagingName
+        }
+        catch (e: any) {
+          // maint 2026-11-08 — counted + shown on the booking's row: a silent failure here left the sound
+          // team with no drop folder while the worker printed errors=0. Still non-fatal for video/photo prep.
+          console.error('[prep] sound staging failed (non-fatal):', b.bookingCode, e?.message || e)
+          staging = `FAILED: ${e?.message || e}`
+          errors++
+        }
       }
-      catch (e: any) { console.error('[prep] sound staging failed (non-fatal):', b.bookingCode, e?.message || e) }
     }
     // v1.102.8 — Photo album jobs → one flat folder in the Photographer Shared
     // Drive (not VIDEO 2026). Handled before the outlet-mapping / camera checks
     // (those are video-only). Idempotent with the approve route's pre-create.
     if (isPhotoAlbumBooking(b.episodes)) {
       const photoName = buildBookingFolderName(b.bookingCode!, jobName, showName)
-      if (opts.dryRun) { results.push({ bookingCode: b.bookingCode, wouldCreate: [`(photo) ${photoName}`] }); prepared++; continue }
+      if (opts.dryRun) { push({ bookingCode: b.bookingCode, wouldCreate: [`(photo) ${photoName}`] }); prepared++; continue }
       try {
         const { bookingFolderId: photoId } = await ensurePhotoAlbumFolder({ bookingCode: b.bookingCode!, bookingFolderName: photoName })
         await rememberDriveLinks(b.id, { photo: photoId })
         const created = [`(photo) ${photoName}`]
         if (await ensureMarkerFile(photoId, b)) created.push(CANONICAL_MARKER_NAME)
-        results.push({ bookingCode: b.bookingCode, created })
+        push({ bookingCode: b.bookingCode, created })
         prepared++
       } catch (e: any) {
-        results.push({ bookingCode: b.bookingCode, error: `photo folder: ${e?.message || e}` })
+        push({ bookingCode: b.bookingCode, error: `photo folder: ${e?.message || e}` })
         errors++
       }
       continue
     }
     if (!hasOutletFolderMapping(b.outlet.code)) {
-      results.push({ bookingCode: b.bookingCode, skipped: `outlet ${b.outlet.code} has no folder mapping` })
+      push({ bookingCode: b.bookingCode, skipped: `outlet ${b.outlet.code} has no folder mapping` })
       continue
     }
     const cameras = camerasToPreCreate(b.cameraCount, b.micCount)
     if (cameras.length === 0) {
-      results.push({ bookingCode: b.bookingCode, skipped: 'no cameras (block shot / unspecified)' })
+      push({ bookingCode: b.bookingCode, skipped: 'no cameras (block shot / unspecified)' })
       continue
     }
     if (opts.dryRun) {
-      results.push({ bookingCode: b.bookingCode, wouldCreate: cameras })
+      push({ bookingCode: b.bookingCode, wouldCreate: cameras })
       prepared++
       continue
     }
@@ -247,10 +267,10 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
       // (boxId is the per-booking folder: AGN = the v1.112 subfolder).
       const created: string[] = [...cameras]
       if (await ensureMarkerFile(boxId, b)) created.push(CANONICAL_MARKER_NAME)
-      results.push({ bookingCode: b.bookingCode, created, prodTeam: 'landing → nightly lifecycle' })
+      push({ bookingCode: b.bookingCode, created, prodTeam: 'landing → nightly lifecycle' })
       prepared++
     } catch (e: any) {
-      results.push({ bookingCode: b.bookingCode, error: e?.message || String(e) })
+      push({ bookingCode: b.bookingCode, error: e?.message || String(e) })
       errors++
     }
   }

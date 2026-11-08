@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 import { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
 import MixQueuePanel from '@/app/_components/MixQueuePanel'
+import { fetchBookingList, addDaysStr, bookingCoversDay, bookingOverlapsRange } from '@/lib/booking-list'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
@@ -64,21 +65,17 @@ export function bangkokTodayStr(): string {
   return new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10)
 }
 
-export function addDaysStr(ymd: string, n: number): string {
-  const d = new Date(`${ymd}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + n)
-  return d.toISOString().slice(0, 10)
-}
+// maint 2026-11-08 — the span rule now lives in src/lib/booking-list.ts (shared
+// with home / my-bookings / admin queue / room schedule). Re-exported for the test.
+export { addDaysStr }
 
 export function matchesDateFilter(b: Pick<Booking, 'shootDate' | 'shootEndDate'>, filter: DateFilter, pickedDate: string): boolean {
   if (filter === 'all') return true
-  const start = b.shootDate.slice(0, 10)
-  const end = (b.shootEndDate || b.shootDate).slice(0, 10)
   const today = bangkokTodayStr()
-  if (filter === 'today') return start <= today && today <= end
-  if (filter === 'tomorrow') { const t = addDaysStr(today, 1); return start <= t && t <= end }
-  if (filter === 'week') return end >= today && start <= addDaysStr(today, 7)
-  if (filter === 'date') return !pickedDate || (start <= pickedDate && pickedDate <= end)
+  if (filter === 'today') return bookingCoversDay(b, today)
+  if (filter === 'tomorrow') return bookingCoversDay(b, addDaysStr(today, 1))
+  if (filter === 'week') return bookingOverlapsRange(b, today, addDaysStr(today, 8))
+  if (filter === 'date') return !pickedDate || bookingCoversDay(b, pickedDate)
   return true
 }
 
@@ -94,12 +91,24 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
   // v1.256 — นัท 2 ต.ค. 2569: งานมิกซ์เสียงดู/แก้ได้จากเมนู Producer เหมือนงานถ่าย
   const [tab, setTab] = useState<'shoots' | 'mix'>('shoots')
 
+  // maint 2026-11-08 — was limit=100 newest-first with `total` ignored (a routine
+  // producer's oldest jobs vanished silently), and res.json() on a 502 HTML page
+  // threw past setLoading(false) → spinner forever. Now: generous cap + a banner
+  // when it still caps, and a failure is an error, not "no jobs".
+  const [loadError, setLoadError] = useState('')
+  const [shownOf, setShownOf] = useState<{ shown: number; total: number } | null>(null)
   const load = useCallback(async () => {
     setLoading(true)
-    const res = await fetch('/api/bookings?scope=producer&limit=100&withCrew=1')
-    const data = await res.json()
-    setBookings(data.bookings || [])
-    setLoading(false)
+    setLoadError('')
+    try {
+      const r = await fetchBookingList<Booking>({ scope: 'producer', limit: '1000', withCrew: '1' })
+      setBookings(r.bookings)
+      setShownOf(r.truncated ? { shown: r.bookings.length, total: r.total } : null)
+    } catch (e: any) {
+      setLoadError(e?.message || String(e))
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -216,6 +225,11 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
         <MixQueuePanel variant="producer" />
       ) : loading ? (
         <p className="text-sm text-gray-400">Loading…</p>
+      ) : loadError ? (
+        <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          โหลดรายการงานไม่ได้ — {loadError}{' '}
+          <button onClick={load} className="underline">ลองใหม่</button>
+        </div>
       ) : bookings.length === 0 ? (
         <p className="text-sm text-gray-400">ยังไม่มีงานที่คุณเป็น Producer</p>
       ) : (() => {
@@ -225,6 +239,9 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
         }
         return (
         <div className="space-y-3">
+          {shownOf && (
+            <p className="text-xs text-amber-700">⚠️ แสดง {shownOf.shown} จาก {shownOf.total} งาน (ใหม่สุดก่อน) — งานเก่ากว่านี้ไม่ได้โหลด</p>
+          )}
           {[...filtered].sort((a, b) => a.shootDate.localeCompare(b.shootDate)).map(b => {
             const assigned = (b.assignedEmails || []).length > 0
             const open = openId === b.id

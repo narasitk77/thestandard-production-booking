@@ -37,7 +37,9 @@ async function isAllowed(request: NextRequest): Promise<boolean> {
   return session?.role === 'ADMIN'
 }
 
-type Outcome = { key: string | null; jobName: string; result: 'created' | 'duplicate' | 'invalid'; reason?: string; id?: string }
+// 'error' = the DB write failed (not the input's fault) — kept apart from 'invalid'
+// so a caller can tell "fix your data" from "retry later".
+type Outcome = { key: string | null; jobName: string; result: 'created' | 'duplicate' | 'invalid' | 'error'; reason?: string; id?: string }
 
 export async function POST(request: NextRequest) {
   if (!(await isAllowed(request))) {
@@ -53,6 +55,11 @@ export async function POST(request: NextRequest) {
   }
 
   const outcomes: Outcome[] = []
+  // Rows created EARLIER IN THIS BATCH, keyed exactly like the DB check below
+  // (externalKey when present, else name+date). The DB check alone made a dry
+  // run say "created: 2" for two items the real run turns into 1 + duplicate.
+  const seenInBatch = new Map<string, string | undefined>()
+  const nameKey = (jobName: string, workDate: string) => `n:${jobName}\u0000${workDate}`
 
   for (const raw of items) {
     const externalKey = String(raw?.externalKey ?? '').trim() || null
@@ -63,6 +70,12 @@ export async function POST(request: NextRequest) {
     if (!jobName) { outcomes.push({ key: externalKey, jobName, result: 'invalid', reason: 'ไม่มีชื่อหมาย' }); continue }
     if (!isValidISODate(workDate)) { outcomes.push({ key: externalKey, jobName, result: 'invalid', reason: 'วันที่ไม่ถูกต้อง' }); continue }
     if (!getOutlet(outletCode)) { outcomes.push({ key: externalKey, jobName, result: 'invalid', reason: `ไม่รู้จักสังกัด ${outletCode}` }); continue }
+
+    const batchKey = externalKey ? `k:${externalKey}` : nameKey(jobName, workDate)
+    if (seenInBatch.has(batchKey)) {
+      outcomes.push({ key: externalKey, jobName, result: 'duplicate', id: seenInBatch.get(batchKey) })
+      continue
+    }
 
     // กันซ้ำสองชั้น: externalKey ถ้ามี (แม่นสุด) ไม่งั้นเทียบชื่อหมาย+วัน
     // ต้นทางที่อ่านข้อความซ้ำได้ต้องยิงซ้ำได้โดยไม่งอกแถว — ไม่งั้นรายการ
@@ -80,6 +93,8 @@ export async function POST(request: NextRequest) {
 
     if (dryRun) {
       outcomes.push({ key: externalKey, jobName, result: 'created' })
+      if (externalKey) seenInBatch.set(`k:${externalKey}`, undefined)
+      seenInBatch.set(nameKey(jobName, workDate), undefined)
       continue
     }
 
@@ -99,6 +114,8 @@ export async function POST(request: NextRequest) {
         select: { id: true },
       })
       outcomes.push({ key: externalKey, jobName, result: 'created', id: created.id })
+      if (externalKey) seenInBatch.set(`k:${externalKey}`, created.id)
+      seenInBatch.set(nameKey(jobName, workDate), created.id)
     } catch (e: any) {
       // ชน @unique externalKey แปลว่ามีอีก request สร้างไปแล้วระหว่างที่เราเช็ก
       // — ผลลัพธ์ที่ต้องการคือ "มีแถวนั้นอยู่" ซึ่งก็เป็นจริงแล้ว ไม่ใช่ error
@@ -106,26 +123,31 @@ export async function POST(request: NextRequest) {
         outcomes.push({ key: externalKey, jobName, result: 'duplicate' })
       } else {
         console.error('[switcher-prefill] create failed:', e?.message || e)
-        outcomes.push({ key: externalKey, jobName, result: 'invalid', reason: 'สร้างไม่สำเร็จ' })
+        outcomes.push({ key: externalKey, jobName, result: 'error', reason: `สร้างไม่สำเร็จ: ${String(e?.message || e).slice(0, 200)}` })
       }
     }
   }
 
   const created = outcomes.filter(o => o.result === 'created').length
-  if (!dryRun && created > 0) {
+  const errors = outcomes.filter(o => o.result === 'error').length
+  if (!dryRun && (created > 0 || errors > 0)) {
     logAudit({
       actorEmail: 'system:switcher-prefill',
       action: 'SWITCHER_PREFILL',
       entityType: 'SwitcherJob',
-      changes: { created, duplicate: outcomes.filter(o => o.result === 'duplicate').length, outcomes },
+      changes: { created, errors, duplicate: outcomes.filter(o => o.result === 'duplicate').length, outcomes },
     })
   }
 
+  // A failed write is not a 200: the endpoint is idempotent (externalKey / name+date),
+  // so the caller can simply resend the whole batch.
   return NextResponse.json({
+    ok: errors === 0,
     dryRun,
     created,
     duplicate: outcomes.filter(o => o.result === 'duplicate').length,
     invalid: outcomes.filter(o => o.result === 'invalid').length,
+    errors,
     outcomes,
-  })
+  }, { status: errors > 0 ? 500 : 200 })
 }

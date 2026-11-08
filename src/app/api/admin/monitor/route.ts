@@ -90,7 +90,8 @@ export async function GET() {
     },
     orderBy: { shootDate: 'asc' },
     select: {
-      id: true, bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
+      // callTime — isShootOver reads an overnight shoot by it; autoCompleteBookings (the sender) selects it too
+      id: true, bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true, callTime: true,
       status: true, deletedAt: true,
       producerEmail: true, createdByEmail: true, assignedEmails: true,
       mainVideographerEmail: true, crewRequired: true,

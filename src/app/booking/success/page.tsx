@@ -41,14 +41,26 @@ function SuccessContent() {
   const [booking, setBooking] = useState<Booking | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
+  // maint 2026-11-08 (ui-15) — we only get here after POST /api/bookings said 201.
+  // A failed RE-READ used to render "Booking not found." and the producer filled
+  // the form again → two bookings, two Production IDs, two room holds.
+  const [loadError, setLoadError] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    if (!bookingId) return
+    if (!bookingId) { setLoading(false); return }
+    setLoading(true)
+    setLoadError('')
     fetch(`/api/bookings/${bookingId}`)
-      .then(r => r.json())
-      .then(data => setBooking(data.booking))
+      .then(async r => {
+        const data = await r.json().catch(() => null)
+        if (r.status === 404) return // genuinely not there → "Booking not found."
+        if (!r.ok || !data?.booking) throw new Error(data?.error ? `${data.error} (HTTP ${r.status})` : `HTTP ${r.status}`)
+        setBooking(data.booking)
+      })
+      .catch(e => setLoadError(e?.message || String(e)))
       .finally(() => setLoading(false))
-  }, [bookingId])
+  }, [bookingId, attempt])
 
   if (loading) {
     return (
@@ -59,6 +71,19 @@ function SuccessContent() {
   }
 
   if (!booking) {
+    if (bookingId && loadError) {
+      return (
+        <div className="max-w-2xl mx-auto px-4 py-20 text-center space-y-3">
+          <p className="text-gray-800 font-medium">จองสำเร็จแล้ว แต่โหลดรายละเอียดไม่ได้</p>
+          <p className="text-sm text-gray-500">({loadError}) — <b>อย่าส่งฟอร์มซ้ำ</b> ดูงานนี้ใน My Bookings ก่อน</p>
+          <div className="flex items-center justify-center gap-3">
+            <button onClick={() => setAttempt(a => a + 1)} className="btn-primary">ลองโหลดใหม่</button>
+            <Link href={`/dashboard/${bookingId}`} className="text-sm text-brand-primary hover:underline">เปิดใบจองนี้</Link>
+            <Link href="/my-bookings" className="text-sm text-brand-primary hover:underline">My Bookings</Link>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <p className="text-brand-gray-500">Booking not found.</p>

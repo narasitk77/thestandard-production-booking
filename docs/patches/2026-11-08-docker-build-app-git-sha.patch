@@ -1,0 +1,15 @@
+diff --git a/.github/workflows/docker-build.yml b/.github/workflows/docker-build.yml
+index 9e4ad07..0908991 100644
+--- a/.github/workflows/docker-build.yml
++++ b/.github/workflows/docker-build.yml
+@@ -45,5 +45,10 @@ jobs:
+           push: true
+           tags: ${{ steps.meta.outputs.tags }}
+           labels: ${{ steps.meta.outputs.labels }}
++          # Dockerfile has `ARG APP_GIT_SHA` → /api/version `commit` + `imageTag`.
++          # Never passed before 2026-11-08, so both were always null and two builds
++          # with the same package.json version could not be told apart.
++          build-args: |
++            APP_GIT_SHA=${{ github.sha }}
+           cache-from: type=gha
+           cache-to: type=gha,mode=max

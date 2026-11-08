@@ -83,7 +83,12 @@ export function workerSpecs(): WorkerSpec[] {
     // v1.220 — the noon prune, brought back in-container from the Hermes cron
     // that ran on a laptop (and silently 401'd for 13 days after a secret
     // rotation). Separate key from 'landing' on purpose: see the route comment.
-    { key: 'landing-prune', label: 'Landing prune (noon)', enabled: enabledUnlessOff(process.env.LANDING_PRUNE_ENABLED),
+    // 2026-11-08 — the prune lives INSIDE scripts/landing-worker.js, which exits
+    // before scheduling it when LANDING_WORKER_ENABLED=0. Mirror both guards, or
+    // switching the evening sweep off makes this spec go stale forever (503 +
+    // a "restart stack" alert every 6h that no restart can fix).
+    { key: 'landing-prune', label: 'Landing prune (noon)',
+      enabled: enabledUnlessOff(process.env.LANDING_WORKER_ENABLED) && enabledUnlessOff(process.env.LANDING_PRUNE_ENABLED),
       intervalMs: 24 * HOUR },
     { key: 'shoot-review', label: 'Post-shoot review invites', enabled: enabled(process.env.SHOOT_REVIEW_ENABLED),
       intervalMs: 24 * HOUR },

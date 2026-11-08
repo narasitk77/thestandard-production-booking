@@ -104,7 +104,7 @@ async function runOnce() {
     const s = JSON.parse(res.text)
     if (s.report && !(s.chat && s.chat.any)) console.error('[footage-integrity] run failed: summary not delivered to any chat channel')
     const count = st => boxes.filter(b => b.state === st).length
-    console.log(`[footage-integrity] done boxes=${boxes.length} ok=${count('ok')} issues=${count('issues')} waiting=${count('waiting')} unreadable=${count('unreadable')} nobox=${noBox} docs=${docs ? 'on' : 'off'}${failure ? ' INCOMPLETE' : ''}`)
+    console.log(`[footage-integrity] done boxes=${boxes.length} ok=${count('ok')} issues=${count('issues')} waiting=${count('waiting')} unreadable=${count('unreadable')} nobox=${noBox} docs=${docs ? 'on' : 'off'} marked=${s.marked ?? '-'} unnamed=${s.unnamed ?? 0}${s.markFailed ? ` markFailed=${s.markFailed}` : ''}${failure ? ' INCOMPLETE' : ''}`)
   } catch (err) {
     console.error('[footage-integrity] run failed:', err?.message || err)
   } finally {

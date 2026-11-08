@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
+import { internalSecretAllowed } from '@/lib/internal-auth'
 import { runBackup } from '@/lib/backup'
 import { recordHeartbeat } from '@/lib/heartbeat'
 
@@ -10,17 +11,11 @@ export const dynamic = 'force-dynamic'
  * shape as the other internal endpoints: a shared secret header or an admin
  * session. GET /api/internal/backup/run
  */
-function expectedSecret(): string | undefined {
-  return process.env.BACKUP_SECRET?.trim()
-    || process.env.NEXTAUTH_SECRET?.trim()
-    || process.env.AUTH_SECRET?.trim()
-}
-
+// 2026-11-08 — ANY configured secret, not the first-set chain (internal-auth.ts v1.123):
+// `X || NEXTAUTH || AUTH` + `===` 401'd every caller still sending NEXTAUTH the day X was set.
 async function isAllowed(request: NextRequest): Promise<boolean> {
-  const secret = expectedSecret()
-  const headerSecret = request.headers.get('x-backup-secret')?.trim()
-  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim()
-  if (secret && (headerSecret === secret || bearer === secret)) return true
+  if (internalSecretAllowed(request, 'x-backup-secret',
+    ['BACKUP_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) return true
   const session = await getSession()
   return session?.role === 'ADMIN'
 }

@@ -8,6 +8,7 @@ import {
   type StagingContainer,
 } from '@/lib/google-drive'
 import { soundStagingCategoryName, outletDriveFolderName, sanitizeNameSegment } from '@/lib/outlet-folders'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest) {
         bookingCode: true, projectName: true,
         outlet: { select: { code: true } },
         program: { select: { code: true, name: true } },
-        episodes: { orderBy: { sequence: 'asc' }, select: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, select: { program: { select: { code: true, name: true } } } },
       },
     })
     const byCode = new Map(dbBookings.map(b => [b.bookingCode as string, b]))

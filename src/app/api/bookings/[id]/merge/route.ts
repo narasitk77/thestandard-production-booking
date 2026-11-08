@@ -29,23 +29,42 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
-      select: BOOKING_MERGE_SELECT,
+      select: { ...BOOKING_MERGE_SELECT, status: true, deletedAt: true },
     })
     if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (!canViewBooking(session, booking)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // Refused: CANCELLED and soft-deleted bookings only. The MOVE would carry a
+    // postponed shoot's landing footage into the box of a job that isn't happening
+    // (the footage belongs to the new booking). Prod allowed this; refusing it is
+    // new and listed for Nat. Dry-run refused too: a preview of a move the real run
+    // would refuse lies.
+    // Every other status merges as in prod. The button shows on the upload page
+    // for any status, and for an ASSIGNED / REQUESTED shoot it is the ONLY merge:
+    // the hourly worker (video-merge) handles CONFIRMED / COMPLETED only — the reply
+    // says so.
+    if (booking.deletedAt) return NextResponse.json({ error: 'ใบจองถูกลบแล้ว — รวมไฟล์ไม่ได้', code: 'BOOKING_DELETED' }, { status: 409 })
+    if (booking.status === 'CANCELLED') {
+      return NextResponse.json({
+        error: 'งานนี้ถูกยกเลิกแล้ว — ไม่ย้ายฟุตเทจเข้ากล่องของงานที่ยกเลิก ถ้างานเลื่อนวัน ให้รวมเข้าใบจองใหม่',
+        code: 'BOOKING_CANCELLED',
+      }, { status: 409 })
+    }
+    const warning = booking.status === 'CONFIRMED' || booking.status === 'COMPLETED'
+      ? undefined
+      : `งานสถานะ ${booking.status} — รอบรวมไฟล์อัตโนมัติรายชั่วโมงไม่ดูแลงานนี้ (ทำเฉพาะ CONFIRMED / COMPLETED) ไฟล์ที่ลงทีหลังต้องกดรวมเองอีกครั้ง`
 
     const { searchParams } = new URL(request.url)
     const dryRun = searchParams.get('dryRun') === '1' || searchParams.get('dryRun') === 'true'
 
     if (dryRun) {
       const result = await runBookingMerge(booking, { dryRun: true })
-      return NextResponse.json(result)
+      return NextResponse.json(warning ? { ...result, warning } : result)
     }
 
     // Footage moves into the box → bust the detect cache when the job lands.
     const status = startMergeJob(params.id, booking, () => clearFootageCache(params.id))
     if (!status) return NextResponse.json({ error: 'รอบรวมไฟล์อัตโนมัติกำลังย้ายไฟล์ของงานนี้อยู่ — รอสักครู่แล้วกดใหม่' }, { status: 409 })
-    return NextResponse.json({ job: status }, { status: 202 })
+    return NextResponse.json(warning ? { job: status, warning } : { job: status }, { status: 202 })
   } catch (e: any) {
     console.error('POST /api/bookings/[id]/merge error:', e)
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })

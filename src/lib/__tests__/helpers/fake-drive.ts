@@ -87,6 +87,10 @@ export class FakeDrive {
   }
 
   isFolderAlive = async (id: string) => this.folders.has(id) && !this.folders.get(id)!.trashed
+  /** ids Drive "cannot answer" for (a 403 rateLimitExceeded / 5xx after retries) → folderLiveness 'unknown' */
+  unknown = new Set<string>()
+  folderLiveness = async (id: string): Promise<'alive' | 'dead' | 'unknown'> =>
+    this.unknown.has(id) ? 'unknown' : (await this.isFolderAlive(id)) ? 'alive' : 'dead'
   hasDriveCredentials = () => true
 
   /** file id → body, for downloadDriveFile (v1.280: video-merge reads MEDIAPRO.XML). No body = the download fails. */

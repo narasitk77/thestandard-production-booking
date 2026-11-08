@@ -49,6 +49,7 @@ import { bookingShowName } from './display'
 import { computeTypeDroppedId } from './id-migration'
 import { EPISODE_ID_RE_LOOSE } from './episode-id'
 import { renderBookingInfo, bookingInfoInput } from './booking-info'
+import { EPISODE_ORDER } from './episode-order'
 
 const SHOOT_FILE_RE = /^_SHOOT.*\.txt$/i
 const CANONICAL_MARKER = '_SHOOT.txt'
@@ -238,7 +239,7 @@ export async function reconcileShootMarkers(
       mainVideographerEmail: true, assignedEmails: true, crewRequired: true,
       agencyRef: true, notes: true,
       outlet: { select: { name: true, code: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true, sequence: true } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, title: true, sequence: true } },
     },
   })
 
@@ -522,7 +523,7 @@ export async function reconcileGenericMarkers(
       agencyRef: true, notes: true,
       outlet: { select: { name: true, code: true } },
       program: { select: { code: true, name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, title: true, sequence: true, program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, title: true, sequence: true, program: { select: { code: true, name: true } } } },
     },
     // v1.148.3 — `limit` bounds the batch (most-recent shoots first) so a staged
     // rollout can exercise the GENERIC pass on N bookings, matching the AGN

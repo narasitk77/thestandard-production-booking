@@ -13,6 +13,28 @@ export interface ShootWindow {
   shootDate: Date
   shootEndDate: Date | null
   estimatedWrap: string | null
+  /** Needed to see an overnight single-day shoot (wrap ≤ call). Callers that
+   *  leave it out keep the old same-day reading. */
+  callTime?: string | null
+}
+
+/**
+ * A single-day booking whose wrap is at/before its call wraps PAST MIDNIGHT —
+ * it ends the next calendar day. One rule for the calendar event's end
+ * (computeEventTimes) and for "the shoot is over" (isShootOver); `<=` matches
+ * computeEventTimes and ot-sync. "Single-day" = no shootEndDate, or one equal to
+ * shootDate (the wizard sets shootEndDate = shootDate for one-day bookings).
+ */
+export function wrapsNextDay(b: {
+  shootDate: Date | string
+  shootEndDate?: Date | string | null
+  callTime?: string | null
+  estimatedWrap?: string | null
+}): boolean {
+  if (!b.callTime || !b.estimatedWrap) return false
+  const ymd = (d: Date | string) => new Date(d).toISOString().slice(0, 10)
+  const singleDay = !b.shootEndDate || ymd(b.shootEndDate) === ymd(b.shootDate)
+  return singleDay && b.estimatedWrap <= b.callTime
 }
 
 /**
@@ -25,6 +47,11 @@ export interface ShootWindow {
  *  2. Last shoot day is today AND estimatedWrap time has passed → over same-day
  *  3. Last shoot day is today AND no estimatedWrap → over after 23:00
  *  4. Last shoot day is in the future → NOT over
+ *
+ * Overnight single-day shoot (20:00 → 02:00, see wrapsNextDay): the last day is
+ * the day AFTER shootDate. Before this, '02:00' >= '02:00' on the shoot day's
+ * own morning auto-COMPLETED it ~18 h before the call — and COMPLETED cannot be
+ * cancelled, edited by the producer, or reconciled afterwards.
  */
 export function isShootOver(b: ShootWindow, now: Date = new Date()): boolean {
   // Bangkok = UTC+7 (no DST, so the fixed offset matches Asia/Bangkok)
@@ -32,8 +59,11 @@ export function isShootOver(b: ShootWindow, now: Date = new Date()): boolean {
   // Today at midnight, as the UTC-midnight Date Prisma stores @db.Date as
   const todayBkk = new Date(Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate()))
 
-  // "Last day" of the shoot: shootEndDate if set, otherwise shootDate
-  const lastDay = b.shootEndDate ?? b.shootDate
+  // "Last day" of the shoot: shootEndDate if set, otherwise shootDate —
+  // pushed one day out when the shoot wraps past midnight
+  const lastDay = wrapsNextDay(b)
+    ? new Date(b.shootDate.getTime() + 24 * 60 * 60 * 1000)
+    : b.shootEndDate ?? b.shootDate
 
   if (lastDay < todayBkk) return true // Case 1: last shoot day has fully passed
   if (lastDay.getTime() !== todayBkk.getTime()) return false // Case 4: future

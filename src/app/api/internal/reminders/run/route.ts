@@ -1,21 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
+import { internalSecretAllowed } from '@/lib/internal-auth'
 import { runReminderScan } from '@/lib/reminders'
 import { recordHeartbeat } from '@/lib/heartbeat'
 
 export const dynamic = 'force-dynamic'
 
-function expectedSecret(): string | undefined {
-  return process.env.REMINDERS_SECRET?.trim()
-    || process.env.NEXTAUTH_SECRET?.trim()
-    || process.env.AUTH_SECRET?.trim()
-}
-
+// 2026-11-08 — ANY configured secret, not the first-set chain (internal-auth.ts v1.123):
+// `X || NEXTAUTH || AUTH` + `===` 401'd every caller still sending NEXTAUTH the day X was set.
 async function isAllowed(request: NextRequest): Promise<boolean> {
-  const secret = expectedSecret()
-  const headerSecret = request.headers.get('x-reminders-secret')?.trim()
-  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim()
-  if (secret && (headerSecret === secret || bearer === secret)) return true
+  if (internalSecretAllowed(request, 'x-reminders-secret',
+    ['REMINDERS_SECRET', 'NEXTAUTH_SECRET', 'AUTH_SECRET'])) return true
 
   const session = await getSession()
   return session?.role === 'ADMIN'

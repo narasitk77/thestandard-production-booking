@@ -125,7 +125,7 @@ AUTH_DISABLED=1
 SEED_ADMIN_EMAIL=<อีเมล @thestandard.co ของคุณ>
 ```
 
-**ทำไมสองชั้น** — ล้าง credential = สร้าง Google client ไม่ได้เลย (แตะ Drive/ปฏิทิน/ชีท/เมลไม่ได้) และ `APP_ENV=staging` ทำให้ `assertStagingDriveIsolation()` **throw ทันที**ถ้ามีโค้ดไหนพยายามสร้าง Drive client โดยยังชี้ไดรฟ์จริง (id จริงทั้ง 3 ฝังเป็น blocklist ในโค้ด) แทนที่จะไปแตะของจริงเงียบ ๆ · `AUTH_DISABLED=1` + `SEED_ADMIN_EMAIL` ทำให้ล็อกอินข้ามได้แต่ยังได้ **role จริงจาก DB** — ใช้ทดสอบสิทธิ์แบบ "เป็นคนอื่น" ได้ (บั๊กสิทธิ์ที่เจ็บที่สุดมองไม่เห็นจากตาแอดมิน)
+**ทำไมสองชั้น** — ล้าง credential = สร้าง Google client ไม่ได้เลย (แตะ Drive/ปฏิทิน/ชีท/เมลไม่ได้) และ `APP_ENV=staging` ทำให้ `assertStagingDriveIsolation()` **throw ทันที**ถ้ามีโค้ดไหนพยายามสร้าง Drive client โดยยังชี้ไดรฟ์จริง (id จริงทั้ง 3 ฝังเป็น blocklist ในโค้ด) แทนที่จะไปแตะของจริงเงียบ ๆ · `AUTH_DISABLED=1` + `SEED_ADMIN_EMAIL` ทำให้ล็อกอินข้ามได้ในนาม **อีเมล** นั้น แต่ `session.role` เป็น **`ADMIN` ตายตัว** และ middleware ข้าม gate หน้าทั้งหมด — ใช้ทดสอบ "เป็นคนอื่น" ได้เฉพาะ gate ที่อ่าน `User`/`TeamMember` จาก DB ซ้ำ (`getProducerAccess`, `getSwitcherAccess`, `getSoundAccess`, `canUploadToBooking`, `getOTApproverAccess`) · `requireAdmin`/`requireConsole` ผ่านเสมอในโหมดนี้ ⇒ "producer X เข้า `/api/admin/*` ไม่ได้" พิสูจน์ด้วยวิธีนี้ไม่ได้ (ล็อกอินจริง หรือพิสูจน์ด้วย SQL)
 
 ### 4.2 เทส
 

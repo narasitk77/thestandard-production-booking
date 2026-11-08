@@ -16,20 +16,35 @@ export function dateOrNull(v: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d
 }
 
+/** Thrown by decOrNull for a value that was SENT but is not a valid amount. */
+export class InvalidMoneyError extends Error {
+  constructor(public readonly raw: unknown) {
+    super(`ยอดเงินไม่ถูกต้อง "${String(raw).slice(0, 40)}" — ต้องเป็นตัวเลข 0 ถึง 9,999,999,999.99 (ไม่ได้บันทึก)`)
+    this.name = 'InvalidMoneyError'
+  }
+}
+
 /**
  * Parse a money/decimal value to a string Prisma accepts for a Decimal column.
  * Strips Thai-baht commas / currency text ("3,640.00 บาท" → "3640.00"). null on empty.
+ *
+ * Throws InvalidMoneyError for a negative, unparseable or over-cap value. It used
+ * to return null for those too — and every PATCH route does
+ * `if ('amount' in b) data.amount = decOrNull(b.amount)`, so a typo like '-500'
+ * WIPED the stored amount and answered 200 (maintenance 2026-11-08). Every caller
+ * sits inside a try/catch that returns the error message to the user.
  */
 export function decOrNull(v: unknown): string | null {
   if (v === null || v === undefined || v === '') return null
   // Money/qty fields only (amount/cost/price/total). Keep the minus while parsing
   // so a negative is DETECTED (not silently flipped to positive) and rejected, and
-  // cap at the Decimal(12,2) ceiling so an over-long value returns null instead of
-  // throwing a raw 500 from Prisma.
+  // cap at the Decimal(12,2) ceiling so an over-long value is refused here instead
+  // of as a raw 500 from Prisma.
   const cleaned = String(v).replace(/[, ]/g, '').replace(/[^\d.\-]/g, '')
+  // Nothing numeric at all ('', '-', 'N/A', 'ฟรี') still means "no amount".
   if (cleaned === '' || cleaned === '-' || cleaned === '.') return null
   const n = Number(cleaned)
-  if (!Number.isFinite(n) || n < 0 || n > 9999999999.99) return null
+  if (!Number.isFinite(n) || n < 0 || n > 9999999999.99) throw new InvalidMoneyError(v)
   return n.toString()
 }
 

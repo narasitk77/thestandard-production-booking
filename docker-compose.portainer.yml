@@ -611,6 +611,14 @@ services:
       SOUND_MERGE_SECRET: ${SOUND_MERGE_SECRET:-}
       VIDEO_MERGE_SECRET: ${VIDEO_MERGE_SECRET:-}
       WORKER_HTTP_TIMEOUT_MS: ${WORKER_HTTP_TIMEOUT_MS:-}
+      # 2026-11-08 — /api/internal/shoot-reviews/send checks RECONCILE_SECRET here in
+      # the app, but compose passed it only to the `worker` service.
+      RECONCILE_SECRET: ${RECONCILE_SECRET:-}
+      # 2026-11-08 — was only ever used inside other vars' defaults
+      # (`${LANDING_REPORT_EMAIL:-${FEEDBACK_EMAIL:-}}`), never passed in itself, so
+      # /api/feedback and ticket replies (which read it directly) always fell back
+      # to narasit.k. Empty = that same fallback (the code uses `||`).
+      FEEDBACK_EMAIL: ${FEEDBACK_EMAIL:-}
 
       # --- App ---
       UPLOAD_DIR: /app/uploads
@@ -705,6 +713,43 @@ services:
       VIDEO_MERGE_FALLBACK_MS: ${VIDEO_MERGE_FALLBACK_MS:-21600000}
       FOLDER_INTEGRITY_INTERVAL_MS: ${FOLDER_INTEGRITY_INTERVAL_MS:-3600000}
       SHOOT_REVIEW_WORKER_HOUR: ${SHOOT_REVIEW_WORKER_HOUR:-10}
+      # 2026-11-08 — what the worker scripts read that this block never passed
+      # (maint-B4-workers-compose-services.test.ts now checks it per service).
+      # Same defaults as the app, character for character. Without them, turning
+      # on this profile per docs/worker-service-split.md would have: run
+      # folder-integrity report-only forever (APPLY missing) while its heartbeat
+      # stayed green · exited room-booking (ENABLED missing) · put video-merge in
+      # PLAIN mode (NAS_DSM_*) · sent NEXTAUTH_SECRET where the app expects a
+      # per-worker secret set on the stack → 401 (calendar = the dead-man too).
+      ROOM_BOOKING_WORKER_ENABLED: ${ROOM_BOOKING_WORKER_ENABLED:-0}
+      ROOM_BOOKING_WORKER_INTERVAL_MS: ${ROOM_BOOKING_WORKER_INTERVAL_MS:-3600000}
+      ROOM_BOOKING_RECONCILE_DAYS: ${ROOM_BOOKING_RECONCILE_DAYS:-45}
+      ROOM_BOOKING_RECONCILE_MAX: ${ROOM_BOOKING_RECONCILE_MAX:-8}
+      FOLDER_INTEGRITY_APPLY: ${FOLDER_INTEGRITY_APPLY:-0}
+      FOLDER_INTEGRITY_START_DELAY_MS: ${FOLDER_INTEGRITY_START_DELAY_MS:-240000}
+      LANDING_WORKER_HOUR: ${LANDING_WORKER_HOUR:-19}
+      SHOOT_MARKER_WORKER_HOUR: ${SHOOT_MARKER_WORKER_HOUR:-3}
+      CALENDAR_RECONCILE_INTERVAL_MS: ${CALENDAR_RECONCILE_INTERVAL_MS:-600000}
+      REMINDERS_WORKER_INTERVAL_MS: ${REMINDERS_WORKER_INTERVAL_MS:-86400000}
+      FOOTAGE_READY_INTERVAL_MS: ${FOOTAGE_READY_INTERVAL_MS:-1800000}
+      FOOTAGE_WORKER_INTERVAL_MS: ${FOOTAGE_WORKER_INTERVAL_MS:-600000}
+      BACKUP_INTERVAL_MS: ${BACKUP_INTERVAL_MS:-86400000}
+      VIDEO_MERGE_INTERVAL_MS: ${VIDEO_MERGE_INTERVAL_MS:-3600000}
+      WORKER_HTTP_TIMEOUT_MS: ${WORKER_HTTP_TIMEOUT_MS:-}
+      NAS_DSM_URL: ${NAS_DSM_URL:-}
+      NAS_DSM_USER: ${NAS_DSM_USER:-}
+      NAS_DSM_PASS: ${NAS_DSM_PASS:-}
+      NAS_DSM_CONN_NAME: ${NAS_DSM_CONN_NAME:-}
+      NAS_DSM_INSECURE_TLS: ${NAS_DSM_INSECURE_TLS:-1}
+      CALENDAR_RECONCILE_SECRET: ${CALENDAR_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
+      REMINDERS_SECRET: ${REMINDERS_SECRET:-${NEXTAUTH_SECRET}}
+      FOOTAGE_READY_SECRET: ${FOOTAGE_READY_SECRET:-${NEXTAUTH_SECRET}}
+      FOOTAGE_SYNC_SECRET: ${FOOTAGE_SYNC_SECRET:-${NEXTAUTH_SECRET}}
+      SHOOT_MARKER_RECONCILE_SECRET: ${SHOOT_MARKER_RECONCILE_SECRET:-${NEXTAUTH_SECRET}}
+      BACKUP_SECRET: ${BACKUP_SECRET:-${NEXTAUTH_SECRET}}
+      PREP_FOLDERS_SECRET: ${PREP_FOLDERS_SECRET:-}
+      SOUND_MERGE_SECRET: ${SOUND_MERGE_SECRET:-}
+      VIDEO_MERGE_SECRET: ${VIDEO_MERGE_SECRET:-}
       # Backup is the ONE worker that needs the database and Drive directly
       # (pg_dump + upload). Leave BACKUP_WORKER_ENABLED=0 here and keep it on
       # the app, or give this container DATABASE_URL too.

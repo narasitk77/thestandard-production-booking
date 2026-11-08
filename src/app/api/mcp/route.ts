@@ -41,9 +41,13 @@ const AUTH_FAIL_WINDOW_MS = 15 * 60 * 1000
 const AUTH_FAIL_LIMIT = 10
 const authFails = new Map<string, { count: number; firstAt: number }>()
 
+// maint 2026-11-08 — the proxy's view of the peer, never the client's claim:
+// NPM sets X-Real-IP from $remote_addr and APPENDS to X-Forwarded-For, so the
+// FIRST XFF entry is whatever the caller typed. Keying on it let anyone dodge
+// the backoff, or fill the bucket of Veela's/Pigwidgeon's egress IP.
 function clientIp(request: NextRequest): string {
-  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || request.headers.get('x-real-ip')?.trim()
+  return request.headers.get('x-real-ip')?.trim()
+    || request.headers.get('x-forwarded-for')?.split(',').pop()?.trim()
     || 'unknown'
 }
 
@@ -75,18 +79,20 @@ export async function POST(request: NextRequest) {
     )
   }
   const ip = clientIp(request)
-  if (authFailState(ip).blocked) {
-    return NextResponse.json(
-      { error: 'Too many failed auth attempts — try again later' },
-      { status: 429, headers: { 'Retry-After': String(Math.ceil(AUTH_FAIL_WINDOW_MS / 1000)) } },
-    )
-  }
+  // Key first: a valid key is never 429'd for sharing a bucket with someone
+  // else's failures (shared egress/proxy IP). Keys are high-entropy, so the
+  // backoff is about log noise, not about guessing odds.
   const key = authorizedKey(request)
   if (!key) {
+    if (authFailState(ip).blocked) {
+      return NextResponse.json(
+        { error: 'Too many failed auth attempts — try again later' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(AUTH_FAIL_WINDOW_MS / 1000)) } },
+      )
+    }
     recordAuthFail(ip)
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  authFails.delete(ip)
 
   let message: unknown
   try {

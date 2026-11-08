@@ -182,6 +182,18 @@ test('off-by-default workers stay disabled until explicitly switched on', () => 
   }
 })
 
+test('landing-prune follows BOTH switches its script obeys (2026-11-08)', () => {
+  // scripts/landing-worker.js exits on LANDING_WORKER_ENABLED=0 before it ever
+  // schedules the noon prune. A spec that only read LANDING_PRUNE_ENABLED reported
+  // the prune as enabled-and-dead: health 503 + a "restart stack" alert every 6h.
+  const prune = (env: Record<string, string | undefined>) =>
+    withEnv(env, () => heartbeat.workerSpecs().find((s) => s.key === 'landing-prune')!.enabled)
+  assert.equal(prune({ LANDING_WORKER_ENABLED: undefined, LANDING_PRUNE_ENABLED: undefined }), true)
+  assert.equal(prune({ LANDING_WORKER_ENABLED: '0', LANDING_PRUNE_ENABLED: '1' }), false,
+    'evening sweep off = the whole script exits = no prune either')
+  assert.equal(prune({ LANDING_WORKER_ENABLED: '1', LANDING_PRUNE_ENABLED: '0' }), false)
+})
+
 test('a daily worker is fresh at 25h and stale at 27h', async () => {
   // 24h interval + the 2h grace in evaluateWorkers = alert at ~26h. A run that
   // lands a couple of hours late (the BKK hour gate drifts across restarts)

@@ -13,10 +13,12 @@ import Link from 'next/link'
 import { ExternalLink, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react'
 import { formatDisplayDate, statusLabel } from '@/lib/utils'
 import { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
+import { todayBangkokStr } from '@/lib/bangkok-day'
+import { fetchBookingList, addDaysStr, bookingCoversDay, bookingOverlapsRange, bookingDayKeys, mondayOf } from '@/lib/booking-list'
 
 interface Episode { episodeId: string; title: string; program?: { code?: string; name: string } | null }
 interface Booking {
-  id: string; shootDate: string; callTime: string; status: string
+  id: string; shootDate: string; shootEndDate?: string | null; callTime: string; status: string
   producer: string; producerNick?: string; coProducer?: string | null; assignedEmails: string[]
   assignedCrew?: { email: string; name: string; isLead?: boolean }[]
   footageFiles?: number | null
@@ -56,6 +58,9 @@ export default function AdminPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  // maint 2026-11-08 (ui-6) — a failed fetch used to land as `[]` → "No REQUESTED
+  // bookings." and approvals stalled on a queue that looked empty.
+  const [loadError, setLoadError] = useState('')
   const [filter, setFilter] = useState('REQUESTED')
   // v1.111 — โหมดดู: ทั้งหมด / วันนี้ / สัปดาห์นี้ (กรองตามวันถ่าย)
   const [range, setRange] = useState<'all' | 'day' | 'week'>('all')
@@ -143,8 +148,9 @@ export default function AdminPage() {
 
   // Months present in the current tab's bookings (ascending, e.g. Jul→Dec).
   const months = Array.from(new Set(bookings.map(b => (b.shootDate || '').slice(0, 7)).filter(Boolean))).sort()
-  // v1.120 — days (yyyy-MM-dd) that have a booking in this tab → dotted on the picker.
-  const markedDates = new Set(bookings.map(b => (b.shootDate || '').slice(0, 10)).filter(Boolean))
+  // v1.120 — days (yyyy-MM-dd) that have a booking in this tab → dotted on the picker
+  // (every day of a multi-day shoot — the day filter below matches those too).
+  const markedDates = new Set(bookings.flatMap(b => bookingDayKeys(b)))
   const monthLabel = (ym: string) => {
     const d = new Date(ym + '-01')
     return isNaN(d.getTime()) ? ym : d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
@@ -156,7 +162,7 @@ export default function AdminPage() {
     if (crewIncompleteOnly) list = list.filter(b => crewGaps[b.id])
     // v1.120 — a picked calendar day wins over the month/range filters.
     if (selectedDate) {
-      list = list.filter(b => (b.shootDate || '').slice(0, 10) === selectedDate)
+      list = list.filter(b => bookingCoversDay(b, selectedDate))
       return [...list].sort((a, b) => {
         const cmp = (a.callTime || '').localeCompare(b.callTime || '')
         return cmp
@@ -165,12 +171,12 @@ export default function AdminPage() {
     if (monthFilter !== 'all') list = list.filter(b => (b.shootDate || '').slice(0, 7) === monthFilter)
     // v1.111 — daily/weekly view: วันนี้ = today's calendar day; สัปดาห์นี้ = the
     // CURRENT week Mon–Sun including past days (so the Completed tab filters too).
+    // A multi-day shoot counts on every day it occupies (bookingOverlapsRange).
     if (range !== 'all') {
-      const t0 = new Date(); t0.setHours(0, 0, 0, 0)
-      let start = new Date(t0), end = new Date(t0)
-      if (range === 'day') { end.setDate(end.getDate() + 1) }
-      else { const dow = (start.getDay() + 6) % 7; start.setDate(start.getDate() - dow); end = new Date(start); end.setDate(end.getDate() + 7) }
-      list = list.filter(b => { const d = new Date(b.shootDate); return !isNaN(d.getTime()) && d >= start && d < end })
+      const today = todayBangkokStr()
+      const start = range === 'day' ? today : mondayOf(today)
+      const end = addDaysStr(start, range === 'day' ? 1 : 7)
+      list = list.filter(b => bookingOverlapsRange(b, start, end))
     }
     return [...list].sort((a, b) => {
       const cmp = sortBy === 'request'
@@ -196,6 +202,7 @@ export default function AdminPage() {
     // ทิ้งผลของแท็บก่อนหน้าที่ยังค้างอยู่ด้วย
     if (filter === 'MIX' && !searchApplied) { setLoading(false); return }
     setLoading(true)
+    setLoadError('')
     try {
       // v1.56 — Routine tab shows only routine bookings (any status); the
       // status/All tabs exclude routine so the normal queue stays focused on
@@ -213,13 +220,12 @@ export default function AdminPage() {
             ? new URLSearchParams({ limit: '200', cancelRequested: '1' })
             : new URLSearchParams({ limit: '200', routine: 'exclude', ...(filter && { status: filter }) })
       params.set('withCrew', '1')
-      const res = await fetch(`/api/bookings?${params}`)
-      const data = await res.json()
+      const data = await fetchBookingList<Booking>(params)
       if (seq !== fetchSeq.current) return // stale response — a newer tab fetch won
-      setBookings(data.bookings || [])
-      setTotal(data.total || 0)
-    } catch {
-      if (seq === fetchSeq.current) setBookings([])
+      setBookings(data.bookings)
+      setTotal(data.total)
+    } catch (e: any) {
+      if (seq === fetchSeq.current) { setBookings([]); setTotal(0); setLoadError(e?.message || String(e)) }
     } finally {
       if (seq === fetchSeq.current) setLoading(false)
     }
@@ -465,6 +471,11 @@ export default function AdminPage() {
 
       {loading ? (
         <div className="py-16 text-center text-gray-400 text-sm">Loading…</div>
+      ) : loadError ? (
+        <div className="py-10 text-center text-sm text-red-700">
+          โหลดคิวไม่ได้ — {loadError}
+          <button onClick={() => fetch_()} className="ml-2 px-2 py-0.5 text-xs border border-red-300 rounded hover:bg-red-50">ลองใหม่</button>
+        </div>
       ) : visibleBookings.length === 0 ? (
         <div className="py-16 text-center text-gray-400 text-sm">
           {crewIncompleteOnly ? '🎉 งาน CONFIRMED ทุกงานทีมครบแล้ว' : soundOnly ? 'ไม่มีงานที่ต้องการเสียง/ไมค์ในแท็บนี้' : `No ${filter || ''} bookings.`}

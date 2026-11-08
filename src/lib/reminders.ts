@@ -12,6 +12,7 @@
 // forgets. Dismiss on /admin/reminders to silence one; resolve when handled.
 import { prisma } from './db'
 import { notifyChatDetailed, notifyEmailDigest } from './notify'
+import { alertOps } from './ops-alert'
 import type { ReminderType } from '@prisma/client'
 import { startOfTodayBangkok } from './bangkok-day'
 import { needsRealQuRef } from './qu-reminder'
@@ -359,11 +360,22 @@ export async function runReminderScan(opts: { dryRun?: boolean } = {}): Promise<
     // พิมพ์ค่านี้ตรง ๆ ก็จะโกหกทั้งคู่ (บทเรียน v1.186: *a record is not delivery*)
     const [chat, email] = await Promise.all([notifyChatDetailed(text, 'ops'), notifyEmailDigest(subject, text)])
     dispatched = { discord: chat.discord, lark: chat.lark, email }
-    // Mark the freshly-created PENDING ones as SENT (already-SENT rows keep their timestamp).
-    await prisma.reminder.updateMany({
-      where: { status: 'PENDING' },
-      data: { status: 'SENT', sentAt: now },
-    })
+    if (dispatched.discord || dispatched.lark || dispatched.email) {
+      // Mark the freshly-created PENDING ones as SENT (already-SENT rows keep their timestamp).
+      await prisma.reminder.updateMany({
+        where: { status: 'PENDING' },
+        data: { status: 'SENT', sentAt: now },
+      })
+    } else {
+      // 2026-11-08 — no channel took the digest (SMTP dead like 15 ต.ค. + no ops
+      // Discord/Lark). Rows used to flip to SENT anyway, so /admin/reminders said
+      // "sent" and nobody knew the digest had vanished. Leave them PENDING, print a
+      // line the Hermes log scan matches, and go through alertOps: its audit row
+      // reaches the Hermes relay even when every in-app channel is down.
+      console.error(`[reminders] run failed: digest ${openReminders.length} รายการส่งไม่ถึงช่องไหนเลย (discord/lark/email = false) — แถวยังเป็น PENDING`)
+      await alertOps('reminders-undelivered', `⚠️ ส่งไม่ถึงใคร — ${subject}`,
+        `${text}\n\n(digest นี้ส่งไม่ถึง Discord/Lark/อีเมลเลย — เช็ก SMTP / REMINDER_ADMIN_EMAIL / DISCORD_OPS_WEBHOOK_URL)`)
+    }
   }
 
   // v1.187 — เมลถึง **ตัว Producer** ให้กลับมาใส่เลข QU จริง เกาะรอบ daily ของ

@@ -23,6 +23,7 @@ import {
 } from '@/lib/review-access'
 import { criteriaFor, isCriterionAllowedFor, tokenFingerprint, buildReceiptMail } from '@/lib/shoot-review'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +40,7 @@ async function loadInvite(token: string) {
           crewRequired: true, producerEmail: true, createdByEmail: true,
           program: { select: { name: true } },
           outlet: { select: { name: true } },
-          episodes: { orderBy: { sequence: 'asc' }, select: { title: true } },
+          episodes: { orderBy: EPISODE_ORDER, select: { title: true } },
         },
       },
     },

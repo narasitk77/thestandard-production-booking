@@ -19,6 +19,7 @@ import { normalizeFreelancers, freelancerEmails } from '@/lib/freelancers'
 import { format } from 'date-fns'
 import { getToken } from 'next-auth/jwt'
 import { resolveAssignPatch } from '@/lib/assign-patch'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function POST(
   request: NextRequest,
@@ -84,7 +85,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
       },
     })
 
@@ -207,6 +208,9 @@ export async function POST(
           locationName: booking.locationName,
           producer: booking.producer,
           producerEmail: booking.producerEmail,
+          // Co-Producer = guest + description line (same gap as approve/reconciler)
+          coProducer: booking.coProducer,
+          coProducerEmail: booking.coProducerEmail,
           directorEmail: booking.directorEmail,
           director2Email: booking.director2Email,
           director3Email: booking.director3Email,

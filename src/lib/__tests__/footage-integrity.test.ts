@@ -275,3 +275,41 @@ test('v1.254 รีวิว: แถว EP/กล้องที่ขาดต�
   const issues = [{ bookingCode: 'X', kind: 'mediapro-missing' as const, detail: 'CLIP/A024C003_261001MM.MP4', fileIds: [], group: { ep: 'EP01 · Osotspa', cam: 'CAM-A' } }]
   assert.deepEqual(groupRows(files, issues).map(r => r.kinds), [['mediapro-missing']])
 })
+
+// ── maint 2026-11-08 (B1b) ─────────────────────────────────────────────────────
+import { mediaproIssues } from '../footage-integrity'
+import { expectsCameraVideo } from '../mediapro'
+
+test('maint: งานเสียงล้วน (ไม่ได้จองกล้อง) มีแต่ AUDIO → ไม่ใช่ "มีเสียงแต่ไม่มีวิดีโอ" · งานที่จองกล้องยังโดนเหมือนเดิม', () => {
+  const wav = [f({ name: 'REC-001.WAV', folderPath: ['EP01', 'AUDIO'] })]
+  const pod = { cameraCount: 0, crewRequired: ['Sound'] } // POD-OTH-261026-01 shape
+  assert.equal(expectsCameraVideo(pod), false)
+  assert.deepEqual(findIssues('POD-OTH-261026-01', wav, { expectVideo: expectsCameraVideo(pod) }), [])
+  assert.equal(findIssues('X-1', wav, { expectVideo: expectsCameraVideo({ cameraCount: 2, crewRequired: ['Sound'] }) })[0].kind, 'audio-without-video')
+  assert.equal(findIssues('X-1', wav, { expectVideo: expectsCameraVideo({ cameraCount: 0, crewRequired: ['Videographer'] }) })[0].kind, 'audio-without-video')
+  assert.equal(findIssues('X-1', wav)[0].kind, 'audio-without-video', 'ไม่บอกข้อมูลใบจอง = กฎเดิม')
+})
+
+test('maint: การ์ดคนละใบที่ path เดียวกัน (MediaproCheck.mixed) → issue "ชื่อซ้ำ" ขึ้นเอกสาร ไม่ใช่ธงที่ไม่มีใครอ่าน', () => {
+  const c = { cards: 2, listed: 4, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [], twinCopies: [], mixed: ['EP01/CAM-B/PRIVATE/M4ROOT'] }
+  const issues = mediaproIssues('X-1', c)
+  assert.equal(issues.length, 1)
+  assert.equal(issues[0].kind, 'duplicate-name')
+  assert.deepEqual(issues[0].group, { ep: 'EP01', cam: 'CAM-B' })
+  assert.match(issues[0].detail, /^การ์ดคนละใบอยู่ที่ path เดียวกัน/)
+})
+
+test('maint: สรุปแชตบอกได้ว่ากล่องข่าวใบไหนถูกเอ่ยชื่อจริง (ที่ถูกตัดเป็น "…อีก N ใบ" ไม่นับ)', () => {
+  const many = Array.from({ length: 30 }, (_, i) => box({
+    bookingCode: `AGN-2611${String(i).padStart(2, '0')}-01`, state: 'issues', counts: { 'missing-sidecar': 3 }, issueKey: `n${i}`,
+    issues: Array.from({ length: 3 }, (_, j) => ({ bookingCode: 'x', kind: 'missing-sidecar' as const, detail: `EP.${j}/CAM-A · A00${j}C001 — มีต้นฉบับ แต่ขาด M01.XML`.repeat(3), fileIds: [] })),
+    doc: { action: 'created', url: 'https://docs.google.com/document/d/abcdefghijklmnopqrstuvwxyz0123456789/edit', id: 'd', announced: null },
+  }))
+  const named = new Set<string>()
+  const s = formatRunSummary({ boxes: many, docs: true }, named)
+  assert.ok(named.size > 0 && named.size < many.length, `named ${named.size}`)
+  for (const b of many) assert.equal(s.includes(`• ${b.bookingCode} —`), named.has(b.bookingCode), b.bookingCode)
+  assert.match(s, /…อีก \d+ ใบ — แจ้งชื่อรอบหน้า/)
+  // without the set: same text as before (callers that do not ask are unaffected)
+  assert.equal(formatRunSummary({ boxes: many, docs: true }), s)
+})

@@ -16,10 +16,12 @@ import assert from 'node:assert/strict'
 type Row = {
   id: string; bookingCode: string; projectId: string | null; projectName: string | null; shootDate: Date; shootEndDate?: Date | null; driveFolders: any
   readyNotifiedAt?: Date | null; deliveredAt?: Date | null; footageCache?: unknown; footageCacheAt?: Date | null
+  cameraCount?: number | null; crewRequired?: string[]
 }
 let rows: Row[] = []
 let located: Record<string, string> = {}
 let lastWhere: any = null
+let lastSelect: any = null
 let sharing = 1
 let boxNames: Record<string, string> = {}
 let boxFiles: Record<string, any[] | Error> = {}
@@ -36,7 +38,7 @@ mock.module('../db', {
     prisma: {
       booking: {
         count: async ({ where }: any) => (where.driveFolders ? sharing : rows.length),
-        findMany: async ({ where, skip, take }: any) => { lastWhere = where; return rows.slice(skip, skip + take) },
+        findMany: async ({ where, skip, take, select }: any) => { lastWhere = where; lastSelect = select; return rows.slice(skip, skip + take) },
       },
     },
   },
@@ -445,4 +447,15 @@ test('กล่องใหญ่เกินเพดานของการ�
   const next = await fi.scanFootagePage({ docs: true, now: NOW })
   assert.equal(next.boxes[0].cache, undefined)
   assert.deepEqual(walked, [])
+})
+
+test('maint: ใบจองเสียงล้วน (cameraCount 0 · crew Sound) มีแต่ AUDIO → ไม่ขึ้น "มีเสียงแต่ไม่มีวิดีโอ" · ใบที่จองกล้องยังขึ้น', async () => {
+  rows = [booking(1, { cameraCount: 0, crewRequired: ['Sound'] }), booking(2, { cameraCount: 1, crewRequired: ['Videographer', 'Sound'] })]
+  boxFiles.box1 = [{ name: 'REC-001.WAV', folderPath: ['EP01', 'AUDIO'] }]
+  boxFiles.box2 = [{ name: 'REC-001.WAV', folderPath: ['EP01', 'AUDIO'] }]
+  const p = await fi.scanFootagePage({ now: NOW })
+  const kinds = (code: string) => p.boxes.find(b => b.bookingCode === code)!.issues.map(i => i.kind)
+  assert.ok(!kinds(rows[0].bookingCode).includes('audio-without-video'), 'POD-OTH-261026-01 shape: the sound IS the job')
+  assert.ok(kinds(rows[1].bookingCode).includes('audio-without-video'))
+  assert.equal(lastSelect?.cameraCount, true, 'the rule reads cameraCount — the real query must select it')
 })

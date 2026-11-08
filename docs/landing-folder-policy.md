@@ -173,10 +173,20 @@ be downloaded or parsed keeps that card in landing for the run and counts as an
 as no index on that side. Kill switch: `CARD_HOLD=0` (app service) = merge exactly
 as before v1.280, no redeploy needed.
 Reported in: `cardHolds` in the result, one ops alert per run keyed by the held
-set (ops repeats every 6 h), the 🎬 team notify (only when the held SET is new —
-fingerprint `card-hold-set` in `system_heartbeats`, like the sync-storm set; a
-booking's merge button keeps its own `card-hold-set:<code>`), the merge buttons
-and the worker log. Every hold text gives the evidence ("MEDIAPRO
+set (ops repeats every 6 h), the 🎬 team notify, the merge buttons and the worker
+log. The 🎬 team notify (hourly worker, `?notify=1`) posts the hold list only when
+the team has not been given that held SET (`cardHoldsChatDue` in the result): the
+fingerprint `card-hold-set` in `system_heartbeats` holds the last set the team
+chat received, and it is written by the **route, only after `notifyChat` was
+delivered** — a post that reached no channel is logged as an error and retried
+next run (`runVideoMerge` itself only reads it, and clears it when nothing is
+held; a `?code=` run neither reads nor clears it). A per-set stamp
+`card-hold-chat:<hash>` (same table) keeps a set that flaps back within 6 h —
+a booking skipped by the merge lock or a Drive error drops out of one run's set —
+from being reposted. The per-booking merge button is **ops-only**: it raises the
+same ops alert and shows the holds on screen, and writes no fingerprint (the old
+`card-hold-set:<code>` row was never read by anything; maint 2026-11-08).
+Every hold text gives the evidence ("MEDIAPRO
 ไม่มีคลิปร่วมกับการ์ดในกล่อง").
 Fix: move the **whole card** — `XDROOT`/`M4ROOT` together with its `SONY`/`PRIVATE`
 siblings — into a new folder of its own (e.g. `D2-<yymmdd>` or `Card 2`); the next

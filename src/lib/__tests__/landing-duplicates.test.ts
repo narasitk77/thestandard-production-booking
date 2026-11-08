@@ -17,6 +17,7 @@ import assert from 'node:assert/strict'
 type F = { id: string; name: string; size: number | null; md5: string | null }
 let trees: Record<string, F[] | Error> = {}
 let folders: Array<{ id: string; name: string; parents: string[] }> | Error = []
+let treeOf: Record<string, 'in-tree' | 'not-in-tree' | 'unknown'> = {}
 
 mock.module('../google-drive', {
   namedExports: {
@@ -29,6 +30,7 @@ mock.module('../google-drive', {
       if (folders instanceof Error) throw folders
       return folders
     },
+    classifyFootageTreeFolder: async (id: string) => treeOf[id] ?? 'in-tree',
   },
 })
 
@@ -37,7 +39,7 @@ before(async () => { ({ verifyLandingDuplicates } = await import('../landing-dup
 
 const f = (name: string, md5: string | null, size = 100): F => ({ id: 'f-' + name, name, size, md5 })
 
-beforeEach(() => { trees = {}; folders = [{ id: 'box', name: 'X (C-1)', parents: [] }] })
+beforeEach(() => { trees = {}; treeOf = {}; folders = [{ id: 'box', name: 'X (C-1)', parents: [] }] })
 
 test('ทุกไฟล์มี checksum ตรงกันในกล่อง → ลบได้', async () => {
   trees = { land: [f('a.mxf', 'aaa'), f('b.mxf', 'bbb')], box: [f('a.mxf', 'aaa'), f('b.mxf', 'bbb'), f('c.mxf', 'ccc')] }
@@ -110,4 +112,21 @@ test('นับไบต์ที่จะได้คืนเฉพาะไ�
   trees = { land: [f('a.mxf', 'aaa', 1_073_741_824), f('b.mxf', 'zzz', 500)], box: [f('a.mxf', 'aaa', 1_073_741_824)] }
   const v = await verifyLandingDuplicates('C-1', 'land')
   assert.equal(v.duplicatedBytes, 1_073_741_824, 'ไฟล์ที่ยังไม่ซ้ำต้องไม่ถูกนับเป็นพื้นที่ที่จะได้คืน')
+})
+
+test('maint: md5 ที่อยู่ในโฟลเดอร์ drop แฝด "(1)" (นอกไดรฟ์ VIDEO) ไม่ใช่ "อยู่ในกล่อง" → ห้ามบอกว่าลบได้', async () => {
+  folders = [{ id: 'twin', name: 'X (C-1) (1)', parents: [] }]
+  treeOf = { twin: 'not-in-tree' }
+  trees = { land: [f('a.mxf', 'aaa')], twin: [f('a.mxf', 'aaa')] }
+  const v = await verifyLandingDuplicates('C-1', 'land')
+  assert.notEqual(v.verdict, 'safe-to-delete', 'สองแฝดอ้างกันเองว่า "ลบได้" = ลบทั้งคู่แล้วฟุตเทจหาย')
+  assert.equal(v.verdict, 'not-merged')
+})
+
+test('maint: ตรวจไม่ได้ว่าโฟลเดอร์อยู่ไดรฟ์ไหน → undecidable', async () => {
+  folders = [{ id: 'box', name: 'X (C-1)', parents: [] }]
+  treeOf = { box: 'unknown' }
+  trees = { land: [f('a.mxf', 'aaa')], box: [f('a.mxf', 'aaa')] }
+  const v = await verifyLandingDuplicates('C-1', 'land')
+  assert.equal(v.verdict, 'undecidable')
 })

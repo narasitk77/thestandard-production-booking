@@ -7,6 +7,7 @@ import { buildFootageReport, renderReportText, formatBytes } from '@/lib/footage
 import { bookingDisplayName } from '@/lib/display'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { tickDeliveredBooking } from '@/lib/delivery-tick'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         callTime: true, shootDate: true, sheetRowIndex: true, driveFolders: true,
         outlet: { select: { name: true } },
         program: { select: { name: true } },
-        episodes: { orderBy: { sequence: 'asc' }, select: { title: true, program: { select: { name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, select: { title: true, program: { select: { name: true } } } },
       },
     })
     if (!booking || booking.deletedAt) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })

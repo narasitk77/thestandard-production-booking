@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { cleanStr, inEnum } from '@/lib/admin-parse'
-import { ensureFolderPath, uploadFileToFolder, deleteDriveFile } from '@/lib/google-drive'
+import { ensureFolderPath, uploadFileToFolder, getDriveItemState, trashDriveItem } from '@/lib/google-drive'
 import { ensurePurchaseItemFolder } from '@/lib/purchase-drive'
 import { isBatchEditable } from '@/lib/purchase-batch'
 import { DocKind } from '@prisma/client'
@@ -144,8 +144,14 @@ export async function GET(request: NextRequest) {
  * Two modes:
  *  - multipart/form-data with a `file`  → uploads the file to the job's Drive
  *    folder, then records the ref. Fields: file, ownerType, ownerId, kind?
- *  - application/json (no file)         → records a ref to an already-uploaded
- *    Drive file. Body: { ownerType, ownerId, fileName, kind?, driveUrl?, driveFileId? }
+ *  - application/json (no file)         → records a LINK only.
+ *    Body: { ownerType, ownerId, fileName, kind?, driveUrl? }
+ *
+ * maint 2026-11-08 — the JSON mode no longer takes `driveFileId`. It used to
+ * store any id the client sent, and DELETE then removed that id from Drive as
+ * the impersonated admin: any console user could make a DRAFT purchase, attach
+ * a footage box's folder id, and delete it. Only the upload path (which created
+ * the file itself) records a driveFileId now.
  */
 export async function POST(request: NextRequest) {
   const session = await requireConsole()
@@ -184,6 +190,9 @@ export async function POST(request: NextRequest) {
 
     // JSON ref-attach (no upload).
     const b = await request.json()
+    if (b.driveFileId != null && b.driveFileId !== '') {
+      return NextResponse.json({ error: 'แนบแบบลิงก์รับแค่ driveUrl — ไฟล์ที่จะให้ระบบดูแล (ลบแล้วไฟล์ใน Drive ไปถังขยะ) ต้องอัปผ่านปุ่มแนบไฟล์' }, { status: 400 })
+    }
     const fk = OWNER_FK[String(b.ownerType)]
     const ownerId = cleanStr(b.ownerId)
     const fileName = cleanStr(b.fileName)
@@ -193,9 +202,9 @@ export async function POST(request: NextRequest) {
     if (!fileName) return NextResponse.json({ error: 'fileName is required' }, { status: 400 })
     const kind = inEnum(DocKind, b.kind) ? b.kind : 'OTHER'
     const doc = await prisma.documentRef.create({
-      data: { kind, fileName, driveUrl: cleanStr(b.driveUrl), driveFileId: cleanStr(b.driveFileId), [fk]: ownerId },
+      data: { kind, fileName, driveUrl: cleanStr(b.driveUrl), [fk]: ownerId },
     })
-    logAudit({ actorEmail: session.email, action: 'document.attach', entityType: 'DocumentRef', entityId: doc.id, changes: { ownerType: b.ownerType, ownerId, fileName } })
+    logAudit({ actorEmail: session.email, action: 'document.attach', entityType: 'DocumentRef', entityId: doc.id, changes: { ownerType: b.ownerType, ownerId, fileName, driveUrl: doc.driveUrl } })
     return NextResponse.json({ document: doc }, { status: 201 })
   } catch (e: any) {
     console.error('POST /api/admin/documents error:', e)
@@ -203,24 +212,43 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** DELETE /api/admin/documents?id=<docId> — remove the Drive file + the ref. */
+/**
+ * DELETE /api/admin/documents?id=<docId> — trash the Drive file, then remove the ref.
+ *
+ * maint 2026-11-08 — Drive TRASH (recoverable ~30 days, bug-class 15), never
+ * files.delete, and never a folder (a document ref only ever points at a file
+ * this route uploaded; a folder id here is a forged/legacy ref). A Drive read/
+ * trash error now fails the request and KEEPS the ref — it used to be logged
+ * and the ref dropped anyway, orphaning the file with nothing pointing at it.
+ * Already gone / already trashed still detaches.
+ */
 export async function DELETE(request: NextRequest) {
   const session = await requireConsole()
   if (!session) return NextResponse.json({ error: 'Console access required' }, { status: 403 })
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   try {
-    const doc = await prisma.documentRef.findUnique({ where: { id }, select: { driveFileId: true, purchaseId: true, rentalJobId: true, loanId: true, repairTicketId: true } })
+    const doc = await prisma.documentRef.findUnique({ where: { id }, select: { fileName: true, driveFileId: true, purchaseId: true, rentalJobId: true, loanId: true, repairTicketId: true } })
     const docOwnerType = doc?.rentalJobId ? 'rental' : doc?.loanId ? 'loan' : doc?.repairTicketId ? 'repair' : doc?.purchaseId ? 'purchase' : ''
     { const blocked = adminOwnerTypeGuard(docOwnerType, session.role); if (blocked) return blocked }
     if (doc?.purchaseId) { const blocked = await purchaseDocGuard(doc.purchaseId, session.email); if (blocked) return blocked }
+    let drive: 'trashed' | 'already-trashed' | 'gone' | null = null
     if (doc?.driveFileId) {
-      // Best-effort: a missing/already-deleted Drive file shouldn't block detach.
-      await deleteDriveFile(doc.driveFileId).catch((e) => console.warn('Drive delete failed:', e?.message || e))
+      try {
+        const state = await getDriveItemState(doc.driveFileId) // null = gone · throws on a read error
+        if (state?.mimeType === 'application/vnd.google-apps.folder') {
+          return NextResponse.json({ error: 'เอกสารนี้ชี้ไปที่โฟลเดอร์ใน Drive ไม่ใช่ไฟล์ — ไม่ลบให้ (แจ้งแอดมินตรวจ)' }, { status: 409 })
+        }
+        if (state && !state.trashed) await trashDriveItem(doc.driveFileId)
+        drive = !state ? 'gone' : state.trashed ? 'already-trashed' : 'trashed'
+      } catch (e: any) {
+        console.error('DELETE /api/admin/documents drive error:', e)
+        return NextResponse.json({ error: `ทิ้งไฟล์ใน Drive ไม่สำเร็จ — เอกสารยังอยู่ ลองใหม่อีกครั้ง (${e?.message || e})` }, { status: 502 })
+      }
     }
     await prisma.documentRef.delete({ where: { id } })
-    logAudit({ actorEmail: session.email, action: 'document.detach', entityType: 'DocumentRef', entityId: id })
-    return NextResponse.json({ success: true })
+    logAudit({ actorEmail: session.email, action: 'document.detach', entityType: 'DocumentRef', entityId: id, changes: { ownerType: docOwnerType, fileName: doc?.fileName, driveFileId: doc?.driveFileId ?? null, drive } })
+    return NextResponse.json({ success: true, drive })
   } catch (e: any) {
     console.error('DELETE /api/admin/documents error:', e)
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })

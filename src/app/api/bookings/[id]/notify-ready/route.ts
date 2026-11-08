@@ -9,6 +9,7 @@ import { getCachedFootagePayload } from '@/lib/footage-folders'
 import { bookingDisplayName } from '@/lib/display'
 import { footageReadyRecipients, inactiveUserEmails } from '@/lib/footage-ready'
 import { CARD_PREFIX } from '@/lib/ingest'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // resolving footage folders does a recursive Drive walk
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         outlet: { select: { code: true, name: true } },
         program: { select: { name: true } },
         episodes: {
-          orderBy: { sequence: 'asc' },
+          orderBy: EPISODE_ORDER,
           select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } },
         },
       },
@@ -103,11 +104,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'
     const folderLines = folders.map(f => `• ${f.label} — ${f.fileCount} ไฟล์ · ${formatBytes(f.totalBytes)}\n  ${f.url}`).join('\n')
 
-    let emailed = 0
-    let emailError: string | null = null
-    if (isEmailConfigured()) {
-      const subject = `[Footage พร้อม] ${code} — ${show}`
-      const text = `footage ของ ${code} พร้อมแล้ว ✅
+    // Nothing can be delivered → say so BEFORE anything is stamped or logged as sent.
+    // (This used to answer ok:true and stamp readyNotifiedAt with no mail sent; the
+    // auto notifier only looks at readyNotifiedAt:null rows, so once SMTP came back
+    // nobody on the booking ever got the footage-ready notice.)
+    if (!isEmailConfigured()) {
+      return NextResponse.json({ error: 'ระบบอีเมลยังไม่ได้ตั้งค่า — ยังไม่มีใครได้รับแจ้ง (ไม่ได้บันทึกว่าแจ้งแล้ว ระบบอัตโนมัติจะยังแจ้งให้เมื่อพร้อม)', code: 'EMAIL_NOT_CONFIGURED' }, { status: 503 })
+    }
+
+    const subject = `[Footage พร้อม] ${code} — ${show}`
+    const text = `footage ของ ${code} พร้อมแล้ว ✅
 ${booking.outlet.name} · ${show} · ${shootDate} ${booking.callTime}
 แจ้งโดย: ${session.email}
 
@@ -118,24 +124,54 @@ ${bookingFolderUrl ? `\nเปิดกล่องงานทั้งหม�
 เปิดในระบบ: ${appUrl}/upload?bookingId=${booking.id}
 
 THE STANDARD Production Booking`
-      // Send INDIVIDUALLY (one email per recipient) so people don't see each
-      // other's addresses — assignedEmails can include external freelancers
-      // (admin free-text, often personal gmail) and sendEmail has no BCC.
-      // Mirrors the per-recipient send in the admin assign route.
-      const results = await Promise.allSettled(recipients.map(to => sendEmail({ to: [to], subject, text })))
-      emailed = results.filter(r => r.status === 'fulfilled').length
-      const failed = results.length - emailed
-      if (failed > 0) {
-        emailError = `${failed}/${results.length} ส่งไม่สำเร็จ`
-        console.error('[notify-ready] some emails failed:', results.filter(r => r.status === 'rejected'))
-      }
+    // Send INDIVIDUALLY (one email per recipient) so people don't see each
+    // other's addresses — assignedEmails can include external freelancers
+    // (admin free-text, often personal gmail) and sendEmail has no BCC.
+    // Mirrors the per-recipient send in the admin assign route.
+    const results = await Promise.allSettled(recipients.map(to => sendEmail({ to: [to], subject, text })))
+    // a record is not delivery: report and log only the addresses that were accepted
+    const delivered = recipients.filter((_, i) => results[i].status === 'fulfilled')
+    const failedRecipients = recipients.filter((_, i) => results[i].status === 'rejected')
+    const emailed = delivered.length
+    const emailError = failedRecipients.length
+      ? `${failedRecipients.length}/${results.length} ส่งไม่สำเร็จ: ${failedRecipients.join(', ')}`
+      : null
+    if (failedRecipients.length > 0) {
+      console.error('[notify-ready] some emails failed:', results.filter(r => r.status === 'rejected'))
     }
 
-    // v1.147 — stamp the auto-notifier's send-once marker: a manual 📣 means
-    // everyone already got the links, so the footage-ready worker must not
-    // send a duplicate later. Manual clicks themselves stay unlimited (this
-    // stamp only gates the AUTO path). Best-effort — never fails the send.
-    prisma.booking.update({ where: { id: booking.id }, data: { readyNotifiedAt: new Date() } }).catch(() => {})
+    // Delivery is counted over the PEOPLE ON THE JOB (team.people), not the
+    // clicker's CC: if every team address bounced and only the clicker's own copy
+    // was accepted, stamping readyNotifiedAt would stop the auto notice from ever
+    // reaching the crew. (A clicker who is on the team is one of the team.)
+    const teamSet = new Set(team.people.map(e => e.trim().toLowerCase()).filter(e => e.includes('@')))
+    const teamDelivered = delivered.filter(e => teamSet.has(e))
+    if (teamSet.size > 0 ? teamDelivered.length === 0 : emailed === 0) {
+      // Not 'booking.notified_ready' — that row is relayed as "ฟุตเทจพร้อม" and
+      // counted by the follow-up notifier as a notice that went out.
+      logAudit({
+        actorEmail: session.email,
+        action: 'booking.notify_ready_failed',
+        entityType: 'Booking',
+        entityId: booking.id,
+        bookingCode: booking.bookingCode,
+        changes: { recipients, delivered, failedRecipients, folderCount: folders.length, fileCount, emailError },
+      })
+      const who = emailed === 0 ? 'ใครเลย' : `คนในงานเลย (ถึงแค่ ${delivered.join(', ')})`
+      return NextResponse.json({
+        error: `ส่งเมลไม่ถึง${who} (${emailError}) — ยังไม่ได้บันทึกว่าแจ้งแล้ว ลองใหม่ภายหลัง`,
+        code: 'EMAIL_FAILED', emailed, recipients: delivered, failedRecipients, emailError,
+      }, { status: 502 })
+    }
+
+    // v1.147 — stamp the auto-notifier's send-once marker: a manual 📣 that
+    // reached people means the footage-ready worker must not send a duplicate
+    // later. Manual clicks themselves stay unlimited (this stamp only gates the
+    // AUTO path). Stamped only when someone on the job got it (above).
+    // A partial failure still stamps (one bad freelancer address must not make
+    // the auto path re-mail everyone) — emailError names who missed it.
+    prisma.booking.update({ where: { id: booking.id }, data: { readyNotifiedAt: new Date() } })
+      .catch(e => console.error('[notify-ready] readyNotifiedAt stamp failed (auto notice may duplicate):', e?.message || e))
 
     logAudit({
       actorEmail: session.email,
@@ -143,16 +179,18 @@ THE STANDARD Production Booking`
       entityType: 'Booking',
       entityId: booking.id,
       bookingCode: booking.bookingCode,
-      changes: { recipients, ...(skippedInactive.length ? { skippedInactive } : {}), folderCount: folders.length, fileCount, emailError },
+      changes: { recipients: delivered, ...(failedRecipients.length ? { failedRecipients } : {}), ...(skippedInactive.length ? { skippedInactive } : {}), folderCount: folders.length, fileCount, emailError },
     })
 
     return NextResponse.json({
       ok: true,
       emailed,
-      recipients,
+      // delivered only — the card says "ส่งแล้ว N คน" from this list
+      recipients: delivered,
+      failedRecipients,
       folderCount: folders.length,
       fileCount,
-      emailConfigured: isEmailConfigured(),
+      emailConfigured: true,
       emailError,
     })
   } catch (e: any) {

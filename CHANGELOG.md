@@ -7,6 +7,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.281.0] — 2026-11-08 · maintenance (นัทสั่ง "maintain ระบบ … ตรวจหาบัคและแก้ไขให้หมด")
+
+ตรวจ 7 ด้าน (prod health + 6 ระบบย่อย) → 82 บั๊กที่ผ่านการตรวจแย้ง + 6 จากสุขภาพ prod → แก้ 3 รอบ + รีวิวแย้งทุกรอบ ·
+gate 1592/1592 · ที่ต้องให้นัทตัดสินใจคงพฤติกรรม prod ไว้ก่อน (ดูท้ายหัวข้อนี้)
+
+### Fixed — ข้อมูลหาย / ความปลอดภัย
+- **OT ที่ส่ง/อนุมัติแล้ว (มีลายเซ็น) ไม่ถูกลบอีก** ตอนแอดมินบันทึกใบจอง/assign/ยกเลิก (syncBookingOT/clearBookingOT ลบทุกสถานะ) — แถวที่เซ็นแล้วคงไว้ เทียบเฉพาะช่องที่ใช้คิดเงิน
+- แนบเอกสาร (/api/admin/documents) ลบไฟล์ Drive อะไรก็ได้ถาวร → ลบได้เฉพาะไฟล์ที่ระบบเป็นคนอัป และ **ทิ้งลงถังขยะแทนลบถาวร**
+- backup เก่าถูก trash แทน files.delete ถาวร + อ่านครบทุกหน้า
+- seed ตอนบูตไม่เขียนทับ thaiName/employeeId/position ที่แอดมินแก้ใน /admin/permissions (เติมเฉพาะช่องว่าง) · seed ล้ม = exit ≠ 0
+- ใช้ session ข้ามไซต์ไม่ได้ (Sec-Fetch-Site) — ลิงก์จากเว็บอื่นสั่ง endpoint ที่แก้ของจริงด้วยคุกกี้แอดมินไม่ได้ · secret เทียบแบบ constant-time ทุกเส้น (internalSecretAllowed)
+- กันเดา key ของ /api/mcp ไม่นับตาม X-Forwarded-For ที่ client ปลอมได้
+- Calendar drawer "จัดทีม" ไม่ส่ง adminNotes/freelancers จากตอนโหลดหน้าไปเขียนทับของที่คนอื่นแก้
+- Week Plan ปิดหน้าแล้วบันทึกที่ค้าง flush ก่อน ไม่ถูกยกเลิก
+- ยกเลิกงานบนหน้า booking ต้องยืนยันก่อน
+
+### Fixed — ทางลัดที่โกหก (รายงานสำเร็จทั้งที่ไม่สำเร็จ)
+- 📣 แจ้งไฟล์ครบ (ปุ่มและ auto) ประทับ readyNotifiedAt เฉพาะเมื่อเมลถึงคนในทีมจริง · บันทึกผู้รับเฉพาะที่ส่งถึง + รายชื่อที่ส่งไม่ถึง · ปุ่มบอก x/N
+- reminders ที่ส่งไม่ถึงช่องไหนไม่ถูกมาร์ก SENT · urgent alert ที่ส่งไม่ถึงถูกลองใหม่จริง
+- รายการหลายหน้า (/admin, ปฏิทิน, home, producer, my-bookings, upload, console) แสดง error + ลองใหม่ แทน "ไม่มีงาน" · ไม่ตัดรายการเงียบ (บอก truncated) · ปฏิทินโหลดตามช่วงที่ดู ไม่ใช่ 500 ใบล่าสุด
+- สรุปตรวจฟุตเทจรายวันที่ถูกตัดความยาว ไม่มาร์ก announced ให้ใบที่ไม่ได้ถูกเอ่ยชื่อ
+- shoot-review ใบที่เกินเพดานแล้วจะหลุดหน้าต่าง = รายงาน 'dropped' + เตือน ops (เดิมบอก deferred ทั้งที่ทิ้งถาวร) · เรียงตามวันถ่ายวันสุดท้าย
+- heartbeat ของ merge/prep/footage-sync ติ๊กเฉพาะรอบจริงของ worker ที่ไม่ skipped (ปุ่มแอดมินไม่ต่ออายุ dead-man) · worker พิมพ์ "run failed: skipped — …" ให้ Hermes จับได้
+- id-first-stats ตอบ 500 เมื่อ DB ล้ม (เดิม ok:true + ว่าง) · Hermes health check อ่าน 503 เป็น error ไม่ใช่ "worker 0/0 ปกติ"
+- Discord/Lark ข้อความยาวไม่ถูกตัดเงียบแล้วนับว่าส่งแล้ว · lark-export อ่านตารางไม่ได้ = ok:false
+- room-booking: ใบ CONFIRMED ที่ห้องชน (CONFLICT) ไม่ถูกส่งข้อความผิด ("ยกเลิก/ปลดห้องมือ" + รหัส null) ทุกชั่วโมงแล้ว — แจ้งครั้งแรกในแชต + เตือนซ้ำรายวันผ่าน ops ด้วยข้อความที่ถูก · heartbeat บอก "รอห้อง N"
+- calendar: ยกเลิกงานไม่ทิ้ง calendarEventId ถ้าลบ event ที่ Google ไม่สำเร็จ (เก็บไว้ FAILED + sweep ลองใหม่; 404/410 = ลบแล้ว) · แก้รายละเอียด event ล้ม = FAILED + reconciler ส่งใหม่ (sendUpdates all) · เวลาไม่ตรง = รายงาน ไม่แก้เอง · dryRun ไม่เขียน audit
+- footage-integrity ไม่ขึ้น "มีเสียงแต่ไม่มีวิดีโอ" กับงานเสียงล้วน
+- boxFootageState ไม่นับ WAV ใน _SOUND-STAGING เป็นฟุตเทจกล้อง (กัน prune ทิ้ง drop ก่อนวิดีโอมา)
+
+### Fixed — สถานะผิด / ค้าง
+- **folder-integrity rename กล่องสลับไปมาทุกชั่วโมง** (ใบหลายรายการที่ sequence=1 เท่ากัน) — ลำดับ EP เดียวทั้งระบบ `EPISODE_ORDER` (sequence, episodeId, id) ใช้แทน 52 จุด · หลัง deploy อาจ rename ครั้งสุดท้าย 1 ครั้งต่อใบที่ sequence ซ้ำ
+- ตัวกันรันซ้อนของ merge/prep/footage-sync/landing-dedup หมดอายุได้ (2 ชม.) · ล็อกรายใบมี token + หมดอายุ — Drive call ค้างครั้งเดียวไม่ทำให้ 409 ไปจนรีสตาร์ท
+- video-merge/sound-merge เชื่อ folder id ที่เก็บไว้เมื่อ Drive ตอบ unknown (rate limit) แทนเดินชื่อแล้วไปเจอกล่องแฝด
+- การ์ดค้าง (v1.280): ลายนิ้วมือ "แชตทีมรู้แล้ว" เขียนหลังโพสต์ถึงจริงเท่านั้น
+- งานถ่ายข้ามคืนไม่ถูก auto-COMPLETED ตอนเช้าก่อนเริ่มถ่าย
+- add-episodes อัปเดต Episode IDs/Titles ในชีท + event · โหลด "กล้องเต็ม/คนเต็ม" ไม่นับงานที่ไม่ได้ซ้อนกันจริง · event ทุกเส้นใส่ Co-Producer
+- OT: PDF แบ่งหน้าได้จริง (เดิมแถวเกิน ~19 วันหายเงียบ) · วันที่ใต้ลายเซ็นเป็น ค.ศ./เวลาไทย · หน้า OT คิด "วันนี้/เดือนนี้" ตามเวลาไทย · อนุมัติเฉพาะแถวที่ผู้อนุมัติเห็น (id + updatedAt) · CSV/PDF บอกยอดที่ยังไม่อนุมัติแยก (ไม่เปลี่ยนตัวเลขรวม)
+- ค่าเงินที่กรอกผิด (ติดลบ/อ่านไม่ออก) ตอบ 400 ไม่เขียนทับยอดเดิมเป็นว่าง
+- my-bookings/export นับ assignedEmails แบบไม่สนตัวพิมพ์ · mix candidates ไม่ตัดงานที่ถ่ายแล้วก่อน
+- room schedule/หน้าต่าง ๆ แสดงงานหลายวันครบทุกวัน · ปี ค.ศ. ทุกจอ · /api/version มี commit/imageTag (APP_GIT_SHA)
+
+### Unchanged on purpose — รอนัทตัดสิน (คงพฤติกรรม prod)
+ชีทคอลัมน์ Status ยังไม่เขียน COMPLETED/ASSIGNED (PMDC Airtable อ่านอยู่) · force-status ยังรับใบ CANCELLED (เตือนชัด) · request-cancel / equipment-request ใครก็ยื่นได้ (มี audit) · MCP ยกเลิกใบ COMPLETED ได้ (มี warning) · add-episodes กับใบยกเลิก/ลบได้ (มี warning) · merge ใบ ASSIGNED/REQUESTED ได้ (ปฏิเสธเฉพาะ CANCELLED/ลบ) · ยอด OT ส่งการเงินยังนับทุกสถานะ · NAS_MANIFEST_SECRET ยังสั่ง merge/backfill ได้ · เบอร์/สัญญาฟรีแลนซ์ยังเห็นทุกคน · SHOOT_REVIEW_MAX_BOOKINGS ยัง 3 (จะมี alert รายวันว่าใบหลุด)
+
 ## [1.280.3] — 2026-11-05
 
 ### Changed

@@ -6,6 +6,7 @@ import { Calendar, Clock, Plus, Trash2, Loader2, Lock, Info, AlertTriangle, Send
 import { format, parseISO } from 'date-fns'
 import { summarizeDay, formatTHB, WEEKDAY_THRESHOLD_HOURS, parseTimeToMinutes, dateOffsetDays, type DaySummary } from '@/lib/ot-calc'
 import { isThaiHoliday, getHolidayName } from '@/lib/thai-holidays'
+import { todayBangkokStr } from '@/lib/bangkok-day'
 
 type ApprovalStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
 
@@ -43,11 +44,16 @@ interface Profile {
 
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
 
-function todayISO(): string { return new Date().toISOString().slice(0, 10) }
+// Bangkok day, not UTC — the server gate (isMonthEditable) is Bangkok since v1.104.1;
+// a UTC 'today' showed yesterday / last month every morning 00:00–06:59.
+function todayISO(): string { return todayBangkokStr() }
 function currentMonth(): string { return todayISO().slice(0, 7) }
 function prevMonth(): string {
-  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1)
-  return d.toISOString().slice(0, 7)
+  // Arithmetic on the Bangkok 'YYYY-MM' — a local Date + setMonth + toISOString
+  // jumped TWO months back between 00:00 and 06:59 Bangkok (UTC still yesterday).
+  const [y, m] = currentMonth().split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 2, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 function monthLabel(yyyymm: string): string {
   const [y, m] = yyyymm.split('-')

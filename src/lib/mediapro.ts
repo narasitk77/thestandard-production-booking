@@ -55,6 +55,14 @@ export interface MediaproCheck {
    * 12/12 files = ALL/CAM A/XDROOT). Nothing in them can be missing that the listed card would not report → passes.
    */
   twinCopies: string[]
+  /**
+   * maint 2026-11-08 — paths where two DIFFERENT cards (no clip in common, sameClip) are indexed AND list a clip name in
+   * common. C0001 restarts on every card: footage-ready's gate walks the box and the landing drop together, so a card
+   * held in landing sits at the same relative path as the box's card, and byPath + the dedupe key (both path + name) let
+   * one card's healthy C0001 stand in for the other's missing / 0-byte one — "ครบตาม MEDIAPRO" over a card with gaps.
+   * Neither card can be verified there → not complete, said out loud.
+   */
+  mixed: string[]
 }
 
 type FileLike = FootageFileLike & { size?: number | null; id?: string; md5?: string | null }
@@ -84,6 +92,37 @@ export function parseMediapro(xml: string): MediaproMaterial[] {
 
 const up = (s: string) => s.trim().toUpperCase()
 const pathKey = (segs: string[]) => segs.map(up).join('/')
+
+/**
+ * v1.280 — the same clip on both cards: by umid when both MEDIAPROs carry one, else by uri AND dur.
+ * (video-merge's card-hold test and the gate's mixed-card test must agree on "same card" — one rule.)
+ */
+export const sameClip = (a: MediaproMaterial, b: MediaproMaterial) =>
+  a.umid && b.umid ? a.umid === b.umid : a.uri === b.uri && a.dur === b.dur
+
+/**
+ * maint 2026-11-08 — ONE rule for "this booking expects camera video at all" (cameras booked, or a video crew role).
+ * footage-ready's camera gap (v1.267) and the daily check's "sound but no picture" both ask it; it lives here because
+ * both already import this module and nothing heavier. The daily check used to ask nothing, so every sound-only job
+ * (POD-OTH-261026-01 … cameraCount 0, crew Sound) was a ⚠️ 'มีเสียงแต่ไม่มีวิดีโอ' every day (5 of 7 flagged boxes).
+ */
+export const expectsCameraVideo = (b: { cameraCount?: number | null; crewRequired?: string[] | null }) =>
+  (b.cameraCount || 0) > 0 || (b.crewRequired || []).some(r => /video|camera|กล้อง|ช่างภาพ/i.test(r))
+
+/** two different cards indexed at one path whose clip names collide (see MediaproCheck.mixed) */
+function mixedCardPaths(cards: MediaproCard[]): string[] {
+  const nameOf = (r: string) => up(baseName(r.split('/').pop() || ''))
+  const out = new Set<string>()
+  cards.forEach((a, i) => {
+    const names = new Set(a.materials.flatMap(m => m.files.map(nameOf)))
+    for (const b of cards.slice(i + 1)) {
+      if (pathKey(a.folderPath) !== pathKey(b.folderPath)) continue
+      if (a.materials.some(m => b.materials.some(t => sameClip(m, t)))) continue // the same card offloaded twice
+      if (b.materials.some(m => m.files.some(r => names.has(nameOf(r))))) out.add(a.folderPath.join('/'))
+    }
+  })
+  return [...out]
+}
 /** YYMMDD in an FX6/FX3 clip name → YYYY-MM-DD (null for C0001-style names) */
 const clipDate = (name: string) => { const m = /^[A-Z]\d{3}[A-Z]\d{3}_(\d{2})(\d{2})(\d{2})/i.exec(name); return m ? `20${m[1]}-${m[2]}-${m[3]}` : null }
 /** a camera whose clock was reset stamps 2021-01-01 — older than a year before the shoot is not "an earlier shoot", it is unknown */
@@ -132,7 +171,7 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
   const inScope = (f: FileLike, scope: string[]) => pathKey((f.folderPath || []).slice(0, scope.length)) === pathKey(scope)
   const biggest = (fs: FileLike[]) => fs.reduce<FileLike | null>((a, f) => (!a || (f.size || 0) > (a.size || 0) ? f : a), null)
 
-  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [], twinCopies: [] }
+  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [], twinCopies: [], mixed: mixedCardPaths(cards) }
   const verified = new Map<string, FileLike[]>() // md5 → the non-empty files a card lists that are here
   const seen = new Set<string>()
   const listedIn = new Map<string, string[][]>()
@@ -209,7 +248,7 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
 }
 
 export const mediaproComplete = (c: MediaproCheck) =>
-  !c.missing.length && !c.zero.length && !c.suspect.length && !c.unverifiable.length
+  !c.missing.length && !c.zero.length && !c.suspect.length && !c.unverifiable.length && !c.mixed.length
 
 /** One Thai line: why it is not complete (empty when complete). */
 export function mediaproGapText(c: MediaproCheck): string {
@@ -219,6 +258,7 @@ export function mediaproGapText(c: MediaproCheck): string {
     c.zero.length ? `0 ไบต์ ${c.zero.length} (${tail(c.zero)})` : '',
     c.suspect.length ? `น่าจะก็อปไม่จบ ${c.suspect.length} (${tail(c.suspect)})` : '',
     c.unverifiable.length ? `การ์ด Sony ไม่มี MEDIAPRO.XML ${c.unverifiable.length} การ์ด (${c.unverifiable.slice(0, 2).map(p => p.split('/').slice(-2).join('/')).join(', ')})` : '',
+    c.mixed.length ? `การ์ดคนละใบอยู่ที่ path เดียวกัน ${c.mixed.length} ที่ (${c.mixed.slice(0, 2).map(p => p.split('/').slice(-3).join('/')).join(', ')}) — ชื่อคลิปซ้ำกัน (C0001…) ตรวจแยกไม่ได้ว่าใบไหนครบ · ย้ายการ์ดใบหนึ่งไปโฟลเดอร์ของมันเอง` : '',
     mediaproStaleText(c),
   ].filter(Boolean).join(' · ')
 }

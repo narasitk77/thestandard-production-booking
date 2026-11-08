@@ -71,8 +71,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   if (!result.ok) return NextResponse.json({ error: result.error, plan, result }, { status: 409 })
 
   // The cache keys footage by the old code/path; drop it so the next read is fresh.
-  // NOTE: deliberately NOT syncBookingOT — that is deleteMany + recreate, and it
-  // would destroy approved OT records along with their snapshotted signatures.
+  // NOTE: no syncBookingOT here. Since maint 2026-11-08 it keeps signed rows (it
+  // compares only pay fields: date/start/end), so it would no longer destroy approved
+  // OT — but an outlet move changes no pay field, so all it could do is relabel the
+  // jobTask of DRAFT rows. Existing OT rows keep the old outlet label until the next
+  // edit/approve of this booking runs the sync.
   await clearFootageCache(params.id).catch(() => {})
 
   return NextResponse.json({ ok: true, mode: 'applied', plan, result })

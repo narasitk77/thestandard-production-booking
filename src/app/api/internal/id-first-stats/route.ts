@@ -22,12 +22,22 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET() {
   const live = publicGaugeView(snapshotIdFirst(false))
-  const rows = await prisma.auditLog.findMany({
-    where: { action: 'drive.id_first_gauge' },
-    orderBy: { at: 'desc' },
-    take: 14,
-    select: { at: true, changes: true },
-  }).catch(() => [] as Array<{ at: Date; changes: unknown }>)
+  // maint 2026-11-08 — a failed read is a 500, not `daily: []` + ok:true: the
+  // Hermes monitor treats an empty daily as "nothing to report" and resets its
+  // fail streak, so a broken DB looked exactly like a quiet day (bug-class 2).
+  // Error detail stays in the log — this endpoint is unauthenticated.
+  let rows: Array<{ at: Date; changes: unknown }>
+  try {
+    rows = await prisma.auditLog.findMany({
+      where: { action: 'drive.id_first_gauge' },
+      orderBy: { at: 'desc' },
+      take: 14,
+      select: { at: true, changes: true },
+    })
+  } catch (e) {
+    console.error('GET /api/internal/id-first-stats: auditLog read failed:', e)
+    return NextResponse.json({ ok: false, error: 'daily gauge read failed' }, { status: 500 })
+  }
   const daily = rows.map(r => ({ at: r.at.toISOString(), ...publicGaugeView(r.changes) }))
   return NextResponse.json({ ok: true, live, daily })
 }

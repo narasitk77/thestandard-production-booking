@@ -9,9 +9,13 @@ import { timingSafeEqual } from 'crypto'
  * moment prod defined a higher-precedence var the worker didn't know about:
  * v1.113.4 inserted NAS_MANIFEST_SECRET into sound-merge's chain, so the route
  * started expecting the NAS secret while scripts/sound-merge-worker.js kept
- * sending NEXTAUTH_SECRET → silent hourly 401s ever since. All candidates live
- * in the same server env (one trust domain), so matching against the full set
- * of configured values is the intended behavior.
+ * sending NEXTAUTH_SECRET → silent hourly 401s ever since. Matching against
+ * the full set of configured values is the intended behavior.
+ *
+ * ⚠️ NOT one trust domain (corrected 2026-11-08): NAS_MANIFEST_SECRET also
+ * lives on the IT-managed DSM box (nas_manifest_agent.py, since 21 Oct 2026),
+ * so every route that lists it grants that box what the route does. Only list
+ * it where the NAS agent itself needs to call.
  */
 export function internalSecretAllowed(
   request: NextRequest,
@@ -35,4 +39,29 @@ export function internalSecretAllowed(
       return pb.length === vb.length && timingSafeEqual(pb, vb)
     })
   })
+}
+
+/**
+ * maint 2026-11-08 — CSRF: a request ANOTHER site made the browser send.
+ *
+ * The session cookie is SameSite=Lax (next-auth default), so any page on a
+ * sibling *.thestandard.co host is "same-site" and gets the cookie attached to
+ * an `<img src=…/api/internal/video-merge/run>` or an auto-submitted form —
+ * one page view by an admin = a real MOVE. getSession() asks this before it
+ * hands out a session, so every route behind getSession/requireAdmin/
+ * requireConsole is covered without touching the routes.
+ *
+ * Refused: cross-site/same-site requests that are NOT a top-level GET
+ * navigation (subresources, fetch, and form POSTs — a POST navigation carries
+ * `Origin`, a GET navigation never does). Still allowed: links clicked in
+ * chat/mail/Google Docs (GET navigation — pages need that), same-origin calls
+ * from the app itself, and non-browser callers (curl/workers send no
+ * Sec-Fetch-* headers; they authenticate with a secret anyway).
+ * ponytail: a link that GETs a state-changing API still works with an admin
+ * session — closing that needs POST-only/dryRun-default on those routes.
+ */
+export function isCrossSiteRequest(h: { get(name: string): string | null }): boolean {
+  const site = h.get('sec-fetch-site')
+  if (site !== 'cross-site' && site !== 'same-site') return false
+  return h.get('sec-fetch-mode') !== 'navigate' || !!h.get('origin')
 }

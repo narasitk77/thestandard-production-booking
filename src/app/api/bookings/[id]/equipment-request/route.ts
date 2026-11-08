@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
+import { isMyBooking } from '@/lib/my-bookings-scope'
 import { bookingDisplayName } from '@/lib/display'
 import { logAudit } from '@/lib/audit'
 import { cleanStr } from '@/lib/admin-parse'
@@ -16,7 +17,7 @@ function genLoanCode(): string {
 }
 
 const bookingSelect = {
-  id: true, status: true, deletedAt: true, assignedEmails: true, producerEmail: true, createdByEmail: true,
+  id: true, status: true, deletedAt: true, assignedEmails: true, producerEmail: true, coProducerEmail: true, createdByEmail: true,
   shootDate: true, shootEndDate: true, projectName: true,
   program: { select: { name: true } },
   episodes: { select: { program: { select: { name: true } } } },
@@ -72,6 +73,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   try {
     const { booking, error } = await loadBooking(params.id, session.email, session.role)
     if (error) return error
+    // Who may open a requisition: anyone who can view the booking (canViewBooking —
+    // every signed-in user since v1.152), on any non-deleted booking, CANCELLED
+    // included — prod behaviour, the page always offered the button. Narrowing it
+    // to people on the booking / live bookings is Nat's decision, not made yet. Until
+    // then the two risky cases are made visible instead of refused: the audit row
+    // records them, and the reply carries a warning (a loan on a CANCELLED booking
+    // sits in /admin/loans dated to a shoot that isn't happening).
+    const onBooking = isMyBooking(booking!, session.email)
+    const cancelled = booking!.status === 'CANCELLED'
 
     const body = await request.json().catch(() => ({}))
     const ids: string[] = Array.isArray(body.equipmentIds) ? body.equipmentIds.filter((x: unknown) => typeof x === 'string') : []
@@ -100,8 +110,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       },
       include: { items: true },
     })
-    logAudit({ actorEmail: session.email, action: 'loan.requested', entityType: 'EquipmentLoan', entityId: loan.id, changes: { bookingId: booking!.id, items: eqs.length } })
-    return NextResponse.json({ loan }, { status: 201 })
+    logAudit({
+      actorEmail: session.email, action: 'loan.requested', entityType: 'EquipmentLoan', entityId: loan.id,
+      changes: { bookingId: booking!.id, items: eqs.length, bookingStatus: booking!.status, onBooking },
+    })
+    if (!cancelled) return NextResponse.json({ loan }, { status: 201 })
+    console.warn(`[equipment-request] ${loan.loanCode} opened on CANCELLED booking ${booking!.id} by ${session.email}`)
+    return NextResponse.json({
+      loan,
+      warning: 'งานนี้ถูกยกเลิกแล้ว — คำขอเบิกถูกบันทึกไว้ แต่ไม่มีงานถ่ายรองรับ ถ้าไม่ได้ตั้งใจให้ยกเลิกคำขอนี้',
+    }, { status: 201 })
   } catch (e: any) {
     console.error('POST equipment-request error:', e)
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 })

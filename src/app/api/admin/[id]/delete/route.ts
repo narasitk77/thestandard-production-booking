@@ -19,7 +19,7 @@ const ROOM_AUDIT_ACTIONS = [
  * Episodes + uploads cascade automatically (onDelete: Cascade).
  * Audit logs, footage_log, and auto-generated ot_records rows referencing
  * this booking are cleaned up explicitly (no FK cascade on those tables).
- * The Google Calendar event is deleted best-effort.
+ * The Google Calendar event must be deleted first — a failed delete refuses (409).
  */
 export async function POST(
   _request: NextRequest,
@@ -39,11 +39,15 @@ export async function POST(
   })
   if (!booking) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Best-effort: delete calendar event if it exists
-  if (booking.calendarEventId) {
-    deleteCalendarEvent(booking.calendarEventId).catch(e =>
-      console.warn(`[delete-booking] calendar event delete failed: ${e}`)
-    )
+  // Fail-closed, same as the room below: this row is the LAST pointer to the
+  // event. A best-effort delete that failed left the shoot on every crew
+  // calendar with nothing in the system pointing back to it. 404/410 = gone = ok.
+  if (booking.calendarEventId && !(await deleteCalendarEvent(booking.calendarEventId))) {
+    return NextResponse.json({
+      error: 'ยังลบไม่ได้ — ลบ event ในปฏิทินไม่สำเร็จ',
+      calendarEventId: booking.calendarEventId,
+      hint: 'ลบแถวตอนนี้จะทำให้ event ค้างในปฏิทินของทีมโดยไม่มีอะไรชี้กลับมาได้ — ลองใหม่อีกครั้ง หรือลบ event ในปฏิทินด้วยมือก่อน',
+    }, { status: 409 })
   }
 
   // Clean up audit_logs, footage_log, and auto-OT rows that reference this

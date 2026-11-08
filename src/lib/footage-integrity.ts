@@ -51,10 +51,11 @@ import {
   pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, hasUniqueClipName, type MediaPoolItem,
 } from './footage-completeness'
 import { parseDrpMediaPool } from './drp-mediapool'
-import { loadMediaproCards, mediaproCheck, mediaproStaleText, type MediaproCheck } from './mediapro'
+import { loadMediaproCards, mediaproCheck, mediaproStaleText, expectsCameraVideo, type MediaproCheck } from './mediapro'
 import { folderNameMatchesCode } from './outlet-folders'
 import { isShootMarkerFile, lastShootDay, CARD_INDEX_RE } from './reconciler/guards'
 import { computeFootagePayload, storeFootageCache, FOOTAGE_WALK_MAX_FILES, type BookingForFootagePayload } from './footage-folders'
+import { EPISODE_ORDER } from './episode-order'
 
 /** Google-native docs report no size at all; that is not a truncation. */
 const GOOGLE_NATIVE_PREFIX = 'application/vnd.google-apps'
@@ -146,7 +147,12 @@ function cameraGroup(f: DriveFile): string | null {
 const gb = (n: number | null | undefined) => (n == null ? '?' : `${(n / 1e9).toFixed(2)} GB`)
 const where = (f: { folderPath?: string[]; name: string }) => [...(f.folderPath || []), f.name].join('/')
 
-export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssue[] {
+export function findIssues(
+  bookingCode: string,
+  files: DriveFile[],
+  /** maint 2026-11-08 — false = the booking expects no camera video (expectsCameraVideo): a sound-only job's AUDIO is the whole job */
+  opts: { expectVideo?: boolean } = {},
+): FootageIssue[] {
   const issues: FootageIssue[] = []
   // v1.253 — files a person set aside in `_แยกไว้ · …` (e.g. the truncated A004R001) are out of every check.
   const real = files.filter(f => isRealFootage(f) && !isQuarantined(f))
@@ -215,6 +221,8 @@ export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssu
   // ── 3. an episode with sound but no picture ────────────────────────────────
   // The shape that hid AGN-260911-02: AUDIO arrived, every CAM-* stayed empty,
   // and because an empty folder holds no files nothing downstream noticed.
+  // maint 2026-11-08 — not for a booking that booked no camera (same rule as footage-ready's camera gap):
+  // 5 of the 7 boxes flagged in 14 days were sound-only POD jobs (cameraCount 0, crew Sound) = a daily false ⚠️.
   const byEpisode = new Map<string, { audio: number; video: number }>()
   for (const f of real) {
     const ep = f.folderPath?.[0]
@@ -226,7 +234,7 @@ export function findIssues(bookingCode: string, files: DriveFile[]): FootageIssu
     byEpisode.set(ep, row)
   }
   for (const [ep, row] of byEpisode) {
-    if (row.audio > 0 && row.video === 0) {
+    if (opts.expectVideo !== false && row.audio > 0 && row.video === 0) {
       issues.push({
         bookingCode, kind: 'audio-without-video', fileIds: [],
         detail: `${ep} — มีเสียง ${row.audio} ไฟล์ แต่ไม่มีวิดีโอใน CAM-* เลย`,
@@ -295,6 +303,10 @@ export function mediaproIssues(bookingCode: string, c: MediaproCheck, foundAt: M
       detail: `${card(m.card)} · ${m.file} — ขนาดต่อเฟรม ${m.ratio}× ของคลิปแบบเดียวกัน (น่าจะก็อปไม่จบ)` })),
     ...c.unverifiablePaths.map(p => ({ bookingCode, kind: 'mediapro-absent' as const, fileIds: [], group: group(p),
       detail: `${card(p.join('/'))} — มีต้นฉบับกล้อง Sony แต่ไม่มี MEDIAPRO.XML ระบุไว้ ตรวจไม่ได้ว่าก็อปครบไหม (ก็อปทั้งการ์ด ไม่ใช่แค่โฟลเดอร์ Clip)` })),
+    // maint 2026-11-08 — two different cards indexed at one path with colliding clip names (MediaproCheck.mixed): a
+    // name collision, not a wait — warning first (the chat cuts a detail at 140 characters)
+    ...c.mixed.map(p => ({ bookingCode, kind: 'duplicate-name' as const, fileIds: [], group: group(p.split('/')),
+      detail: `การ์ดคนละใบอยู่ที่ path เดียวกัน ชื่อคลิปซ้ำกัน ตรวจแยกไม่ได้ว่าใบไหนครบ · ห้ามลบ ย้ายการ์ดใบหนึ่งไปโฟลเดอร์ของมันเอง · ${card(p)}` })),
   ]
 }
 
@@ -463,6 +475,7 @@ export interface BoxCheck {
 
 /** The booking fields checkBox needs beyond the box itself — the footage-ready state and the cache. */
 type CheckRow = BookingForFootagePayload & {
+  cameraCount?: number | null
   readyNotifiedAt?: Date | null
   deliveredAt?: Date | null
   footageCache?: unknown
@@ -783,9 +796,11 @@ export async function scanFootagePage(opts: {
       id: true, bookingCode: true, projectId: true, projectName: true, shootDate: true, shootEndDate: true, driveFolders: true,
       // v1.266 — what cacheBehindBox and a cache re-walk need (the detect-footage select)
       category: true, crewRequired: true, readyNotifiedAt: true, deliveredAt: true, footageCache: true, footageCacheAt: true,
+      cameraCount: true, // maint 2026-11-08 — expectsCameraVideo (sound-only jobs are not "sound without picture")
       outlet: { select: { code: true } },
       program: { select: { name: true } },
-      episodes: { orderBy: { sequence: 'asc' }, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
+      // maint 2026-11-08 — total order (sequence ties on multi-item bookings; same rule as folder-integrity)
+      episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
     },
     orderBy: [{ shootDate: 'desc' }, { id: 'asc' }],
     skip: offset,
@@ -863,7 +878,7 @@ async function checkBox(o: {
   let mediaPool: MediaPoolLine | null = null
   const notes: string[] = []
   if (readable) {
-    issues.push(...findIssues(o.code, files))
+    issues.push(...findIssues(o.code, files, { expectVideo: expectsCameraVideo(o.booking) }))
     try {
       // v1.260 — shootFrom: clips an unformatted card still lists from an earlier shoot are reported, not counted missing
       const mc = mediaproCheck(files, await loadMediaproCards(files), { shootFrom: o.shootDate })
@@ -998,8 +1013,17 @@ export function isNews(b: BoxCheck): boolean {
   return !b.doc.id || b.doc.announced !== b.issueKey
 }
 
-/** Discord/Lark body. Empty string when there is nothing anyone needs to read. */
-export function formatRunSummary(s: RunSummary): string {
+/**
+ * Discord/Lark body. Empty string when there is nothing anyone needs to read.
+ *
+ * maint 2026-11-08 — `named` (optional) receives the bookingCode of every NEWS box whose block made it into the
+ * text. The budget cuts the rest to "…อีก N ใบ" with no codes, and the POST used to mark EVERY news box announced
+ * once a channel took the message — so the cut ones became "ค้างเดิม" (a number) forever, never named in chat.
+ * The route marks only these; the rest stay news and are named on a later run.
+ * ponytail: news keeps page order (newest shoot first), so a run of >~4 new boxes EVERY day could keep pushing an
+ * older one past the budget; its count is still in the header and the heartbeat (unnamed=N). Rotate if that happens.
+ */
+export function formatRunSummary(s: RunSummary, named?: Set<string>): string {
   const boxes = s.boxes || []
   const by = (st: BoxState) => boxes.filter(b => b.state === st).length
   const stranded = boxes.filter(b => b.stranded)
@@ -1062,7 +1086,8 @@ export function formatRunSummary(s: RunSummary): string {
         .map(([k, n]) => `${ISSUE_LABEL[k]} ${n}`).join(' · ')
       const block = [`• ${b.bookingCode} — ${counts}${b.doc.url ? ` · ${b.doc.url}` : ''}`,
         ...b.issues.filter(x => isLive(x, b.waiting)).slice(0, 2).map(x => `   – [${ISSUE_LABEL[x.kind]}] ${x.detail.slice(0, 140)}${x.hint ? ` · 🔎 อยู่ที่ ${x.hint.slice(0, 80)}` : ''}`)]
-      if (!add(block, () => `• …อีก ${news.length - i} ใบ ดูใน _FOOTAGE-CHECK ของแต่ละกล่อง`)) break
+      if (!add(block, () => `• …อีก ${news.length - i} ใบ — แจ้งชื่อรอบหน้า · ดูใน _FOOTAGE-CHECK ของแต่ละกล่อง`)) break
+      named?.add(b.bookingCode)
     }
   }
   return [...head, ...run, ...detail, ...tail].join('\n')

@@ -23,12 +23,15 @@ type Payload = {
   responseRate: number | null
   invites: number
   answered: number
+  /** the window's real review count; `reviews` is capped (API LIST_LIMIT) */
+  total?: number
+  truncated?: boolean
 }
 
 // 'overall' is not a team — it is the v1.173 job-level satisfaction score, and it
 // shows up in the same score cards and the same log rows as the team ratings.
 const ROLE_TH: Record<string, string> = { producer: 'ทีมโปรดิวเซอร์', camera: 'ทีมกล้อง', sound: 'ทีมเสียง', other: 'อื่นๆ', overall: 'ความพึงพอใจโดยรวม' }
-const when = (s: string) => new Date(s).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short' })
+const when = (s: string) => new Date(s).toLocaleString('th-TH-u-ca-gregory', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' })
 
 export default function AdminReviewsPage() {
   const [data, setData] = useState<Payload | null>(null)
@@ -59,9 +62,9 @@ export default function AdminReviewsPage() {
     setError('')
     try {
       const r = await fetch(`/api/admin/reviews?days=${days}`)
-      const d = await r.json()
+      const d = await r.json().catch(() => null) // a 502 HTML page must not throw a JSON SyntaxError at the reader
       if (r.status === 403) throw new Error('ข้อความประเมินเปิดอ่านได้เฉพาะหัวหน้าทีม (ปุ๊ก · หวาน) — ผู้ดูแลระบบดูความเคลื่อนไหวได้ที่ /admin/monitor')
-      if (!r.ok) throw new Error(d.error || 'โหลดไม่สำเร็จ')
+      if (!r.ok || !d || !Array.isArray(d.reviews)) throw new Error(d?.error || `โหลดไม่สำเร็จ (HTTP ${r.status})`)
       setData(d)
     } catch (e: any) { setError(e.message); setData(null) }
   }, [days])
@@ -146,6 +149,14 @@ export default function AdminReviewsPage() {
             </div>
           </div>
 
+          {/* maint 2026-11-08 — the API caps the list and says so (truncated); the
+              averages above cover the whole window, the list below does not */}
+          {data.truncated && (
+            <div className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              ⚠️ แสดง {data.reviews.length} จาก {data.total ?? '?'} รายการล่าสุด — ค่าเฉลี่ยด้านบนคิดจากทั้ง {data.total ?? '?'} รายการแล้ว
+              ส่วนข้อความที่เหลือ <a href={`/api/admin/reviews/export?days=${days}`} className="underline">export {days} วัน</a> เพื่อดูครบ
+            </div>
+          )}
           {data.reviews.length === 0 ? (
             <p className="text-sm text-gray-500 py-6">ยังไม่มีผลประเมินในช่วงนี้</p>
           ) : (

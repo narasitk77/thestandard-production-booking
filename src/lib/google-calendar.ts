@@ -6,6 +6,7 @@ import { isEmailConfigured, sendEmail } from './email'
 import { normalizeFreelancers, formatFreelancerLines, type Freelancer } from './freelancers'
 import { bookingDisplayName } from './display'
 import { bookingCalendarAttendees } from './calendar-attendees'
+import { wrapsNextDay } from './shoot-window'
 
 // v1.41.0 — prefix added to the calendar event title when a booking needs a
 // company van (off-site shoots). Surfaced on both the web calendar and Google
@@ -247,9 +248,12 @@ export function computeEventTimes(booking: {
   if (!booking.estimatedWrap) return { startTime, endTime: addHoursInBangkok(startTime, 4) }
   const endBaseDate = booking.shootEndDate ? new Date(booking.shootEndDate) : shootDate
   let endTime = parseBangkokDateTime(endBaseDate, booking.estimatedWrap)
-  // No explicit end date but the wrap is at/before call time → it wraps past
-  // midnight → the end is the NEXT calendar day.
-  if (!booking.shootEndDate && new Date(endTime).getTime() <= new Date(startTime).getTime()) {
+  // Single-day (no end date, OR end date == shoot date — the wizard writes that
+  // for every one-day booking) and the wrap is at/before call time → it wraps
+  // past midnight → the end is the NEXT calendar day. Checking only "no end
+  // date" left end < start for wizard bookings edited to 20:00→02:00, and Google
+  // rejected both the create and the patch.
+  if (wrapsNextDay(booking)) {
     endTime = addHoursInBangkok(endTime, 24)
   }
   return { startTime, endTime }
@@ -751,7 +755,11 @@ export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
     })
     return true
   } catch (e: any) {
-    if (e?.code === 404 || e?.response?.status === 404) return true
+    // 404 = never existed / aged out; 410 = "Resource has been deleted" — what
+    // Google answers for an event that is ALREADY deleted. Both mean the event
+    // is gone, which is what the caller wanted (same rule as mix-calendar's gone()).
+    const status = Number(e?.code ?? e?.response?.status)
+    if (status === 404 || status === 410) return true
     console.error('deleteCalendarEvent error:', e?.message || e)
     return false
   }
@@ -761,6 +769,10 @@ export async function getCalendarEventAttendees(eventId: string): Promise<{
   exists: boolean
   attendees: string[]
   htmlLink?: string | null
+  /** The event's start/end as Google stores them — the reconciler compares
+   *  these against computeEventTimes() to catch a time patch that never landed. */
+  start?: string | null
+  end?: string | null
 }> {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
     return { exists: false, attendees: [] }
@@ -774,6 +786,8 @@ export async function getCalendarEventAttendees(eventId: string): Promise<{
         .map(attendee => attendee.email?.trim().toLowerCase())
         .filter((email): email is string => Boolean(email)),
       htmlLink: res.data.htmlLink || null,
+      start: res.data.start?.dateTime || res.data.start?.date || null,
+      end: res.data.end?.dateTime || res.data.end?.date || null,
     }
   } catch (e: any) {
     if (e?.code === 404 || e?.response?.status === 404) {

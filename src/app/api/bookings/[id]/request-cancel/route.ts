@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
+import { isMyBooking } from '@/lib/my-bookings-scope'
 import { logAudit } from '@/lib/audit'
 import { sendEmail, isEmailConfigured } from '@/lib/email'
 
@@ -17,9 +18,15 @@ async function notifyEmails(): Promise<string[]> {
 
 /**
  * POST /api/bookings/[id]/request-cancel  { reason }
- * The booking owner/producer/assigned crew (or staff) asks to cancel — this does
- * NOT cancel the booking, it flags it (cancelRequestedAt) so staff/Tui review it
- * in the "ขอยกเลิก" tab. Emails the notify list. Reason is required.
+ * Someone asks to cancel — this does NOT cancel the booking, it flags it
+ * (cancelRequestedAt) so staff/Tui review it in the "ขอยกเลิก" tab. Emails the
+ * notify list. Reason is required.
+ *
+ * Who may file: any signed-in user (canViewBooking — prod behaviour since v1.152).
+ * Limiting it to people on the booking is Nat's decision, not made yet. Until then
+ * a filer who is NOT on the booking is made visible instead of refused: the audit
+ * row and the managers' email say so, and a request that replaces an earlier one
+ * keeps the earlier reason/requester in the audit row.
  */
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -29,8 +36,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       select: {
-        id: true, bookingCode: true, status: true, createdByEmail: true, producerEmail: true,
+        id: true, bookingCode: true, status: true, createdByEmail: true, producerEmail: true, coProducerEmail: true,
         assignedEmails: true, producer: true, shootDate: true, callTime: true, deletedAt: true,
+        cancelRequestedAt: true, cancelReason: true, cancelRequestedBy: true,
         outlet: { select: { code: true, name: true } }, program: { select: { name: true } },
       },
     })
@@ -48,7 +56,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       data: { cancelRequestedAt: new Date(), cancelReason: reason.slice(0, 1000), cancelRequestedBy: session.email },
       select: { id: true, cancelRequestedAt: true, cancelReason: true, cancelRequestedBy: true },
     })
-    logAudit({ actorEmail: session.email, action: 'booking.cancel_requested', entityType: 'Booking', entityId: booking.id, changes: { reason } })
+    const onBooking = isMyBooking(booking, session.email)
+    const previous = booking.cancelRequestedAt
+      ? { reason: booking.cancelReason, by: booking.cancelRequestedBy, at: booking.cancelRequestedAt }
+      : null
+    logAudit({
+      actorEmail: session.email, action: 'booking.cancel_requested', entityType: 'Booking', entityId: booking.id,
+      bookingCode: booking.bookingCode,
+      changes: { reason, requestedBy: session.email, onBooking, ...(previous ? { replaced: previous } : {}) },
+    })
 
     // Notify Tui / managers — best-effort, never block the request.
     try {
@@ -59,7 +75,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           const date = booking.shootDate ? new Date(booking.shootDate).toISOString().slice(0, 10) : '—'
           const link = process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL.replace(/\/$/, '')}/admin?cancel=${booking.id}` : ''
           const subject = `[ขอยกเลิกงาน] ${code} — ${booking.outlet.code} ${booking.program.name}`
-          const text = `${session.email} ขอยกเลิกงาน\n\nงาน: ${code} (${booking.outlet.name} · ${booking.program.name})\nวันถ่าย: ${date} ${booking.callTime}\nProducer: ${booking.producer}\nสถานะปัจจุบัน: ${booking.status}\n\nเหตุผล: ${reason}\n${link ? `\nเปิดดู: ${link}` : ''}`
+          const who = onBooking ? '' : `\n⚠️ ผู้ขอไม่ได้อยู่ในรายชื่อของงานนี้ (ไม่ใช่ผู้จอง / Producer / Co-Producer / ทีมที่ได้รับมอบหมาย) — ตรวจกับ Producer ก่อนยกเลิกจริง\n`
+          const replaced = previous ? `\n(แทนคำขอเดิมของ ${previous.by || '—'}: ${previous.reason || '—'})\n` : ''
+          const text = `${session.email} ขอยกเลิกงาน\n${who}${replaced}\nงาน: ${code} (${booking.outlet.name} · ${booking.program.name})\nวันถ่าย: ${date} ${booking.callTime}\nProducer: ${booking.producer}\nสถานะปัจจุบัน: ${booking.status}\n\nเหตุผล: ${reason}\n${link ? `\nเปิดดู: ${link}` : ''}`
           // one message per recipient — don't expose the manager list in a flat To:
           await Promise.allSettled(to.map(addr => sendEmail({ to: [addr], subject, text })))
         }

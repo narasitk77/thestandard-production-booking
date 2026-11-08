@@ -3,6 +3,7 @@ import { mcpRequestActorEmail } from './mcp/auth'
 import type { Prisma } from '@prisma/client'
 import { logAudit } from './audit'
 import { notifyChat } from './notify'
+import { alertOps } from './ops-alert'
 import {
   findExistingRoomBooking, cancelRoomBooking, roomIdForLocation,
   roomTargetForBooking, roomBookingEnabled, roomBookingAllowed, listRoomBookings,
@@ -43,6 +44,16 @@ import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './
  */
 const CONFLICT_RETRY_MS = 6 * 60 * 60 * 1000
 
+/**
+ * maint r3 2026-11-08 — งานที่ยัง "ห้องไม่ว่าง" อยู่ ได้เตือนซ้ำวันละครั้งต่อใบ (alertOps key `room-conflict-waiting:<code>`)
+ *
+ * ก่อนรอบ 1 ใบรอห้องถูกยัดลง staleStuck แล้วโพสต์ห้องทีมทุกชั่วโมงด้วยข้อความผิด ("คิวยกเลิก/ย้ายไปแล้ว ·
+ * null — …") รอบ 1 ย้ายออกมาเป็น conflictWaiting ซึ่งเหลือแค่ประกาศครั้งเดียวตอนเพิ่งเป็น CONFLICT ⇒
+ * การตามซ้ำ (ของเดิมบนพรอด) หายไป · คืนการตามซ้ำแบบข้อความถูก: ทั้งใบที่รอรอบลองใหม่ 6 ชม. และใบที่
+ * ลองใหม่รอบนี้แล้วยังชน — จนกว่าจะได้ห้อง / ยกเลิก / พ้นวันถ่าย
+ */
+export const ROOM_CONFLICT_REPEAT_MS = 24 * 3_600_000
+
 export interface RoomReconcileResult {
   scanned: number
   staleCancelled: string[]     // ห้องค้างที่ยกเลิกสำเร็จ
@@ -51,6 +62,13 @@ export interface RoomReconcileResult {
   vanished: string[]           // เราคิดว่าจองไว้ แต่หายไปจากระบบเขาแล้ว
   /** v1.227 — ห้องที่ระบบยังไม่จองให้อัตโนมัติ (ROOM_BOOKING_ROOMS) — ต้องจองเอง */
   notEnabled: string[]
+  /**
+   * 2026-11-08 — งานที่ "ห้องไม่ว่าง" (CONFLICT) และยังอยู่ในช่วงรอ 6 ชม. ก่อนลองใหม่ = **ยังไม่มีห้อง**
+   * เดิมยัดลง staleStuck ด้วย bookingNo:null แล้วเตือนห้องทีมถ่ายทุกชั่วโมงว่า "คิวยกเลิก/ย้ายไปแล้ว
+   * ปลดห้องเองไม่ได้ · null — ..." ซึ่งผิดทั้งเนื้อหาและความถี่ (~20 โพสต์/วัน/ใบ) · การเตือนที่ถูกมีอยู่แล้ว:
+   * syncRoomBooking แจ้งครั้งเดียวตอนเพิ่งเป็น CONFLICT พร้อมรายละเอียดว่าชนกับใคร + ป้าย ⚠ บนการ์ด
+   */
+  conflictWaiting: string[]
   booked: { code: string; bookingNo: string }[]
   failed: { code: string; status: string; message?: string }[]
   dryRun: boolean
@@ -168,9 +186,11 @@ export async function reconcileRoomBookings(opts: {
 
   const out: RoomReconcileResult = {
     scanned: rows.length, staleCancelled: [], staleStuck: [],
-    wrongRoomReleased: [], vanished: [], notEnabled: [], booked: [], failed: [], dryRun,
+    wrongRoomReleased: [], vanished: [], notEnabled: [], conflictWaiting: [], booked: [], failed: [], dryRun,
   }
   let writes = 0
+  /** ใบที่ยังไม่มีห้องเพราะ CONFLICT (รอลองใหม่ + ลองแล้วยังชน) → เตือนซ้ำรายวันหลังลูป */
+  const stillConflict: any[] = []
 
   /**
    * v1.207 — การจองที่ยังมีชีวิตในระบบเขา ดึงเดือนละครั้งแล้วใช้ร่วมกัน
@@ -352,7 +372,8 @@ export async function reconcileRoomBookings(opts: {
     // แค่ทุก 6 ชม. เผื่อคนที่จองทับไว้ยกเลิกไป
     if (!b.roomBookingNo && b.roomBookingStatus === 'CONFLICT' && b.roomBookingAt
         && Date.now() - new Date(b.roomBookingAt).getTime() < CONFLICT_RETRY_MS) {
-      out.staleStuck.push({ code, bookingNo: null, reason: 'ห้องไม่ว่าง — รอรอบถัดไป (6 ชม.)' })
+      out.conflictWaiting.push(code)
+      stillConflict.push(b)
       continue
     }
     // v1.227 — ห้องที่ยังไม่เปิดให้จองอัตโนมัติ: ข้ามได้ แต่ **ต้องเขียนสถานะไว้**
@@ -387,6 +408,7 @@ export async function reconcileRoomBookings(opts: {
       const r = await syncRoomBooking(b.id)
       if (r.status === 'OK') out.booked.push({ code, bookingNo: r.bookingNo })
       else if (r.status !== 'SKIPPED') out.failed.push({ code, status: r.status, message: (r as any).message })
+      if (r.status === 'CONFLICT') stillConflict.push(b)
       // เว้นจังหวะ — rate limit ของเขา 20 req/5 นาที และแต่ละใบกิน 2 request
       await new Promise(res => setTimeout(res, 1200))
     }
@@ -404,12 +426,27 @@ export async function reconcileRoomBookings(opts: {
   }
 
   if (!dryRun && out.staleStuck.length > 0) {
-    const lines = out.staleStuck.map(s => `• ${s.bookingNo} — ${s.code} (${s.reason})`).join('\n')
+    const lines = out.staleStuck.map(s => `• ${[s.bookingNo, s.code].filter(Boolean).join(' — ')} (${s.reason})`).join('\n')
     await notifyChat(
       `🚪 **ห้องค้างในระบบกลาง ${out.staleStuck.length} รายการ**\n` +
       `คิวถ่ายยกเลิก/ย้ายไปแล้ว แต่ผมปลดห้องเองไม่ได้\n\n${lines}\n\n` +
       `ปลดมือที่ https://service.thestandard.co/booking — หรือรอ IT เปิดสิทธิ์ยกเลิกให้ service key แล้วผมจะเก็บกวาดเองรอบถัดไป`,
     ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
+  }
+
+  if (!dryRun) {
+    for (const b of stillConflict) {
+      const code = b.bookingCode || b.id
+      const when = `${b.shootDate.toISOString().slice(0, 10)} ${b.callTime || '?'}–${b.estimatedWrap || '?'}`
+      const r = await alertOps(`room-conflict-waiting:${code}`, `[probook] ${code} ยังไม่มีห้อง — ห้องที่ขอไม่ว่าง`,
+        `🚪 ${code} ยังไม่มีห้อง — ห้องที่ขอไม่ว่าง (ระบบกลางตอบว่าถูกจองแล้ว)\n` +
+        `   ${b.locationName || ''} · ${when}\n` +
+        `   ระบบลองจองใหม่เองทุก 6 ชม. · ถ้าต้องใช้ห้องนี้จริง คุยกับคนที่จองไว้ หรือเปลี่ยนห้อง/เวลาในใบจอง · ` +
+        `จองมือที่ https://service.thestandard.co/booking\n` +
+        `   (เตือนซ้ำวันละครั้งจนกว่าจะได้ห้อง)`,
+        ROOM_CONFLICT_REPEAT_MS)
+      if (r.attempted && !r.delivered) console.error(`[room-reconcile] still-no-room reminder for ${code} reached no channel`)
+    }
   }
 
   return out

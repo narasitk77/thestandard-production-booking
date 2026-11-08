@@ -2,6 +2,7 @@ import { prisma } from './db'
 import { logAudit } from './audit'
 import { bookingDisplayName } from './display'
 import { notifyChat } from './notify'
+import { alertOps } from './ops-alert'
 import {
   describeRoomClash, bkkTime, bangkokToUtcIso,
   roomTargetForBooking, roomIdForLocation, buildRoomBookingPayload,
@@ -9,6 +10,7 @@ import {
   roomBookingEnabled, roomBookingAllowed, RoomSkipReason,
   listRoomBookings, findMarkerBooking, findManualHold, roomBookingMarker,
 } from './room-booking'
+import { EPISODE_ORDER } from './episode-order'
 
 /**
  * จองห้องในระบบกลางให้คิวถ่ายหนึ่งใบ — **at-most-once**
@@ -44,7 +46,7 @@ export const ROOM_BOOKING_SELECT = {
   outlet: { select: { code: true, name: true } },
   program: { select: { name: true } },
   episodes: {
-    orderBy: { sequence: 'asc' as const },
+    orderBy: EPISODE_ORDER,
     select: { episodeId: true, title: true, program: { select: { name: true } } },
   },
 } as const
@@ -226,36 +228,69 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     //
     // แจ้ง **เฉพาะตอนที่เพิ่งเปลี่ยนเป็น CONFLICT** ไม่ใช่ทุกรอบที่เห็นว่า CONFLICT
     // (worker เดินทุกชั่วโมง — แจ้งทุกรอบคือสแปมจนไม่มีใครอ่าน)
+    //
+    // 2026-11-08 — นี่คือเสียงเดียวของ CONFLICT แล้ว (reconcile ย้ายใบรอห้องออกจาก staleStuck
+    // ไปไว้ conflictWaiting) และสถานะถูก stamp เป็น CONFLICT ไปแล้วข้างบน = รอบหน้าไม่แจ้งซ้ำ
+    // ⇒ ห้ามหายเงียบ: อ่านเวลา/รายการชนไม่ได้ก็ยังโพสต์ (บอกว่าอ่านไม่ได้) และโพสต์ไม่ถึง → alertOps
     if (b.roomBookingStatus !== 'CONFLICT') {
-      void (async () => {
-        try {
-          // ช่วงเวลาที่เราขอไป = สิ่งที่ payload ส่งจริง (ไม่ประกอบใหม่ให้ต่างกัน)
-          const p = built.payload
-          const startAt = bangkokToUtcIso(p.startDate, p.startTime)
-          const endAt = bangkokToUtcIso(p.endDate, p.endTime)
-          if (!startAt || !endAt) return
-          const clashes = await describeRoomClash({ roomId, startAt, endAt })
-          const manual = clashes.filter(c => !c.isProbook)
-          const lines = [
-            `🚪 จองห้องให้ ${code} ไม่ได้ — ห้องไม่ว่าง`,
-            `   ${b.locationName || ''} · ${p.startDate} ${p.startTime}–${p.endTime}`,
-            ...(clashes.length ? ['   ชนกับ:'] : []),
-            // ไม่ส่งหัวข้อการจองของคนอื่นออกไป — ชื่อคนจอง + เวลา พอให้ไปคุยต่อได้
-            ...clashes.slice(0, 5).map(c =>
-              `   • ${bkkTime(c.startAt)}–${bkkTime(c.endAt)} ${c.bookingNo} ${c.isProbook ? '(โปรบุ๊คจองเอง)' : `· จองมือโดย ${c.bookedBy || 'ไม่ทราบชื่อ'}${c.department ? ` (${c.department})` : ''}`}`),
-            ...(manual.length ? ['   ⚠️ มีคนจองห้องนี้ด้วยมือในพอร์ทัล — ถ้าเป็นงานเดียวกัน ห้องได้แล้ว ไม่ต้องทำอะไร'] : []),
-            '   ระบบจะลองใหม่อีกครั้งใน 6 ชม.',
-          ]
-          await notifyChat(lines.join('\n'), 'footage')
-        } catch (e: any) {
-          console.error('[room-booking] conflict notify failed (non-fatal):', e?.message || e)
-        }
-      })()
+      void notifyRoomConflict(code, b.locationName, roomId, built.payload)
     }
     return { status: 'CONFLICT', message: out.message }
   }
   if (out.kind === 'invalid') return { status: 'INVALID', message: out.message }
   return { status: 'UNKNOWN', message: out.message }
+}
+
+/**
+ * แจ้งทีมว่าจองห้องไม่ได้ (เรียกครั้งเดียวตอนเพิ่งเปลี่ยนเป็น CONFLICT) — ไม่ throw
+ * ส่งเข้าห้องทีมไม่ถึง / พังกลางทาง → alertOps('room-conflict:<code>') ให้ operator รู้แทน
+ */
+async function notifyRoomConflict(
+  code: string,
+  locationName: string | null | undefined,
+  roomId: number,
+  p: { startDate: string; startTime: string; endDate: string; endTime: string },
+): Promise<void> {
+  const head = [
+    `🚪 จองห้องให้ ${code} ไม่ได้ — ห้องไม่ว่าง`,
+    `   ${locationName || ''} · ${p.startDate} ${p.startTime}–${p.endTime}`,
+  ]
+  let text = head.join('\n')
+  try {
+    // ช่วงเวลาที่เราขอไป = สิ่งที่ payload ส่งจริง (ไม่ประกอบใหม่ให้ต่างกัน)
+    const startAt = bangkokToUtcIso(p.startDate, p.startTime)
+    const endAt = bangkokToUtcIso(p.endDate, p.endTime)
+    let detail: string[]
+    if (!startAt || !endAt) {
+      detail = ['   ⚠️ แปลงเวลาที่ขอไม่ได้ — บอกไม่ได้ว่าชนกับใคร']
+    } else {
+      try {
+        const clashes = await describeRoomClash({ roomId, startAt, endAt })
+        const manual = clashes.filter(c => !c.isProbook)
+        detail = [
+          ...(clashes.length ? ['   ชนกับ:'] : []),
+          // ไม่ส่งหัวข้อการจองของคนอื่นออกไป — ชื่อคนจอง + เวลา พอให้ไปคุยต่อได้
+          ...clashes.slice(0, 5).map(c =>
+            `   • ${bkkTime(c.startAt)}–${bkkTime(c.endAt)} ${c.bookingNo} ${c.isProbook ? '(โปรบุ๊คจองเอง)' : `· จองมือโดย ${c.bookedBy || 'ไม่ทราบชื่อ'}${c.department ? ` (${c.department})` : ''}`}`),
+          ...(manual.length ? ['   ⚠️ มีคนจองห้องนี้ด้วยมือในพอร์ทัล — ถ้าเป็นงานเดียวกัน ห้องได้แล้ว ไม่ต้องทำอะไร'] : []),
+        ]
+      } catch (e: any) {
+        detail = [`   ⚠️ อ่านรายการที่ชนจากระบบกลางไม่ได้: ${e?.message || e}`]
+      }
+    }
+    text = [...head, ...detail, '   ระบบจะลองใหม่อีกครั้งใน 6 ชม.'].join('\n')
+    if (await notifyChat(text, 'footage')) return
+    console.error(`[room-booking] conflict notice for ${code} not delivered to chat — falling back to alertOps`)
+  } catch (e: any) {
+    console.error(`[room-booking] conflict notify failed for ${code}:`, e?.message || e)
+  }
+  try {
+    const r = await alertOps(`room-conflict:${code}`, `[probook] จองห้องไม่ได้ ${code} — แจ้งทีมไม่ถึง`,
+      `${text}\n(ส่งเข้าห้องทีมไม่สำเร็จ — ส่งมาที่ ops แทน)`)
+    if (r.attempted && !r.delivered) console.error(`[room-booking] conflict ${code}: ops alert not delivered either`)
+  } catch (e: any) {
+    console.error(`[room-booking] alertOps for conflict ${code} failed:`, e?.message || e)
+  }
 }
 
 async function stamp(

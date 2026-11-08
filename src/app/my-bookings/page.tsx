@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState } from 'react'
 import MiniMonthCalendar from '@/app/_components/MiniMonthCalendar'
 import Link from 'next/link'
 import { Loader2, Plus, Search, Inbox } from 'lucide-react'
-import { parseISO, startOfToday, isAfter, isToday } from 'date-fns'
+import { parseISO } from 'date-fns'
+import { todayBangkokStr } from '@/lib/bangkok-day'
+import { fetchBookingList, addDaysStr, bookingCoversDay, bookingOverlapsRange, bookingDays, bookingDayKeys, mondayOf } from '@/lib/booking-list'
 import { formatDisplayDate } from '@/lib/utils'
 import StatusPill, { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
 import { isValidQuRef } from '@/lib/qu-ref'
@@ -42,6 +44,10 @@ interface Booking {
   footageSent?: boolean
 }
 
+// A booking is upcoming until its LAST shoot day has passed (multi-day shoots
+// stay listed on day 2–3), and only while not cancelled. Bangkok "today".
+const isUpcoming = (x: Booking, today: string) => x.status !== 'CANCELLED' && !!x.shootDate && bookingDays(x).end >= today
+
 type TabKey = 'upcoming' | 'REQUESTED' | 'ASSIGNED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED'
 
 const TABS: { key: TabKey; label: string; short: string }[] = [
@@ -76,27 +82,29 @@ export default function MyBookingsPage() {
   // Fetch once with scope=mine, then filter client-side per tab. The API
   // already handles "mine" vs "all confirmed" — for an inbox we want the
   // user-owned/assigned set across all statuses.
+  // maint 2026-11-08 — was limit=200 newest-first with `total` ignored, and a
+  // 401/500 became `[]` → "No upcoming bookings — create one" (a producer could
+  // re-book a job they already have). Now a failure is an error with a retry,
+  // and a list that still caps says so.
+  const [loadError, setLoadError] = useState('')
+  const [shownOf, setShownOf] = useState<{ shown: number; total: number } | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   useEffect(() => {
     setBookings(null)
-    fetch('/api/bookings?scope=mine&limit=200&withCrew=1')
-      .then(r => r.json())
-      .then(d => setBookings(d.bookings || []))
-      .catch(() => setBookings([]))
-  }, [])
+    setLoadError('')
+    fetchBookingList<Booking>({ scope: 'mine', limit: '1000', withCrew: '1' })
+      .then(r => { setBookings(r.bookings); setShownOf(r.truncated ? { shown: r.bookings.length, total: r.total } : null) })
+      .catch(e => setLoadError(e?.message || String(e)))
+  }, [reloadKey])
 
-  const loading = bookings === null
+  const loading = bookings === null && !loadError
 
   // Per-tab counts shown on tab pills.
   const counts = useMemo(() => {
     const b = bookings || []
-    const today0 = startOfToday()
+    const today = todayBangkokStr()
     return {
-      upcoming: b.filter(x => {
-        const d = parseISO(x.shootDate)
-        if (isNaN(d.getTime())) return false
-        if (x.status === 'CANCELLED') return false
-        return isToday(d) || isAfter(d, today0)
-      }).length,
+      upcoming: b.filter(x => isUpcoming(x, today)).length,
       REQUESTED: b.filter(x => x.status === 'REQUESTED').length,
       ASSIGNED: b.filter(x => x.status === 'ASSIGNED').length,
       CONFIRMED: b.filter(x => x.status === 'CONFIRMED').length,
@@ -105,17 +113,17 @@ export default function MyBookingsPage() {
     } as Record<TabKey, number>
   }, [bookings])
 
-  // v1.120 — days with a booking → dot on the picker.
-  const markedDates = useMemo(() => new Set((bookings||[]).map(b => (b.shootDate||'').slice(0,10)).filter(Boolean)), [bookings])
+  // v1.120 — days with a booking → dot on the picker (every day of a multi-day shoot).
+  const markedDates = useMemo(() => new Set((bookings || []).flatMap(b => bookingDayKeys(b))), [bookings])
 
   const filtered = useMemo(() => {
     const b = bookings || []
-    const today0 = startOfToday()
+    const today = todayBangkokStr()
     let list = b
     // v1.120 — a picked calendar day wins over range + tab-status filtering, but
     // still respects the current tab's status so "my Completed on 5 Jul" works.
     if (selectedDate) {
-      list = list.filter(x => (x.shootDate || '').slice(0, 10) === selectedDate)
+      list = list.filter(x => bookingCoversDay(x, selectedDate))
       if (tab === 'upcoming') list = list.filter(x => x.status !== 'CANCELLED')
       else list = list.filter(x => x.status === tab)
       if (search.trim()) {
@@ -129,21 +137,12 @@ export default function MyBookingsPage() {
     // must show under สัปดาห์นี้ — the first cut only looked forward, so the
     // Completed tab appeared unfiltered/empty).
     if (range !== 'all') {
-      let start = new Date(today0), end = new Date(today0)
-      if (range === 'day') { end.setDate(end.getDate() + 1) }
-      else { const dow = (start.getDay() + 6) % 7; start.setDate(start.getDate() - dow); end = new Date(start); end.setDate(end.getDate() + 7) }
-      list = list.filter(x => {
-        const d = parseISO(x.shootDate)
-        return !isNaN(d.getTime()) && d >= start && d < end
-      })
+      const start = range === 'day' ? today : mondayOf(today)
+      const end = addDaysStr(start, range === 'day' ? 1 : 7)
+      list = list.filter(x => bookingOverlapsRange(x, start, end))
     }
     if (tab === 'upcoming') {
-      list = list.filter(x => {
-        const d = parseISO(x.shootDate)
-        if (isNaN(d.getTime())) return false
-        if (x.status === 'CANCELLED') return false
-        return isToday(d) || isAfter(d, today0)
-      })
+      list = list.filter(x => isUpcoming(x, today))
       // Upcoming sorts ascending — soonest first — opposite the API default.
       list = [...list].sort((a, b) => a.shootDate.localeCompare(b.shootDate))
     } else {
@@ -243,7 +242,16 @@ export default function MyBookingsPage() {
         />
       </div>
 
-      {loading ? (
+      {shownOf && (
+        <p className="text-xs text-amber-700 mb-2">⚠️ แสดง {shownOf.shown} จาก {shownOf.total} งาน (ใหม่สุดก่อน) — งานเก่ากว่านี้ไม่ได้โหลด</p>
+      )}
+
+      {loadError ? (
+        <div className="ops-card ops-empty text-red-700">
+          โหลดรายการงานไม่ได้ — {loadError}
+          <button onClick={() => setReloadKey(k => k + 1)} className="ml-2 text-brand-primary hover:underline text-xs">ลองใหม่</button>
+        </div>
+      ) : loading ? (
         <div className="ops-card ops-empty">
           <Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" />
         </div>

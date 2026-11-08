@@ -58,6 +58,17 @@ type Row = { b: Booking; productionIds: string[] }
 
 const TH_DAY = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.']
 
+/** Hand every queued patch to `send` NOW and empty the queue (each patch goes once). */
+export function flushPendingPatches(pending: Record<string, NotePatch>, send: (id: string, patch: NotePatch) => void): number {
+  const ids = Object.keys(pending)
+  for (const id of ids) {
+    const patch = pending[id]
+    delete pending[id]
+    send(id, patch)
+  }
+  return ids.length
+}
+
 export default function WeekPlanClient() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }))
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -153,8 +164,30 @@ export default function WeekPlanClient() {
     timerRef.current[r.b.id] = setTimeout(() => saveBooking(r.b.id), 700)
   }
 
-  // flush ที่ค้างเมื่อปิดแท็บ — เดิมงานที่พิมพ์ค้าง 700ms สุดท้ายหายไปเงียบ ๆ
-  useEffect(() => () => { Object.values(timerRef.current).forEach(clearTimeout) }, [])
+  // flush ที่ค้างเมื่อออกจากหน้า/ปิดแท็บ — เดิมงานที่พิมพ์ค้าง 700ms สุดท้ายหายไปเงียบ ๆ
+  // maint 2026-11-08 (ui-2): v1.197 swapped the flush for a bare clearTimeout, so
+  // the timer was cancelled AND the patch dropped while this comment still said
+  // "flush". Restored both paths: unmount (in-app navigation) and pagehide (tab
+  // close / reload — React cleanup never runs there). keepalive lets the request
+  // outlive the page; nobody is left on screen to see a failure, so it logs.
+  useEffect(() => {
+    const flush = () => {
+      Object.values(timerRef.current).forEach(clearTimeout)
+      timerRef.current = {}
+      flushPendingPatches(pendingRef.current, (id, patch) => {
+        fetch(`/api/bookings/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+          keepalive: true,
+        })
+          .then(r => { if (!r.ok) console.error(`[week-plan] flush PATCH ${id} → HTTP ${r.status}`, patch) })
+          .catch(e => console.error(`[week-plan] flush PATCH ${id} failed`, e, patch))
+      })
+    }
+    window.addEventListener('pagehide', flush)
+    return () => { window.removeEventListener('pagehide', flush); flush() }
+  }, [])
 
   const weekLabel = `${format(weekStart, 'd MMM')} – ${format(addDays(weekStart, 6), 'd MMM yyyy')}`
 

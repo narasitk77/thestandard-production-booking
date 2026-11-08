@@ -19,6 +19,7 @@ import { deriveBookingCategory } from '@/lib/booking-category'
 import { quRuleEnabled, isAcceptableQuRef, isQuPending, normalizeQuRef, quRefRejectMessage, pullQuRefFromProject, QU_PENDING } from '@/lib/agency-ref'
 import { applyDefaultCoProducer } from '@/lib/outlet-coproducer'
 import { isValidHHMM } from '@/lib/shoot-window'
+import { EPISODE_ORDER } from './episode-order'
 
 export type CreateBookingResult =
   | { ok: true; booking: any }
@@ -469,7 +470,7 @@ export async function createBookingFromPayload(
     include: {
       outlet: true,
       program: true,
-      episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+      episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
     },
     })
   }, { timeout: 15000 }) // headroom for lock wait when two creates contend

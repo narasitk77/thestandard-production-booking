@@ -6,7 +6,7 @@ import { requireConsole, requireAdmin } from '@/lib/session'
 import { createBookingFromPayload } from '@/lib/create-booking'
 import { teamMailboxesForCrew } from '@/lib/shared-mailboxes'
 import { generateRoutineDates, ROUTINE_MAX_DAYS } from '@/lib/routine'
-import { deleteCalendarEvent } from '@/lib/google-calendar'
+import { removeCancelledBookingEvent } from '@/lib/calendar-reconcile'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { clearBookingOT } from '@/lib/ot-sync'
 import { logAudit } from '@/lib/audit'
@@ -147,7 +147,6 @@ export async function POST(request: NextRequest) {
     })
     if (rows.length === 0) return NextResponse.json({ error: 'ไม่พบงานในชุดนี้' }, { status: 404 })
     for (const r of rows) {
-      if (r.calendarEventId) deleteCalendarEvent(r.calendarEventId).catch(() => {})
       clearBookingOT(r.id).catch(() => {})
       // v1.149 — mirror the cancel flows: blank col W + Status on the Sheet so
       // the bulk-cancelled rows don't keep a live-looking Status + a dead
@@ -162,7 +161,10 @@ export async function POST(request: NextRequest) {
     for (const r of rows) releaseRoomForBooking(r.id, 'routine-cancelled')
     await prisma.booking.updateMany({
       where: { routineGroupId: groupId, deletedAt: null },
-      data: { deletedAt: new Date(), calendarEventId: null, calendarSyncStatus: null, calendarSyncError: null },
+      // calendarEventId is NOT nulled here — removeCancelledBookingEvent clears
+      // each one only once Google confirms the delete (a blind null orphaned the
+      // event on every crew calendar whenever the delete failed)
+      data: { deletedAt: new Date(), calendarSyncStatus: null, calendarSyncError: null },
     })
     logAudit({
       actorEmail: session.email,
@@ -171,6 +173,15 @@ export async function POST(request: NextRequest) {
       entityId: groupId,
       changes: { routineGroupId: groupId, count: rows.length },
     })
+    // Calendar deletes LAST, one at a time (a burst of ~60 is what draws 429s),
+    // in the background: googleapis has no timeout and a group can be long. The
+    // helper never throws; failures stay FAILED for the reconcile sweep (+ ops alert).
+    const withEvent = rows.filter(r => r.calendarEventId)
+    if (withEvent.length > 0) {
+      void (async () => {
+        for (const r of withEvent) await removeCancelledBookingEvent(r.id, r.calendarEventId!)
+      })()
+    }
     return NextResponse.json({ ok: true, cancelled: rows.length })
   }
 

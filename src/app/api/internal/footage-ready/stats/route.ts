@@ -82,14 +82,15 @@ export async function GET(request: NextRequest) {
       OR: [{ shootDate: { gte: agedOutFrom } }, { shootEndDate: { gte: agedOutFrom } }],
     },
     select: {
-      bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true,
+      bookingCode: true, shootDate: true, shootEndDate: true, estimatedWrap: true, callTime: true,
       readyCheckedAt: true, footageCache: true, footageCacheAt: true, readySnapshot: true,
       program: { select: { code: true } },
       episodes: { select: { program: { select: { code: true } } } },
     },
   })
   const pendingRows: PendingBooking[] = candidates
-    .filter(b => isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap }, now))
+    // callTime — same overnight reading as the worker's gate (footage-ready.ts)
+    .filter(b => isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap, callTime: b.callTime }, now))
     .map(b => {
       const c = b.footageCacheAt ? (b.footageCache as { fileCount?: unknown; folders?: unknown } | null) : null
       // Window on the LAST day of the shoot — same OR the worker's query uses.

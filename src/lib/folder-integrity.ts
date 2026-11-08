@@ -50,6 +50,7 @@ import {
 import { canonicalCameraName } from './camera-folder-normalize'
 import { bookingShowName } from './display'
 import { getDriveLink, rememberDriveLinks } from './drive-links'
+import { EPISODE_ORDER } from './episode-order'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
 const SHOOT_STUB_RE = /^_SHOOT\b.*\.txt$/i
@@ -252,7 +253,11 @@ export async function runFolderIntegrity(opts: {
       outlet: { select: { code: true } },
       program: { select: { name: true } },
       episodes: {
-        orderBy: { sequence: 'asc' },
+        // maint 2026-11-08 — a TOTAL order. sequence alone ties when a multi-item booking's episodes all carry
+        // sequence 1 (class 17), Postgres then returns them in any order, and jobName (episodes[0].title) +
+        // bookingShowName flip between runs → this worker renamed the same box back and forth (WLT-OTH-261113-01
+        // 8× in 16 days, WLT-MNW-261016-01 5×). Ties break on episodeId, then the row id.
+        orderBy: EPISODE_ORDER,
         select: { episodeId: true, sequence: true, title: true, program: { select: { code: true, name: true } } },
       },
     },

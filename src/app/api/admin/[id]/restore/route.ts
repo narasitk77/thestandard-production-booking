@@ -3,10 +3,13 @@ import { prisma } from '@/lib/db'
 import { requireConsole } from '@/lib/session'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { syncBookingOT } from '@/lib/ot-sync'
+import { removeCancelledBookingEvent } from '@/lib/calendar-reconcile'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 /**
  * Restore a CANCELLED booking back to live (status = REQUESTED).
- * - Calendar event was deleted on cancel; admin must re-Approve to recreate it.
+ * - Calendar event was deleted on cancel (or is deleted here if that failed —
+ *   409 if it still can't be); admin must re-Approve to recreate it.
  * - Sheet row gets updated.
  */
 export async function POST(
@@ -30,11 +33,19 @@ export async function POST(
       return NextResponse.json({ error: 'Only CANCELLED bookings can be restored' }, { status: 400 })
     }
 
+    // The cancel-time delete may have failed (the id is kept until Google
+    // confirms). Restoring with calendarEventId:null would orphan that live event
+    // for good — the sweep only looks at CANCELLED rows — so remove it first and
+    // refuse only when it still cannot be removed.
+    if (existing.calendarEventId && !(await removeCancelledBookingEvent(existing.id, existing.calendarEventId))) {
+      return NextResponse.json({ error: 'event ของรอบที่ยกเลิกยังลบจากปฏิทินไม่สำเร็จ — ลองกู้คืนใหม่อีกครั้ง', code: 'CALENDAR_DELETE_FAILED' }, { status: 409 })
+    }
+
     const booking = await prisma.booking.update({
       where: { id: params.id },
       data: {
         status: 'REQUESTED',
-        calendarEventId: null, // old event was deleted on cancel
+        calendarEventId: null, // the cancelled run's event is confirmed gone (above)
         approvedAt: null,
         // v1.235 — ต้องล้างคู่กับ approvedAt เสมอ ไม่งั้นใบที่กลับไปเป็น REQUESTED
         // จะยังค้างชื่อคนอนุมัติของรอบก่อน (OT reject กับ purchases reject ทำถูกอยู่แล้ว
@@ -44,7 +55,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
       },
     })
 

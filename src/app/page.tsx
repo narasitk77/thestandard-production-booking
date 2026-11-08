@@ -4,7 +4,8 @@ import { bookingDisplayName } from '@/lib/display'
 import CrewLine from '@/app/_components/CrewLine'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { isToday, isThisWeek, isAfter, parseISO, startOfToday } from 'date-fns'
+import { todayBangkokStr } from '@/lib/bangkok-day'
+import { fetchBookingList, addDaysStr, bookingCoversDay, mondayOf } from '@/lib/booking-list'
 import { formatDisplayDate } from '@/lib/utils'
 import { Plus, Calendar as CalendarIcon, Inbox, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react'
 import StatusPill, { categoryCardClass, AdBadge } from './_components/StatusPill'
@@ -33,79 +34,97 @@ interface Booking {
 
 type Bucket = { key: string; label: string; bookings: Booking[] }
 
+// panel keys of the home fetches (also the label in the error banner)
+const SCHED = 'ตารางวันนี้/สัปดาห์นี้', ATTN = 'Needs attention', MINE = 'My upcoming'
+
 /**
  * Home / Overview — first screen after login.
  * Replaces the legacy "open the booking form on /" behavior — the form now
  * lives at /new (reachable from the persistent + New Booking CTA in the nav).
  */
 export default function HomeOverview() {
-  const [allBookings, setAllBookings] = useState<Booking[] | null>(null)
+  // maint 2026-11-08 (ui-4) — each panel asks the API for what it MEANS. It used
+  // to take the newest-200 by shootDate DESC and bucket client-side, so once more
+  // than 200 bookings lay ahead (routine rows run to Mar 2027) the response was
+  // all 2027 and "Today" read 0 with no hint. null = not loaded / failed.
+  const [schedule, setSchedule] = useState<Booking[] | null>(null)        // today → Sunday
+  const [scheduleCapped, setScheduleCapped] = useState(false)
+  const [attention, setAttention] = useState<{ list: Booking[]; total: number; overdue: number } | null>(null)
   const [myBookings, setMyBookings] = useState<Booking[] | null>(null)
-  const [error, setError] = useState('')
+  const [errors, setErrors] = useState<Record<string, string>>({})
   // v1.102.5 — only tiers that may open /new get the "New Booking" CTA. Crew
   // (videographers) can't access /new → middleware bounces them to /upload, so
   // showing them the button just dumped them on the upload page. Default false
   // (resolve from /api/me) so a non-booker never sees a button that redirects.
   const [canCreate, setCanCreate] = useState(false)
+  const today = todayBangkokStr()
 
   useEffect(() => {
-    // Pull a generous slice — the API caps at 500. Enough to populate
-    // "today / this week / attention" without paging.
-    fetch('/api/bookings?limit=200&withCrew=1')
-      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-      .then(d => setAllBookings(d.bookings || []))
-      .catch(e => setError(String(e)))
+    const fail = (what: string) => (e: unknown) =>
+      setErrors(prev => ({ ...prev, [what]: e instanceof Error ? e.message : String(e) }))
+    // Mon–Sun week, like isThisWeek({ weekStartsOn: 1 }) before. span=1 = a
+    // multi-day shoot that started earlier still counts as today.
+    const weekEndExcl = addDaysStr(mondayOf(today), 7)
+    fetchBookingList<Booking>({ from: today, to: weekEndExcl, span: '1', order: 'asc', limit: '500', withCrew: '1' })
+      .then(r => { setSchedule(r.bookings); setScheduleCapped(r.truncated) })
+      .catch(fail(SCHED))
+    // "Needs attention" — EVERY REQUESTED booking. Round 1 put a `from: today`
+    // floor here, so a request whose shoot day passed without approval (the most
+    // overdue item) left the list AND the KPI, and the panel could say "All caught
+    // up." while it sat in the queue (maint r2 review). Two disjoint start-date
+    // halves (shootDate < today | >= today) so the KPI = every REQUESTED row:
+    // overdue newest-first (up to 3 rows, all counted) + upcoming soonest-first.
+    Promise.all([
+      fetchBookingList<Booking>({ status: 'REQUESTED', to: today, order: 'desc', limit: '3', withCrew: '1' }),
+      fetchBookingList<Booking>({ status: 'REQUESTED', from: today, order: 'asc', limit: '6', withCrew: '1' }),
+    ])
+      .then(([over, up]) => setAttention({
+        list: [...over.bookings, ...up.bookings].slice(0, 6),
+        total: over.total + up.total,
+        overdue: over.total,
+      }))
+      .catch(fail(ATTN))
     // v1.50 — console tiers now get the full corpus from the default scope,
     // so "My upcoming" asks for scope=mine explicitly (created-by or assigned)
     // instead of relying on the implicit plain-USER filter.
-    fetch('/api/bookings?limit=200&scope=mine&withCrew=1')
-      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-      .then(d => setMyBookings(d.bookings || []))
-      .catch(() => setMyBookings([]))
+    fetchBookingList<Booking>({ scope: 'mine', from: today, span: '1', order: 'asc', limit: '50', withCrew: '1' })
+      .then(r => setMyBookings(r.bookings))
+      .catch(fail(MINE))
     fetch('/api/me')
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setCanCreate(tierAllows(resolveTier(d?.user?.role, d?.user?.position), '/new')))
       .catch(() => {})
-  }, [])
+  }, [today])
 
-  const loading = allBookings === null || myBookings === null
+  const error = Object.entries(errors).map(([k, v]) => `${k}: ${v}`).join(' · ')
+  // Per panel: a failed fetch stops "loading" (the banner says why) instead of
+  // spinning forever, and a slow one keeps spinning while another has failed.
+  const schedLoading = schedule === null && !errors[SCHED]
+  const attnLoading = attention === null && !errors[ATTN]
+  const mineLoading = myBookings === null && !errors[MINE]
 
-  // Buckets — purely client-side splits of the two fetches.
-  const { today, thisWeek, mine, attention, attentionTotal } = useMemo(() => {
-    const today0 = startOfToday()
-    const isUpcoming = (b: Booking) => {
-      const d = parseISO(b.shootDate)
-      return !isNaN(d.getTime()) && (isToday(d) || isAfter(d, today0))
-    }
-    // v1.54.1 — the API returns shootDate DESC; every "upcoming" panel must
-    // re-sort ascending (soonest first) before slicing, or the nearest shoots
-    // are the ones silently dropped (same fix my-bookings already carries).
-    const byDateAsc = (a: Booking, b: Booking) => a.shootDate.localeCompare(b.shootDate)
-    const bs = allBookings || []
-    const upcoming = bs.filter(isUpcoming)
-    const attentionAll = bs.filter(b => b.status === 'REQUESTED').sort(byDateAsc)
+  // Buckets — client-side splits of the date-ranged fetches above.
+  const { todayList, thisWeek, mine } = useMemo(() => {
+    const bs = schedule || []
     return {
-      today: upcoming.filter(b => isToday(parseISO(b.shootDate))),
-      thisWeek: upcoming.filter(b => {
-        const d = parseISO(b.shootDate)
-        return !isToday(d) && isThisWeek(d, { weekStartsOn: 1 })
-      }).sort(byDateAsc),
+      todayList: bs.filter(b => bookingCoversDay(b, today)),
+      // starts later this week (the fetch already stops at Sunday)
+      thisWeek: bs.filter(b => (b.shootDate || '').slice(0, 10) > today),
       // "My upcoming" — the user's own non-cancelled upcoming items, soonest
-      // first, capped at 6, from the scope=mine fetch.
-      mine: (myBookings || []).filter(isUpcoming).filter(b => b.status !== 'CANCELLED').sort(byDateAsc).slice(0, 6),
-      // "Attention" — REQUESTED bookings (waiting for coordinator action).
-      // For an operator-style view this is the single most useful filter.
-      attention: attentionAll.slice(0, 6),
-      // KPI shows the real backlog, not the sliced panel length
-      attentionTotal: attentionAll.length,
+      // first (server-sorted), capped at 6.
+      mine: (myBookings || []).filter(b => b.status !== 'CANCELLED').slice(0, 6),
     }
-  }, [allBookings, myBookings])
+  }, [schedule, myBookings, today])
+  const attentionList = attention?.list || []
+  const attentionTotal = attention?.total ?? 0
+  const failedLabel = 'โหลดไม่ได้ — ดูข้อความด้านบน'
 
-  const counts = useMemo(() => ({
-    today: today.length,
-    week: thisWeek.length,
-    attention: attentionTotal,
-  }), [today, thisWeek, attentionTotal])
+  // null = that fetch failed → the KPI shows "—", never a confident 0
+  const counts = {
+    today: schedule === null ? null : todayList.length,
+    week: schedule === null ? null : thisWeek.length,
+    attention: attention === null ? null : attentionTotal,
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
@@ -143,30 +162,39 @@ export default function HomeOverview() {
           Couldn’t load bookings: {error}
         </div>
       )}
+      {scheduleCapped && (
+        <div className="ops-card px-3 py-2 mb-3 text-xs text-amber-800 bg-amber-50 border-amber-200">
+          ⚠️ งานสัปดาห์นี้มีมากกว่าที่โหลดได้ — ตัวเลข Today / This week อาจไม่ครบ ดูที่ Calendar
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         {/* Today's schedule */}
         <Panel
           title="Today’s schedule"
-          subtitle={today.length === 0 ? 'No bookings today.' : `${today.length} booking${today.length === 1 ? '' : 's'}`}
+          subtitle={schedule === null ? '—' : todayList.length === 0 ? 'No bookings today.' : `${todayList.length} booking${todayList.length === 1 ? '' : 's'}`}
           href="/calendar"
-          loading={loading}
+          loading={schedLoading}
         >
-          {today.length === 0 ? (
+          {schedule === null ? (
+            <EmptyRow label={failedLabel} />
+          ) : todayList.length === 0 ? (
             <EmptyRow label="No bookings today." />
           ) : (
-            <BookingList items={today} />
+            <BookingList items={todayList} />
           )}
         </Panel>
 
         {/* My upcoming */}
         <Panel
           title="My upcoming"
-          subtitle={mine.length === 0 ? 'Nothing on the horizon.' : `${mine.length} upcoming`}
+          subtitle={myBookings === null ? '—' : mine.length === 0 ? 'Nothing on the horizon.' : `${mine.length} upcoming`}
           href="/my-bookings"
-          loading={loading}
+          loading={mineLoading}
         >
-          {mine.length === 0 ? (
+          {myBookings === null ? (
+            <EmptyRow label={failedLabel} />
+          ) : mine.length === 0 ? (
             <EmptyRow label="No upcoming bookings yet." cta={canCreate ? { href: '/new', label: 'Create a booking' } : undefined} />
           ) : (
             <BookingList items={mine} />
@@ -176,20 +204,23 @@ export default function HomeOverview() {
         {/* Needs attention */}
         <Panel
           title="Needs attention"
-          subtitle={attentionTotal === 0 ? 'All caught up.' : `${attentionTotal} requested`}
+          subtitle={attention === null ? '—' : attentionTotal === 0 ? 'All caught up.'
+            : `${attentionTotal} requested${attention.overdue ? ` · ⚠️ ${attention.overdue} เลยวันถ่าย` : ''}`}
           href="/my-bookings"
-          loading={loading}
+          loading={attnLoading}
         >
-          {attention.length === 0 ? (
+          {attention === null ? (
+            <EmptyRow label={failedLabel} />
+          ) : attentionList.length === 0 ? (
             <EmptyRow label="No requested bookings — nothing waiting." />
           ) : (
-            <BookingList items={attention} />
+            <BookingList items={attentionList} />
           )}
         </Panel>
       </div>
 
       {/* This week row (full width) */}
-      {!loading && thisWeek.length > 0 && (
+      {thisWeek.length > 0 && (
         <div className="mt-3">
           <Panel title="Later this week" subtitle={`${thisWeek.length} booking${thisWeek.length === 1 ? '' : 's'}`} href="/calendar">
             <BookingList items={thisWeek} />
@@ -295,7 +326,7 @@ function BookingRulesNotice() {
 
 function KpiCard({ label, value, accent, icon, href }: {
   label: string
-  value: number
+  value: number | null
   accent?: 'warn'
   icon: React.ReactNode
   href: string
@@ -303,12 +334,12 @@ function KpiCard({ label, value, accent, icon, href }: {
   return (
     <Link
       href={href}
-      className={`ops-card p-3 sm:p-4 flex items-center justify-between hover:border-gray-400 transition-colors ${accent === 'warn' && value > 0 ? 'border-status-requested-500/30' : ''}`}
+      className={`ops-card p-3 sm:p-4 flex items-center justify-between hover:border-gray-400 transition-colors ${accent === 'warn' && (value ?? 0) > 0 ? 'border-status-requested-500/30' : ''}`}
     >
       <div>
         <div className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</div>
-        <div className={`text-2xl font-semibold mt-1 tabular-nums ${accent === 'warn' && value > 0 ? 'text-status-requested-700' : 'text-gray-900'}`}>
-          {value}
+        <div className={`text-2xl font-semibold mt-1 tabular-nums ${accent === 'warn' && (value ?? 0) > 0 ? 'text-status-requested-700' : 'text-gray-900'}`}>
+          {value ?? '—'}
         </div>
       </div>
       {icon}

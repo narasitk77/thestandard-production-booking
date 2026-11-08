@@ -407,8 +407,13 @@ export default function WorkspacePage() {
       {/* Stats strip */}
       <div className="flex items-center gap-4 text-xs text-gray-500 mb-2 px-1 flex-wrap">
         <span>แสดง <strong className="text-gray-800">{filtered.length}</strong> จาก {rows.length} งาน</span>
+        {/* maint 2026-11-08 — was "กรองให้แคบลงเพื่อดูส่วนที่เหลือ", but every filter here
+            runs client-side over these same rows, so narrowing can never bring the rest in */}
         {total > rows.length && (
-          <span className="text-amber-700">โหลด {rows.length} จากทั้งหมด {total} — กรองให้แคบลงเพื่อดูส่วนที่เหลือ</span>
+          <span className="text-amber-700">
+            ⚠️ โหลดมา {rows.length} จาก {total} งาน (วันถ่ายใหม่สุดก่อน{rows.length ? ` · เก่าสุดที่โหลด ${String(rows[rows.length - 1].shootDate || '').slice(0, 10)}` : ''})
+            — งานที่เหลือไม่ได้โหลด ตัวกรอง ค้นหา และ Export ในหน้านี้ใช้ได้เฉพาะ {rows.length} งานนี้
+          </span>
         )}
         {selectedCount > 0 && <span className="text-[#673ab7]">เลือก <strong>{selectedCount}</strong></span>}
         <span>มี Freelance <strong className="text-gray-800">{filtered.filter(hasFreelancers).length}</strong></span>

@@ -26,8 +26,9 @@ import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { planEpisodeRemoval, type RemovableEpisode } from '@/lib/episode-removal'
 import { summarizeGearNotes } from '@/lib/gear-notes'
-import { updateCalendarEventDetails } from '@/lib/google-calendar'
+import { pushCalendarDetails } from '@/lib/calendar-reconcile'
 import { updateBookingRow, joinEpisodeTitles } from '@/lib/google-sheets'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function POST(
   request: NextRequest,
@@ -46,7 +47,7 @@ export async function POST(
       include: {
         program: true,
         episodes: {
-          orderBy: { sequence: 'asc' },
+          orderBy: EPISODE_ORDER,
           include: {
             program: { select: { name: true } },
             _count: { select: { uploads: true } },
@@ -120,7 +121,7 @@ export async function POST(
       include: {
         outlet: true,
         program: true,
-        episodes: { orderBy: { sequence: 'asc' }, include: { program: { select: { code: true, name: true } } } },
+        episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
       },
     })
 
@@ -140,15 +141,18 @@ export async function POST(
     // ชีท: คอลัมน์ Episode IDs (Q) + Episode Titles (AH) ต้องตรงกับที่เหลือจริง
     // ไม่งั้น PMDC อ่านจากชีทแล้วยังเห็น ID ที่ไม่มีอยู่แล้ว
     if (booking.bookingCode && updated) {
+      // updateBookingRow never throws — a .catch never fired; read what it returns
       updateBookingRow(booking.bookingCode, {
         episodeIds: updated.episodes.map(e => e.episodeId).join(', '),
         episodeTitles: joinEpisodeTitles(updated.episodes),
-      }).catch(e => console.error('[remove-episodes] updateBookingRow error:', e?.message || e))
+      }).then(r => {
+        if (r === 'error' || r === 'not-found') console.error(`[remove-episodes] sheet Episode IDs/Titles write ${r} for ${booking.bookingCode}`)
+      })
     }
 
     if (updated?.calendarEventId) {
-      updateCalendarEventDetails(updated.calendarEventId, updated as Parameters<typeof updateCalendarEventDetails>[1])
-        .catch(e => console.error('[remove-episodes] updateCalendarEventDetails error:', e?.message || e))
+      // never throws; a failed patch marks the row FAILED and the reconciler retries it
+      void pushCalendarDetails(updated.calendarEventId, updated as Parameters<typeof pushCalendarDetails>[1])
     }
 
     return NextResponse.json({
