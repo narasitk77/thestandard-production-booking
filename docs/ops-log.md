@@ -4150,3 +4150,9 @@ problem and not a deployment problem.
 - ตรวจหลัง deploy: boot สะอาด (seed complete, worker 16 ตัวสตาร์ต) · หน้า /, /admin, /calendar, /my-bookings, /producer, /ot, /upload, /admin/* = 200 ไม่มี console error · API list ส่ง truncated · health-summary ok:true · worker ผ่าน secret ได้ (video-merge/landing dryRun) · heartbeat ครบ · room-booking "รอห้อง 1" (NWS-TSN-261203-01) + alert room-conflict-waiting ส่งทางเมล · folder-integrity 14:29 rename ครั้งสุดท้ายตามลำดับใหม่ 2 ใบ (TSS-TSG-261029-01, TSS-TSG-261103-01)
 - Hermes: ติดตั้ง scripts/hermes/probook-worker-check.py ใหม่ใน ~/.hermes/scripts (สำรอง .bak-20261108) · selftest ผ่าน
 - ต้องให้คนจัดการ (ไม่ใช่โค้ด): NWS-TSN-261203-01 ห้องชน · KND-ENU-261105-01 ไม่มี MEDIAPRO · SPT-OTH-261106-02 REQUESTED เลยวันถ่าย · feedback #2/#3 · คิว NAS PM-PMG-260916-01 · AGN-261104-01 ไม่มีไฟล์เสียง
+
+## 2026-11-08 — SHOOT_REVIEW_MAX_BOOKINGS 3 → 8 (นัทสั่ง) · redeploy 17:35
+- เหตุ: lookback 1 วัน แต่เพดาน 3 ใบ/รอบ ขณะที่งานจบวันละ 5–7 ใบ → ใบที่เกินหลุดหน้าต่างถาวร (v1.281.0 เริ่มเตือน 'dropped' รายวัน) · 8 ครอบวันปกติ
+- `deploy.py c638ebe --set SHOOT_REVIEW_MAX_BOOKINGS=8` (อิมเมจเดิม) · ครั้งแรก 17:33 Portainer ตอบ 500 "Unable to clone git repository … lookup github.com on 127.0.0.11:53: server misbehaving" = ล้มก่อนแตะคอนเทนเนอร์ (StartedAt/stack ไม่เปลี่ยน) · ทดสอบ git ของ Portainer ด้วย `POST /api/gitops/repo/file/preview` (อ่านอย่างเดียว) ผ่าน → ยิงใหม่ 17:34 สำเร็จ
+- backup-2026-11-08T103452.sql.gz · 502 ~1.5 นาที · ตรวจครบสามชั้น: stack env = 8 · container env = 8 (StartedAt 17:35:56) · /api/version 1.281.0 in-sync · boot log worker สตาร์ตครบ (shoot-review daily 10:00) · จุดถอยยังเป็น sha-2b81ead
+- ผลจริงดูได้รอบ 10:00 พรุ่งนี้ (9 พ.ย.) — ไม่ควรมี alert 'dropped' ถ้างานต่อวัน ≤ 8
