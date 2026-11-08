@@ -32,6 +32,11 @@ const FIELD_LABELS: Record<string, string> = {
   rentalGearNote: 'Rental gear note',
   itinerary: 'Itinerary',
   assignedEquipmentIds: 'อุปกรณ์ที่ assign',
+  // v1.282 — booking.assign / booking.restore
+  emailRequested: 'ขอให้ส่งอีเมลแจ้งทีม',
+  approvedAt: 'อนุมัติเมื่อ',
+  approvedByEmail: 'ผู้อนุมัติ',
+  calendarEventId: 'Calendar event',
 }
 
 const ACTION_LABELS: Record<string, { label: string; tone: 'request' | 'edit' | 'status' | 'other' }> = {
@@ -41,6 +46,8 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'request' | 'edit' | 
   'booking.update': { label: 'แอดมิน/ทีมคิวแก้ไข', tone: 'edit' },
   'booking.status_change': { label: 'เปลี่ยนสถานะ', tone: 'status' },
   'booking.force_status': { label: 'บังคับสถานะ (admin)', tone: 'status' },
+  'booking.assign': { label: 'จัดทีม', tone: 'edit' },
+  'booking.restore': { label: 'กู้ใบที่ยกเลิก → REQUESTED', tone: 'status' },
   'booking.create': { label: 'สร้างใบจอง', tone: 'other' },
   'booking.delete': { label: 'ยกเลิก/ลบใบจอง', tone: 'status' },
   approve: { label: 'Approve', tone: 'status' },

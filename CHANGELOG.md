@@ -7,6 +7,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.282.0] — 2026-11-09 (PR #23)
+
+### Fixed — ช่อง audit ที่ตรวจรายงานการใช้งานเจอ (5 พ.ย. 2569)
+
+ที่มา: ตรวจเรื่อง "ผู้อนุมัติ" ในรายงาน Probook + AI Usage Report — ใบที่อนุมัติแล้ว 762 ใบ รู้ผู้อนุมัติแค่ 170 ใบ (เริ่มจด v1.235, 24 ก.ย.)
+และขั้น REQUESTED → ASSIGNED **ไม่มีใน audit_logs เลยตั้งแต่ 22 พ.ค.** เพราะเส้นจัดทีมไม่เคยเขียน audit · ไม่แตะ schema ไม่แตะข้อมูลเก่า
+
+- **assign ไม่กันใบ CANCELLED** — ยิง `POST /api/admin/[id]/assign` ตรง ๆ กับใบที่ยกเลิกแล้ว ใบจะกลายเป็น ASSIGNED และส่งเมลจัดทีมออกไป
+  (nextStatus ตกไปที่ ASSIGNED) · ตอนนี้ตอบ 409 "restore it first" แบบเดียวกับ approve (v1.54.1) · และการเขียนเป็น compare-and-swap
+  บนสถานะที่อ่านมา (`where: { id, status, deletedAt: null }` → P2025 → 409) กันใบถูกยกเลิก/อนุมัติแทรกระหว่างอ่านกับเขียนแล้วโดนทับ
+- **assign เขียน audit `booking.assign`** ทุกครั้ง: ผู้กด · fromStatus/toStatus · diff ของ `assignedEmails` / `mainVideographerEmail` / `adminNotes`
+  (ผ่าน `diffBooking` ตัวเดียวกับ PATCH) · `emailRequested` = แอดมิน*ขอ*ให้ส่งเมล ไม่ใช่ "ส่งถึงแล้ว" · ไม่ใส่ `freelancers` ทั้งก้อน
+  เพราะมีเบอร์โทร และ prefix `booking.` ทุกคนที่ล็อกอินเห็นบนไทม์ไลน์ (booking-history-visibility.ts)
+- **restore เขียน audit `booking.restore`** เก็บ `approvedAt` / `approvedByEmail` / `calendarEventId` ค่าเดิมไว้ก่อนล้าง —
+  เดิมกู้ใบแล้วชื่อคนอนุมัติรอบก่อนหายไปโดยไม่มีที่ไหนจำ
+- **`/api/admin/users` เขียน audit** ทุกเส้นที่เปลี่ยนสิทธิ์ได้: PATCH / POST (upsert คนเดิม = เปลี่ยน role + เปิดบัญชีคืนได้) / DELETE (ปิดบัญชี)
+  → `user.update` พร้อม diff ของ role / active / position (คำว่า manager = สิทธิ์อนุมัติ OT) / producerOutlets / ชื่อ / รหัสพนักงาน ·
+  คนใหม่ = `user.add` (มี position/ชื่อที่ตั้งตอนเพิ่มด้วย — manager ตั้งแต่วันแรก = สิทธิ์อนุมัติ OT ต้องมีร่องรอย) · กดบันทึกโดยไม่มีอะไรเปลี่ยน = ไม่เขียน · entityType `User` ไม่ขึ้นไทม์ไลน์ใบจองของใคร
+- `diffFields()` ใน audit.ts (ตัวเดียวกับ `diffBooking` แต่รับรายชื่อฟิลด์) · ป้ายภาษาไทยของ `booking.assign` / `booking.restore` ในแผงประวัติ
+- เทสต์ `admin-audit-gaps.test.ts` 12 ข้อ เรียก route ตัวจริง (mock แค่ DB/Google/อีเมล) — รันกับโค้ดเดิมล้ม 9 ข้อ (อีก 3 คือเคสปฏิเสธที่ต้องผ่านทั้งสองแบบ)
+- re-bump จาก v1.281.0 (PR เขียนก่อน maintenance) → merge main แล้ว: restore ของ main ลบ event รอบที่ยกเลิกก่อนกู้ (409 ถ้าลบไม่ได้) — audit `booking.restore` เขียนหลังกู้สำเร็จเท่านั้น · เพิ่มเทสต์ล็อกว่า 409 นั้นไม่มีแถว audit · รีวิวหลัง merge เจอ `user.add` บันทึกแค่ role → แก้ + เทสต์ (รวม 14 ข้อ)
+
+ยังไม่ทำ รอนัทตัดสิน (อยู่ใน PR): คอลัมน์ `assignedAt`/`assignedByEmail` บนใบจอง · `force-status` ใช้ requireConsole แต่ UI เขียน "(admin)" ·
+approve ข้ามตารางสถานะ (REQUESTED → CONFIRMED ได้ ขณะที่ PATCH ปฏิเสธ)
+
 ## [1.281.0] — 2026-11-08 · maintenance (นัทสั่ง "maintain ระบบ … ตรวจหาบัคและแก้ไขให้หมด")
 
 ตรวจ 7 ด้าน (prod health + 6 ระบบย่อย) → 82 บั๊กที่ผ่านการตรวจแย้ง + 6 จากสุขภาพ prod → แก้ 3 รอบ + รีวิวแย้งทุกรอบ ·
