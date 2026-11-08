@@ -71,6 +71,9 @@ export async function POST(
         // untouched, so a never-synced one gets no event and no invites for a
         // date that has already gone.
         ...(status === 'CONFIRMED' ? { approvedAt: new Date(), approvedByEmail: session.email } : {}),
+        // v1.283 — forcing ASSIGNED is a transition into ASSIGNED too; forcing REQUESTED clears it (as restore does)
+        ...(status === 'ASSIGNED' ? { assignedAt: new Date(), assignedByEmail: session.email } : {}),
+        ...(status === 'REQUESTED' ? { assignedAt: null, assignedByEmail: null } : {}),
         ...(status === 'CONFIRMED' && !fromCancelled && shootNotPast
           ? { calendarSyncStatus: 'PENDING' as const, calendarSyncError: null, calendarLastSyncedAt: new Date(0) }
           : {}),

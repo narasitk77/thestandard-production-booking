@@ -7,6 +7,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.283.0] — 2026-11-09 · `assignedAt` / `assignedByEmail` บนใบจอง (นัทสั่ง "เพิ่มคอลัมน์ assignedAt ตามข้อเสนอ")
+
+### Added
+- คอลัมน์ nullable 2 ตัวในตาราง bookings: **`assignedAt` / `assignedByEmail`** = ใครจัดทีม เมื่อไร — อยู่กับใบถาวร
+  (audit `booking.assign` ของ v1.282 ถูกล้างที่ 90 วัน เหตุผลเดียวกับ `approvedByEmail` v1.235)
+- เขียนทับทุกครั้งที่สถานะ **เปลี่ยนเป็น** ASSIGNED ทั้ง 3 ประตู: ปุ่มจัดทีม (assign) · ฟอร์มแก้ไขเลื่อนสถานะ (PATCH) · force-status
+  · จัดทีมซ้ำใบที่ ASSIGNED / CONFIRMED / COMPLETED อยู่แล้ว = ไม่แตะค่าเดิม
+- กลับเป็น REQUESTED = ล้าง (ใบ REQUESTED ไม่ค้างชื่อคนจัดทีมรอบก่อน): restore (เก็บค่าเดิมไว้ใน audit `booking.restore` เฉพาะใบที่มีค่า)
+  · ฟอร์มแก้ไข ASSIGNED → REQUESTED · force-status → REQUESTED — ส่วน `approvedAt` คงพฤติกรรมเดิม (ล้างเฉพาะ restore) ไม่ได้แตะ
+- ป้ายในแผงประวัติ: "จัดทีมเมื่อ" / "ผู้จัดทีม"
+
+### หมายเหตุ
+- schema เพิ่มอย่างเดียว (`db push` ตอนบูตเพิ่มคอลัมน์ ไม่ลบอะไร) · ถอยไป v1.282.0 = ด่าน schema-sync ข้าม push และเก็บคอลัมน์ไว้ (`schemaSync=skipped` ปกติของการถอย)
+- ใบที่จัดทีมก่อน v1.283 = NULL ถาวร — ไม่มีข้อมูลให้ย้อนเติม (audit `booking.assign` เริ่ม 9 พ.ย. 00:52 กับ v1.282)
+- ยังไม่ขึ้นบนหน้าจอ/ชีท/Workspace — อ่านได้จาก DB/รายงาน · ถ้าอยากให้โชว์ (เช่นคอลัมน์ "Assigned At" ใน Workspace ข้าง Approved At) บอกได้
+
 ## [1.282.0] — 2026-11-09 (PR #23)
 
 ### Fixed — ช่อง audit ที่ตรวจรายงานการใช้งานเจอ (5 พ.ย. 2569)

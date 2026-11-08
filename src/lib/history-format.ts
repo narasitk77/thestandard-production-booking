@@ -36,6 +36,8 @@ const FIELD_LABELS: Record<string, string> = {
   emailRequested: 'ขอให้ส่งอีเมลแจ้งทีม',
   approvedAt: 'อนุมัติเมื่อ',
   approvedByEmail: 'ผู้อนุมัติ',
+  assignedAt: 'จัดทีมเมื่อ',
+  assignedByEmail: 'ผู้จัดทีม',
   calendarEventId: 'Calendar event',
 }
 

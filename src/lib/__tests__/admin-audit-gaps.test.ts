@@ -95,6 +95,7 @@ const baseBooking = (o: any = {}) => ({
   id: 'b1', bookingCode: 'NWS-KYM-261105-01', status: 'REQUESTED', deletedAt: null,
   assignedEmails: [], adminNotes: null, mainVideographerEmail: null, freelancers: null,
   calendarEventId: null, sheetRowIndex: null, approvedAt: null, approvedByEmail: null,
+  assignedAt: null, assignedByEmail: null,
   producer: 'P', producerEmail: 'p@thestandard.co', coProducerEmail: null,
   directorEmail: null, director2Email: null, director3Email: null,
   shootDate: new Date('2026-11-20'), shootEndDate: null, callTime: '09:00', estimatedWrap: '18:00',
@@ -200,6 +201,47 @@ test('restore: ลบ event ของรอบที่ยกเลิกไม�
   assert.equal(bookingRow.approvedByEmail, 'approver@thestandard.co')
   assert.equal(bookingWrites.length, 0)
   assert.equal(audits.length, 0)
+})
+
+// ── v1.283 assignedAt / assignedByEmail บนใบจอง ─────────────────────────────
+
+test('assign: REQUESTED → ASSIGNED ประทับ assignedAt/assignedByEmail บนใบ', async () => {
+  const before = Date.now()
+  const res = await assign(post({ assignedEmails: ['a@thestandard.co'] }), ctx)
+  assert.equal(res.status, 200)
+  assert.equal(bookingRow.assignedByEmail, COORD.email)
+  assert.ok(bookingRow.assignedAt instanceof Date && bookingRow.assignedAt.getTime() >= before)
+})
+
+test('assign: จัดทีมซ้ำใบที่ ASSIGNED / CONFIRMED อยู่แล้ว → ไม่แตะคนจัดทีมเดิม', async () => {
+  const first = new Date('2026-11-01T02:00:00Z')
+  for (const status of ['ASSIGNED', 'CONFIRMED']) {
+    bookingWrites.length = 0
+    bookingRow = baseBooking({ status, assignedAt: first, assignedByEmail: 'first@thestandard.co', calendarEventId: status === 'CONFIRMED' ? 'ev1' : null })
+    const res = await assign(post({ assignedEmails: ['b@thestandard.co'] }), ctx)
+    assert.equal(res.status, 200, status)
+    assert.ok(!('assignedAt' in bookingWrites[0].data) && !('assignedByEmail' in bookingWrites[0].data), status)
+    assert.equal(bookingRow.assignedByEmail, 'first@thestandard.co', status)
+    assert.equal(bookingRow.assignedAt, first, status)
+  }
+})
+
+test('restore: ล้าง assignedAt/assignedByEmail คู่กับ approvedAt และเก็บค่าเดิมใน audit', async () => {
+  const assignedAt = new Date('2026-10-02T03:00:00Z')
+  bookingRow = baseBooking({ status: 'CANCELLED', assignedAt, assignedByEmail: 'coord2@thestandard.co' })
+  const res = await restore(post({}), ctx)
+  assert.equal(res.status, 200)
+  assert.equal(bookingRow.assignedAt, null)
+  assert.equal(bookingRow.assignedByEmail, null)
+  assert.deepEqual(audits[0].changes.assignedByEmail, { from: 'coord2@thestandard.co', to: null })
+  assert.deepEqual(audits[0].changes.assignedAt, { from: assignedAt.toISOString(), to: null })
+})
+
+test('restore: ใบที่ไม่เคยถูกจัดทีม → audit ไม่มีแถว assigned null→null', async () => {
+  bookingRow = baseBooking({ status: 'CANCELLED' })
+  const res = await restore(post({}), ctx)
+  assert.equal(res.status, 200)
+  assert.ok(!('assignedAt' in audits[0].changes) && !('assignedByEmail' in audits[0].changes))
 })
 
 test('restore: ใบที่ไม่ใช่ CANCELLED → 400 ไม่มี audit', async () => {

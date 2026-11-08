@@ -347,6 +347,12 @@ model Booking {
   // 90 วัน (audit-retention.ts) ส่วนใบจองอยู่ล่วงหน้าได้ 3 เดือนขึ้นไป — แถวจะหาย
   // ก่อนถึงวันถ่ายด้วยซ้ำ ค่านี้จึงต้องอยู่บนใบจอง
   approvedByEmail  String?
+  // v1.283 — ใครจัดทีม เมื่อไร (เหตุผลเดียวกับ approvedByEmail: audit `booking.assign`
+  // หายที่ 90 วัน) · เขียนทับทุกครั้งที่สถานะ *เปลี่ยนเป็น* ASSIGNED (ปุ่มจัดทีม /
+  // ฟอร์มแก้ไข / force-status) · จัดทีมซ้ำใบที่ ASSIGNED/CONFIRMED อยู่แล้ว = ไม่แตะ ·
+  // กลับเป็น REQUESTED (restore / ฟอร์มแก้ไข / force-status) = ล้าง · ใบก่อน v1.283 = NULL ถาวร
+  assignedAt       DateTime?
+  assignedByEmail  String?
   // v1.51.0 — soft delete for test/junk queues: row stays in the DB (episode
   // IDs keep their sequence slots, audit history survives) but every web
   // surface filters `deletedAt: null`. ADMIN-only; restorable from the

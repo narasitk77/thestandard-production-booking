@@ -92,6 +92,10 @@ export async function POST(
         adminNotes: nextAdminNotes,
         freelancers: freelancerList as unknown as Prisma.InputJsonValue,
         status: nextStatus,
+        // v1.283 — who moved it into ASSIGNED (re-assigning an ASSIGNED/CONFIRMED row keeps the stamp)
+        ...(nextStatus === 'ASSIGNED' && existing.status !== 'ASSIGNED'
+          ? { assignedAt: new Date(), assignedByEmail: session.email }
+          : {}),
       },
       include: {
         outlet: true,

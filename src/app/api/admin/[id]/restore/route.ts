@@ -53,6 +53,9 @@ export async function POST(
         // จะยังค้างชื่อคนอนุมัติของรอบก่อน (OT reject กับ purchases reject ทำถูกอยู่แล้ว
         // เส้นนี้หลุดเพราะตอนเขียนยังไม่มีคอลัมน์นี้)
         approvedByEmail: null,
+        // v1.283 — same reason: a REQUESTED row must not carry last round's assigner
+        assignedAt: null,
+        assignedByEmail: null,
       },
       include: {
         outlet: true,
@@ -74,6 +77,10 @@ export async function POST(
       changes: {
         approvedAt: { from: existing.approvedAt, to: null },
         approvedByEmail: { from: existing.approvedByEmail, to: null },
+        // only when there was one (rows from before v1.283 have none — no null → null noise)
+        ...(existing.assignedAt || existing.assignedByEmail
+          ? { assignedAt: { from: existing.assignedAt, to: null }, assignedByEmail: { from: existing.assignedByEmail, to: null } }
+          : {}),
         calendarEventId: { from: existing.calendarEventId, to: null },
       },
     })

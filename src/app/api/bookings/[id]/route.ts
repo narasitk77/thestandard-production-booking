@@ -240,6 +240,10 @@ export async function PATCH(
             ...(status === 'CONFIRMED' && !existing.approvedAt
               ? { approvedAt: new Date(), approvedByEmail: session.email }
               : {}),
+            // v1.283 — same door for "who assigned it" (statusChanging ⇒ a real transition);
+            // back to REQUESTED (un-assign) clears it, as restore does
+            ...(status === 'ASSIGNED' ? { assignedAt: new Date(), assignedByEmail: session.email } : {}),
+            ...(status === 'REQUESTED' ? { assignedAt: null, assignedByEmail: null } : {}),
             // The comment above promises "reconciler creates the event in 10
             // min" — it didn't: a never-approved row has calendarSyncStatus AND
             // calendarLastSyncedAt NULL, and the reconciler's

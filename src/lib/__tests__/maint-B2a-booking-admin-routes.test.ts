@@ -194,6 +194,49 @@ test('force-status → CONFIRMED: stale PENDING + OT drafts, like approve (no sh
   assert.deepEqual(otSynced, ['b1'])
 })
 
+// v1.283 — assignedAt/assignedByEmail stamp on every door into ASSIGNED
+test('PATCH REQUESTED → ASSIGNED stamps assignedAt/assignedByEmail; → CONFIRMED does not', async () => {
+  booking.status = 'REQUESTED'
+  let res = await patch(req({ status: 'ASSIGNED' }), params)
+  assert.equal(res.status, 200)
+  const cas = updateManys.find(u => u.data.status === 'ASSIGNED')
+  assert.equal(cas.data.assignedByEmail, 'admin@x.co')
+  assert.ok(cas.data.assignedAt instanceof Date)
+  updateManys = []
+  booking.status = 'ASSIGNED'; booking.shootDate = new Date(Date.now() + 7 * 86_400_000); booking.shootEndDate = null
+  res = await patch(req({ status: 'CONFIRMED' }), params)
+  assert.equal(res.status, 200)
+  assert.ok(!('assignedAt' in updateManys.find(u => u.data.status === 'CONFIRMED').data))
+})
+
+test('force-status → ASSIGNED stamps assignedAt/assignedByEmail; → CONFIRMED does not', async () => {
+  booking.status = 'REQUESTED'
+  let res = await force(req({ status: 'ASSIGNED' }), params)
+  assert.equal(res.status, 200)
+  assert.equal(updateManys[0].data.assignedByEmail, 'admin@x.co')
+  assert.ok(updateManys[0].data.assignedAt instanceof Date)
+  updateManys = []
+  booking.status = 'ASSIGNED'
+  res = await force(req({ status: 'CONFIRMED' }), params)
+  assert.equal(res.status, 200)
+  assert.ok(!('assignedAt' in updateManys[0].data))
+})
+
+test('back to REQUESTED clears assignedAt/assignedByEmail — PATCH un-assign and force-status', async () => {
+  booking.status = 'ASSIGNED'; booking.assignedAt = new Date('2026-11-01T02:00:00Z'); booking.assignedByEmail = 'first@x.co'
+  let res = await patch(req({ status: 'REQUESTED' }), params)
+  assert.equal(res.status, 200)
+  const cas = updateManys.find(u => u.data.status === 'REQUESTED')
+  assert.equal(cas.data.assignedAt, null)
+  assert.equal(cas.data.assignedByEmail, null)
+  updateManys = []
+  booking.status = 'CONFIRMED'
+  res = await force(req({ status: 'REQUESTED' }), params)
+  assert.equal(res.status, 200)
+  assert.equal(updateManys[0].data.assignedAt, null)
+  assert.equal(updateManys[0].data.assignedByEmail, null)
+})
+
 test('force-status → COMPLETED: no sheet Status write (PMDC reads it — Nat decides), OT left alone', async () => {
   const res = await force(req({ status: 'COMPLETED' }), params)
   assert.equal(res.status, 200)
