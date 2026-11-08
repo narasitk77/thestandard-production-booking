@@ -4140,3 +4140,13 @@ problem and not a deployment problem.
 - "ข้อ 5 เอา 'พร้อมรับทุกความเห็น… · ข้อความจะแสดงตามที่พิมพ์ (ไม่มีชื่อกำกับ)' ออก" → หน้าแก้คำถือช่องว่าง = ใช้คำในโค้ด จึงต้องลบในโค้ด → v1.280.2 (b7eb7e3) gate 1271/1271 · CI+Docker ผ่าน · backup-2026-11-05T072939.sql.gz · จุดถอย sha-62991e8 · ตรวจ /survey บนพรอด: ข้อ 5 ไม่มีบรรทัดอธิบาย, dropdown agn = Video Production
 - ตั้ง Hermes one-shot `b6bc10d1dd41` 6 พ.ย. 10:00 สร้าง D3-261106 ให้ AGN-261104-01 (CAM-A/B/C/AUDIO) + EVT-EVT-261104-01 (CAM-A) · ผลเข้า Discord hermes-agent
 - v1.280.3 (2b81ead) deployed 15:05 · ข้อความ 🔒 บน /survey เหลือ "ระบบจำแค่ว่าคุณตอบแล้ว (จะได้ไม่ชวนซ้ำ) แต่ไม่เก็บว่าใครตอบอะไร" (นัทสั่งเอาประโยคผลแยกรายทีมออก · กฎซ่อนทีม <3 คนในหน้าผลยังทำงาน) · backup-2026-11-05T080103.sql.gz · จุดถอย sha-b7eb7e3 · ตรวจบนพรอดแล้ว: 🔒 ตรง, ข้อ 5 ไม่มีคำอธิบาย, agn = Video Production
+
+## 2026-11-08 — v1.281.0 maintenance ("maintain ระบบ … ตรวจหาบัคและแก้ไขให้หมด") · deployed 14:22
+- ตรวจ: prod health 1 agent + bug hunter 6 ระบบ (footage, booking, auth, workers, UI, อื่น ๆ) ทุก finding ผ่านผู้ตรวจแย้ง → 82 บั๊กยืนยัน + 6 จาก prod health · แก้ 3 รอบ (ไฟล์ไม่ทับกัน) + รีวิวแย้งทุกรอบ · รอบ 3 ครั้งแรกล้มเพราะชน weekly limit (02:15) — รันใหม่ 13:40 หลังรีเซ็ต · gate สุดท้าย 1592/1592 + next build + tsc + lint + node --check + py_compile · CI+Docker ผ่าน (c638ebe)
+- สิ่งที่ถอดพฤติกรรม prod ถูกคืนเป็นแบบเดิม แล้วยกเป็นเรื่องให้นัทตัดสิน (ดู CHANGELOG [1.281.0] หัวข้อ "รอนัทตัดสิน")
+- `.github/workflows/docker-build.yml` (APP_GIT_SHA → /api/version commit) push ไม่ได้: token ไม่มี scope `workflow` → เก็บเป็น docs/patches/2026-11-08-docker-build-app-git-sha.patch
+- ก่อน deploy นับ: ใบ CANCELLED/ลบที่ยังถือ calendarEventId = 0 → sweep ใหม่ไม่ลบ event ใคร
+- backup-2026-11-08T071814.sql.gz · จุดถอย sha-2b81ead (v1.280.3) · ไม่มี schema change (เฉพาะ seed.ts/start.sh)
+- ตรวจหลัง deploy: boot สะอาด (seed complete, worker 16 ตัวสตาร์ต) · หน้า /, /admin, /calendar, /my-bookings, /producer, /ot, /upload, /admin/* = 200 ไม่มี console error · API list ส่ง truncated · health-summary ok:true · worker ผ่าน secret ได้ (video-merge/landing dryRun) · heartbeat ครบ · room-booking "รอห้อง 1" (NWS-TSN-261203-01) + alert room-conflict-waiting ส่งทางเมล · folder-integrity 14:29 rename ครั้งสุดท้ายตามลำดับใหม่ 2 ใบ (TSS-TSG-261029-01, TSS-TSG-261103-01)
+- Hermes: ติดตั้ง scripts/hermes/probook-worker-check.py ใหม่ใน ~/.hermes/scripts (สำรอง .bak-20261108) · selftest ผ่าน
+- ต้องให้คนจัดการ (ไม่ใช่โค้ด): NWS-TSN-261203-01 ห้องชน · KND-ENU-261105-01 ไม่มี MEDIAPRO · SPT-OTH-261106-02 REQUESTED เลยวันถ่าย · feedback #2/#3 · คิว NAS PM-PMG-260916-01 · AGN-261104-01 ไม่มีไฟล์เสียง
