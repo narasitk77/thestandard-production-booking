@@ -4177,3 +4177,13 @@ problem and not a deployment problem.
 - สภาพที่ siranat.k@ (ไม่อยู่ใน probook users) จัดเอง: 5 พ.ย. 15:53 สลับชื่อ CAM-A↔CAM-B วันที่ 1 → CAM-A = `B006…` 32 คลิป, CAM-B = `A008…` 28 คลิป · 6 พ.ย. ~15:00 วันที่ 2 ใน `Day 5112026`: "Cam A"→`Cam-B` (`B001…` 33), "Cam B"→`Cam-A` (`A001…` 36) · เสียงวันที่ 2 อยู่ `Day 5112026/Sound` (6+3 WAV) · AUDIO ว่าง · เสียงวันที่ 1 ไม่มีบน Drive
 - ชื่อที่เขาแก้อยู่รอดผ่าน folder-integrity รายชั่วโมงมา 2 วัน (อ่านสด 8 พ.ย.) = worker ไม่สลับกลับ
 - ตาราง 6 พ.ย. ที่ส่งนัท คอลัมน์วันที่ 1 ใช้ข้อมูล 5 พ.ย. 11:53 (ก่อน siranat สลับ) = ผิดตอนส่ง — แจ้งนัทแล้ว
+
+## 2026-11-09 00:52 — v1.282.0 deployed (PR #23 audit จัดทีม/กู้ใบ/สิทธิ์ผู้ใช้) · นัทสั่ง "re-bump PR #23 แล้ว merge" + "merge เสร็จแล้ว deploy เลย"
+
+- PR #23 เขียน 6 พ.ย. เป็น v1.281.0 ก่อน maintenance → merge main เข้า PR (conflict แค่ import ใน assign/restore + CHANGELOG) แล้ว re-bump เป็น **1.282.0** · commit 922109d
+- main เปลี่ยน restore ให้ลบ event ของรอบที่ยกเลิกก่อนกู้ (409 ถ้าลบไม่ได้) → เทสต์ของ PR ล้ม 1 ข้อเพราะ mock เก่า · แก้ mock ให้ตรงสัญญาใหม่ + เพิ่มเทสต์ว่า 409 นั้นไม่มีแถว audit
+- รีวิวหลัง merge (3 มุม + ผู้แย้ง 2 คนต่อข้อ): ยืนยัน 1 ข้อ — `user.add` จดแค่ role ไม่จด position ที่ตั้งตอนเพิ่มคน (manager = สิทธิ์อนุมัติ OT) → แก้ให้ diff กับบัญชีว่าง + เทสต์ · อีก 2 มุมไม่เจออะไร
+- gate `npm run build` 1606/1606 + next build · CI ของ PR ผ่าน → merge แบบ merge commit **f412b1b** · Docker build สำเร็จ
+- **เปลี่ยนพฤติกรรม prod (นัทอนุมัติด้วยการสั่ง merge):** assign ใบ CANCELLED = 409 "restore it first" (เดิมกลายเป็น ASSIGNED + ส่งเมลทีม) · assign ที่สถานะเปลี่ยนระหว่างอ่านกับเขียน = 409 ให้รีโหลด · audit ใหม่: `booking.assign` `booking.restore` `user.update` `user.add`
+- deploy.py: `--check` ผ่าน (ไม่มี schema change) · backup-2026-11-08T174807.sql.gz 1.37 MB · **จุดถอย sha-c638ebe** (v1.281.0) · ครบสามชั้น 00:52:06 · /api/version 1.282.0 schemaSync in-sync
+- ตรวจหลัง deploy: คอนเทนเนอร์ sha-f412b1b Up · DB รีสตาร์ทพร้อม deploy (ปกติ) · boot log: schema in sync, seed 31 untouched, worker สตาร์ตครบ (footage-sync / lark-export ปิดอยู่เหมือนเดิม), ไม่มี error · stack env SHOOT_REVIEW_MAX_BOOKINGS=8 ยังอยู่ · purge audit >90 วัน 15 แถว (retention ปกติ)
