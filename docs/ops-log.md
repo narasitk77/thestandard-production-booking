@@ -4170,3 +4170,10 @@ problem and not a deployment problem.
 - fix.py dry-run 1/1 would do → apply ok=True · ตรวจสด: chain ใหม่ถูก, md5/size เดิม · manifest `footage-check/audit-2026-11-06/plan-AGN-261104-01-strayMOV.{dry.20261108-203210,applied.20261108-203221}.json`
 - โฟลเดอร์ `อ.เชน เช้านี้` (1nGeGzmE…) ว่างแล้ว ยังอยู่ที่รากกล่อง — ไม่ได้ทิ้ง (นัทไม่ได้สั่ง)
 - 20:34 นัทสั่ง "ทิ้งโฟลเดอร์ว่างได้เลย" → fix.py `trashshell` (walk สดตอน apply: 0 ไฟล์, parent = กล่อง) dry-run → apply ok=True · ทิ้งลงถัง (กู้ได้ 30 วัน) ไม่ได้ลบถาวร · รากกล่องเหลือ `_FOOTAGE-CHECK`, `_SHOOT.txt`, โฟลเดอร์ EP · manifest `plan-AGN-261104-01-trash-empty-folder.{dry.20261108-203407,applied.20261108-203416}.json`
+
+## 2026-11-08 — KND-TMH-261104-01 ปล่อยตามที่ siranat.k@ จัดกล้อง (นัทสั่ง "ปล่อยตามที่ siranat จัด ไม่ต้องย้าย")
+
+- ไม่เขียน Drive อะไรเลย · คำถามเดิม (วิธี 1/2 · ย้ายเข้า D1-261104/D2-261105 · Sound→AUDIO/D2 · ทิ้ง `Day 5112026`) ปิดแล้ว
+- สภาพที่ siranat.k@ (ไม่อยู่ใน probook users) จัดเอง: 5 พ.ย. 15:53 สลับชื่อ CAM-A↔CAM-B วันที่ 1 → CAM-A = `B006…` 32 คลิป, CAM-B = `A008…` 28 คลิป · 6 พ.ย. ~15:00 วันที่ 2 ใน `Day 5112026`: "Cam A"→`Cam-B` (`B001…` 33), "Cam B"→`Cam-A` (`A001…` 36) · เสียงวันที่ 2 อยู่ `Day 5112026/Sound` (6+3 WAV) · AUDIO ว่าง · เสียงวันที่ 1 ไม่มีบน Drive
+- ชื่อที่เขาแก้อยู่รอดผ่าน folder-integrity รายชั่วโมงมา 2 วัน (อ่านสด 8 พ.ย.) = worker ไม่สลับกลับ
+- ตาราง 6 พ.ย. ที่ส่งนัท คอลัมน์วันที่ 1 ใช้ข้อมูล 5 พ.ย. 11:53 (ก่อน siranat สลับ) = ผิดตอนส่ง — แจ้งนัทแล้ว
