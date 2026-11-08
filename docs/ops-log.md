@@ -4156,3 +4156,10 @@ problem and not a deployment problem.
 - `deploy.py c638ebe --set SHOOT_REVIEW_MAX_BOOKINGS=8` (อิมเมจเดิม) · ครั้งแรก 17:33 Portainer ตอบ 500 "Unable to clone git repository … lookup github.com on 127.0.0.11:53: server misbehaving" = ล้มก่อนแตะคอนเทนเนอร์ (StartedAt/stack ไม่เปลี่ยน) · ทดสอบ git ของ Portainer ด้วย `POST /api/gitops/repo/file/preview` (อ่านอย่างเดียว) ผ่าน → ยิงใหม่ 17:34 สำเร็จ
 - backup-2026-11-08T103452.sql.gz · 502 ~1.5 นาที · ตรวจครบสามชั้น: stack env = 8 · container env = 8 (StartedAt 17:35:56) · /api/version 1.281.0 in-sync · boot log worker สตาร์ตครบ (shoot-review daily 10:00) · จุดถอยยังเป็น sha-2b81ead
 - ผลจริงดูได้รอบ 10:00 พรุ่งนี้ (9 พ.ย.) — ไม่ควรมี alert 'dropped' ถ้างานต่อวัน ≤ 8
+
+## 2026-11-08 — AGN-261104-01 วันที่ 1 อยู่ใน D1-261104 ครบแล้ว (นัทสั่ง "go AGN")
+- dry-run ใหม่ก่อน apply (18:29): ทั้ง 7 โฟลเดอร์การ์ด (CAM-A SONY/XDROOT · CAM-B XDROOT/SONY · CAM-C M4ROOT/SONY/PRIVATE) **อยู่ใน CAM-X/D1-261104 แล้ว** → SKIP ทุกบรรทัด · ไม่ได้ apply อะไร (manifest plan-AGN-261104-01-D1.dry.20261108-182929.json)
+- ใครย้าย: ไม่ใช่ fix.py ของ session ไหน (ไม่มี id ในทรานสคริปต์อื่น) และไม่มีโค้ดแอปที่ย้ายของในกล่องเข้า D1 (moveFileToFolder เรียกจาก video-merge landing→box / audio-relocate / regenerate-id / shoot-marker เท่านั้น) = น่าจะคนย้ายเองบน Drive · เครื่องมือ read-only ดูผู้ย้ายไม่ได้ (move ไม่เปลี่ยน modifiedTime)
+- นับกล่องสด: D1-261104 = 542 (A 33 · B 346 · C 163 ตรงกับก่อนย้าย) · D2-261105 = 362 (A 53 · B 163 · C 146) · D3-261106 = 12 (CAM-A เท่านั้น) · ไม่มีไฟล์ค้างที่ราก CAM · AUDIO ว่างทุกวัน · landing ถูกทิ้งแล้ว (ว่าง) · _SOUND-STAGING ว่าง
+- นอกโครง: `/อ.เชน เช้านี้/IMG_2852.MOV` (26.7 MB, 6 พ.ย. 09:38) อยู่ที่รากกล่อง ไม่อยู่ใต้ EP/CAM — ไม่แตะ รอนัทว่าจะเก็บที่ไหน
+- footage-ready แจ้งแล้ว 6 พ.ย. 23:37 "ครบตาม MEDIAPRO 7 การ์ด · 884 ไฟล์" (3+3+1 การ์ด)
