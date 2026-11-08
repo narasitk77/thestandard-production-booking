@@ -4169,3 +4169,4 @@ problem and not a deployment problem.
 - `IMG_2852.MOV` (26.7 MB, md5 b05fc8de…, อัปโดย nuttapong.k@ 6 พ.ย. 09:38) จาก `/อ.เชน เช้านี้/` ที่รากกล่อง → `PP-26-077-S01 …/CAM-A/D3-261106/` (ข้าง XDROOT) · ปลายทางไม่มีชื่อซ้ำ
 - fix.py dry-run 1/1 would do → apply ok=True · ตรวจสด: chain ใหม่ถูก, md5/size เดิม · manifest `footage-check/audit-2026-11-06/plan-AGN-261104-01-strayMOV.{dry.20261108-203210,applied.20261108-203221}.json`
 - โฟลเดอร์ `อ.เชน เช้านี้` (1nGeGzmE…) ว่างแล้ว ยังอยู่ที่รากกล่อง — ไม่ได้ทิ้ง (นัทไม่ได้สั่ง)
+- 20:34 นัทสั่ง "ทิ้งโฟลเดอร์ว่างได้เลย" → fix.py `trashshell` (walk สดตอน apply: 0 ไฟล์, parent = กล่อง) dry-run → apply ok=True · ทิ้งลงถัง (กู้ได้ 30 วัน) ไม่ได้ลบถาวร · รากกล่องเหลือ `_FOOTAGE-CHECK`, `_SHOOT.txt`, โฟลเดอร์ EP · manifest `plan-AGN-261104-01-trash-empty-folder.{dry.20261108-203407,applied.20261108-203416}.json`
