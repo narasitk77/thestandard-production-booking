@@ -44,7 +44,7 @@ python3 scripts/ops/offboard.py --leaver <email> --actor <อีเมลคน�
 
 และตรวจนอก DB (เครื่องมือพิมพ์เตือนแต่ไม่ทำให้):
 - `grep -rn '<ชื่อผู้ใช้อีเมล>' src scripts docs` → ถ้าโผล่ในไฟล์กฎ (ตารางบน) = ต้องทำขั้น 1
-- env ของ stack (Portainer → stack → Environment) ว่ามีอีเมลเขาใน `REVIEW_*_EMAILS`, `SOUND_COORDINATOR_EMAILS`, `INITIAL_ADMIN_EMAILS`, `AUTO_COPRODUCER_*` ไหม
+- env ของ stack (Portainer → stack → Environment) ว่ามีอีเมลเขาใน `REVIEW_*_EMAILS`, `SOUND_COORDINATOR_EMAILS`, `EPISODE_REMOVER_EMAILS`, `INITIAL_ADMIN_EMAILS`, `AUTO_COPRODUCER_*` ไหม
 - สคริปต์ cron บนเครื่อง operator (`~/.hermes/scripts/`)
 
 ### ขั้น 1 — ถอดชื่อออกจากกฎในโค้ด แล้ว deploy [ทำ **ก่อน** ขั้น 2]
@@ -52,7 +52,7 @@ python3 scripts/ops/offboard.py --leaver <email> --actor <อีเมลคน�
 ทำเฉพาะเมื่อขั้น 0 เจอชื่อเขาในไฟล์กฎ · ทำก่อน apply เพราะถ้า apply ก่อน กฎจะเติมชื่อเขากลับเข้าใบใหม่ระหว่างรอ deploy
 
 1. `src/lib/outlet-coproducer.ts` — เอาออกจาก `BUILT_IN_DEFAULT_COPRODUCERS` (หรือเปลี่ยนเป็นคนใหม่ — ต้องเป็นคนเดียวกับ seed ใน `outlet-producers.ts`) · เทส `src/lib/__tests__/outlet-coproducer.test.ts` ทดสอบกลไกผ่าน env ไม่ pin ชื่อคน (v1.242) จึงไม่ต้องแก้ตามชื่อ
-2. `vp-assign.ts`, `shared-mailboxes.ts`, ค่าตั้งต้นใน `review-access.ts` / `shoot-review.ts` — ถ้ามี
+2. `vp-assign.ts`, `shared-mailboxes.ts`, ค่าตั้งต้นใน `review-access.ts` / `shoot-review.ts`, `episodeRemoverEmails()` / `soundCoordinatorEmails()` ใน `session.ts` — ถ้ามี
 3. **เก็บแถว seed ไว้:** `src/lib/outlet-producers.ts` และ `team-profiles.ts` / `team-roster.ts` ไม่ต้องลบ — `POST /api/admin/import-producers` เป็น endpoint ที่แอดมินกดเอง ไม่ใช่ตอนบูต และแถวที่มีอยู่แล้วมัน**ไม่แตะ role/active** (`src/app/api/admin/import-producers/route.ts` คอมเมนต์ v1.108) · `prisma/seed.ts` ตอนบูต upsert คนใน `team-profiles.ts` — path `create` ตั้ง `active:true` ฉะนั้น**ลบแถว users ทิ้ง = ถูกสร้างคืนเป็น active** (ดู "สิ่งที่ห้ามทำ")
 4. CHANGELOG → CI → `python3 scripts/ops/deploy.py <sha>` (`docs/runbook-deploy-rollback.md`)
 

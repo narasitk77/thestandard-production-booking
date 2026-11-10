@@ -528,6 +528,9 @@ services:
       # ตั้งเพิ่มคนสำรองได้ที่นี่โดยไม่ต้อง deploy: coordinator คนเดียวลาหยุดแล้ว
       # คิวค้างทั้งคิว เป็นความเสี่ยงที่จริงกว่าความเรียบร้อยของการฮาร์ดโค้ด
       SOUND_COORDINATOR_EMAILS: ${SOUND_COORDINATOR_EMAILS:-}
+      # คนที่ "ลดจำนวนตอน" ได้นอกจาก ADMIN (v1.284 · คั่นด้วยจุลภาค · ต้องเป็น console role)
+      # ว่าง = ใช้ค่าในโค้ด `tossapol.b@thestandard.co` (ตุ้ย — นัทสั่ง 10 พ.ย. 2569)
+      EPISODE_REMOVER_EMAILS: ${EPISODE_REMOVER_EMAILS:-}
       # กล่องกลางที่รับแจ้งคำขอใหม่ · ว่าง = sound@thestandard.co ตามค่าในโค้ด
       # ⚠️ อย่าตั้งเป็นที่อยู่เดียวกับ SMTP_USER — dropSender() ในคิวมิกซ์จะตัดทิ้ง (เหตุผลเดิม
       # "Gmail ไม่ส่งเมลถึงตัวเอง" ผิด: ตรวจ 9 ต.ค. 2569 เมลหาตัวเองเข้า Inbox ได้)

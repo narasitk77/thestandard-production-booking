@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession, getOTApproverAccess, getUploadAccess } from '@/lib/session'
+import { getSession, getOTApproverAccess, getUploadAccess, canRemoveEpisodes } from '@/lib/session'
 
 export async function GET() {
   const session = await getSession()
@@ -24,6 +24,8 @@ export async function GET() {
       signatureUpdatedAt: user.signatureUpdatedAt,
       canApproveOT,
       canUpload,
+      // v1.284 — the ลดจำนวนตอน button on /admin/[id] (same rule as the endpoint)
+      canRemoveEpisodes: canRemoveEpisodes({ email: user.email, role: user.role }),
     } : null,
   })
 }

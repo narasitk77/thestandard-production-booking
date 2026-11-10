@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.284.0] — 2026-11-10 · ตุ้ยลดจำนวนตอนได้ (นัทสั่ง "เพิ่มสิทธิ์ลบตอนให้ตุ้ยด้วย")
+
+### Changed
+- `POST /api/admin/[id]/remove-episodes` (ปุ่ม "ลดจำนวนตอน" บน /admin/[id]): จาก ADMIN เท่านั้น → **ADMIN + รายคนใน
+  `EPISODE_REMOVER_EMAILS`** · ว่าง = ค่าในโค้ด `tossapol.b@` (ตุ้ย) · ต้องเป็น console role ด้วย
+- เปิดเป็นรายคน **ไม่เปิดทั้ง role COORDINATOR** — COORDINATOR ตอนนี้มี 2 คน (ตุ้ย, กฤตพล) · ลบตอนแล้วกู้ Production ID คืนไม่ได้
+- ปุ่มบนหน้าอ่านกฎเดียวกันผ่าน `/api/me` → `canRemoveEpisodes` (ไม่โผล่ปุ่มที่กดแล้ว 403)
+- `EPISODE_REMOVER_EMAILS` ประกาศใน `docker-compose.portainer.yml` · เพิ่ม/เปลี่ยนคนได้ที่ stack env ไม่ต้อง deploy
+- runbook-offboarding: เพิ่มตัวแปรนี้ในรายการที่ต้องเช็กตอนคนออก
+- เทสต์ `episode-remover-access.test.ts`: ตุ้ยผ่าน · กฤตพล (COORDINATOR) 403 · USER ในลิสต์ไม่ได้ · env แทนค่าเริ่มต้นได้
+
 ## [1.283.0] — 2026-11-09 · `assignedAt` / `assignedByEmail` บนใบจอง (นัทสั่ง "เพิ่มคอลัมน์ assignedAt ตามข้อเสนอ")
 
 ### Added

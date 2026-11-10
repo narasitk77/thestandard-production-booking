@@ -4,8 +4,9 @@
  * ลดจำนวนตอนในใบจอง — คู่ตรงข้ามของ add-episodes แต่ **ระวังกว่ามาก** เพราะ
  * ลบแล้วไม่มีทางกู้ ID กลับ (ห้ามมินต์ซ้ำ ไม่งั้น Production ID จะชนของเก่า)
  *
- * ADMIN เท่านั้น — ไม่ใช่ requireConsole เหมือน add-episodes ตามคอนเวนชันของรีโป
- * ที่งานทำลายข้อมูลใช้ด่านที่แคบกว่า (ดู bulk-cancel ใน admin/routine/route.ts)
+ * ADMIN + รายคนใน EPISODE_REMOVER_EMAILS (v1.284 · ค่าเริ่มต้นตุ้ย) — ไม่ใช่ requireConsole
+ * เหมือน add-episodes ตามคอนเวนชันของรีโปที่งานทำลายข้อมูลใช้ด่านที่แคบกว่า
+ * (ดู bulk-cancel ใน admin/routine/route.ts) · ดู canRemoveEpisodes ใน session.ts
  *
  * กฎว่าลบอะไรได้บ้างอยู่ที่ `src/lib/episode-removal.ts` ที่เดียว (เทสได้ 9 เคส)
  * เส้นนี้รับผิดชอบแค่ "ลงมือตามแผน" และตามเก็บผลข้างเคียงให้ครบ:
@@ -22,7 +23,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/session'
+import { getSession, canRemoveEpisodes } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { planEpisodeRemoval, type RemovableEpisode } from '@/lib/episode-removal'
 import { summarizeGearNotes } from '@/lib/gear-notes'
@@ -35,8 +36,8 @@ export async function POST(
   { params }: { params: { id: string } },
 ) {
   try {
-    const session = await requireAdmin()
-    if (!session) return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+    const session = await getSession()
+    if (!session || !canRemoveEpisodes(session)) return NextResponse.json({ error: 'ไม่มีสิทธิ์ลดจำนวนตอน (เฉพาะ Admin และคนที่ได้รับสิทธิ์)' }, { status: 403 })
 
     const body = await request.json().catch(() => ({}))
     const ids: string[] = Array.isArray(body.episodeRowIds) ? body.episodeRowIds.map(String) : []

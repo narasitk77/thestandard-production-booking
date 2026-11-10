@@ -314,6 +314,26 @@ export function soundCoordinatorEmails(): string[] {
   return raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
 }
 
+/**
+ * v1.284 — คนที่ "ลดจำนวนตอน" ได้นอกจาก ADMIN (นัทสั่ง 10 พ.ย. 2569 "เพิ่มสิทธิ์ลบตอนให้ตุ้ย")
+ *
+ * remove-episodes เป็น ADMIN-only โดยตั้งใจ (ลบแล้วกู้ Production ID คืนไม่ได้) จึงเปิดเป็น
+ * รายคน ไม่เปิดทั้ง role — COORDINATOR มีหลายคน (ณ วันนี้ตุ้ยกับกฤตพล) · ค่าเริ่มต้น
+ * tossapol.b@ (ตุ้ย, Production Coordinator) · ต้องเป็น console role ด้วย (USER ในลิสต์ = ไม่ได้)
+ * ⚠️ ประกาศใน docker-compose.portainer.yml แล้ว (compose-env-coverage.test.ts บังคับ)
+ */
+export function episodeRemoverEmails(): string[] {
+  const raw = process.env.EPISODE_REMOVER_EMAILS?.trim()
+  if (!raw) return ['tossapol.b@thestandard.co']
+  return raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+}
+
+export function canRemoveEpisodes(s: { email?: string | null; role?: string | null } | null | undefined): boolean {
+  if (!s) return false
+  if (s.role === 'ADMIN') return true
+  return hasConsoleAccess(s.role) && !!s.email && episodeRemoverEmails().includes(s.email.toLowerCase())
+}
+
 export async function getSoundAccess(
   email: string | null | undefined,
   role?: string | null,
