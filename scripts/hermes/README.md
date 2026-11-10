@@ -1,6 +1,6 @@
 # Hermes cron scripts (probook watchdogs)
 
-สคริปต์ 3 ตัวนี้เคยเป็น **Claude Code scheduled routine** แล้วย้ายมาอยู่บน **Hermes cron**
+สคริปต์ watchdog 3 ตัวแรกเคยเป็น **Claude Code scheduled routine** แล้วย้ายมาอยู่บน **Hermes cron**
 เมื่อ 2026-08-18. ตัวที่รันจริงคือสำเนาใน `~/.hermes/scripts/` — โฟลเดอร์นี้คือต้นฉบับที่ git คุม
 (`~/.hermes` ไม่มีระบบสำรอง และ `updates.pre_update_backup: false` ใน `~/.hermes/config.yaml`
 หมายความว่าการอัปเดต Hermes ไม่ได้สำรองอะไรให้)
@@ -10,6 +10,7 @@
 | `probook-worker-check.py` | `0 9,21 * * *` | **1** probe `/api/health-summary` + `/api/version` · **2** สแกน log container 24 ชม. ผ่าน Portainer API · **3** เฝ้า launchd NAS agent · **4** เตือนหมุนงวดไดรฟ์ฟุตเทจ |
 | `probook-idfirst-monitor.py` | `30 9 * * *` | อ่าน `/api/internal/id-first-stats` เก็บ snapshot 14 วัน; แจ้งเมื่อ fallback พุ่ง / hit ตกเกือบ 0 / endpoint ล่ม 2 วันติด |
 | `probook-landing-cleanup.py` | `0 12 * * *` | `landing/manage?prune=today` แบบ dry-run → apply → verify; ลบเฉพาะ drop folder ที่ว่าง (ฟุตเทจส่งเข้ากล่องแล้ว) |
+| `probook-tuy-digest.py` | `30 8,17 * * *` | **ส่งข้อความหาคน** (ไม่ใช่ watchdog): สรุปใบจองที่เปลี่ยนตั้งแต่รอบก่อน → Pig → ตุ้ย (`person:ตุ้ย`) · นัทสั่ง 10 พ.ย. 2569 · ทุกฉบับเก็บที่ `~/.hermes/state/probook/tuy-digest/` (`log.jsonl` + `.md` ฉบับละไฟล์) · กุญแจ Pig อ่านจาก `~/.zshrc` ตอนรัน · `--dry-run` / `--self-test` |
 
 ## หลักการที่ต้องรักษาไว้
 

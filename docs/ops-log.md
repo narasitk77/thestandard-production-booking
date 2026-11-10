@@ -4187,3 +4187,23 @@ problem and not a deployment problem.
 - **เปลี่ยนพฤติกรรม prod (นัทอนุมัติด้วยการสั่ง merge):** assign ใบ CANCELLED = 409 "restore it first" (เดิมกลายเป็น ASSIGNED + ส่งเมลทีม) · assign ที่สถานะเปลี่ยนระหว่างอ่านกับเขียน = 409 ให้รีโหลด · audit ใหม่: `booking.assign` `booking.restore` `user.update` `user.add`
 - deploy.py: `--check` ผ่าน (ไม่มี schema change) · backup-2026-11-08T174807.sql.gz 1.37 MB · **จุดถอย sha-c638ebe** (v1.281.0) · ครบสามชั้น 00:52:06 · /api/version 1.282.0 schemaSync in-sync
 - ตรวจหลัง deploy: คอนเทนเนอร์ sha-f412b1b Up · DB รีสตาร์ทพร้อม deploy (ปกติ) · boot log: schema in sync, seed 31 untouched, worker สตาร์ตครบ (footage-sync / lark-export ปิดอยู่เหมือนเดิม), ไม่มี error · stack env SHOOT_REVIEW_MAX_BOOKINGS=8 ยังอยู่ · purge audit >90 วัน 15 แถว (retention ปกติ)
+
+## 2026-11-10 11:54 — สรุปใบจองที่เปลี่ยนถึงตุ้ย (รอบทดลอง) · นัทสั่ง "ลองก่อนได้ จากอัพเดทที่เพิ่งผ่านมา 24 ชม" / "แจ้งตุ้ยคนเดียว" / "เรารีเชค" / "ส่ง"
+
+- ช่วง 9 พ.ย. 11:23 – 10 พ.ย. 11:23 · อ่าน audit_logs + bookings จาก prod (SELECT อย่างเดียว) · กฎชุดเดียวกับที่ปุ๊กประกาศให้ Pig (ยกเลิก/ลบ · เลื่อนวัน/เวลา/สถานที่ · เปลี่ยนทีมงานที่ถ่ายใน 7 วัน · เปลี่ยน Producer · ใบใหม่ · ไม่นับอนุมัติ) + ส่วน "ที่ตุ้ยแก้เอง"
+- รีเช็กก่อนส่ง: ผู้ตรวจ 3 คน + ผู้แย้ง 2 คนต่อข้อ → แก้ 6 จุด (จัดทีมตอนอนุมัติไม่นับ, crew diff หลังอนุมัติ, เหตุผลยกเลิกนอกช่วง, งานที่ถ่ายจบแล้วไม่อยู่ใน 🔴, ถอดตอน WLT-OTH-261113-01 ที่ตกไป, ชื่อ/ปี พ.ศ.)
+- ส่ง `pig -to ตุ้ย` ครั้งเดียว → ok · qid **31EB06** · 24 รายการ · ฉบับเต็มเก็บที่ `~/.hermes/state/probook/tuy-digest/` (หน้ารายงาน Pig อยู่ 14 วัน)
+- WLT-OTH-261113-01: ถอดตอน "morning wealth interview" (OTH) เหลือ "สัมภาษณ์แขก" (NGI) จากบัญชีนัท 9 พ.ย. 14:03 — โน้ตของแอ๊นท์ขอเก็บตอน Onyx · นัทยืนยัน "ถอดแล้ว" (ตั้งใจ)
+
+## 2026-11-10 12:29 — v1.283.0 + v1.284.0 deployed · นัทสั่ง "deploy ทั้งสองเวอร์ชันเลย"
+
+- v1.283.0 (4a19d36): คอลัมน์ `bookings.assignedAt` / `assignedByEmail` (นัท: "เพิ่มคอลัมน์ assignedAt ตามข้อเสนอ") · v1.284.0 (e75a27b): ตุ้ยลดจำนวนตอนได้ — `EPISODE_REMOVER_EMAILS` ค่าเริ่มต้น tossapol.b@ (นัท: "เพิ่มสิทธิ์ลบตอนให้ตุ้ยด้วย")
+- deploy.py `--check`: เพิ่ม 2 คอลัมน์ ไม่ลบอะไร · backup-2026-11-10T052451.sql.gz 1.39 MB · **จุดถอย sha-f412b1b** (v1.282.0) · ครบสามชั้น 12:29:30 · /api/version 1.284.0 schemaSync in-sync
+- ตรวจหลัง deploy: boot log "database is now in sync" · คอลัมน์ assignedAt/assignedByEmail อยู่ใน DB จริง · worker สตาร์ตครบ (footage-sync / lark-export ปิดเหมือนเดิม) · stack env SHOOT_REVIEW_MAX_BOOKINGS=8 ยังอยู่
+- ⚠️ นัทขอเลื่อนเริ่มเป็น 12:45 หลังจาก redeploy ยิงไปแล้ว (12:27) — ปล่อยจบตามที่นัทตกลง · ช่วง 502 ราว 12:28:06–12:29:30
+
+## 2026-11-10 12:31 — Hermes job `probook-tuy-digest` (940551ea9ee0) · นัทสั่ง "ตั้งตรวจ worker คอย เรื่องส่งให้ตุ้ยด้วย" / "ลงทะเบียน cron เลย"
+
+- `30 8,17 * * *` · `--no-agent` · deliver discord hermes-agent · สคริปต์ `scripts/hermes/probook-tuy-digest.py` (สำเนาที่รัน: `~/.hermes/scripts/`) · นัทเลือก: สรุปวันละ 2 รอบ + รวม "ที่ตุ้ยแก้เอง"
+- เริ่มต่อจากรอบทดลอง (state lastEnd 10 พ.ย. 11:23) · รอบแรก 17:30 · ทุกฉบับเก็บที่ `~/.hermes/state/probook/tuy-digest/` (นัท: "อยากเก็บที่ส่งให้ตุ้ยด้วย")
+- ตรวจแล้ว: self-test ผ่าน (py3.9 + py3.11) · `--dry-run` อ่าน prod ได้ · replay ช่วงทดลองได้ 24 รายการตรงกับฉบับที่ส่ง
