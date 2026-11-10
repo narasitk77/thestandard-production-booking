@@ -49,6 +49,7 @@ SENT_DIR = os.path.expanduser("~/.hermes/state/probook/tuy-digest")   # <วั�
 SENT_LOG = os.path.join(SENT_DIR, "log.jsonl")
 PROBOOK_ENV = os.path.expanduser("~/.hermes/scripts/probook.env")
 ZSHRC = os.path.expanduser("~/.zshrc")
+APP = "https://probook.thestandard.co"    # ลิงก์หน้าใบจอง /admin/<id> (นัทขอ 10 พ.ย. "แนบลิงก์ไปด้วย")
 TH_MON = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
 
 # READ-ONLY: findMany เท่านั้น — ไม่มี create/update/delete ในสคริปต์นี้
@@ -62,7 +63,7 @@ const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaCli
     select: { at: true, actorEmail: true, action: true, bookingCode: true, fromStatus: true, toStatus: true, changes: true } })
   const codes = [...new Set(audits.map(a => a.bookingCode).filter(Boolean))]
   const bookings = await prisma.booking.findMany({ where: { bookingCode: { in: codes } },
-    select: { bookingCode: true, status: true, deletedAt: true, shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
+    select: { id: true, bookingCode: true, status: true, deletedAt: true, shootDate: true, shootEndDate: true, callTime: true, estimatedWrap: true,
       locationName: true, producer: true, program: { select: { name: true } }, episodes: { select: { episodeId: true, title: true } } } })
   const cancelled = bookings.filter(b => b.status === 'CANCELLED' || b.deletedAt).map(b => b.bookingCode)
   const reqs = cancelled.length ? await prisma.auditLog.findMany({ where: { action: 'booking.cancel_requested', bookingCode: { in: cancelled } },
@@ -253,7 +254,7 @@ def build(d, since, now):
             actors = {r.get("actor") for r in rs}
             by = f" (โดย {first(actors.pop())})" if k == "crew" and len(actors) == 1 and None not in actors and not rs[0]["by_tuy"] else ""
             out.append(ICON[k] + (f" {len(rs)} ใบ" if k == "new" else "") + by)
-            out += ["• " + r["text"] for r in rs]
+            out += ["• " + r["text"] + (f"\n  {APP}/admin/{r['b']['id']}" if r["b"].get("id") else "") for r in rs]
         return out
 
     hdr = f"{since.day} {TH_MON[since.month]} {since:%H:%M} – " + ("" if since.date() == now.date() else f"{now.day} {TH_MON[now.month]} ") + f"{now:%H:%M}"
@@ -479,7 +480,7 @@ def self_test():
     since = now - timedelta(hours=24)
 
     def bk(code, **o):
-        return dict(dict(bookingCode=code, status="CONFIRMED", deletedAt=None, shootDate="2026-11-13T00:00:00.000Z", shootEndDate=None,
+        return dict(dict(id=f"id-{code}", bookingCode=code, status="CONFIRMED", deletedAt=None, shootDate="2026-11-13T00:00:00.000Z", shootEndDate=None,
                          callTime="09:00", estimatedWrap="12:00", locationName="Studio 1", producer="แอ๊นท์",
                          program={"name": "Long-form"}, episodes=[{"episodeId": code, "title": "ตอนหนึ่ง"}]), **o)
 
@@ -512,6 +513,7 @@ def self_test():
     assert "CXL-1" in mine and "แขกขอเลื่อน" in mine and "SWAP-1" in mine, text
     assert "ถอด 1 ตอน (EPS-1A)" in text and "(โดย นัท)" in text, text
     assert "🆕 ใบจองใหม่ 1 ใบ" in text and "NEW-1" in text, text
+    assert f"{APP}/admin/id-SWAP-1" in text and f"{APP}/admin/id-NEW-1" in text, "ทุกรายการต้องมีลิงก์หน้าใบจอง"
     assert not re.search(r"\d{3}-?\d{3}-?\d{4}|@thestandard", text), "ห้ามมีเบอร์/อีเมลในข้อความ"
     assert build(dict(d, audits=[A("booking.approve", "APPR-1", TUY)]), since, now) == (None, 0), "อนุมัติอย่างเดียว = ไม่มีอะไรส่ง"
     print("self-test ok\n" + text)
