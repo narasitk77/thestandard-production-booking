@@ -5,15 +5,15 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { validateAnswers, summarize, applyOverrides, validateOverrides, SURVEY, TEAMS, TEAM_MIN, TEXT_MAX, OTHER_MAX } from '../survey'
 
-// v1.279.2 — `useful` (strengths to keep) is required too, so the base answer carries one pick
-const BASE = { team: 'nws', efficiency: '4', satisfaction: '3', useful: ['status'] }
+// v1.279.2 — `useful` (strengths to keep) is required; v1.284.1 — so is `fix` (what to improve first), so the base answer carries one pick of each
+const BASE = { team: 'nws', efficiency: '4', satisfaction: '3', useful: ['status'], fix: ['form'] }
 
 test('a complete answer passes; team goes to group, unknown keys are stripped', () => {
   const r = validateAnswers({ ...BASE, smuggled: 'x', role: 'queue' })
   assert.equal(r.ok, true)
   if (!r.ok) return
   assert.equal(r.group, 'nws')
-  assert.deepEqual(r.answers, { efficiency: '4', satisfaction: '3', useful: ['status'] })
+  assert.deepEqual(r.answers, { efficiency: '4', satisfaction: '3', useful: ['status'], fix: ['form'] })
 })
 
 test('team, both scales and the strengths pick are required; free text may be left out', () => {
@@ -28,6 +28,19 @@ test('team, both scales and the strengths pick are required; free text may be le
   assert.equal(validateAnswers(noUseful).ok, false)
   assert.equal(validateAnswers({ ...noUseful, useful_other: 'ลิงก์' }).ok, false)  // no "อื่น ๆ" box since v1.279.3 — free text can't stand in
   assert.equal(validateAnswers({ ...BASE, improve: '' }).ok, true)
+})
+
+test('v1.284.1 — `fix` is required like `useful`, shares its option list, "none" is exclusive, nothing outside the list passes', () => {
+  const { fix, ...noFix } = BASE
+  assert.equal(validateAnswers(noFix).ok, false)
+  assert.equal(validateAnswers({ ...BASE, fix: [] }).ok, false)
+  assert.equal(validateAnswers({ ...BASE, fix: ['none'] }).ok, true)
+  assert.equal(validateAnswers({ ...BASE, fix: ['none', 'form'] }).ok, false)
+  assert.equal(validateAnswers({ ...BASE, fix: ['hack'] }).ok, false)
+  assert.equal(validateAnswers({ ...BASE, fix: ['form', 'capacity', 'folder'] }).ok, true)
+  const ids = (id: string) => SURVEY.questions.find(q => q.id === id)!.options!.map(o => o.id)
+  assert.deepEqual(ids('fix'), ids('useful'))   // one list: "liked" vs "fix first" compare per feature
+  assert.ok(ids('useful').includes('form'))
 })
 
 test('scale values: 1–5 only; "na" refused since v1.279.2 (no question offers it any more)', () => {
@@ -169,7 +182,7 @@ test('applyOverrides: wording changes, structure (ids, kind, exclusive) does not
   assert.deepEqual(useful.options!.map(o => o.id), SURVEY.questions.find(q => q.id === 'useful')!.options!.map(o => o.id))
   assert.equal(useful.options!.find(o => o.id === 'status')!.label, 'My Bookings')
   assert.equal(S.questions.find(q => q.id === 'efficiency')!.help, 'ช่วย')
-  assert.equal(SURVEY.questions.find(q => q.id === 'useful')!.title.startsWith('ฟังก์ชัน'), true)   // code untouched
+  assert.equal(SURVEY.questions.find(q => q.id === 'useful')!.title.startsWith('ส่วนไหน'), true)   // code untouched
   const { useful: _u, ...noUseful } = BASE
   assert.equal(validateAnswers(noUseful, S).ok, true)
   assert.equal(validateAnswers(noUseful).ok, false)

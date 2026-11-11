@@ -162,7 +162,7 @@ export default function AdminSurveyPage() {
             {s.smallTeams > 0 && <p className="mt-2 text-[11px] text-gray-500">อีก {s.smallTeams} คนไม่แยกตามทีม (ทีมที่คนตอบไม่ถึง {data.teamMin} คน หรือทีมที่ต้องรวมไว้ด้วย เพื่อไม่ให้เอาภาพรวมมาลบแล้วรู้คำตอบของใครได้) แต่นับรวมในภาพรวมด้านบน</p>}
           </div>
 
-          <div className="gf-card p-4">
+          <div className="gf-card p-4 space-y-5">
             {S.questions.filter(q => q.kind === 'multi').map(q => {
               const c = s.counts[q.id] || {}
               const max = Math.max(1, ...Object.values(c))
