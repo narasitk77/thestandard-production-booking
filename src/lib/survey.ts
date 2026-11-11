@@ -62,10 +62,20 @@ export const TEAMS: Option[] = [
 /** ผลแยกทีมโชว์เฉพาะทีมที่มีคนตอบตั้งแต่เท่านี้ (ตั้งแต่ v1.280.3 ไม่ได้ประกาศเลขนี้บนหน้าคนตอบแล้ว) */
 export const TEAM_MIN = 3
 
+/**
+ * v1.285.1 — "กล่อง" ของคนตอบ (ใส่ฝั่ง server ตอนบันทึก เก็บในคำตอบเป็น `seg`): booker = จองคิวเอง (สร้าง/Producer/Co-Producer ของใบที่ถ่ายใน 180 วัน)
+ * other = ล็อกอินเข้ามาตอบแต่ไม่ได้จองเอง (ไม่เคยใช้ / ใช้ทางอ้อม / ทีมจัดคิว) — ไว้วัดว่าคนที่ไม่ได้ใช้เองรู้สึกต่างจากคนใช้ไหม
+ */
+export type Segment = 'booker' | 'other'
+export const SEGMENTS: Array<{ id: Segment; label: string }> = [
+  { id: 'booker', label: 'คนจองคิวเอง' },
+  { id: 'other', label: 'ไม่ได้จองเอง / ไม่เคยใช้' },
+]
+
 export const SURVEY = {
   key: SURVEY_KEY,
   title: 'แบบสำรวจการใช้งาน Production Booking',
-  intro: 'อยากฟังความเห็นจากคนที่จองคิวถ่ายผ่านระบบ ทั้งส่วนที่ใช้ได้ดีและส่วนที่ควรปรับ เพื่อนำไปปรับปรุงระบบต่อครับ',
+  intro: 'อยากฟังความเห็นจากทุกคนที่เกี่ยวข้องกับการจองคิวถ่ายผ่านระบบ ทั้งส่วนที่ใช้ได้ดีและส่วนที่ควรปรับ เพื่อนำไปปรับปรุงระบบต่อครับ',
   facts: ['⏱ ประมาณ 1–2 นาที', '🙈 ไม่ผูกชื่อกับคำตอบ'],
   // v1.280.3 — นัทสั่งเอาประโยค "ผู้ดูแลระบบจะเห็นผลแยกรายทีม…" ออกจากจอ · กฎ TEAM_MIN ใน summarize ยังทำงานเหมือนเดิม (แค่ไม่ประกาศ)
   privacy: 'ระบบจำแค่ว่าคุณตอบแล้ว (จะได้ไม่ชวนซ้ำ) แต่ไม่เก็บว่าใครตอบอะไร',
@@ -257,6 +267,11 @@ export type Summary = {
    */
   teams: Array<{ id: string; label: string; n: number; scales: Record<string, ScaleStat> }>
   smallTeams: number
+  /**
+   * v1.285.1 — แยกตามกล่อง (คนจองคิวเอง vs ไม่ได้จองเอง) · โชว์เมื่อ "ทั้งสองกล่อง" มีคนตอบ ≥ teamMin เท่านั้น
+   * ไม่งั้น null: กล่องเล็ก 1–2 คน = ภาพรวมลบอีกกล่องได้คะแนนรายคน · คำตอบเก่าที่ไม่มี seg ไม่นับเข้ากล่องไหน (นับในภาพรวมตามปกติ)
+   */
+  segments: Array<{ id: Segment; label: string; n: number; scales: Record<string, ScaleStat> }> | null
   /** questionId → optionId → จำนวนคน (เฉพาะ multi) */
   counts: Record<string, Record<string, number>>
   /** questionId → จำนวนคนที่ตอบข้อ multi นั้นจริง (ข้อไม่บังคับ — ตัวหารไม่ใช่ total) */
@@ -322,5 +337,11 @@ export function summarize(rows: Array<{ group: string; answers: unknown }>, team
     const i = teams.reduce((m, t, j) => (t.n < teams[m].n ? j : m), 0)
     smallTeams += teams.splice(i, 1)[0].n
   }
-  return { total: valid.length, scales: scalesOf(valid), teams, smallTeams, counts, answered, texts }
+  const segRows = SEGMENTS.map(s => ({ ...s, rs: valid.filter(r => r.answers.seg === s.id) }))
+  // ต้องไม่มีคำตอบ "ไม่มีกล่อง" ค้าง: ถ้ามี (ข้อมูลก่อน v1.285.1) ภาพรวมลบสองกล่อง = คะแนนของคนกลุ่มนั้นที่ไม่ถึงเพดาน
+  const unboxed = valid.length - segRows.reduce((s, x) => s + x.rs.length, 0)
+  const segments = segRows.every(x => x.rs.length >= teamMin) && (unboxed === 0 || unboxed >= teamMin)
+    ? segRows.map(x => ({ id: x.id, label: x.label, n: x.rs.length, scales: scalesOf(x.rs) }))
+    : null
+  return { total: valid.length, scales: scalesOf(valid), teams, smallTeams, segments, counts, answered, texts }
 }

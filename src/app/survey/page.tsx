@@ -8,12 +8,13 @@ import { SURVEY, OTHER_MAX, TEXT_MAX, type Question, type SurveyDef } from '@/li
 /* =============================================================================
    /survey — แบบสำรวจการใช้งาน (v1.279: ทุกข้อในหน้าเดียว · เดิม v1.278 ทีละคำถาม)
    ส่งครั้งเดียวตอนกด "ส่งคำตอบ" · ข้อบังคับที่ยังไม่ตอบขึ้นกรอบแดง แล้วเลื่อนไปข้อแรกที่ขาด
-   โหมดดูตัวอย่าง = เฉพาะทีมจัดคิว/แอดมิน (canPreview) ตอนปิดรับหรือไม่มีสิทธิ์ตอบ — กรอกได้ครบ ไม่ยิง request
-   คนจองคิวตอนปิดรับเห็นจอ "ไม่ได้เปิดรับ" (เดิมได้โหมดตัวอย่างแล้วขึ้น "ส่งแล้ว ขอบคุณ" ทั้งที่ไม่ได้บันทึก)
+   โหมดดูตัวอย่าง = เฉพาะทีมจัดคิว/แอดมิน (canPreview) ตอนปิดรับ — กรอกได้ครบ ไม่ยิง request
+   คนอื่นตอนปิดรับเห็นจอ "ไม่ได้เปิดรับ" (เดิมได้โหมดตัวอย่างแล้วขึ้น "ส่งแล้ว ขอบคุณ" ทั้งที่ไม่ได้บันทึก)
+   v1.285.1 — ตอนเปิดรับ ทุกคนที่ล็อกอินตอบจริงได้ (ไม่มีด่าน "เฉพาะคนจองคิว" แล้ว)
    ============================================================================= */
 
 /** survey = ชุดคำถามที่ใช้จริง (โค้ด + คำที่แอดมินแก้ v1.279.3) — API เก่าไม่ส่งมาก็ใช้ของโค้ด */
-type Status = { key: string; open: boolean; eligible: boolean; answered: boolean; canPreview?: boolean; survey?: SurveyDef }
+type Status = { key: string; open: boolean; answered: boolean; canPreview?: boolean; survey?: SurveyDef }
 type Answers = Record<string, string | string[]>
 
 const BRAND = '#0b8043'
@@ -51,15 +52,12 @@ export default function SurveyPage() {
     return <Shell><div className="text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด…</div></Shell>
   }
   const S = status.survey ?? SURVEY
-  const preview = !!status.canPreview && (!status.open || !status.eligible)
+  const preview = !!status.canPreview && !status.open
   if (!preview && !status.open) {
     return <Shell><Center emoji="🕒" title="ตอนนี้แบบสำรวจไม่ได้เปิดรับคำตอบ" /></Shell>
   }
   if (!preview && status.answered) {
     return <Shell><Center emoji="🙏" title="คุณตอบแบบสำรวจนี้ไปแล้ว ขอบคุณครับ" /></Shell>
-  }
-  if (!preview && !status.eligible) {
-    return <Shell><Center emoji="🙂" title="แบบสำรวจรอบนี้ถามเฉพาะคนที่จองคิวถ่ายครับ" body="ขอบคุณที่แวะมานะครับ" /></Shell>
   }
   if (done) {
     return <Shell>{preview
@@ -96,9 +94,7 @@ export default function SurveyPage() {
 
   return (
     <Shell>
-      {preview && <PreviewNote text={status.open
-        ? '🧪 โหมดดูตัวอย่างสำหรับทีมจัดคิว — กรอกได้ แต่ไม่มีอะไรถูกบันทึก'
-        : '🧪 ยังไม่เปิดรับคำตอบ — นี่คือหน้าตัวอย่าง กรอกได้ แต่ไม่มีอะไรถูกบันทึก'} />}
+      {preview && <PreviewNote text="🧪 ยังไม่เปิดรับคำตอบ — นี่คือหน้าตัวอย่าง กรอกได้ แต่ไม่มีอะไรถูกบันทึก" />}
       <h1 className="text-xl font-semibold text-gray-900 leading-snug">{S.title}</h1>
       <p className="mt-2 text-[15px] text-gray-700 leading-relaxed">{S.intro}</p>
       <div className="mt-3 flex flex-wrap gap-2">

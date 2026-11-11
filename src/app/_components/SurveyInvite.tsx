@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { X } from 'lucide-react'
 
 /**
- * v1.278 — การ์ดชวนตอบแบบสำรวจบนหน้าแรก โผล่เฉพาะตอนเปิดรับ + มีสิทธิ์ + ยังไม่ตอบ
+ * v1.278 — การ์ดชวนตอบแบบสำรวจบนหน้าแรก โผล่เฉพาะตอนเปิดรับ + ยังไม่ตอบ (ทุกคนที่ล็อกอิน — v1.285.1)
  * "ไว้ทีหลัง" = หลบไป 3 วันในเครื่องนี้ (localStorage — ถ้าใช้ไม่ได้ก็แค่โผล่ใหม่ครั้งหน้า)
  */
 const SNOOZE_MS = 3 * 24 * 3_600_000
@@ -17,7 +17,7 @@ export default function SurveyInvite() {
     fetch('/api/survey')
       .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(d => {
-        if (!d?.open || !d.eligible || d.answered) return
+        if (!d?.open || d.answered) return
         let until = 0
         try { until = Number(localStorage.getItem(`survey-snooze:${d.key}`)) || 0 } catch {}
         if (until < Date.now()) setKey(d.key)

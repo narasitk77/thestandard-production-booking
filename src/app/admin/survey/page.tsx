@@ -95,7 +95,7 @@ export default function AdminSurveyPage() {
   const S = data.survey ?? SURVEY
   const SCALES = S.questions.filter(q => q.kind === 'scale')
   const rate = data.eligible ? (data.participants / data.eligible) * 100 : null
-  const responded = <Kpi label="ตอบแล้ว" value={`${data.participants}`} sub={`จาก ${data.eligible} คนที่มีสิทธิ์${rate !== null ? ` · ${fmt(rate, 0)}%` : ''}`} />
+  const responded = <Kpi label="ตอบแล้ว" value={`${data.participants}`} sub={`จาก ${data.eligible} บัญชีที่ใช้งานอยู่${rate !== null ? ` · ${fmt(rate, 0)}%` : ''}`} />
 
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4">
@@ -114,7 +114,7 @@ export default function AdminSurveyPage() {
       </div>
       {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
       <div className={`text-sm rounded-lg border p-3 ${data.open ? 'bg-green-50 border-green-200 text-green-900' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>
-        {data.open ? '🟢 เปิดรับคำตอบอยู่ — คนจองคิวที่ยังไม่ตอบเห็นการ์ดชวนบนหน้าแรก'
+        {data.open ? '🟢 เปิดรับคำตอบอยู่ — ทุกคนที่ล็อกอินและยังไม่ตอบเห็นการ์ดชวนบนหน้าแรก'
           : '⚪ ปิดรับคำตอบ — ไม่มีใครเห็นการ์ดชวน · หน้าแบบสำรวจเป็นโหมดดูตัวอย่าง (ไม่บันทึก)'}
       </div>
 
@@ -140,6 +140,26 @@ export default function AdminSurveyPage() {
 
           <div className="gf-card p-4 space-y-5">
             {SCALES.map(q => <ScaleBars key={q.id} title={q.title} labels={q.scale!} st={s.scales[q.id]} naLabel={q.na} />)}
+          </div>
+
+          <div className="gf-card p-4">
+            <div className="text-sm font-medium text-gray-800">แยกตามกล่อง</div>
+            {!s.segments ? <div className="text-xs text-gray-500 mt-1">ยังแยกไม่ได้ — ต้องมีคนตอบตั้งแต่ {data.teamMin} คนทั้งสองกล่อง (ไม่งั้นเอาภาพรวมลบอีกกล่องแล้วรู้คะแนนรายคน)</div> : (
+              <table className="mt-2 w-full text-xs">
+                <thead><tr className="text-gray-500 text-left"><th className="py-1 font-normal">กล่อง</th><th className="font-normal text-right">คน</th>
+                  {SCALES.map(q => <th key={q.id} className="font-normal text-right">{q.id === 'efficiency' ? 'ประสิทธิภาพ' : 'พึงพอใจ'}</th>)}</tr></thead>
+                <tbody>
+                  {s.segments.map(t => (
+                    <tr key={t.id} className="border-t border-gray-100">
+                      <td className="py-1.5 text-gray-800">{t.label}</td>
+                      <td className="text-right tabular-nums">{t.n}</td>
+                      {SCALES.map(q => <td key={q.id} className="text-right tabular-nums">{fmt(t.scales[q.id].avg)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <p className="mt-2 text-[11px] text-gray-500">กล่องดูจากว่าตอนตอบ เป็นคนสร้าง/Producer/Co-Producer ของใบที่ถ่ายใน 180 วันหรือไม่ — ไม่ได้ถามในฟอร์ม</p>
           </div>
 
           <div className="gf-card p-4">

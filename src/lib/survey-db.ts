@@ -3,8 +3,7 @@
  * (นิยามคำถาม + กฎตรวจคำตอบอยู่ที่ survey.ts ซึ่งหน้า client ใช้ร่วม)
  */
 import { prisma } from './db'
-import { hasConsoleAccess } from './roles'
-import { validateOverrides, type Answers, type Overrides } from './survey'
+import { validateOverrides, type Answers, type Overrides, type Segment } from './survey'
 
 const openKey = (key: string) => `survey-open:${key}`
 const textKey = (key: string) => `survey-text:${key}`
@@ -44,12 +43,12 @@ export async function setSurveyText(key: string, ov: Overrides | null): Promise<
 const BOOKER_WINDOW_MS = 180 * 24 * 3_600_000
 
 /**
- * คนที่แบบสำรวจนี้ถามได้ = คนจองคิว: สร้าง / เป็น Producer / Co-Producer ของใบที่ถ่ายใน 180 วัน
- * v1.279 — ไม่รวมทีมจัดคิว (สิทธิ์คอนโซล) แล้ว: ฟีดแบ็ก 4 พ.ย. "เน้นให้ฝั่งคนจองคิวตอบ (Producer, PM)"
- * ทีมจัดคิวเปิดหน้าได้ในโหมดดูตัวอย่าง (`canPreview` ใน GET /api/survey)
+ * v1.285.1 — ทุกคนที่ล็อกอินตอบได้ (เดิม v1.278–v1.285.0 จำกัดเฉพาะคนจองคิว ทีมจัดคิวตอบไม่ได้) · นัทสั่ง 11 พ.ย.:
+ * "ใครล็อกอินเข้ามาก็ให้ตอบ … แบ่งกล่องไว้ก็ได้ เผื่อมีคนไม่เคยใช้มาตอบ จะได้วัดได้"
+ * กล่อง = ว่าเป็น "คนจองคิว" ไหม ณ ตอนตอบ (สร้าง / Producer / Co-Producer ของใบที่ถ่ายใน 180 วัน) → ลงในคำตอบเป็น `seg`
+ * ใช้แยกผลเป็น 2 ก้อน (ใช้จริง vs ไม่ได้จองเอง) — ไม่ใช่ด่านกั้นสิทธิ์
  */
-export async function isSurveyEligible(email: string, role: string | null | undefined): Promise<boolean> {
-  if (hasConsoleAccess(role)) return false
+export async function surveySegment(email: string): Promise<Segment> {
   const n = await prisma.booking.count({
     where: {
       deletedAt: null,
@@ -61,19 +60,12 @@ export async function isSurveyEligible(email: string, role: string | null | unde
       ],
     },
   })
-  return n > 0
+  return n > 0 ? 'booker' : 'other'
 }
 
-/** จำนวนคนที่มีสิทธิ์ตอบ (บัญชี active) — ใช้คิดอัตราการตอบในหน้าผล */
+/** จำนวนคนที่ตอบได้ = บัญชีที่ active ทั้งหมด — ใช้คิดอัตราการตอบในหน้าผล */
 export async function eligibleCount(): Promise<number> {
-  const since = new Date(Date.now() - BOOKER_WINDOW_MS)
-  const [users, bookings] = await Promise.all([
-    prisma.user.findMany({ where: { active: true }, select: { email: true, role: true } }),
-    prisma.booking.findMany({ where: { deletedAt: null, shootDate: { gte: since } }, select: { createdByEmail: true, producerEmail: true, coProducerEmail: true } }),
-  ])
-  const bookers = new Set<string>()
-  for (const b of bookings) for (const e of [b.createdByEmail, b.producerEmail, b.coProducerEmail]) if (e) bookers.add(e.toLowerCase())
-  return users.filter(u => !hasConsoleAccess(u.role) && bookers.has(u.email.toLowerCase())).length
+  return prisma.user.count({ where: { active: true } })
 }
 
 /** Fisher–Yates — สุ่มลำดับจริง (sort แบบ random comparator เอียงตามลำดับเดิม) */

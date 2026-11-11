@@ -192,3 +192,26 @@ test('applyOverrides: wording changes, structure (ids, kind, exclusive) does not
   assert.equal(validateAnswers(noChange).ok, false)        // code default: still required
   assert.equal(applyOverrides(null), SURVEY)
 })
+
+// v1.285.1 — everyone who is logged in may answer; the server tags each answer with a box (`seg`) so non-users can be measured
+test('v1.285.1 — a client-sent seg is stripped by the gate (only the server may set it)', () => {
+  const r = validateAnswers({ ...BASE, seg: 'booker' })
+  assert.equal(r.ok, true)
+  if (r.ok) assert.equal('seg' in r.answers, false)
+})
+
+test('v1.285.1 — segments are shown only when both boxes reach the minimum; scales are per box', () => {
+  const row = (seg: string | undefined, satisfaction: string) => ({ group: 'nws', answers: { efficiency: '3', satisfaction, ...(seg ? { seg } : {}) } })
+  const ok = summarize([row('booker', '5'), row('booker', '5'), row('booker', '4'), row('other', '2'), row('other', '2'), row('other', '3')], 3)
+  assert.deepEqual(ok.segments?.map(x => [x.id, x.n]), [['booker', 3], ['other', 3]])
+  assert.ok(Math.abs(ok.segments![0].scales.satisfaction.avg! - 14 / 3) < 1e-9)
+  assert.ok(Math.abs(ok.segments![1].scales.satisfaction.avg! - 7 / 3) < 1e-9)
+  // one box under the minimum → none shown (overall minus the other box would give that person's score)
+  assert.equal(summarize([row('booker', '5'), row('booker', '5'), row('booker', '4'), row('other', '1')], 3).segments, null)
+  // everyone in one box → no split to show
+  assert.equal(summarize([row('booker', '5'), row('booker', '5'), row('booker', '4')], 3).segments, null)
+  // 1–2 answers with no box (pre-v1.285.1 rows) would be recoverable by subtraction → hidden; 3+ is fine
+  const six = [row('booker', '5'), row('booker', '5'), row('booker', '4'), row('other', '2'), row('other', '2'), row('other', '3')]
+  assert.equal(summarize([...six, row(undefined, '1')], 3).segments, null)
+  assert.notEqual(summarize([...six, row(undefined, '1'), row(undefined, '1'), row(undefined, '1')], 3).segments, null)
+})
