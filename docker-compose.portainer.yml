@@ -222,6 +222,14 @@ services:
       # v1.280 — video-merge leaves a DIFFERENT card (MEDIAPRO shares no clip with the box card) poured onto an
       # existing card in landing and alerts. CARD_HOLD=0 = merge exactly as before v1.280 (rollback lever). App container.
       CARD_HOLD: ${CARD_HOLD:-1}
+      # v1.286 — the daily episode-code check (scripts/hermes/probook-episode-drift.py → /api/internal/episode-sync/run)
+      # REPORTS when a booking holds an episode code the Producer Dashboard no longer lists. With =1 it also RENAMES
+      # a pair only on strong evidence: one code vanished + exactly one unclaimed Dashboard code in the project + same
+      # episode number + the Dashboard row has its OWN label (not empty/'-'/the project name), unique in the project,
+      # equal to every stored title. Writes the DB + sheet col Q + _SHOOT.txt + audit — NOT the booking's Calendar event.
+      # Everything weaker is reported with the likely pair for a human. Default 0 = report only. Code compares === '1'.
+      # Staged like footage-ready: read a few clean reports before switching it on. App container.
+      EPISODE_SYNC_AUTOAPPLY: ${EPISODE_SYNC_AUTOAPPLY:-0}
       # v1.220 — the NOON prune (prune=today), moved in from a Hermes cron on a
       # laptop. Clears empty orphan folders the 19:00 sweep refuses to touch
       # (no matching Booking row / inside the grace window). Trashes EMPTY only,

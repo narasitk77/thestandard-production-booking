@@ -280,3 +280,30 @@ export async function listProjectEpisodes(projectId: string): Promise<ListEpisod
   console.error(`[episodes] ${pid} failed after retry: ${lastError}`)
   return { ok: false, error: lastError }
 }
+
+/**
+ * v1.286 — EVERY episode the Dashboard knows (Published ones included), for the
+ * episode-code drift check (src/lib/episode-sync.ts). Same fresh-JWT retry as
+ * listProjectEpisodes; a failed read comes back as { ok:false } — the caller must
+ * never turn "could not read the Dashboard" into "no drift".
+ *
+ * ponytail: ~12 lines duplicated from listProjectEpisodes on purpose — that one is
+ * the booking form's hot path (6 callers + their tests); not worth touching it to
+ * share a retry loop. Merge them if a third caller appears.
+ */
+export async function listAllDashboardEpisodes(): Promise<ListEpisodesResult> {
+  if (!hasCredentials()) return { ok: false, error: 'Google service account not configured' }
+  const spreadsheetId = getSheetId()
+  let lastError = ''
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const sheets = google.sheets({ version: 'v4', auth: getAuth() })
+      return { ok: true, episodes: await fetchAllEpisodeRows(sheets, spreadsheetId) }
+    } catch (e: any) {
+      lastError = (e && e.message) || String(e)
+      if (attempt === 1) console.warn(`[episodes] dashboard-wide read attempt 1 failed, retrying: ${lastError}`)
+    }
+  }
+  console.error(`[episodes] dashboard-wide read failed after retry: ${lastError}`)
+  return { ok: false, error: lastError }
+}
