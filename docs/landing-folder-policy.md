@@ -1,6 +1,7 @@
 # Landing drop-folder policy — "Production Team" drive
 
 _v1.139 · 2026-07-09 · owner: Production Booking_
+_Rewritten 2026-11-11 to match the code and the prod stack at v1.284 (create window v1.222 · "ว่าง ≠ ส่งงานแล้ว" v1.225 · originals-pending v1.251 · cancelled bookings v1.258/v1.259 · noon prune v1.220). The original text described the v1.139 rule only._
 
 The **"Production Team"** Shared Drive (`0AGendsFHFQYKUk9PVA`, env
 `DRIVE_PRODUCTION_TEAM_ROOT`) is the **landing / drop zone**: one flat folder per
@@ -14,14 +15,58 @@ only ever show shoots that are relevant right now, not a folder for every past j
 
 | | |
 |---|---|
-| **Create** | Only for the **NEXT day's** shoots, the **evening before** (default 19:00 BKK). Never pre-create further ahead — a booking confirmed weeks out gets **no** landing folder until the night before its shoot. |
-| **Keep** | Through the shoot day + an **upload-grace window** (`LANDING_KEEP_PAST_DAYS`, default **3** days). A folder that still holds real footage is **always** kept, regardless of age. |
-| **Remove** | Once a shoot is **older than the grace window** AND its folder is **empty** (footage delivered to the box). Only empty, regenerable folders are trashed — to Shared-Drive trash (recoverable ~30 days). |
+| **Create** | At the **19:00 BKK sweep**, for a **window** of shoots: tomorrow … `LANDING_CREATE_DAYS` days ahead (**prod: 3** → today+1 … today+3; the code default is 1 = tomorrow only; cap 14). A booking approved for a shoot inside that window gets its folder at once (`ensureLandingForBooking`, called by approve) instead of waiting for the sweep. Nothing is created further ahead. |
+| **Keep** | Through the shoot day + an **upload-grace window** (`LANDING_KEEP_PAST_DAYS`: **prod 1**; the compose/code default is 3). A folder that still holds real files is **always** kept, regardless of age. |
+| **Remove** | Only when **all** hold: the shoot is **past** the grace window · the folder is **empty** · **and the box holds camera footage for that Production ID** (`boxFootageState` = `has-footage` — next section). Trash goes to Shared-Drive trash (recoverable ~30 days). |
 
 `video-merge` no longer trashes a landing folder when it moves footage (that made
 drop targets vanish mid-shoot — 2026-07-09 incident); removal is owned solely by
-this nightly lifecycle, which is time-based (past + empty), so an active shoot's
-folder never disappears out from under crew.
+this lifecycle, which is time-based (past + empty + footage in the box), so an active
+shoot's folder never disappears out from under crew.
+
+Exceptions to the table:
+
+- **Cancelled bookings** (v1.258/v1.259): an EMPTY drop folder is trashed at once,
+  whatever its date; one that holds files is kept and shouted about
+  (`cancelledWithFiles` — the system cannot know whose files they are). The 19:00
+  sweep also trashes a cancelled booking's EMPTY box folder, `_SOUND-STAGING` folder
+  and photo folder (`trashCancelledBookingFolders`; "empty" ignores only our own
+  stubs — `_SHOOT*.txt`, `_FOOTAGE-CHECK` — and OS junk).
+- **No Production ID in the name** (a manual folder) is never touched, only reported
+  (`keptManual`).
+- **A Production ID with no booking row** (orphan): the 19:00 sweep leaves it
+  ("unknown booking — leave"); the noon prune trashes it when empty.
+
+### "ว่าง ≠ ส่งงานแล้ว" — why an empty folder is not always trashed (v1.225)
+
+An empty drop folder looks identical whether the footage was delivered (moved into
+the box) or never arrived. On 2026-09-18 POP-7TG-260916-01 lost its drop folder while
+the NAS was off and not one video file had reached Drive (the box held two `.wav`
+files and `_SHOOT.txt`). So before trashing an empty past folder, **both** passes ask
+`boxFootageState(code)` (`src/lib/landing-duplicates.ts`) and trash **only** on
+`has-footage`:
+
+| state | meaning | folder |
+|---|---|---|
+| `has-footage` | the box holds camera footage and every original has arrived | trashed |
+| `originals-pending` (v1.251) | Sub/XML arrived before the MXF originals — still uploading | kept → `keptNoFootage` |
+| `no-footage` | the box has no folder, or only audio / `_SHOOT*.txt` stubs | kept → `keptNoFootage` |
+| `unknown` | Drive could not be read, or the box is over the 20,000-file cap | kept → `keptNoFootage` |
+
+"Camera footage" = every file in the box folder(s) of that Production ID **except**
+`_SHOOT*.txt` stubs and anything under an `AUDIO` path segment (sound arrives by
+another route, so it must not make a job look delivered).
+
+A kept-no-footage folder is reported in the result (`keptNoFootage`), the audit row
+(`drive.landing_lifecycle` / `drive.prune_landing_to_today`), the noon team-chat post,
+the 19:00 digest email and an ops alert (`alertOps` key `landing-no-footage`). The ops
+alert names only bookings that **expect camera video** (`expectsCameraVideo`:
+cameraCount > 0 or a video crew role), fires at once when a code appears that the last
+alert did not name, and otherwise repeats the same set every 48 h.
+
+**Consequence worth knowing:** these folders pile up. A shoot whose footage never
+reached the box, or whose booking expects no camera video at all, keeps its empty
+drop folder until someone settles it (see *Known gaps* below).
 
 ## How it runs
 
@@ -31,20 +76,23 @@ folder never disappears out from under crew.
 - **Noon prune** (v1.220, same worker, second timer): `LANDING_PRUNE_HOUR` (default
   12:00 BKK) calls `?prune=today`. It clears empty folders the nightly sweep
   refuses — ones whose Production ID no longer matches a Booking row, or whose
-  shoot is still inside the grace window. On 2026-09-09 that was 14 folders the
+  shoot is still inside the grace window (it ignores the grace window: any EMPTY
+  folder of a day before today goes). A folder that matches a booking still has
+  to pass the box-footage check above. On 2026-09-09 that was 14 folders the
   nightly had left behind, so it earns its slot. Both passes only ever trash
   EMPTY folders, so they cannot fight. Own heartbeat key `landing-prune` — never
   `landing`, so a healthy noon run cannot hide a dead evening sweep.
-  This used to be a Hermes cron job on a laptop; prod rotated `NEXTAUTH_SECRET`
+  This used to be a Hermes cron job on a laptop (retired — `hermes cron list`
+  shows no landing job on 2026-11-11); prod rotated `NEXTAUTH_SECRET`
   on 2026-08-25, the laptop kept the old copy, and it 401'd for 13 runs before
   anyone noticed. In-container it resolves the secret from the same process env
   as the nightly, so it cannot drift.
 
 ### What neither pass can ever clean
 
-A folder is **immortal** to both passes if it holds any real file, or if its name
-has no trailing `(CODE)`. That is deliberate — but it means a single leftover file
-pins a folder forever. The usual cause is not an unfinished upload: `video-merge`
+A folder is **kept** by both passes if it holds any real file, if its name has no
+trailing `(CODE)`, or if its box does not yet hold camera footage (above). That is
+deliberate — but it means a single leftover file pins a folder forever. The usual cause is not an unfinished upload: `video-merge`
 leaves a landing file in place when the box already holds a twin with the same
 name AND size (`mirrorMove` → `stats.dup++`, "already in box — leave in landing").
 The folder is then non-empty forever and pressing 🎬 merge again is a no-op.
@@ -61,9 +109,55 @@ Since v1.220 the prune reports these by NAME to Discord/Lark via
   - `?keepDays=N` — override the grace window for this run.
   - `?report=1` — force the digest email even on a manual/dry run.
 
+## The NAS follows Drive (observed 2026-11-11)
+
+Nothing in Probook writes to or deletes from the office NAS (`production team`, an SMB
+share on the office LAN). The only NAS code is read-only: `scripts/nas_manifest_agent.py`
+scans the share, and `scripts/video-merge-worker.js` logs in to DSM and reads the Cloud
+Sync status (`SYNO.CloudSync list_conn`). Cloud Sync itself belongs to IT and is not in
+this repo. So the share shows whatever Cloud Sync mirrors:
+
+- **Files go up and leave the NAS** — it is a transfer queue, not a copy
+  (`src/lib/nas-sync.ts`, observed 2026-07-03).
+- **Folders follow Drive.** The folders this lifecycle pre-creates appear on the NAS (the
+  3-day window shows as up to three days of empty folders), and a folder trashed on
+  Drive disappears from the NAS — the 12 most recently trashed drop folders were all
+  absent from the NAS on 2026-11-11. On that day every one of Drive's 55 coded folders
+  was on the NAS, plus one that was only on the NAS (AGN-260930-01, below).
+- So the NAS looks exactly as lean — or as cluttered — as this drive. Cleaning the NAS
+  means cleaning the drop folders on Drive; there is no separate NAS-side worker and no
+  `LANDING_*` knob for one.
+- **The exception is a file Cloud Sync never uploaded:** it keeps its folder on the NAS
+  even after Drive's copy is gone. AGN-260930-01 held one 113 GB MXF on the NAS only (its
+  Drive drop folder was recreated and trashed again 16 times on nine straight days,
+  26 Oct–3 Nov, then stayed gone).
+  Look for a twin in the box before anyone deletes it.
+
+## Known gaps (2026-11-11)
+
+Both come from the dry-run of 2026-11-11 (`GET /api/internal/landing/manage?dryRun=1`):
+30 empty past folders kept, every one with the reason "กล่องมีแต่ไฟล์เสียง/stub —
+ยังไม่มีฟุตเทจกล้อง".
+
+- **Sound-only bookings keep their empty folder forever.** A job with cameraCount 0 and
+  a Sound crew never gets camera footage in the box — its audio goes to `AUDIO`, which
+  `boxFootageState` ignores — so its state is `no-footage` for good. The dry-run kept
+  six: EVT-OTH-260922-01, POD-8MH-261012-03, WLT-OTH-261015-01, POD-OTH-261105-01,
+  POD-OTH-261105-02, POD-OTH-261109-01. v1.281 took them out of the *alert* only;
+  retention is unchanged.
+- **Cameras booked, no video in the box.** The other 24 were COMPLETED bookings that
+  booked cameras, and the three boxes opened by hand held only `_FOOTAGE-CHECK` and
+  `_SHOOT.txt` (one also had `.wav` files). Most are NWS studio shows (THE STANDARD NOW,
+  Decoding the World, End Game, The World Dialogue); "footage ready" had been announced
+  for one of the 24. Whether those shows deliver footage by another route — in which case
+  the lifecycle should be told to stop waiting for them — or the footage is truly
+  missing is **undecided**. Until it is, the folders stay and the alert fires. Do not
+  bulk-trash them: "empty" does not mean "delivered".
+
 ## "ขอเพิ่มพิเศษ" — creating a folder on demand
 
-Default policy is next-day-only. When a specific shoot needs its drop folder
+The sweep creates folders for tomorrow … `LANDING_CREATE_DAYS` days ahead (prod: 3).
+When a specific shoot needs its drop folder
 now — a big shoot the crew want to pre-stage, or a **past/completed** shoot whose
 folder was already pruned but still needs a late upload — an admin runs, in a
 logged-in `probook.thestandard.co` tab:
@@ -210,6 +304,7 @@ is nothing to compare and it merges as before v1.280.
 |---|---|---|
 | `LANDING_WORKER_ENABLED` | `1` | on/off |
 | `LANDING_WORKER_HOUR` | `19` | nightly run hour, BKK |
+| `LANDING_CREATE_DAYS` | `1` | how many days ahead the 19:00 sweep pre-creates drop folders (today+1 … today+N; cap 14) — **prod runs `3`** (v1.222) |
 | `LANDING_KEEP_PAST_DAYS` | `3` | upload-grace days before an empty past folder is cleaned — **prod runs `1`**; the `3` here is only the compose default, and a compose default is not the stack value |
 | `LANDING_PRUNE_ENABLED` | `1` | on/off for the noon prune (v1.220) |
 | `LANDING_PRUNE_HOUR` | `12` | noon prune hour, BKK |
