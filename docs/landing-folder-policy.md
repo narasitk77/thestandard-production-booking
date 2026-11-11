@@ -1,7 +1,7 @@
 # Landing drop-folder policy — "Production Team" drive
 
 _v1.139 · 2026-07-09 · owner: Production Booking_
-_Rewritten 2026-11-11 to match the code and the prod stack at v1.284 (create window v1.222 · "ว่าง ≠ ส่งงานแล้ว" v1.225 · originals-pending v1.251 · cancelled bookings v1.258/v1.259 · noon prune v1.220). The original text described the v1.139 rule only._
+_Rewritten 2026-11-11 to match the code and the prod stack at v1.284 (create window v1.222 · "ว่าง ≠ ส่งงานแล้ว" v1.225 · originals-pending v1.251 · cancelled bookings v1.258/v1.259 · noon prune v1.220 · sound-only jobs v1.285). The original text described the v1.139 rule only._
 
 The **"Production Team"** Shared Drive (`0AGendsFHFQYKUk9PVA`, env
 `DRIVE_PRODUCTION_TEAM_ROOT`) is the **landing / drop zone**: one flat folder per
@@ -17,7 +17,7 @@ only ever show shoots that are relevant right now, not a folder for every past j
 |---|---|
 | **Create** | At the **19:00 BKK sweep**, for a **window** of shoots: tomorrow … `LANDING_CREATE_DAYS` days ahead (**prod: 3** → today+1 … today+3; the code default is 1 = tomorrow only; cap 14). A booking approved for a shoot inside that window gets its folder at once (`ensureLandingForBooking`, called by approve) instead of waiting for the sweep. Nothing is created further ahead. |
 | **Keep** | Through the shoot day + an **upload-grace window** (`LANDING_KEEP_PAST_DAYS`: **prod 1**; the compose/code default is 3). A folder that still holds real files is **always** kept, regardless of age. |
-| **Remove** | Only when **all** hold: the shoot is **past** the grace window · the folder is **empty** · **and the box holds camera footage for that Production ID** (`boxFootageState` = `has-footage` — next section). Trash goes to Shared-Drive trash (recoverable ~30 days). |
+| **Remove** | Only when **all** hold: the shoot is **past** the grace window · the folder is **empty** · **and the box holds camera footage for that Production ID** (`boxFootageState` = `has-footage` — next section; a positively sound-only job needs real audio instead). Trash goes to Shared-Drive trash (recoverable ~30 days). |
 
 `video-merge` no longer trashes a landing folder when it moves footage (that made
 drop targets vanish mid-shoot — 2026-07-09 incident); removal is owned solely by
@@ -48,14 +48,38 @@ files and `_SHOOT.txt`). So before trashing an empty past folder, **both** passe
 
 | state | meaning | folder |
 |---|---|---|
-| `has-footage` | the box holds camera footage and every original has arrived | trashed |
+| `has-footage` | the box holds camera footage and every original has arrived — **or**, for a sound-only job (below), the box holds real audio | trashed |
 | `originals-pending` (v1.251) | Sub/XML arrived before the MXF originals — still uploading | kept → `keptNoFootage` |
-| `no-footage` | the box has no folder, or only audio / `_SHOOT*.txt` stubs | kept → `keptNoFootage` |
+| `no-footage` | the box has no folder, or only audio / `_SHOOT*.txt` stubs (a sound-only job: no real audio either) | kept → `keptNoFootage` |
 | `unknown` | Drive could not be read, or the box is over the 20,000-file cap | kept → `keptNoFootage` |
 
 "Camera footage" = every file in the box folder(s) of that Production ID **except**
 `_SHOOT*.txt` stubs and anything under an `AUDIO` path segment (sound arrives by
 another route, so it must not make a job look delivered).
+
+**Sound-only jobs (v1.285).** A booking that expects no camera video never gets camera
+footage in the box, so before v1.285 its empty drop folder was kept for ever. For a booking
+that is **positively** sound-only (`isSoundOnlyBooking` in `src/lib/mediapro.ts`: `cameraCount`
+is exactly 0 — not null — it is not a Block Shot, a crew is listed and **every** role is
+`Sound`) both passes now pass `soundOnly` to `boxFootageState`, and **real audio in the box
+counts as delivered**, judged on audio alone:
+
+- real audio = at least one file with an audio extension (`wav bwf mp3 m4a aif aiff flac aac`),
+  under an `AUDIO` folder, larger than 0 bytes (0 bytes = an interrupted copy), and not a
+  macOS `._*` sidecar (copying from exFAT cards or uploading a folder from Finder drops one
+  beside every file);
+- no such file — only stubs, nothing, or stray files such as a loose or empty `.wav` outside
+  `AUDIO`, notes, `.DS_Store` — is still `no-footage` and the folder is kept: the 7TG hazard
+  exists for audio too. A stray file never blocks a delivered-audio decision either;
+- camera-shaped files beside the audio still go through the originals check
+  (`originals-pending` holds the folder); a Drive read error stays `unknown`.
+
+"Positively" is deliberate. `expectsCameraVideo` answers false whenever data is missing —
+on prod (2026-11-11) it matched 66 bookings, but only 41 are sound-only; the other 25 are
+photographer-only, lighting-only, Block Shot, or have no crew listed. Those keep the camera
+rule, so a stray audio file cannot trash the folder of a video job whose gear was never
+filled in. A camera job is not affected: audio alone never made it `has-footage` and still
+does not.
 
 A kept-no-footage folder is reported in the result (`keptNoFootage`), the audit row
 (`drive.landing_lifecycle` / `drive.prune_landing_to_today`), the noon team-chat post,
@@ -65,8 +89,8 @@ cameraCount > 0 or a video crew role), fires at once when a code appears that th
 alert did not name, and otherwise repeats the same set every 48 h.
 
 **Consequence worth knowing:** these folders pile up. A shoot whose footage never
-reached the box, or whose booking expects no camera video at all, keeps its empty
-drop folder until someone settles it (see *Known gaps* below).
+reached the box keeps its empty drop folder until someone settles it — so does a job
+whose booking was never filled in enough to prove it is sound-only (see *Known gaps*).
 
 ## How it runs
 
@@ -91,7 +115,7 @@ drop folder until someone settles it (see *Known gaps* below).
 ### What neither pass can ever clean
 
 A folder is **kept** by both passes if it holds any real file, if its name has no
-trailing `(CODE)`, or if its box does not yet hold camera footage (above). That is
+trailing `(CODE)`, or if its box does not yet hold camera footage — real audio, for a sound-only job (above). That is
 deliberate — but it means a single leftover file pins a folder forever. The usual cause is not an unfinished upload: `video-merge`
 leaves a landing file in place when the box already holds a twin with the same
 name AND size (`mirrorMove` → `stats.dup++`, "already in box — leave in landing").
@@ -135,16 +159,35 @@ this repo. So the share shows whatever Cloud Sync mirrors:
 
 ## Known gaps (2026-11-11)
 
-Both come from the dry-run of 2026-11-11 (`GET /api/internal/landing/manage?dryRun=1`):
-30 empty past folders kept, every one with the reason "กล่องมีแต่ไฟล์เสียง/stub —
+The figures below come from the dry-run of 2026-11-11 (`GET /api/internal/landing/manage?dryRun=1`),
+before v1.285: 30 empty past folders kept, every one with the reason "กล่องมีแต่ไฟล์เสียง/stub —
 ยังไม่มีฟุตเทจกล้อง".
 
-- **Sound-only bookings keep their empty folder forever.** A job with cameraCount 0 and
-  a Sound crew never gets camera footage in the box — its audio goes to `AUDIO`, which
-  `boxFootageState` ignores — so its state is `no-footage` for good. The dry-run kept
-  six: EVT-OTH-260922-01, POD-8MH-261012-03, WLT-OTH-261015-01, POD-OTH-261105-01,
-  POD-OTH-261105-02, POD-OTH-261109-01. v1.281 took them out of the *alert* only;
-  retention is unchanged.
+- **Sound-only jobs: what v1.285 trashes, and what stays.** The dry-run of 2026-11-11 had
+  kept six positively sound-only folders; opening their boxes (and the one more that
+  qualified by date) showed **four with real audio** — POD-OTH-261105-01, POD-OTH-261105-02,
+  POD-OTH-261109-01 and POD-OTH-261110-01 (shoot 10 Nov) — and **three with none at all**,
+  only `_SHOOT.txt` / `_FOOTAGE-CHECK`: EVT-OTH-260922-01, POD-8MH-261012-03,
+  WLT-OTH-261015-01. The first three of the four go at the 19:00 sweep or the noon prune, whichever
+  runs first after v1.285 is deployed; POD-OTH-261110-01 goes at the **noon prune only**
+  (the sweep's 1-day grace keeps a shoot dated yesterday, the prune has no grace). Every
+  later positively sound-only job follows the day after its shoot, as soon as its audio
+  has landed. The three audio-less ones stay kept — their audio has not arrived.
+- **Who is told about a kept folder.** The noon team chat shows the first 8 names of the
+  kept-no-footage list and then "…อีก N งาน" — in practice it does not name the three
+  audio-less sound-only jobs (they sit at positions 18–29 of 30). The 19:00 digest email
+  lists every kept folder as a `KEEP "<folder>" — <reason>` action line (the action list
+  is cut at 60 lines), so it does name them; the 🚨 block of the email and the ops alert
+  skip them (v1.281, `expectsCameraVideo`: it was a list nobody could fix). Whether an
+  audio-less sound-only job should now get the 🚨 treatment — the list *can* be fixed —
+  is **undecided**.
+- **The alert filter still uses the loose predicate.** `alertNoFootage`
+  (`src/app/api/internal/landing/manage/route.ts`) drops a booking when
+  `!expectsCameraVideo`, which is also true for Block Shot, no-crew, photographer-only and
+  lighting-only bookings (25 of 66 on prod, 2026-11-11). If the video of such a booking
+  never reaches the box, its folder is kept (the camera rule) but it is left out of the ops
+  alert and the email's 🚨 block, so only the noon chat (first 8) and the KEEP lines speak
+  for it. Pre-existing since v1.281; v1.285 did not touch it. **Undecided.**
 - **Cameras booked, no video in the box.** The other 24 were COMPLETED bookings that
   booked cameras, and the three boxes opened by hand held only `_FOOTAGE-CHECK` and
   `_SHOOT.txt` (one also had `.wav` files). Most are NWS studio shows (THE STANDARD NOW,

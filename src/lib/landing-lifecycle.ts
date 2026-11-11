@@ -35,6 +35,7 @@ import { rememberDriveLinks, getDriveLink } from './drive-links'
 import { computeTypeDroppedId } from './id-migration'
 import { landingMayBeTrashed, isShootMarkerFile, isFootageCheckReport } from './reconciler/guards'
 import { boxFootageState } from './landing-duplicates'
+import { isSoundOnlyBooking } from './mediapro'
 import { EPISODE_ORDER } from './episode-order'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
@@ -387,14 +388,16 @@ export async function manageLandingFolders(
   // that was transiently empty between upload batches got trashed mid-shoot.
   const codeToLastShootDay = new Map<string, Date>()
   const cancelled = new Set<string>()
+  const soundOnly = new Set<string>() // v1.285 — positively sound-only bookings (isSoundOnlyBooking · see boxFootageState `soundOnly`)
   const recent = await prisma.booking.findMany({
     where: { bookingCode: { not: null }, deletedAt: null },
-    select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true },
+    select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true, cameraCount: true, crewRequired: true, isBlockShot: true },
   })
   for (const b of recent) {
     if (!b.bookingCode) continue
     codeToLastShootDay.set(b.bookingCode.toUpperCase(), b.shootEndDate ?? b.shootDate)
     if (b.status === 'CANCELLED') cancelled.add(b.bookingCode.toUpperCase())
+    if (isSoundOnlyBooking(b)) soundOnly.add(b.bookingCode.toUpperCase())
   }
 
   const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
@@ -431,9 +434,10 @@ export async function manageLandingFolders(
     // (กล่องมีแต่ .wav 2 ไฟล์ที่มาทางสายเสียง จึงไม่ช่วยอะไร)
     //
     // ทิ้งได้เฉพาะเมื่อ **รู้แน่** ว่ากล่องมีฟุตเทจกล้องแล้วเท่านั้น
+    // (v1.285: งานเสียงล้วนที่มีหลักฐานบวก = มีไฟล์เสียงจริงในกล่อง · ใบที่ข้อมูลไม่ครบยังใช้กฎกล้อง)
     // อ่านกล่องไม่ได้ = ไม่ทิ้ง (โฟลเดอร์ว่างที่ค้างไว้เสียแค่ความรก
     //  ส่วนการทิ้งผิดจังหวะทำให้ไม่มีปลายทางให้ไฟล์ลง)
-    const fs = await boxFootageState(code, { excludeFolderId: f.id })
+    const fs = await boxFootageState(code, { excludeFolderId: f.id, soundOnly: soundOnly.has(code) })
     if (fs.state !== 'has-footage') {
       base.keptNoFootage.push({ name: f.name, code, reason: fs.reason })
       base.actions.push(`KEEP "${f.name}" — ${keepLabel(fs.state)}: ${fs.reason}`)
@@ -582,11 +586,13 @@ export async function pruneLandingToToday(
   // range SPANS today (day 2 of a 3-day shoot), not just one that STARTS today.
   const codeToShootRange = new Map<string, { start: Date; end: Date }>()
   const cancelled = new Set<string>()
-  const rows = await prisma.booking.findMany({ where: { bookingCode: { not: null }, deletedAt: null }, select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true } })
+  const soundOnly = new Set<string>() // v1.285 — positively sound-only bookings (isSoundOnlyBooking · see boxFootageState `soundOnly`)
+  const rows = await prisma.booking.findMany({ where: { bookingCode: { not: null }, deletedAt: null }, select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true, cameraCount: true, crewRequired: true, isBlockShot: true } })
   for (const b of rows) {
     if (!b.bookingCode) continue
     codeToShootRange.set(b.bookingCode.toUpperCase(), { start: b.shootDate, end: b.shootEndDate ?? b.shootDate })
     if (b.status === 'CANCELLED') cancelled.add(b.bookingCode.toUpperCase())
+    if (isSoundOnlyBooking(b)) soundOnly.add(b.bookingCode.toUpperCase())
   }
 
   const folders = await listChildFolders(PRODUCTION_TEAM_ROOT)
@@ -639,9 +645,10 @@ export async function pruneLandingToToday(
 
     // v1.225 — กฎเดียวกับ sweep 19:00: **ว่าง ≠ ส่งงานแล้ว**
     // ทิ้งได้เฉพาะเมื่อรู้แน่ว่ากล่องมีฟุตเทจกล้องแล้ว (ดูเหตุผลเต็มที่ manageLandingFolders)
+    // (v1.285: งานเสียงล้วนที่มีหลักฐานบวก = มีไฟล์เสียงจริงในกล่อง · ใบที่ข้อมูลไม่ครบยังใช้กฎกล้อง)
     // เฉพาะโฟลเดอร์ที่จับคู่กับใบจองได้ — orphan ที่ไม่มี booking ยังใช้กฎเดิม
     if (range) {
-      const fs = await boxFootageState(code, { excludeFolderId: f.id })
+      const fs = await boxFootageState(code, { excludeFolderId: f.id, soundOnly: soundOnly.has(code) })
       if (fs.state !== 'has-footage') {
         base.keptNoFootage.push({ name: f.name, code, reason: fs.reason })
         base.actions.push(`KEEP "${f.name}" — ${keepLabel(fs.state)}: ${fs.reason}`)

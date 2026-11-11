@@ -52,9 +52,12 @@ function noFootageLines(list: Array<{ code: string; reason: string }>): string[]
 
 /**
  * maint r3 2026-11-08 — the ops alert (noon prune + 19:00 sweep) and the 19:00 email for keptNoFootage went out
- * every day for a list nobody can fix: a sound-only job's box never gets camera footage (boxFootageState says
- * 'no-footage' forever) and a box over the file cap reads 'unknown' forever. Now:
- *  - only bookings that expect camera video (expectsCameraVideo — cameraCount 0 / no camera crew = sound-only);
+ * every day for a list nobody can fix: a sound-only job's box never gets camera footage (boxFootageState said
+ * 'no-footage' forever — since v1.285 a POSITIVELY sound-only job is trashed once real audio is in its box, so only an
+ * audio-less one stays) and a box over the file cap reads 'unknown' forever. Now:
+ *  - only bookings that expect camera video (expectsCameraVideo — cameraCount 0 / no camera crew = sound-only). This is
+ *    still the LOOSE predicate (v1.285 left the alert alone): a Block Shot / no-crew / photographer-only booking whose
+ *    video never arrives is left out of the alert too — an open decision, see docs/landing-folder-policy.md;
  *    a booking row that cannot be read stays IN (louder beats silent);
  *  - alert at once when a code appears that the last alert did not name, else repeat the same set every 48 h.
  *    Both passes share one key + one remembered set, so the 19:00 list (a subset of noon's) is not news again.

@@ -109,6 +109,21 @@ export const sameClip = (a: MediaproMaterial, b: MediaproMaterial) =>
 export const expectsCameraVideo = (b: { cameraCount?: number | null; crewRequired?: string[] | null }) =>
   (b.cameraCount || 0) > 0 || (b.crewRequired || []).some(r => /video|camera|กล้อง|ช่างภาพ/i.test(r))
 
+/**
+ * v1.285 — "งานเสียงล้วน" แบบมี **หลักฐานบวก** (ใช้ตัดสินว่าทิ้งโฟลเดอร์ drop ได้ — ขั้นที่ทำลายของ)
+ *
+ * `!expectsCameraVideo` ใช้ไม่ได้ตรงนี้: มันตอบ false เมื่อ "ไม่มีข้อมูล" — ใบ Block Shot (cameraCount null),
+ * ใบที่ไม่ได้ใส่ทีมงาน, ช่างภาพ/ไฟ/DIT/Switcher อย่างเดียว ล้วนอ่านเป็น "ไม่คาดหวังวิดีโอ" ทั้งที่ไม่ใช่เสียงล้วน
+ * (prod 11 พ.ย. 2569: 66 ใบอ่านแบบนั้น แต่เสียงล้วนจริง 41 ใบ — อีก 25 ใบคือพวกนี้) · สำหรับตัวเตือน false = เงียบ
+ * ไม่เป็นไร แต่สำหรับการทิ้ง false-positive = ทิ้งโฟลเดอร์ของงานวิดีโอที่ฟุตเทจยังไม่มา (เหตุ POP-7TG-260916-01)
+ *
+ * ต้องครบทุกข้อ: กล้อง **เป็น 0 ชัดเจน** (ไม่ใช่ null) · ไม่ใช่ Block Shot · ระบุทีมงานแล้ว และ **ทุกบทบาทคือ Sound**
+ */
+export const isSoundOnlyBooking = (b: { cameraCount?: number | null; crewRequired?: string[] | null; isBlockShot?: boolean | null }) => {
+  const crew = b.crewRequired || []
+  return b.cameraCount === 0 && !b.isBlockShot && crew.length > 0 && crew.every(r => r.trim().toLowerCase() === 'sound')
+}
+
 /** two different cards indexed at one path whose clip names collide (see MediaproCheck.mixed) */
 function mixedCardPaths(cards: MediaproCard[]): string[] {
   const nameOf = (r: string) => up(baseName(r.split('/').pop() || ''))

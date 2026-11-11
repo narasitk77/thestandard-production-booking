@@ -15,7 +15,7 @@
 import { test, mock, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
-type F = { name: string; folderPath: string[] }
+type F = { name: string; folderPath: string[]; size?: number | null }
 let trees: Record<string, F[] | Error> = {}
 let folders: Array<{ id: string; name: string; parents: string[] }> | Error = []
 /** classifyFootageTreeFolder per folder id — unset = 'in-tree' (the box) */
@@ -28,7 +28,7 @@ mock.module('../google-drive', {
       if (t instanceof Error) throw t
       return (t || []).map(x => ({
         id: 'x', name: x.name, mimeType: 'video/mp4', parents: [id], webViewLink: null,
-        size: 1, createdTime: null, modifiedTime: null, md5: 'm', folderPath: x.folderPath, topFolderId: null,
+        size: 'size' in x ? x.size : 1, createdTime: null, modifiedTime: null, md5: 'm', folderPath: x.folderPath, topFolderId: null,
       }))
     },
     findFoldersByCode: async () => {
@@ -159,3 +159,110 @@ test('maint: ตรวจไม่ได้ว่าโฟลเดอร์อ�
   assert.equal(r.state, 'unknown')
   assert.match(r.reason, /ไดรฟ์ VIDEO/)
 })
+
+// ── v1.285 — งานเสียงล้วน: ไฟล์เสียงจริงในกล่องคือหลักฐานว่าส่งแล้ว ─────────────────────────────
+// 11 พ.ย. 2569: โฟลเดอร์ drop ของงานเสียงล้วน 6 ใบถูกเก็บถาวรเพราะกล่องไม่มีวันมี "ฟุตเทจกล้อง" · แต่ 3 ใน 6
+// กล่องไม่มีไฟล์เสียงสักไฟล์ (มีแต่ _SHOOT.txt) = เสียงยังไม่มาถึง = ต้องเก็บ ไม่ใช่ทิ้งหมดทั้ง 6
+
+test('v1.285 งานเสียงล้วน: มีไฟล์เสียงใต้ AUDIO → has-footage (ทิ้งโฟลเดอร์ drop ได้)', async () => {
+  trees = { box: [
+    { name: 'Bookmark pt1 rec.wav', folderPath: ['EP01 · Bookmark', 'AUDIO'] },
+    { name: '_SHOOT.txt', folderPath: [] },
+  ] }
+  const r = await boxFootageState('C-1', { soundOnly: true }) as any
+  assert.equal(r.state, 'has-footage')
+  assert.equal(r.files, 1)
+})
+
+test('v1.285 งานเสียงล้วน: กล่องมีแต่ stub (ไม่มีไฟล์เสียงเลย) → no-footage (ห้ามทิ้ง) — เสียงยังไม่มาถึง', async () => {
+  trees = { box: [{ name: '_SHOOT.txt', folderPath: [] }] }
+  const r = await boxFootageState('C-1', { soundOnly: true }) as any
+  assert.equal(r.state, 'no-footage')
+  assert.match(r.reason, /งานเสียงล้วน — กล่องยังไม่มีไฟล์เสียง/)
+})
+
+test('v1.285 งานเสียงล้วน: ไม่มีโฟลเดอร์ในกล่องเลย → no-footage', async () => {
+  folders = []
+  assert.equal(((await boxFootageState('C-1', { soundOnly: true })) as any).state, 'no-footage')
+})
+
+test('v1.285 งานเสียงล้วน: ไฟล์เสียง 0 ไบต์ (ก็อปค้าง) หรือไม่มีขนาด ไม่นับ', async () => {
+  trees = { box: [
+    { name: 'a.wav', folderPath: ['EP01', 'AUDIO'], size: 0 },
+    { name: 'b.wav', folderPath: ['EP01', 'AUDIO'], size: null },
+  ] }
+  assert.equal(((await boxFootageState('C-1', { soundOnly: true })) as any).state, 'no-footage')
+})
+
+test('v1.285 งานเสียงล้วน: ไฟล์ที่ไม่ใช่เสียงใต้ AUDIO (notes.txt, .DS_Store) ไม่นับเป็นเสียงที่ส่งแล้ว', async () => {
+  trees = { box: [
+    { name: 'notes.txt', folderPath: ['EP01', 'AUDIO'] },
+    { name: '.DS_Store', folderPath: ['EP01', 'AUDIO'] },
+  ] }
+  assert.equal(((await boxFootageState('C-1', { soundOnly: true })) as any).state, 'no-footage')
+})
+
+test('v1.285 งานเสียงล้วน: WAV ใน _SOUND-STAGING (ชื่อมี CODE แต่ไม่ใช่กล่อง) ไม่นับ', async () => {
+  folders = [{ id: 'staging', name: 'Show · Job (C-1)', parents: ['cat'] }]
+  treeOf = { staging: 'not-in-tree' }
+  trees = { staging: [{ name: 'rec.wav', folderPath: ['AUDIO'] }] }
+  assert.equal(((await boxFootageState('C-1', { soundOnly: true })) as any).state, 'no-footage')
+})
+
+test('v1.285 งานกล้อง (ไม่ใช่ soundOnly): มีแต่ไฟล์เสียงใต้ AUDIO → no-footage เหมือนเดิม — เคส POP-7TG-260916-01', async () => {
+  trees = { box: [{ name: 'rec.wav', folderPath: ['EP01', 'AUDIO'] }] }
+  assert.equal(((await boxFootageState('C-1')) as any).state, 'no-footage')
+  assert.equal(((await boxFootageState('C-1', { soundOnly: false })) as any).state, 'no-footage')
+})
+
+test('v1.285 งานเสียงล้วนที่กล่องมีไฟล์กล้องด้วย → ใช้กฎกล้องตามเดิม (ต้นฉบับยังไม่ครบ = originals-pending)', async () => {
+  trees = { box: [
+    { name: 'rec.wav', folderPath: ['EP01', 'AUDIO'] },
+    { name: 'B022C001_2609297HS03.MP4', folderPath: ['EP.1', 'CAM-B', 'XDROOT', 'Sub'] },
+    { name: 'B022C001_2609297HM01.XML', folderPath: ['EP.1', 'CAM-B', 'XDROOT', 'Clip'] },
+  ] }
+  assert.equal(((await boxFootageState('C-1', { soundOnly: true })) as any).state, 'originals-pending')
+})
+
+test('v1.285 อ่านกล่องไม่ได้ → unknown แม้เป็นงานเสียงล้วน (ห้ามตีเป็นส่งแล้ว)', async () => {
+  trees = { box: new Error('Drive 500') }
+  assert.equal(((await boxFootageState('C-1', { soundOnly: true })) as any).state, 'unknown')
+})
+
+// ── v1.285 รอบรีวิว — ไฟล์ขยะข้างเสียง / AppleDouble ────────────────────────────────
+
+test('v1.285 งานเสียงล้วน: AppleDouble `._take01.wav` (~4 KB ที่ macOS สร้างข้างไฟล์จริง) ไม่นับเป็นเสียง', async () => {
+  trees = { box: [
+    { name: '._take01.wav', folderPath: ['EP01', 'AUDIO'], size: 4096 },
+    { name: '_SHOOT.txt', folderPath: [] },
+  ] }
+  const r = await boxFootageState('C-1', { soundOnly: true }) as any
+  assert.equal(r.state, 'no-footage')
+  assert.match(r.reason, /งานเสียงล้วน/)
+})
+
+test('v1.285 งานเสียงล้วน: ไม่มีเสียงจริง แต่มีไฟล์อื่นนอก AUDIO (WAV วางที่ราก, WAV 0 ไบต์, โน้ต, .DS_Store) → no-footage ทุกแบบ', async () => {
+  for (const stray of [
+    { name: 'loose.wav', folderPath: [] as string[] },
+    { name: 'empty.wav', folderPath: ['EP01'], size: 0 },
+    { name: 'notes.txt', folderPath: ['EP01'] },
+    { name: '.DS_Store', folderPath: ['EP01'] },
+  ]) {
+    trees = { box: [stray, { name: '_SHOOT.txt', folderPath: [] }] }
+    const r = await boxFootageState('C-1', { soundOnly: true }) as any
+    assert.equal(r.state, 'no-footage', `${stray.name} นอก AUDIO ต้องไม่ทำให้งานเสียงล้วนเป็น "ส่งแล้ว"`)
+  }
+})
+
+test('v1.285 งานเสียงล้วน: เสียงจริงมาแล้ว → has-footage แม้มีไฟล์ขยะอื่นข้าง ๆ (ขยะไม่บล็อก)', async () => {
+  trees = { box: [
+    { name: 'take01.wav', folderPath: ['EP01', 'AUDIO'] },
+    { name: '._take01.wav', folderPath: ['EP01', 'AUDIO'], size: 4096 },
+    { name: '.DS_Store', folderPath: ['EP01'] },
+    { name: 'notes.txt', folderPath: ['EP01'] },
+  ] }
+  const r = await boxFootageState('C-1', { soundOnly: true }) as any
+  assert.equal(r.state, 'has-footage')
+  assert.equal(r.files, 1, 'files = จำนวนไฟล์เสียงที่เป็นหลักฐาน ไม่ใช่ไฟล์ขยะที่อยู่ข้าง ๆ')
+})
+

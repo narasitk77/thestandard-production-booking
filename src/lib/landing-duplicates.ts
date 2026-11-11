@@ -165,6 +165,28 @@ function isCameraFootage(f: { name: string; folderPath?: string[] }): boolean {
 }
 
 /**
+ * v1.285 — งานเสียงล้วน **ที่มีหลักฐานบวก** (`isSoundOnlyBooking` ใน mediapro.ts: กล้อง = 0 ชัดเจน · ไม่ใช่ Block Shot · ทุกบทบาทคือ Sound
+ * — **ห้ามใช้ `!expectsCameraVideo`** มันตอบ false เมื่อไม่มีข้อมูล) ไม่มีฟุตเทจกล้องมาถึงกล่อง
+ * ไม่ว่าวันไหน — กล่องที่ "เสร็จ" ของงานแบบนี้จึงมีแต่เสียง (ใต้ AUDIO) + stub · ถ้าอ่านว่า "ไม่มีฟุตเทจกล้อง =
+ * ยังไม่ส่งงาน" โฟลเดอร์ drop ของมันจะค้างถาวร (11 พ.ย. 2569 เก็บไว้ 6 ใบ · มีเสียงในกล่องจริง 3 ใบ)
+ *
+ * เกณฑ์ "ส่งแล้ว" ของงานเสียงล้วนจึงเป็น **มีไฟล์เสียงจริงในกล่อง** — นามสกุลเสียง · อยู่ใต้ AUDIO · ขนาด > 0
+ * (0 ไบต์ = ก็อปค้าง) · ไม่ใช่ `._*` (AppleDouble) · stub/Google Doc/ไฟล์อื่นไม่นับ · ไม่มีไฟล์เสียงสักไฟล์ = ยังไม่ส่ง
+ * = เก็บ (เหมือนเหตุ POP-7TG-260916-01 แต่ฝั่งเสียง — อีก 3 ใบที่กล่องมีแต่ stub ยังถูกเก็บไว้)
+ *
+ * งานเสียงล้วนตัดสินจาก **เสียงอย่างเดียว** — ไฟล์อื่นข้าง ๆ (โน้ต, .DS_Store, WAV 0 ไบต์/วางนอก AUDIO) ไม่ทำให้
+ * "ส่งแล้ว" และไม่บล็อกถ้าเสียงมาแล้ว (กฎกล้องนับไฟล์ใดก็ได้นอก AUDIO เป็นไฟล์กล้อง จึงใช้ตัดสินงานเสียงล้วนไม่ได้)
+ */
+const AUDIO_FILE = /\.(wav|bwf|mp3|m4a|aif|aiff|flac|aac)$/i
+/** macOS AppleDouble sidecar (`._take01.wav`, ~4 KB) — copying from exFAT/FAT cards or uploading a folder from Finder drops one beside every file */
+const APPLEDOUBLE = /^\._/
+function isDeliveredAudio(f: { name: string; folderPath?: string[]; size?: number | null }): boolean {
+  if (SHOOT_STUB.test(f.name) || APPLEDOUBLE.test(f.name) || !AUDIO_FILE.test(f.name)) return false
+  if (!(f.folderPath || []).some(seg => seg.trim().toUpperCase() === 'AUDIO')) return false
+  return (Number(f.size) || 0) > 0
+}
+
+/**
  * กล่องของ Production ID นี้มีฟุตเทจกล้องแล้วหรือยัง
  *
  * ใช้ก่อนจะ "ทิ้งโฟลเดอร์ drop ที่ว่าง" — เพราะ **ว่าง ≠ ส่งงานแล้ว**:
@@ -172,7 +194,17 @@ function isCameraFootage(f: { name: string; folderPath?: string[] }): boolean {
  */
 export async function boxFootageState(
   code: string,
-  opts: { excludeFolderId?: string; maxFiles?: number } = {},
+  opts: {
+    excludeFolderId?: string
+    maxFiles?: number
+    /**
+     * v1.285 — the booking is POSITIVELY sound-only (`isSoundOnlyBooking`: cameraCount === 0, not Block Shot, every crew
+     * role Sound): real audio in the box counts as delivered. NEVER derive this from `!expectsCameraVideo` — that is false
+     * whenever data is missing (Block Shot, no crew, photographer-only) and would let one stray audio file trash a video
+     * job's drop folder (POP-7TG-260916-01 again).
+     */
+    soundOnly?: boolean
+  } = {},
 ): Promise<BoxFootageState> {
   // v1.251 — ต้องเห็นรายการครบถึงจะบอกได้ว่าต้นฉบับครบ (เดิมเจอไฟล์กล้องไฟล์เดียวก็พอ) · เพดานสูงขึ้น และถ้าชนเพดาน = unknown
   const maxFiles = opts.maxFiles ?? 20000
@@ -185,6 +217,7 @@ export async function boxFootageState(
   if (folders.length === 0) return { state: 'no-footage', reason: 'ไม่มีโฟลเดอร์ในกล่อง (ไดรฟ์ VIDEO) เลย' }
 
   let files = 0
+  let audio = 0
   const camera: Array<{ name: string; folderPath?: string[] }> = []
   for (const f of folders) {
     try {
@@ -195,17 +228,25 @@ export async function boxFootageState(
       }
       for (const file of list) {
         if (isCameraFootage(file)) { files++; camera.push(file) }
+        else if (isDeliveredAudio(file)) audio++
       }
     } catch (e: any) {
       return { state: 'unknown', reason: `อ่านกล่องไม่ครบ: ${e?.message || e}` }
     }
   }
-  if (files === 0) return { state: 'no-footage', reason: 'กล่องมีแต่ไฟล์เสียง/stub — ยังไม่มีฟุตเทจกล้อง' }
+  if (opts.soundOnly) {
+    // v1.285 — a sound-only job's delivery IS its audio, judged on audio alone: an audio-less box is "not delivered"
+    // whatever else sits in it (a stray file outside AUDIO would otherwise count as camera footage below)
+    if (audio === 0) return { state: 'no-footage', reason: 'งานเสียงล้วน — กล่องยังไม่มีไฟล์เสียง (ใต้ AUDIO)' }
+  } else if (files === 0) {
+    return { state: 'no-footage', reason: 'กล่องมีแต่ไฟล์เสียง/stub — ยังไม่มีฟุตเทจกล้อง' }
+  }
   // v1.251 — "มีฟุตเทจ" ไม่พอ: ต้นฉบับ MXF อัปตามหลัง Sub/XML 1–2 วัน ทิ้งตอนนี้ = ต้นฉบับตกถังขยะ (PP-26-034)
   const pending = pendingOriginals(camera)
   if (pending.length > 0) {
     const shown = pending.slice(0, 5).join(', ') + (pending.length > 5 ? ` และอีก ${pending.length - 5}` : '')
     return { state: 'originals-pending', files, pending, reason: `ต้นฉบับยังมาไม่ครบ ${pending.length} คลิป: ${shown}` }
   }
-  return { state: 'has-footage', files }
+  // for a sound-only job the evidence is the audio, not whatever strays sit beside it
+  return { state: 'has-footage', files: opts.soundOnly ? audio : files }
 }
