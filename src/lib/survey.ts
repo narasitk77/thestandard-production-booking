@@ -62,21 +62,6 @@ export const TEAMS: Option[] = [
 /** ผลแยกทีมโชว์เฉพาะทีมที่มีคนตอบตั้งแต่เท่านี้ (ตั้งแต่ v1.280.3 ไม่ได้ประกาศเลขนี้บนหน้าคนตอบแล้ว) */
 export const TEAM_MIN = 3
 
-/**
- * v1.284.1 — ลิสต์ฟังก์ชันที่ข้อ "พึงพอใจ/รักษาไว้" (useful) กับข้อ "ปรับก่อน" (fix) ใช้ร่วมกัน
- * ลิสต์เดียว = เทียบ "ชอบ" กับ "อยากให้แก้" รายฟังก์ชันได้โดยไม่ต้องให้คะแนนทีละอัน · id เดิมไม่เปลี่ยน (คำตอบที่เก็บไปแล้วอ่านออก)
- */
-const FEATURES: Option[] = [
-  { id: 'form', label: 'ขั้นตอนกรอกใบจอง' },
-  { id: 'approved_mail', label: 'เมลและ Calendar invite เมื่อคิวได้รับอนุมัติ' },
-  { id: 'footage_mail', label: 'เมล "Footage พร้อม" เมื่อฟุตเทจขึ้น Drive ครบ' },
-  { id: 'capacity', label: 'คำเตือนตอนจองเมื่อช่วงเวลานั้นกล้อง ทีมงาน หรือห้องไม่พอ' },
-  { id: 'status', label: 'หน้า My Bookings — ดูสถานะคิวของตัวเอง (อนุมัติหรือยัง / ใครไปกอง)' },
-  { id: 'calendar', label: 'หน้า Calendar — ดูว่าวันไหนมีงานถ่ายอะไร' },
-  { id: 'folder', label: 'โฟลเดอร์ Drive ของงานที่ระบบสร้างให้' },
-  { id: 'none', label: 'ไม่มีข้อไหนเลย' },
-]
-
 export const SURVEY = {
   key: SURVEY_KEY,
   title: 'แบบสำรวจการใช้งาน Production Booking',
@@ -93,10 +78,9 @@ export const SURVEY = {
     { id: 'efficiency', kind: 'scale', required: true,
       title: 'ระบบ Production Booking ช่วยให้คุณวางแผนการทำงานได้สะดวกและมีประสิทธิภาพมากขึ้น',
       scale: ['ไม่เห็นด้วยอย่างยิ่ง', 'ไม่เห็นด้วย', 'เฉย ๆ', 'เห็นด้วย', 'เห็นด้วยอย่างยิ่ง'] },
-    { id: 'useful', kind: 'multi', required: true, exclusive: 'none',
-      title: 'ส่วนไหนของระบบที่คุณพึงพอใจ และอยากให้รักษาไว้ต่อไป', help: 'เลือกได้หลายข้อ', options: FEATURES },
-    { id: 'fix', kind: 'multi', required: true, exclusive: 'none',
-      title: 'ส่วนไหนของระบบที่คุณอยากให้ปรับปรุงก่อน', help: 'เลือกได้หลายข้อ', options: FEATURES },
+    // v1.284.2 — ข้อ 4/5 เป็นพิมพ์ข้อความ (นัท 11 พ.ย.) · id ใหม่ keep/change เพราะ useful/fix เดิมเก็บเป็นรายการตัวเลือก — id เดียวไม่ควรเปลี่ยนรูปข้อมูลกลางทาง
+    { id: 'keep', kind: 'text', required: true, title: 'ส่วนไหนของระบบที่คุณพึงพอใจ และอยากให้รักษาไว้ต่อไป' },
+    { id: 'change', kind: 'text', required: true, title: 'ส่วนไหนของระบบที่คุณอยากให้ปรับปรุงก่อน' },
     // ข้อความเปิดถามเหตุการณ์จริงล่าสุด (เจาะจงกว่า "มีอะไรอยากบอกไหม" ได้คำตอบที่เอาไปทำต่อได้) · ไม่บังคับ
     // ไม่มีคำอธิบายใต้ข้อ (นัทสั่งเอาออก v1.280.2 · ช่องว่างในหน้าแก้คำ = ใช้คำในโค้ด จึงลบจากหน้าแก้คำไม่ได้)
     { id: 'improve', kind: 'text', required: false, title: 'ครั้งล่าสุดที่จองคิว มีตรงไหนที่ติด หรือต้องถามคนอื่นต่อบ้าง? มีอะไรอยากให้ระบบทำเพิ่มก็บอกได้เลย' },
@@ -119,7 +103,7 @@ export type Overrides = { intro?: string; questions?: Record<string, QuestionOve
 const OVERRIDE_TEXT_MAX = 500
 
 /** รับ JSON จากฟอร์มแอดมิน → Overrides ที่สะอาด (ตัดช่องว่าง, ทิ้งช่องว่างเปล่า) หรือบอกว่าผิดตรงไหน */
-export function validateOverrides(raw: unknown): { ok: true; value: Overrides | null } | { ok: false; error: string } {
+export function validateOverrides(raw: unknown, survey: SurveyDef = SURVEY): { ok: true; value: Overrides | null } | { ok: false; error: string } {
   if (raw === null || raw === undefined) return { ok: true, value: null }
   if (typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'รูปแบบไม่ถูกต้อง' }
   const r = raw as Record<string, unknown>
@@ -137,7 +121,7 @@ export function validateOverrides(raw: unknown): { ok: true; value: Overrides | 
   if (r.questions !== undefined && r.questions !== null) {
     if (typeof r.questions !== 'object' || Array.isArray(r.questions)) return { ok: false, error: 'questions ต้องเป็น object' }
     for (const [id, qv] of Object.entries(r.questions as Record<string, unknown>)) {
-      const q = SURVEY.questions.find(x => x.id === id)
+      const q = survey.questions.find(x => x.id === id)
       if (!q) return { ok: false, error: `ไม่มีคำถาม id "${id}"` }
       if (!qv || typeof qv !== 'object' || Array.isArray(qv)) return { ok: false, error: `${q.id}: รูปแบบไม่ถูกต้อง` }
       const o = qv as Record<string, unknown>
@@ -184,12 +168,12 @@ export function validateOverrides(raw: unknown): { ok: true; value: Overrides | 
 }
 
 /** ชุดคำถามที่หน้า /survey และ API ใช้จริง = โค้ด + ส่วนที่แอดมินแก้ (ไม่แก้ SURVEY ตัวจริง) */
-export function applyOverrides(ov: Overrides | null | undefined): SurveyDef {
-  if (!ov) return SURVEY
+export function applyOverrides(ov: Overrides | null | undefined, survey: SurveyDef = SURVEY): SurveyDef {
+  if (!ov) return survey
   return {
-    ...SURVEY,
-    intro: ov.intro ?? SURVEY.intro,
-    questions: SURVEY.questions.map(q => {
+    ...survey,
+    intro: ov.intro ?? survey.intro,
+    questions: survey.questions.map(q => {
       const o = ov.questions?.[q.id]
       if (!o) return q
       return {
@@ -222,7 +206,9 @@ export function validateAnswers(raw: unknown, survey: SurveyDef = SURVEY):
       if (typeof v !== 'string') return { ok: false, error: `คำตอบไม่ถูกรูปแบบ: ${q.title}` }
       const t = v.trim()
       if (t.length > TEXT_MAX) return { ok: false, error: `ข้อความยาวเกิน ${TEXT_MAX} ตัวอักษร` }
-      if (t) out[q.id] = t
+      // ช่องว่างล้วนไม่ใช่คำตอบ — หน้าจอเช็กด้วย trim อยู่แล้ว แต่ด่านนี้ต้องไม่ผ่านถ้ามีคนยิง API ตรง ๆ (ข้อบังคับพิมพ์ข้อความเริ่มใช้ v1.284.2)
+      if (!t) { if (q.required) return { ok: false, error: `ยังไม่ได้ตอบ: ${q.title}` }; continue }
+      out[q.id] = t
       continue
     }
     if (q.kind === 'select' || q.kind === 'scale') {
@@ -275,7 +261,8 @@ export type Summary = {
   counts: Record<string, Record<string, number>>
   /** questionId → จำนวนคนที่ตอบข้อ multi นั้นจริง (ข้อไม่บังคับ — ตัวหารไม่ใช่ total) */
   answered: Record<string, number>
-  texts: { improve: string[]; other: string[] }
+  /** ข้อความที่พิมพ์ แยกตาม id ของข้อ (keep / change / improve) · other = ช่อง "อื่น ๆ" ของข้อเลือกตัวเลือก */
+  texts: Record<string, string[]>
 }
 
 const SCALE_QS = SURVEY.questions.filter(q => q.kind === 'scale').map(q => q.id)
@@ -299,7 +286,7 @@ function scaleStat(values: string[]): ScaleStat {
   }
 }
 
-export function summarize(rows: Array<{ group: string; answers: unknown }>, teamMin = TEAM_MIN): Summary {
+export function summarize(rows: Array<{ group: string; answers: unknown }>, teamMin = TEAM_MIN, survey: SurveyDef = SURVEY): Summary {
   const valid = rows.filter(r => TEAMS.some(t => t.id === r.group) && r.answers && typeof r.answers === 'object') as
     Array<{ group: string; answers: Answers }>
   const scalesOf = (rs: typeof valid) =>
@@ -307,9 +294,9 @@ export function summarize(rows: Array<{ group: string; answers: unknown }>, team
 
   const counts: Summary['counts'] = {}
   const answered: Summary['answered'] = {}
-  const texts: Summary['texts'] = { improve: [], other: [] }
+  const texts: Summary['texts'] = { other: [], ...Object.fromEntries(survey.questions.filter(q => q.kind === 'text').map(q => [q.id, [] as string[]])) }
   for (const r of valid) {
-    for (const q of SURVEY.questions) {
+    for (const q of survey.questions) {
       const v = r.answers[q.id]
       if (q.kind === 'multi') {
         const c = (counts[q.id] ||= {})
@@ -317,7 +304,7 @@ export function summarize(rows: Array<{ group: string; answers: unknown }>, team
         const o = r.answers[`${q.id}_other`]
         if (typeof o === 'string' && o) texts.other.push(o)
         if ((Array.isArray(v) && v.length) || (typeof o === 'string' && o)) answered[q.id] = (answered[q.id] || 0) + 1
-      } else if (q.kind === 'text' && typeof v === 'string' && v) texts.improve.push(v)
+      } else if (q.kind === 'text' && typeof v === 'string' && v) texts[q.id].push(v)
     }
   }
 

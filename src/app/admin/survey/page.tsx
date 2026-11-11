@@ -162,7 +162,7 @@ export default function AdminSurveyPage() {
             {s.smallTeams > 0 && <p className="mt-2 text-[11px] text-gray-500">อีก {s.smallTeams} คนไม่แยกตามทีม (ทีมที่คนตอบไม่ถึง {data.teamMin} คน หรือทีมที่ต้องรวมไว้ด้วย เพื่อไม่ให้เอาภาพรวมมาลบแล้วรู้คำตอบของใครได้) แต่นับรวมในภาพรวมด้านบน</p>}
           </div>
 
-          <div className="gf-card p-4 space-y-5">
+          {S.questions.some(q => q.kind === 'multi') && <div className="gf-card p-4 space-y-5">
             {S.questions.filter(q => q.kind === 'multi').map(q => {
               const c = s.counts[q.id] || {}
               const max = Math.max(1, ...Object.values(c))
@@ -175,10 +175,10 @@ export default function AdminSurveyPage() {
                 </div>
               )
             })}
-          </div>
+          </div>}
 
-          <Texts title={S.questions.find(q => q.kind === 'text')?.title || 'ข้อความ'} items={s.texts.improve} />
-          {(S.questions.some(q => q.other) || s.texts.other.length > 0) && <Texts title={'ช่อง "อื่น ๆ"'} items={s.texts.other} />}
+          {S.questions.filter(q => q.kind === 'text').map(q => <Texts key={q.id} title={q.title} items={s.texts[q.id] || []} />)}
+          {s.texts.other.length > 0 && <Texts title={'ช่อง "อื่น ๆ"'} items={s.texts.other} />}
           <p className="text-[11px] text-gray-400">คำตอบไม่มีชื่อ/อีเมล/เวลา และถูกสลับลำดับทุกครั้งที่มีคนตอบ · ข้อความเรียงตามตัวอักษร ไม่แยกตามทีม · ข้อความที่พิมพ์เองอาจบอกตัวคนเขียนได้ — อย่าเอาไปไล่ถามรายคน</p>
         </>
       )}

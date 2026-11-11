@@ -30,7 +30,7 @@ export async function GET() {
 
     const rows = await prisma.surveyResponse.findMany({ where: { surveyKey: SURVEY_KEY }, select: { group: true, answers: true } })
     const summary = summarize(rows, TEAM_MIN)
-    for (const k of ['improve', 'other'] as const) summary.texts[k].sort((a, b) => a.localeCompare(b, 'th'))
+    for (const k of Object.keys(summary.texts)) summary.texts[k].sort((a, b) => a.localeCompare(b, 'th'))
     return NextResponse.json({ key: SURVEY_KEY, open, participants, eligible, summary, teamMin: TEAM_MIN, overrides, survey })
   } catch (e: any) {
     console.error('[admin/survey] failed:', e?.message || e)
