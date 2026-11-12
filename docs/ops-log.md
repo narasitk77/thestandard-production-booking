@@ -4286,7 +4286,7 @@ problem and not a deployment problem.
   `landing-worker.js` นัดรอบถัดไปด้วย msUntilNextRun(12) ไม่มีการชดเชย → dead-man อีเมล 14:23 "Landing prune (noon) — last tick 1567 min ago" (Discord ops ยังไม่ได้ตั้ง) · ข้อเสนอ: ชดเชยเมื่อเริ่มในช่วง 12:00–18:30 แล้ววันนี้ยังไม่รัน (ยังไม่ทำ)
   (2) Hermes `probook-trash-watch` ล้ม 472 รอบตั้งแต่ 4 พ.ย. 09:45 — `exec /bin/sh: argument list too long` (อาร์กิวเมนต์ 131,077 ไบต์ เกิน 131,072) · แชต "Fix Hermes exit-1 …" รับแก้ ติดตั้ง 16:04 (เขียนข้อมูลเป็นไฟล์ในคอนเทนเนอร์แทน argv) · ตรวจย้อนจาก 4 พ.ย. เอง
 
-## 2026-11-12 — v1.287.0 = Footage พร้อม: ครบตาม MEDIAPRO → แจ้งรอบถัดไป ไม่รอ 4 ชม. · built + reviewed (ยังไม่ deploy · ยังไม่ commit)
+## 2026-11-12 — v1.287.0 = Footage พร้อม: ครบตาม MEDIAPRO → แจ้งรอบถัดไป ไม่รอ 4 ชม. · DEPLOYED `sha-f9ff300` (12:21)
 นัท: "rule 4 ชม หลังไฟล์ไม่เข้ายังช้าอยู่ อยากให้เช็คได้เลยว่าไฟล์ครบไหมจาก Mediapro แล้วถ้าครบแล้วแจ้งได้เลย แต่ถ้างานไหนไม่มี ก็ใช้กฎเดิม"
 - prod 30 วัน (SELECT ใน `BEGIN READ ONLY`): แจ้งอัตโนมัติ 56 ใบ · 43 ครบตาม MEDIAPRO + กล้องครบ (37 จองเสียง) · 13 ไม่มี MEDIAPRO · มัธยฐานแจ้ง ~6–6.6 ชม. หลังเลิกกอง
 - ย้อนหลัง 43 กล่อง (ro.py boxwalk อ่านอย่างเดียว · `createdTime` = เวลาขึ้น Drive จริง · Cloud Sync อัป MEDIAPRO.XML/ไฟล์เล็กก่อน MXF ใหญ่ทีหลัง →
@@ -4295,5 +4295,10 @@ problem and not a deployment problem.
 - รีวิว 2 รอบ: ยืนยัน (high) การ์ดที่เทระหว่างถ่าย/วันแรกของงานหลายวัน → เพิ่มกฎ "ต้องมีภาพขึ้นหลังเลิกกอง" · NAS เงียบ → ต้องสแกนหลังเห็นไฟล์ ·
   ตัวเฝ้าหลังแจ้งพลาด ingest/NAS ที่จบระหว่างรอบ → อ่าน audit `ingest.start`/`nas.folder_drained` · ไม่ทำกฎราย EP (5/7 ใบหลาย EP ใช้โฟลเดอร์ร่วม)
 - ปิด: `FOOTAGE_READY_VERIFIED_SETTLE_MS` ≥ `FOOTAGE_READY_SETTLE_MS` · ดูผลหลัง deploy: audit `readyPath` + Discord ops "ไฟล์มาเพิ่มหลังแจ้ง"
-- **รอนัท:** commit + push + deploy
+- deploy (นัทสั่ง "Deploy ได้เลย"): `deploy.py f9ff300` · `--check` ผ่าน (ไม่แตะ schema) · backup-2026-11-12T051454.sql.gz 1.41MB · จุดถอย `sha-78ff271` (v1.286.0) ·
+  12:21:41 ครบสามชั้น `/api/version` 1.287.0 `schemaSync` in-sync · deploy หลังรอบ prune เที่ยงจบ (12:07) ก่อน footage-integrity 13:00 · push พา `cfc7b25` (Hermes เท่านั้น) ขึ้นไปด้วย
+- ตรวจหลัง deploy: env คอนเทนเนอร์ `FOOTAGE_READY_VERIFIED_SETTLE_MS=1200000` · `SETTLE_MS=14400000` · `/stats` config `verifiedSettleMinutes: 20` ·
+  dry-run 82/5/5 ทั้งหมด no-footage `fast: []` `errors: []` · worker รอบแรก `fast=0 errors=0` (log บรรทัดใหม่)
+- เฝ้าต่อ: audit `booking.auto_notified_ready` ที่ `changes.readyPath='mediapro'` + Discord ops "ไฟล์มาเพิ่มหลังแจ้ง Footage พร้อม (ทางลัด MEDIAPRO)"
+- ค้าง (เสนอแล้ว รอนัท): v1.288 แปะ ✅ + ลิงก์กล่องใน event ปฏิทินตอนแจ้ง (sendUpdates none) + เติมย้อนหลัง 55 ใบ · ตัวสแกน NAS ตรวจ MEDIAPRO + ทุก 1 นาที
 
