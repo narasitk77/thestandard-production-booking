@@ -126,7 +126,7 @@ def compose(report, auto, auto_err=None):
     """ข้อความรายงาน (None = เงียบ) · pure — self-test
     report = ผล GET · auto = ผล POST (None = ไม่ได้เรียก) · auto_err = exception ของ POST (ผลไม่แน่นอน)"""
     if not report.get("ok"):
-        return f"⚠️ รหัสตอน vs Dashboard: ตรวจไม่ได้ — {report.get('error')}"
+        return f"⚠️ รหัสตอน vs Dashboard: ตรวจไม่ได้ — {str(report.get('error'))[:90]}"   # [:90] = exit 1 ส่งครบ
     drift = report.get("drift", [])
     if not drift:
         return None
@@ -238,15 +238,36 @@ def remember_report(outbox, text):
 # → exit 1 เพื่อให้ Hermes นับ streak. ส่วน "เจอปัญหาที่ prod" (worker ค้าง,
 # fallback พุ่ง) คือสคริปต์ทำงาน *สำเร็จ* → exit 0 ไม่งั้น streak จะเตือนผิดตัว
 #
-# ⚠️ แก้ 11 พ.ย. 2569 (ตรวจกับ Hermes ที่ติดตั้งอยู่): รอบที่ exit ≠ 0 ไม่ได้ส่ง stdout เต็ม — scheduler.py:6420 ส่ง
-# _summarize_cron_failure_for_delivery() ซึ่งตัดเหลือ ~177 ตัวอักษร (ฉบับเต็มอยู่แค่ใน ~/.hermes/cron/output/) และการส่ง
-# สรุปนั้นสำเร็จ = last_delivery_error ว่าง = OUTBOX ไม่ส่งซ้ำ · สคริปต์นี้จึง exit 1 เฉพาะเมื่อข้อความสั้นอยู่แล้ว
-# (อ่านระบบไม่ได้/พังกลางคัน) ส่วนข้อความยาวที่คนต้องอ่านครบ = exit 0 แล้วพูดดัง ๆ ในข้อความเอง
+# ⚠️ แก้ 11 พ.ย. 2569 — ความเชื่อเดิมตรงนี้ ("scheduler.py:3660 ยัง append stdout … คนอ่านได้เนื้อรายงานครบ") ผิด
+# (ตรวจกับ ~/.hermes/hermes-agent/cron/scheduler.py ที่ติดตั้งอยู่): 3660 แค่ประกอบ error ภายใน ส่วนตอนส่ง (~6420)
+# รอบที่ exit ≠ 0 ได้ _summarize_cron_failure_for_delivery() แทน stdout — "Script exited with code 1 stdout: …"
+# ยุบช่องว่าง/ขึ้นบรรทัดเหลือช่องเดียว เกิน 180 ตัวตัดเหลือ 177 + "..." (มี stderr = มาก่อน stdout กินที่อีก)
+# ฉบับเต็มอยู่แค่ ~/.hermes/cron/output/<job-id>/ · ข้อความสั้นนั้นส่งถึง → last_delivery_error ว่าง → OUTBOX ล้าง
+# ทิ้งรอบหน้า → ส่วนที่ถูกตัดหายถาวร (เกิดจริง: landing 4 ต.ค. รายงานส่งซ้ำ + dry-run ล้ม ถึงห้องแค่ต้นบรรทัดแรก)
+# กฎ (exit_plan): exit 1 เฉพาะเมื่อ stdout *ทั้งก้อน* รอดการตัด (ที่ว่างให้ stdout ~146 ตัว) · ยาวกว่านั้น = exit 0
+# + บรรทัด ‼️ นำหน้า ให้รายงานถึงครบ (แลกกับที่รอบนั้น Hermes ไม่นับ failure_streak) · ข้อความ self_fail เดี่ยว ๆ
+# จึงต้องสั้นพอ (ตัด detail) — --self-test ล็อกไว้ · ซ้ำทุกสคริปต์โดยเจตนา (เหตุผลเดียวกับบล็อก OUTBOX)
+def hermes_fail_view(stdout):
+    """-> (ข้อความที่ห้อง Discord ได้จริงถ้ารอบนี้ exit 1, ได้ครบทั้งก้อนไหม) · จำลองตอน stderr ว่าง"""
+    s = " ".join(f"Script exited with code 1\nstdout:\n{stdout}".split())
+    return (s, True) if len(s) <= 180 else (s[:177].rstrip() + "...", False)
+
+
+def exit_plan(payload):
+    """-> (stdout ที่จะพิมพ์, exit code) — ที่เดียวที่ตัดสิน exit code ของรอบ (OUTBOX เก็บสิ่งที่คืนจากที่นี่)"""
+    if not _SELF_FAIL:
+        return payload, 0
+    if hermes_fail_view(payload)[1]:
+        return payload, 1
+    why = ", ".join(dict.fromkeys(_SELF_FAIL))
+    return f"‼️ {JOB_NAME} ทำงานไม่สำเร็จรอบนี้ ({why}) — รายงานเต็มข้างล่าง\n{payload}", 0
+
+
 _SELF_FAIL = []
 
 
 def self_fail(reason=""):
-    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — epilogue จะ exit 1"""
+    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — exit_plan() ตัดสิน exit code (1 = ข้อความสั้นพอ)"""
     _SELF_FAIL.append(reason or "self-failure")
 
 
@@ -328,7 +349,59 @@ def self_test():
     done = {**res, "dryRun": False, "committed": True, "notes": ["ปฏิทิน: ไม่แก้", "OT: ป้ายเดิม"]}
     t = compose({**ok, "drift": [cand]}, {"ok": True, "applied": True, "results": [done]})
     assert "แก้รหัสตอนตาม Dashboard แล้ว" in t and t.count("ℹ️ ปฏิทิน: ไม่แก้") == 1 and "ℹ️ OT: ป้ายเดิม" in t, t
+
+    # ── exit code ↔ สิ่งที่ห้องได้จริง (exit_plan) — ทางจริง main()+run_once() ด้วยของปลอม ไม่แตะ prod ──
+    import tempfile
+    g, tmp, real_main = globals(), tempfile.mkdtemp(prefix="drift-selftest-"), main
+    g.update(OUTBOX=os.path.join(tmp, "ob.json"), HERMES_JOBS=os.path.join(tmp, "jobs.json"),
+             container_call=lambda method, body=None, timeout=330: {"ok": False, "error": "อ่าน Dashboard ไม่ได้: " + "x" * 300})
+
+    def must_reach(essential, out, code):   # exit 1 = ห้องได้แค่ hermes_fail_view() → ทั้งก้อนต้องรอด
+        view, whole = hermes_fail_view(out)
+        assert code == 1 and whole and all(e in view for e in essential), (code, view)
+
+    def reaches(essential, out, code):      # สิ่งที่ห้องได้จริง: exit 1 = hermes_fail_view() · exit 0 = ทั้งก้อน
+        got = hermes_fail_view(out)[0] if code else out
+        assert all(e in got for e in essential), (code, got)
+
+    def run(delivery_err=None):
+        _SELF_FAIL.clear()
+        _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": delivery_err}]})
+        return run_once()
+
+    must_reach(["ตรวจไม่ได้", "อ่าน Dashboard ไม่ได้"], *run())
+    _ob_write(OUTBOX, {"runAt": "2026-11-10 05:30", "text": "❓ OLD-" + "z" * 200})
+    out, code = run("DNS")
+    assert code == 0 and out.startswith("‼️ probook-episode-drift") and "❓ OLD-" + "z" * 200 in out, (code, out)
+    g["main"] = lambda: {}["k" * 300]
+    must_reach(["พังกลางคัน", "KeyError"], *run())
+    g["main"] = real_main
     print("self-test ok")
+
+
+def run_once():
+    """main() + epilogue (OUTBOX + exit_plan) -> (stdout, exit code) · __main__ และ --self-test ใช้ตัวเดียวกัน"""
+    import contextlib
+    import io
+
+    buf, crash = io.StringIO(), None
+    try:
+        with contextlib.redirect_stdout(buf):
+            main()
+    except SystemExit:
+        pass
+    except Exception as e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr · [:70] = สั้นพอให้ exit 1 ส่งครบ
+        self_fail("crash")
+        crash = f"⚠️ {JOB_NAME} พังกลางคัน: {type(e).__name__}: {str(e)[:70]}"
+    report = buf.getvalue().rstrip("\n")
+    if crash:
+        report = (report + "\n" + crash).strip()
+
+    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของรอบก่อนให้เสร็จ แล้วจึงเขียนของรอบนี้ทับ
+    resend = undelivered_lines(JOB_NAME, OUTBOX)
+    payload, code = exit_plan("\n".join(resend + ([report] if report else [])))
+    remember_report(OUTBOX, "\n".join(payload.splitlines()[:60]))
+    return payload, code
 
 
 if __name__ == "__main__":
@@ -338,30 +411,7 @@ if __name__ == "__main__":
     if "--dry-run" in sys.argv:
         main(dry_run=True)
         sys.exit(1 if _SELF_FAIL else 0)
-    import contextlib
-    import io as _io
-
-    _buf = _io.StringIO()
-    _crash = None
-    try:
-        with contextlib.redirect_stdout(_buf):
-            main()
-    except SystemExit:
-        pass
-    except Exception as _e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr
-        self_fail("crash")
-        _crash = f"⚠️ {JOB_NAME} พังกลางคัน: {type(_e).__name__}: {str(_e)[:200]}"
-
-    _report = _buf.getvalue().rstrip("\n")
-    if _crash:
-        _report = (_report + "\n" + _crash).strip()
-
-    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของรอบก่อนให้เสร็จ แล้วจึงเขียนของรอบนี้ทับ
-    _resend = undelivered_lines(JOB_NAME, OUTBOX)
-    _payload = "\n".join(_resend + ([_report] if _report else []))
-    remember_report(OUTBOX, "\n".join(_payload.splitlines()[:60]))
-
-    if _payload:
-        print(_payload)
-    if _SELF_FAIL:
-        sys.exit(1)
+    out, code = run_once()
+    if out:
+        print(out)
+    sys.exit(code)

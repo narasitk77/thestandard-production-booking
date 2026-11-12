@@ -39,6 +39,8 @@ window; this noon pass only clears delivered-footage folders sooner. Both only
 ever trash empties, so they cannot fight. Since v1.172 `prune=today` deliberately
 does NOT record a worker heartbeat — do not "fix" that; it keeps this run from
 masking a dead 19:00 worker.
+
+Self-check without network/prod (never reaches the apply step): python3 probook-landing-cleanup.py --self-test
 """
 import json
 import os
@@ -225,13 +227,36 @@ def remember_report(outbox, text):
 # → exit 1 เพื่อให้ Hermes นับ streak. ส่วน "เจอปัญหาที่ prod" (worker ค้าง,
 # fallback พุ่ง) คือสคริปต์ทำงาน *สำเร็จ* → exit 0 ไม่งั้น streak จะเตือนผิดตัว
 #
-# ปลอดภัยกับรายงาน: scheduler.py:3660 เมื่อ returncode != 0 ยัง append
-# "stdout:\n<payload>" ไปกับข้อความ ดังนั้นคนอ่านยังได้เนื้อรายงานครบเหมือนเดิม
+# ⚠️ แก้ 11 พ.ย. 2569 — ความเชื่อเดิมตรงนี้ ("scheduler.py:3660 ยัง append stdout … คนอ่านได้เนื้อรายงานครบ") ผิด
+# (ตรวจกับ ~/.hermes/hermes-agent/cron/scheduler.py ที่ติดตั้งอยู่): 3660 แค่ประกอบ error ภายใน ส่วนตอนส่ง (~6420)
+# รอบที่ exit ≠ 0 ได้ _summarize_cron_failure_for_delivery() แทน stdout — "Script exited with code 1 stdout: …"
+# ยุบช่องว่าง/ขึ้นบรรทัดเหลือช่องเดียว เกิน 180 ตัวตัดเหลือ 177 + "..." (มี stderr = มาก่อน stdout กินที่อีก)
+# ฉบับเต็มอยู่แค่ ~/.hermes/cron/output/<job-id>/ · ข้อความสั้นนั้นส่งถึง → last_delivery_error ว่าง → OUTBOX ล้าง
+# ทิ้งรอบหน้า → ส่วนที่ถูกตัดหายถาวร (เกิดจริง: landing 4 ต.ค. รายงานส่งซ้ำ + dry-run ล้ม ถึงห้องแค่ต้นบรรทัดแรก)
+# กฎ (exit_plan): exit 1 เฉพาะเมื่อ stdout *ทั้งก้อน* รอดการตัด (ที่ว่างให้ stdout ~146 ตัว) · ยาวกว่านั้น = exit 0
+# + บรรทัด ‼️ นำหน้า ให้รายงานถึงครบ (แลกกับที่รอบนั้น Hermes ไม่นับ failure_streak) · ข้อความ self_fail เดี่ยว ๆ
+# จึงต้องสั้นพอ (ตัด detail) — --self-test ล็อกไว้ · ซ้ำทุกสคริปต์โดยเจตนา (เหตุผลเดียวกับบล็อก OUTBOX)
+def hermes_fail_view(stdout):
+    """-> (ข้อความที่ห้อง Discord ได้จริงถ้ารอบนี้ exit 1, ได้ครบทั้งก้อนไหม) · จำลองตอน stderr ว่าง"""
+    s = " ".join(f"Script exited with code 1\nstdout:\n{stdout}".split())
+    return (s, True) if len(s) <= 180 else (s[:177].rstrip() + "...", False)
+
+
+def exit_plan(payload):
+    """-> (stdout ที่จะพิมพ์, exit code) — ที่เดียวที่ตัดสิน exit code ของรอบ (OUTBOX เก็บสิ่งที่คืนจากที่นี่)"""
+    if not _SELF_FAIL:
+        return payload, 0
+    if hermes_fail_view(payload)[1]:
+        return payload, 1
+    why = ", ".join(dict.fromkeys(_SELF_FAIL))
+    return f"‼️ {JOB_NAME} ทำงานไม่สำเร็จรอบนี้ ({why}) — รายงานเต็มข้างล่าง\n{payload}", 0
+
+
 _SELF_FAIL = []
 
 
 def self_fail(reason=""):
-    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — epilogue จะ exit 1"""
+    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — exit_plan() ตัดสิน exit code (1 = ข้อความสั้นพอ)"""
     _SELF_FAIL.append(reason or "self-failure")
 
 OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-landing.json")
@@ -260,12 +285,13 @@ def main():
 
     if status == 401:
         self_fail("401")
-        print("⚠️ landing-cleanup: prod ตอบ 401 — shared secret ไม่ตรงแล้ว (prod หมุน NEXTAUTH_SECRET?)")
-        print(f"   อัปเดตค่าใน {ENV_FILE} แล้วรอบหน้าจะทำงานเอง")
+        # สั้นพอให้ exit 1 ส่งครบ (exit_plan)
+        print("⚠️ landing-cleanup: prod ตอบ 401 — secret ไม่ตรงแล้ว (prod หมุน NEXTAUTH_SECRET?) · "
+              f"แก้ PROBOOK_LANDING_SECRET ใน {ENV_FILE.replace(os.path.expanduser('~'), '~')}")
         return
     if status != 200 or not isinstance(data, dict):
         self_fail(f"dry-run http {status}")
-        print(f"⚠️ landing-cleanup: dry-run ไม่สำเร็จ (http={status}) {str(err)[:120]}")
+        print(f"⚠️ landing-cleanup: dry-run ไม่สำเร็จ (http={status}) {str(err)[:60]}")   # [:60] = exit 1 ส่งครบ
         return
     if data.get("skipped"):
         print(f"⚠️ landing-cleanup: endpoint ข้ามงาน — {data.get('reason', 'ไม่ระบุเหตุผล')}")
@@ -336,36 +362,76 @@ def main():
     print("\n".join(lines[:12]))
 
 
-if __name__ == "__main__":
-    # ห่อ main() เพื่อให้บล็อก OUTBOX ด้านบนครอบ *ทุกทางออก* ของ main() ได้
-    # (สคริปต์นี้ return ออกกลางทางหลายจุด) โดยไม่ต้องไปแก้ print ทีละที่
+def run_once():
+    """main() + epilogue (OUTBOX + exit_plan) -> (stdout, exit code) · __main__ และ --self-test ใช้ตัวเดียวกัน"""
     import contextlib
-    import io as _io
+    import io
 
-    _buf = _io.StringIO()
-    _crash = None
+    buf, crash = io.StringIO(), None
     try:
-        with contextlib.redirect_stdout(_buf):
+        with contextlib.redirect_stdout(buf):
             main()
     except SystemExit:
         pass
-    except Exception as _e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr
+    except Exception as e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr · [:70] = สั้นพอให้ exit 1 ส่งครบ
         self_fail("crash")
-        _crash = f"\u26a0\ufe0f {JOB_NAME} \u0e1e\u0e31\u0e07\u0e01\u0e25\u0e32\u0e07\u0e04\u0e31\u0e19: {type(_e).__name__}: {str(_e)[:120]}"
-
-    _report = _buf.getvalue().rstrip("\n")
-    if _crash:
-        _report = (_report + "\n" + _crash).strip()
+        crash = f"⚠️ {JOB_NAME} พังกลางคัน: {type(e).__name__}: {str(e)[:70]}"
+    report = buf.getvalue().rstrip("\n")
+    if crash:
+        report = (report + "\n" + crash).strip()
 
     # ลำดับสำคัญ: อ่าน+ล้าง outbox ของรอบก่อนให้เสร็จ แล้วจึงเขียนของรอบนี้ทับ
-    _resend = undelivered_lines(JOB_NAME, OUTBOX)
-    _payload = "\n".join(_resend + ([_report] if _report else []))
-    remember_report(OUTBOX, "\n".join(_payload.splitlines()[:60]))
+    resend = undelivered_lines(JOB_NAME, OUTBOX)
+    payload, code = exit_plan("\n".join(resend + ([report] if report else [])))
+    remember_report(OUTBOX, "\n".join(payload.splitlines()[:60]))
+    return payload, code
 
-    if _payload:
-        print(_payload)
 
-    # exit 1 เฉพาะตอนที่ "เราเอง" ทำงานไม่สำเร็จ — Hermes จะได้นับ failure_streak
-    # และปล่อย nudge ตอนล้มติดกัน 3 รอบ. รายงานยังถูกส่งครบ (scheduler แนบ stdout)
-    if _SELF_FAIL:
-        sys.exit(1)
+def self_test():
+    """ทางจริง main()+run_once() ด้วยของปลอม ไม่แตะเน็ต/prod และไม่มีวันถึงขั้น apply
+    — ล็อกว่ารอบ exit 1 ส่งข้อความสำคัญถึงห้องครบ (exit_plan)"""
+    import tempfile
+    g, tmp = globals(), tempfile.mkdtemp(prefix="landing-selftest-")
+    g.update(OUTBOX=os.path.join(tmp, "ob.json"), HERMES_JOBS=os.path.join(tmp, "jobs.json"),
+             DRY_RETRY_DELAYS=(), secret=lambda: "selftest")
+
+    def must_reach(essential, out, code):   # exit 1 = ห้องได้แค่ hermes_fail_view() → ทั้งก้อนต้องรอด
+        view, whole = hermes_fail_view(out)
+        assert code == 1 and whole and all(e in view for e in essential), (code, view)
+
+    def reaches(essential, out, code):      # สิ่งที่ห้องได้จริง: exit 1 = hermes_fail_view() · exit 0 = ทั้งก้อน
+        got = hermes_fail_view(out)[0] if code else out
+        assert all(e in got for e in essential), (code, got)
+
+    def run(status, err="", down=False, delivery_err=None):
+        _SELF_FAIL.clear()
+        _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": delivery_err}]})
+
+        def fake_call(dry, token, timeout):
+            assert dry, "self-test ต้องไม่ถึงขั้น apply"
+            return status, None, err
+        g.update(call=fake_call, net_down=lambda: down)
+        return run_once()
+
+    must_reach(["ข้ามรอบนี้", "เน็ต/DNS", "ไม่มีการลบอะไร"], *run(0, "timed out", down=True))
+    must_reach(["401", "secret ไม่ตรง", "PROBOOK_LANDING_SECRET"], *run(401))
+    must_reach(["dry-run ไม่สำเร็จ", "http=500"], *run(500, "Internal Server Error " + "x" * 300))
+    # รายงานรอบก่อนส่งไม่ออก + รอบนี้ 401 → ห้าม exit 1 (เคสจริง 4 ต.ค.: ห้องได้แค่ต้นบรรทัดแรกของรายงานที่ส่งซ้ำ)
+    _ob_write(OUTBOX, {"runAt": "2026-10-03 12:16", "text": "🧹 OLD-" + "z" * 200})
+    out, code = run(401, delivery_err="DNS")
+    assert code == 0 and out.startswith("‼️ probook-landing-cleanup") and "🧹 OLD-" + "z" * 200 in out and "401" in out, (code, out)
+    g["secret"] = lambda: {}["k" * 300]
+    must_reach(["พังกลางคัน", "KeyError"], *run(200))
+    print("self-test ok")
+
+
+if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        self_test()
+        sys.exit(0)
+    # ห่อ main() ด้วย run_once() เพื่อให้บล็อก OUTBOX + exit_plan ครอบ *ทุกทางออก* ของ main()
+    # (สคริปต์นี้ return ออกกลางทางหลายจุด) โดยไม่ต้องไปแก้ print ทีละที่
+    out, code = run_once()
+    if out:
+        print(out)
+    sys.exit(code)

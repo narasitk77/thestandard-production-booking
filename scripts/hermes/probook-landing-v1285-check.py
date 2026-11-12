@@ -15,7 +15,8 @@ Hermes `--no-agent` · stdlib ล้วน ไม่มี LLM · อ่าน�
   - trashed[]: ไม่มีโฟลเดอร์ live ชื่อ "(CODE)" ใต้ root และมีตัวที่ถูกทิ้ง (trashedTime ≥ since)
   - kept[]:    ยังมีโฟลเดอร์ live อย่างน้อย 1 และไม่มีตัวที่ถูกทิ้งหลัง since (ถูกทิ้งผิด = ⚠️ ตัวแดง)
 ผลผ่าน = 1 บรรทัด ✅ (ครั้งเดียวต่อ expectation) · ไม่ผ่าน = ⚠️ ครั้งเดียว (exit 0 — เป็นข้อค้นพบที่ prod ไม่ใช่สคริปต์ล้ม) ·
-อ่าน prod/Drive ไม่ได้ = ⚠️ + exit 1 แล้วลองใหม่ tick หน้า · ส่ง Discord ไม่ถึง = OUTBOX พิมพ์ซ้ำรอบหน้า ·
+อ่าน prod/Drive ไม่ได้ = ⚠️ สั้น + exit 1 แล้วลองใหม่ tick หน้า (ปนกับผลตรวจของอีกรอบ = exit 0 + ‼️ ให้ผลถึงครบ — ดู exit_plan) ·
+ส่ง Discord ไม่ถึง = OUTBOX พิมพ์ซ้ำรอบหน้า ·
 บันทึก "done" หลังผลถูกเก็บลง OUTBOX และพิมพ์ออกแล้วเท่านั้น
 ครบทุก expectation แล้ว = เงียบถาวร ไม่แตะเครือข่าย (ลบ job ได้: hermes cron remove <id>)
 
@@ -249,15 +250,36 @@ def remember_report(outbox, text):
 # → exit 1 เพื่อให้ Hermes นับ streak. ส่วน "เจอปัญหาที่ prod" (worker ค้าง,
 # fallback พุ่ง) คือสคริปต์ทำงาน *สำเร็จ* → exit 0 ไม่งั้น streak จะเตือนผิดตัว
 #
-# ⚠️ แก้ 11 พ.ย. 2569 (ตรวจกับ Hermes ที่ติดตั้งอยู่): รอบที่ exit ≠ 0 ไม่ได้ส่ง stdout เต็ม — scheduler.py:6420 ส่ง
-# _summarize_cron_failure_for_delivery() ซึ่งตัดเหลือ ~177 ตัวอักษร (ฉบับเต็มอยู่แค่ใน ~/.hermes/cron/output/) และการส่ง
-# สรุปนั้นสำเร็จ = last_delivery_error ว่าง = OUTBOX ไม่ส่งซ้ำ · สคริปต์นี้จึง exit 1 เฉพาะเมื่อข้อความสั้นอยู่แล้ว
-# (อ่านระบบไม่ได้/พังกลางคัน) ส่วนข้อความยาวที่คนต้องอ่านครบ = exit 0 แล้วพูดดัง ๆ ในข้อความเอง
+# ⚠️ แก้ 11 พ.ย. 2569 — ความเชื่อเดิมตรงนี้ ("scheduler.py:3660 ยัง append stdout … คนอ่านได้เนื้อรายงานครบ") ผิด
+# (ตรวจกับ ~/.hermes/hermes-agent/cron/scheduler.py ที่ติดตั้งอยู่): 3660 แค่ประกอบ error ภายใน ส่วนตอนส่ง (~6420)
+# รอบที่ exit ≠ 0 ได้ _summarize_cron_failure_for_delivery() แทน stdout — "Script exited with code 1 stdout: …"
+# ยุบช่องว่าง/ขึ้นบรรทัดเหลือช่องเดียว เกิน 180 ตัวตัดเหลือ 177 + "..." (มี stderr = มาก่อน stdout กินที่อีก)
+# ฉบับเต็มอยู่แค่ ~/.hermes/cron/output/<job-id>/ · ข้อความสั้นนั้นส่งถึง → last_delivery_error ว่าง → OUTBOX ล้าง
+# ทิ้งรอบหน้า → ส่วนที่ถูกตัดหายถาวร (เกิดจริง: landing 4 ต.ค. รายงานส่งซ้ำ + dry-run ล้ม ถึงห้องแค่ต้นบรรทัดแรก)
+# กฎ (exit_plan): exit 1 เฉพาะเมื่อ stdout *ทั้งก้อน* รอดการตัด (ที่ว่างให้ stdout ~146 ตัว) · ยาวกว่านั้น = exit 0
+# + บรรทัด ‼️ นำหน้า ให้รายงานถึงครบ (แลกกับที่รอบนั้น Hermes ไม่นับ failure_streak) · ข้อความ self_fail เดี่ยว ๆ
+# จึงต้องสั้นพอ (ตัด detail) — --self-test ล็อกไว้ · ซ้ำทุกสคริปต์โดยเจตนา (เหตุผลเดียวกับบล็อก OUTBOX)
+def hermes_fail_view(stdout):
+    """-> (ข้อความที่ห้อง Discord ได้จริงถ้ารอบนี้ exit 1, ได้ครบทั้งก้อนไหม) · จำลองตอน stderr ว่าง"""
+    s = " ".join(f"Script exited with code 1\nstdout:\n{stdout}".split())
+    return (s, True) if len(s) <= 180 else (s[:177].rstrip() + "...", False)
+
+
+def exit_plan(payload):
+    """-> (stdout ที่จะพิมพ์, exit code) — ที่เดียวที่ตัดสิน exit code ของรอบ (OUTBOX เก็บสิ่งที่คืนจากที่นี่)"""
+    if not _SELF_FAIL:
+        return payload, 0
+    if hermes_fail_view(payload)[1]:
+        return payload, 1
+    why = ", ".join(dict.fromkeys(_SELF_FAIL))
+    return f"‼️ {JOB_NAME} ทำงานไม่สำเร็จรอบนี้ ({why}) — รายงานเต็มข้างล่าง\n{payload}", 0
+
+
 _SELF_FAIL = []
 
 
 def self_fail(reason=""):
-    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — epilogue จะ exit 1"""
+    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — exit_plan() ตัดสิน exit code (1 = ข้อความสั้นพอ)"""
     _SELF_FAIL.append(reason or "self-failure")
 
 OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-landing-v1285-check.json")
@@ -277,7 +299,8 @@ def main(dry_run=False):
         try:
             d = probe(exp)
         except Exception as e:                     # อ่านไม่ได้ ≠ ผ่าน: ตะโกน แล้ว tick หน้าลองใหม่ (ไม่ mark done)
-            print(f"⚠️ landing v1.285 ({exp['id']}): ตรวจไม่ได้ — {type(e).__name__}: {str(e)[:160]} · จะลองใหม่ tick หน้า")
+            # สั้นพอให้ exit 1 ส่งครบ (exit_plan) — ข้อความเต็มอยู่ใน ~/.hermes/cron/output/
+            print(f"⚠️ landing v1.285 ({exp['id']}): ตรวจไม่ได้ จะลองใหม่ tick หน้า — {(type(e).__name__ + ': ' + str(e))[:60]}")
             self_fail("probe failed")              # เราเองตรวจไม่ได้ → exit 1 ให้ Hermes นับ streak
             continue
         status, text = judge(exp, d, now)
@@ -322,7 +345,68 @@ def self_test():
     # ไม่เจอโฟลเดอร์เลย (ไม่ live ไม่ถังขยะ) ≠ ผ่าน
     s, t = judge(exp, {**ok, "folders": {**ok["folders"], "T-1": []}}, at)
     assert s == "fail" and "T-1" in t, t
+
+    # ── exit code ↔ สิ่งที่ห้องได้จริง (exit_plan) — ทางจริง main()+run_once() ด้วยของปลอม ไม่แตะ prod ──
+    import tempfile
+    g, tmp, real_main = globals(), tempfile.mkdtemp(prefix="v1285-selftest-"), main
+    g.update(STATE=os.path.join(tmp, "s.json"), OUTBOX=os.path.join(tmp, "ob.json"), HERMES_JOBS=os.path.join(tmp, "jobs.json"))
+    past = {**exp, "since": "2026-11-01T19:00:00+07:00", "due": "2026-11-01T19:25:00+07:00", "deadline": "2026-11-01T20:30:00+07:00"}
+    wrong = [{"id": "w", "trashed": True, "trashedTime": "2026-11-01T12:11:30Z"}]   # K-1 ถูกทิ้งในรอบนี้ = ผล 🔴
+
+    def fake_probe(e):
+        if e["id"] == "down":
+            raise RuntimeError("คอนเทนเนอร์ไม่ตอบผลการตรวจ: " + "x" * 300)
+        return {"audit": [row], "folders": {"T-1": gone(), "T-2": gone(), "K-1": wrong}}
+    g["probe"] = fake_probe
+
+    def must_reach(essential, out, code):   # exit 1 = ห้องได้แค่ hermes_fail_view() → ทั้งก้อนต้องรอด
+        view, whole = hermes_fail_view(out)
+        assert code == 1 and whole and all(e in view for e in essential), (code, view)
+
+    def reaches(essential, out, code):      # สิ่งที่ห้องได้จริง: exit 1 = hermes_fail_view() · exit 0 = ทั้งก้อน
+        got = hermes_fail_view(out)[0] if code else out
+        assert all(e in got for e in essential), (code, got)
+
+    def run(expects):
+        _SELF_FAIL.clear()
+        _TO_MARK.clear()
+        g["EXPECT"] = expects
+        _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": None}]})
+        return run_once()
+
+    must_reach(["ตรวจไม่ได้", "tick หน้า"], *run([{**past, "id": "down"}]))
+    # ผล "ไม่ผ่าน" ของรอบหนึ่ง + อีกรอบอ่านไม่ได้: exit 1 จะตัดผลทิ้ง แล้ว epilogue mark done = ไม่มีวันรายงานซ้ำ → exit 0 + ‼️
+    out, code = run([{**past, "id": "judged"}, {**past, "id": "down"}])
+    assert code == 0 and out.startswith("‼️") and "🔴 K-1" in out and "ตรวจไม่ได้" in out and "judged" in _TO_MARK, (code, out)
+    g["main"] = lambda: {}["k" * 300]
+    must_reach(["พังกลางคัน", "KeyError"], *run([]))
+    g["main"] = real_main
     print("self-test ok")
+
+def run_once():
+    """main() + epilogue (OUTBOX + exit_plan) -> (stdout, exit code) · __main__ และ --self-test ใช้ตัวเดียวกัน"""
+    import contextlib
+    import io
+
+    buf, crash = io.StringIO(), None
+    try:
+        with contextlib.redirect_stdout(buf):
+            main()
+    except SystemExit:
+        pass
+    except Exception as e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr · [:70] = สั้นพอให้ exit 1 ส่งครบ
+        self_fail("crash")
+        crash = f"⚠️ {JOB_NAME} พังกลางคัน: {type(e).__name__}: {str(e)[:70]}"
+    report = buf.getvalue().rstrip("\n")
+    if crash:
+        report = (report + "\n" + crash).strip()
+
+    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของรอบก่อนให้เสร็จ แล้วจึงเขียนของรอบนี้ทับ
+    resend = undelivered_lines(JOB_NAME, OUTBOX)
+    payload, code = exit_plan("\n".join(resend + ([report] if report else [])))
+    remember_report(OUTBOX, "\n".join(payload.splitlines()[:60]))
+    return payload, code
+
 
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
@@ -331,35 +415,12 @@ if __name__ == "__main__":
     if "--dry-run" in sys.argv:
         main(dry_run=True)
         sys.exit(1 if _SELF_FAIL else 0)
-    import contextlib
-    import io as _io
-
-    _buf = _io.StringIO()
-    _crash = None
-    try:
-        with contextlib.redirect_stdout(_buf):
-            main()
-    except SystemExit:
-        pass
-    except Exception as _e:  # พังกลางคัน = แจ้งคน ไม่ใช่หายไปใน stderr
-        self_fail("crash")
-        _crash = f"⚠️ {JOB_NAME} พังกลางคัน: {type(_e).__name__}: {str(_e)[:200]}"
-
-    _report = _buf.getvalue().rstrip("\n")
-    if _crash:
-        _report = (_report + "\n" + _crash).strip()
-
-    # ลำดับสำคัญ: อ่าน+ล้าง outbox ของรอบก่อนให้เสร็จ แล้วจึงเขียนของรอบนี้ทับ
-    _resend = undelivered_lines(JOB_NAME, OUTBOX)
-    _payload = "\n".join(_resend + ([_report] if _report else []))
-    remember_report(OUTBOX, "\n".join(_payload.splitlines()[:60]))
-
-    if _payload:
-        print(_payload)
+    out, code = run_once()
+    if out:
+        print(out)
     sys.stdout.flush()
     if _TO_MARK:
         _st = load_state()
         _st["done"].update(_TO_MARK)
         save_state(_st)
-    if _SELF_FAIL:
-        sys.exit(1)
+    sys.exit(code)

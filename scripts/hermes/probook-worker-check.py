@@ -646,13 +646,36 @@ def remember_report(outbox, text):
 # → exit 1 เพื่อให้ Hermes นับ streak. ส่วน "เจอปัญหาที่ prod" (worker ค้าง,
 # fallback พุ่ง) คือสคริปต์ทำงาน *สำเร็จ* → exit 0 ไม่งั้น streak จะเตือนผิดตัว
 #
-# ปลอดภัยกับรายงาน: scheduler.py:3660 เมื่อ returncode != 0 ยัง append
-# "stdout:\n<payload>" ไปกับข้อความ ดังนั้นคนอ่านยังได้เนื้อรายงานครบเหมือนเดิม
+# ⚠️ แก้ 11 พ.ย. 2569 — ความเชื่อเดิมตรงนี้ ("scheduler.py:3660 ยัง append stdout … คนอ่านได้เนื้อรายงานครบ") ผิด
+# (ตรวจกับ ~/.hermes/hermes-agent/cron/scheduler.py ที่ติดตั้งอยู่): 3660 แค่ประกอบ error ภายใน ส่วนตอนส่ง (~6420)
+# รอบที่ exit ≠ 0 ได้ _summarize_cron_failure_for_delivery() แทน stdout — "Script exited with code 1 stdout: …"
+# ยุบช่องว่าง/ขึ้นบรรทัดเหลือช่องเดียว เกิน 180 ตัวตัดเหลือ 177 + "..." (มี stderr = มาก่อน stdout กินที่อีก)
+# ฉบับเต็มอยู่แค่ ~/.hermes/cron/output/<job-id>/ · ข้อความสั้นนั้นส่งถึง → last_delivery_error ว่าง → OUTBOX ล้าง
+# ทิ้งรอบหน้า → ส่วนที่ถูกตัดหายถาวร (เกิดจริง: landing 4 ต.ค. รายงานส่งซ้ำ + dry-run ล้ม ถึงห้องแค่ต้นบรรทัดแรก)
+# กฎ (exit_plan): exit 1 เฉพาะเมื่อ stdout *ทั้งก้อน* รอดการตัด (ที่ว่างให้ stdout ~146 ตัว) · ยาวกว่านั้น = exit 0
+# + บรรทัด ‼️ นำหน้า ให้รายงานถึงครบ (แลกกับที่รอบนั้น Hermes ไม่นับ failure_streak) · ข้อความ self_fail เดี่ยว ๆ
+# จึงต้องสั้นพอ (ตัด detail) — --self-test ล็อกไว้ · ซ้ำทุกสคริปต์โดยเจตนา (เหตุผลเดียวกับบล็อก OUTBOX)
+def hermes_fail_view(stdout):
+    """-> (ข้อความที่ห้อง Discord ได้จริงถ้ารอบนี้ exit 1, ได้ครบทั้งก้อนไหม) · จำลองตอน stderr ว่าง"""
+    s = " ".join(f"Script exited with code 1\nstdout:\n{stdout}".split())
+    return (s, True) if len(s) <= 180 else (s[:177].rstrip() + "...", False)
+
+
+def exit_plan(payload):
+    """-> (stdout ที่จะพิมพ์, exit code) — ที่เดียวที่ตัดสิน exit code ของรอบ (OUTBOX เก็บสิ่งที่คืนจากที่นี่)"""
+    if not _SELF_FAIL:
+        return payload, 0
+    if hermes_fail_view(payload)[1]:
+        return payload, 1
+    why = ", ".join(dict.fromkeys(_SELF_FAIL))
+    return f"‼️ {JOB_NAME} ทำงานไม่สำเร็จรอบนี้ ({why}) — รายงานเต็มข้างล่าง\n{payload}", 0
+
+
 _SELF_FAIL = []
 
 
 def self_fail(reason=""):
-    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — epilogue จะ exit 1"""
+    """ทำเครื่องหมายว่ารอบนี้ 'เราทำงานไม่สำเร็จ' — exit_plan() ตัดสิน exit code (1 = ข้อความสั้นพอ)"""
     _SELF_FAIL.append(reason or "self-failure")
 
 OUTBOX = os.path.expanduser("~/.hermes/state/probook/outbox-worker-check.json")
@@ -699,15 +722,17 @@ def finish(lines, heartbeat=False):
     # เก็บ payload ทั้งก้อน ไม่ใช่แค่ report ของรอบนี้ — ถ้าเน็ตล่มติดกันหลายรอบ
     # ของเก่าจะได้ถูกหอบต่อไปเรื่อย ๆ แทนที่จะหล่นหายตั้งแต่รอบที่สอง (cap 60 บรรทัด)
     # heartbeat ไม่เข้า outbox: หายไปก็แก้ตัวเองรอบหน้า ส่วนคำเตือนที่หายคือของจริง
-    remember_report(OUTBOX, "" if heartbeat else "\n".join(payload.splitlines()[:60]))
-
-    if payload:
-        print(payload)
-    # exit 1 เฉพาะตอนที่ "เราเอง" เช็กไม่สำเร็จ (401 / เน็ตล่ม) — ไม่ใช่ตอนที่
-    # เจอ worker ค้างที่ prod ซึ่งแปลว่าสคริปต์นี้ทำงานสำเร็จตามหน้าที่
+    #
+    # exit 1 เฉพาะตอนที่ "เราเอง" เช็กไม่สำเร็จ (401 / เน็ตล่ม) **และ** ข้อความทั้งก้อนรอดการตัดของ Hermes —
+    # self_fail ที่ปนกับรายงานเต็ม (เช่น footage-ready 401 + worker ค้าง) = exit 0 + ‼️ นำหน้า (exit_plan)
+    # ไม่ใช่ตอนที่เจอ worker ค้างที่ prod ซึ่งแปลว่าสคริปต์นี้ทำงานสำเร็จตามหน้าที่
     # เงียบเมื่อปกติ (รอบค่ำ) — ไม่ print อะไรเลย = Hermes ไม่ส่งข้อความ
     # (ทุกที่ที่เรียก self_fail ใส่บรรทัดรายงานด้วยเสมอ จึงไม่มีกรณี exit 1 แบบเงียบ)
-    sys.exit(1 if _SELF_FAIL else 0)
+    payload, code = exit_plan(payload)
+    remember_report(OUTBOX, "" if heartbeat else "\n".join(payload.splitlines()[:60]))
+    if payload:
+        print(payload)
+    sys.exit(code)
 
 
 def main():
@@ -731,20 +756,18 @@ def main():
             self_fail("net down")
             save_state(state)
             hm = lambda ts: time.strftime("%H:%M", time.localtime(ts))
+            # สั้นพอให้ exit 1 ส่งครบ (exit_plan) · ไม่ใส่ body: net_down() ยืนยันแล้วว่า DNS ล่ม URLError ไม่บอกอะไรเพิ่ม
             finish([
-                "⚠️ เช็ก probook ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod)",
-                f"   ({body[:100]}) รอบหน้าจะลองใหม่เอง",
-                f"   (เริ่ม {hm(started)} · เช็กเสร็จ {hm(time.time())} — ห่างกันนาน = แมคหลับระหว่างรัน)",
+                "⚠️ เช็ก probook ไม่ได้รอบนี้ — เน็ต/DNS ของเครื่องนี้ล่ม (ไม่ใช่ prod) รอบหน้าลองใหม่เอง",
+                f"   เริ่ม {hm(started)} · เช็กเสร็จ {hm(time.time())} (ห่างนาน = แมคหลับ)",
             ])
         self_fail("prod not responding")
         state["neverTicked"] = {}
         state["appDownStreak"] = int(state.get("appDownStreak", 0)) + 1
         save_state(state)
-        finish([
-            "⚠️ probook ตอบไม่ได้เลย — /api/health-summary ไม่มีการตอบกลับ (เน็ตเครื่องนี้ปกติ)",
-            f"   ({body[:120]}) ครั้งที่ {state['appDownStreak']} ติดกัน",
-            "   ดูต่อ: Portainer stack 125 → container production-booking-app (ผมรีสตาร์ทให้ไม่ได้)",
-        ])
+        # บรรทัดเดียวสั้นพอให้ exit 1 ส่งครบ (exit_plan) — ฉบับ 3 บรรทัดเดิม Hermes ตัด "ดูต่อ" ทิ้ง ซึ่งเป็นส่วนที่ลงมือได้
+        finish([f"⚠️ probook ตอบไม่ได้เลย {state['appDownStreak']} รอบติด (เน็ตเครื่องนี้ปกติ) — "
+                f"ดู Portainer stack 125 → production-booking-app · {body[:30]}"])
     state["appDownStreak"] = 0
 
     try:
@@ -761,7 +784,7 @@ def main():
     if not lines and (data.get("error") or not isinstance(workers, list) or not workers):
         self_fail("health-summary error")
         lines.append(f"⚠️ /api/health-summary ตอบ HTTP {status} แต่ไม่มีรายชื่อ worker — เช็ก worker ไม่ได้รอบนี้"
-                     + (f": {str(data.get('error'))[:120]}" if data.get("error") else ""))
+                     + (f": {str(data.get('error'))[:50]}" if data.get("error") else ""))
     if not isinstance(workers, list):
         workers = []
 
@@ -882,7 +905,7 @@ def selftest():
         f.write(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 3600))
                 + " [info] [CCDScheduledTasks] Spawning new session for scheduled task probook-nightly-check { x }\n")
 
-    sim = {"down": False, "footage404": False, "healthErr": False}
+    sim = {"down": False, "footage404": False, "healthErr": False, "footage401": False, "stale": 0}
 
     class Resp:
         def __init__(self, status, body):
@@ -902,12 +925,15 @@ def selftest():
         if "/api/health-summary" in url:
             if sim["healthErr"]:   # evaluateWorkers() throw → 503 {ok:false,error} ไม่มี workers
                 raise urllib.error.HTTPError(url, 503, "x", {}, io.BytesIO(b'{"ok":false,"error":"db blip"}'))
-            return Resp(200, json.dumps({"workers": [{"key": "w", "enabled": True, "lastTickAgoSec": 60}]}))
+            stale = [{"key": f"stale-{i}", "enabled": True, "stale": True, "lastTickAgoSec": 30000} for i in range(sim["stale"])]
+            return Resp(200, json.dumps({"workers": [{"key": "w", "enabled": True, "lastTickAgoSec": 60}] + stale}))
         if "/api/version" in url:
             return Resp(200, json.dumps({"version": "v-selftest"}))
         if "/footage-ready/stats" in url:
             if sim["footage404"]:
                 raise urllib.error.HTTPError(url, 404, "nf", {}, io.BytesIO(b""))
+            if sim["footage401"]:
+                raise urllib.error.HTTPError(url, 401, "unauth", {}, io.BytesIO(b""))
             return Resp(200, json.dumps({"alerts": []}))
         raise AssertionError(f"unexpected URL {url}")
 
@@ -932,7 +958,8 @@ def selftest():
     jobs(None)
     sim["down"] = True
     code, out = run()
-    assert code != 0, code
+    view, whole = hermes_fail_view(out)   # exit 1 = ห้องได้แค่นี้ → ทั้งก้อนต้องรอด
+    assert code == 1 and whole and "เน็ต/DNS ของเครื่องนี้ล่ม" in view and "เช็กเสร็จ" in view, (code, view)
     assert "เน็ต/DNS ของเครื่องนี้ล่ม" in out and "เริ่ม " in out and "เช็กเสร็จ" in out, out
     ob = _ob_read(OUTBOX)
     assert ob and "เน็ต/DNS ของเครื่องนี้ล่ม" in ob["text"], ob
@@ -947,7 +974,8 @@ def selftest():
     sim["down"] = True
     g["net_down"] = lambda: False
     code, out = run()
-    assert code == 1 and "probook ตอบไม่ได้เลย" in out, (code, out)
+    view, whole = hermes_fail_view(out)
+    assert code == 1 and whole and "probook ตอบไม่ได้เลย" in view and "Portainer stack 125" in view, (code, view)
     assert "probook ตอบไม่ได้เลย" in _ob_read(OUTBOX)["text"]
     sim["down"] = False
     g["net_down"] = lambda: sim["down"]
@@ -957,9 +985,20 @@ def selftest():
     jobs(None)
     sim["healthErr"] = True
     code, out = run()
-    assert code == 1 and "เช็ก worker ไม่ได้รอบนี้" in out and "db blip" in out and "✅" not in out, (code, out)
+    view, whole = hermes_fail_view(out)
+    assert code == 1 and whole and "เช็ก worker ไม่ได้รอบนี้" in view and "db blip" in view and "✅" not in out, (code, view)
     sim["healthErr"] = False
     print("ok (a3) health-summary error -> loud + exit 1, no ✅ 0/0")
+
+    # (a4) self_fail ปนกับรายงานเต็ม (footage-ready 401 + worker ค้าง 6 ตัว) — exit 1 จะเหลือ ~146 ตัว = รายงานหาย
+    #      → exit 0 + ‼️ บรรทัดแรก และทุกบรรทัดถึงห้อง
+    jobs(None)
+    sim.update(footage401=True, stale=6)
+    code, out = run()
+    assert code == 0 and out.startswith("‼️ probook-worker-check ทำงานไม่สำเร็จรอบนี้ (footage-ready stats 401)"), (code, out)
+    assert "footage-ready stats: 401" in out and out.count("ไม่ tick มา") == 6, out
+    sim.update(footage401=False, stale=0)
+    print("ok (a4) self-fail inside a long report -> exit 0 + ‼️ first, nothing cut")
 
     # (b) outbox ค้างจากรอบก่อน → ส่งซ้ำครั้งเดียว · รอบถัดไปที่ส่งถึงแล้ว → ล้าง
     jobs("simulated delivery failure")
