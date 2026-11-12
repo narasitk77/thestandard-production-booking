@@ -74,6 +74,20 @@ export function isShootOver(b: ShootWindow, now: Date = new Date()): boolean {
   return b.estimatedWrap ? bkkTimeStr >= b.estimatedWrap : bkkTimeStr >= '23:00'
 }
 
+/**
+ * v1.287 — the instant isShootOver flips to true: last shoot day (overnight → the next day) + estimatedWrap
+ * Bangkok, or 23:00 when there is none. A wrap that is not "HH:MM" (isShootOver's string compare is undefined
+ * for it) reads as the END of that day — later, never earlier. Cross-checked against isShootOver in tests.
+ */
+export function shootEndsAt(b: ShootWindow): Date {
+  const DAY_MS = 24 * 60 * 60 * 1000
+  const lastDay = wrapsNextDay(b) ? new Date(b.shootDate.getTime() + DAY_MS) : (b.shootEndDate ?? b.shootDate)
+  const wrap = b.estimatedWrap || '23:00'
+  if (!isValidHHMM(wrap)) return new Date(lastDay.getTime() + DAY_MS - 7 * 3_600_000)
+  const [h, m] = wrap.split(':').map(Number)
+  return new Date(lastDay.getTime() + ((h - 7) * 60 + m) * 60_000)
+}
+
 // ── v1.118 — same-day HH:MM occupancy helpers (Week Plan + camera overlap) ──
 
 /**

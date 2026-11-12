@@ -56,8 +56,11 @@ async function runOnce() {
     // v1.267 — and because a booked camera has no video on Drive yet (review: that hold was invisible in the log)
     const blocked = (json.skipped || []).filter(s => s.reason === 'mediapro-incomplete' || s.reason === 'camera-incomplete')
     console.log(
-      `[footage-ready] scanned=${json.scanned} eligible=${json.eligible} walked=${json.walked} notified=${(json.notified || []).length} settling=${(json.settling || []).length} deferred=${json.deferred} blocked=${blocked.length} followedUp=${(json.followedUp || []).length} errors=${(json.errors || []).length}`,
+      `[footage-ready] scanned=${json.scanned} eligible=${json.eligible} walked=${json.walked} notified=${(json.notified || []).length} settling=${(json.settling || []).length} deferred=${json.deferred} blocked=${blocked.length} followedUp=${(json.followedUp || []).length} fast=${(json.fast || []).filter(f => f.ok && (json.notified || []).includes(f.code)).length} errors=${(json.errors || []).length}`,
     )
+    // v1.287 — why a booking past the short wait still keeps the 4h rule (judged once per footage state, so once per change)
+    for (const f of json.fast || []) if (!f.ok && !f.cached) console.log(`[footage-ready] 4h rule ${f.code}: ${String(f.detail || '').slice(0, 300)}`)
+    for (const m of json.fastMore || []) console.log(`[footage-ready] more footage after fast notice ${m.code}: ${String(m.detail || '').slice(0, 300)}`)
     // v1.268 — warned bookings still waiting for their "cameras complete" follow-up
     for (const w of json.followUpWaiting || []) console.log(`[footage-ready] follow-up waiting ${w.code}: ${String(w.detail || '').slice(0, 200)}`)
     for (const s of blocked) console.log(`[footage-ready] held ${s.code} (${s.reason}): ${String(s.detail || '').slice(0, 300)}`)

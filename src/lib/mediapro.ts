@@ -302,7 +302,7 @@ export async function loadMediaproCards(files: DriveFile[]): Promise<MediaproCar
  * when every file the cards list is in place. Any error = not ok, with the reason —
  * a check that could not run must never read as "complete".
  */
-export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptions = {}): Promise<{ ok: boolean; text: string; check: MediaproCheck | null; files?: DriveFile[] }> {
+export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptions = {}): Promise<{ ok: boolean; text: string; check: MediaproCheck | null; files?: DriveFile[]; cards?: MediaproCard[] }> {
   try {
     if (!folderIds.length) return { ok: false, text: 'ไม่มีโฟลเดอร์ให้ตรวจ MEDIAPRO', check: null }
     const files: DriveFile[] = []
@@ -313,10 +313,11 @@ export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptio
     }
     // A dead/empty folder walks to [] — that is "could not check", never "no Sony card, fine".
     if (!files.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) return { ok: false, text: 'โฟลเดอร์ที่ตรวจไม่มีไฟล์ (ว่างหรืออยู่ในถังขยะ) — ตรวจ MEDIAPRO ไม่ได้', check: null }
-    const check = mediaproCheck(files, await loadMediaproCards(files), opts)
+    const cards = await loadMediaproCards(files)
+    const check = mediaproCheck(files, cards, opts)
     const ok = mediaproComplete(check)
     return {
-      ok, check, files,
+      ok, check, files, cards, // v1.287 — footage-ready's fast path asks which camera folder each card sits in
       text: ok
         ? [check.cards ? `ครบตาม MEDIAPRO ${check.cards} การ์ด · ${check.listed - check.stale.length} ไฟล์` : 'ไม่มีการ์ด Sony (ไม่มี MEDIAPRO ให้เทียบ)',
             check.twinCopies.length ? `สำเนาการ์ดที่ตรงทุกไบต์ ${check.twinCopies.length} โฟลเดอร์ (${check.twinCopies.slice(0, 2).map(p => p.split('/').slice(-2).join('/')).join(', ')})` : '',

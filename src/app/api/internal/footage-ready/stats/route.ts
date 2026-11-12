@@ -128,6 +128,8 @@ export async function GET(request: NextRequest) {
     audience: footageReadyAudience(),
     lookbackDays,
     settleHours: Math.round(envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000) / 360_000) / 10,
+    // v1.287 — the wait when MEDIAPRO vouches for the whole box (≥ settleHours = fast path off)
+    verifiedSettleMinutes: Math.round(envInt('FOOTAGE_READY_VERIFIED_SETTLE_MS', 20 * 60_000) / 60_000),
     intervalMinutes: Math.round(envInt('FOOTAGE_READY_INTERVAL_MS', 30 * 60_000) / 60_000),
     maxPerRun: envInt('FOOTAGE_READY_MAX_PER_RUN', 5),
   }

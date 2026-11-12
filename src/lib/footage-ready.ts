@@ -24,6 +24,10 @@
  *                      (default 2 h — covers the "dump card 1 → travel/dinner →
  *                      dump card 2" gap) across sweeps, so a multi-batch card
  *                      dump doesn't fire after the first batch
+ *                      v1.287 — OR, when MEDIAPRO can vouch for the whole box
+ *                      (fastPathBlocker === ''), unchanged for only
+ *                      FOOTAGE_READY_VERIFIED_SETTLE_MS (default 20 min = one sweep
+ *                      later). Anything MEDIAPRO cannot vouch for keeps the long wait.
  *   g) MEDIAPRO      — v1.254: every file each Sony card's MEDIAPRO.XML lists is in
  *                      the box (none 0 bytes, none far smaller per frame than its
  *                      siblings), and no Sony card is missing its MEDIAPRO. A copy
@@ -46,16 +50,16 @@ import { logAudit } from './audit'
 import { sendEmail, isEmailConfigured } from './email'
 import { notifyChatDetailed, notifyEmailDigest } from './notify'
 import { getCachedFootagePayload, computeFootagePayload, type FootagePayload, type BookingForFootagePayload } from './footage-folders'
-import { isPhotoAlbumBooking } from './outlet-folders'
-import { isShootOver } from './shoot-window'
+import { isPhotoAlbumBooking, bookingNeedsSound } from './outlet-folders'
+import { isShootOver, shootEndsAt, type ShootWindow } from './shoot-window'
 import { latestNasState, nasManifestAge } from './nas-sync'
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
 import { ADMIN_DIGEST, readHeld } from './footage-ready-health'
-import { mediaproGate, expectsCameraVideo } from './mediapro'
+import { mediaproGate, expectsCameraVideo, sameClip } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
-import { isQuarantined, sonyClipPart, type FootageFileLike } from './footage-completeness'
+import { baseName, isQuarantined, sonyClipPart, type FootageFileLike } from './footage-completeness'
 import { alertOps } from './ops-alert'
 import { CARD_PREFIX, isStaleCard, cardHoldsNotice } from './ingest'
 import { EPISODE_ORDER } from './episode-order'
@@ -120,6 +124,79 @@ export function cameraCoverage(
   if (expectVideo && video === 0) gap = 'ยังไม่มีไฟล์ภาพจากกล้องเลย (มีแต่ไฟล์อื่น เช่น เสียง)'
   else if (!uncounted && expected > 0 && cams.size < expected) gap = `มีไฟล์ภาพ ${cams.size}/${expected} กล้อง (${list.join(', ') || '—'})`
   return { video, cams: list, uncounted, gap }
+}
+
+// ── MEDIAPRO fast path (v1.287) ─────────────────────────────────────────────
+// นัท 12 พ.ย. 2569: "rule 4 ชม หลังไฟล์ไม่เข้ายังช้าอยู่ อยากให้เช็คได้เลยว่าไฟล์ครบไหมจาก Mediapro แล้วถ้าครบแล้ว
+// แจ้งได้เลย แต่ถ้างานไหนไม่มี ก็ใช้กฎเดิม" · ข้อ (f) รอ 4 ชม. เพราะ "ไฟล์หยุดเข้า" เป็นหลักฐานเดียวที่มี — แต่การ์ด
+// Sony บอกเองว่ามีไฟล์อะไรบ้าง ถ้ากล่องมีครบทุกไฟล์ที่ MEDIAPRO ระบุ ก็ไม่ต้องเดาจากความเงียบ
+// "ครบ" ต้องพูดได้ทั้งกล่อง ไม่ใช่แค่การ์ดที่อยู่ตรงหน้า: ภาพจากกล้องที่ไม่ใช่ Sony (ไม่มี MEDIAPRO) · กล้องที่จองแต่ยังไม่มา ·
+// ใบที่ไม่บอกว่าจองกี่กล้อง · ทีมเสียงที่ยังไม่มีไฟล์เสียง — MEDIAPRO รับรองแทนไม่ได้ → กฎเดิม
+const AUDIO_EXT = /\.(wav|bwf|mp3|m4a|aif|aiff|flac)$/i
+
+type GateResult = Awaited<ReturnType<typeof mediaproGate>>
+
+/**
+ * '' = MEDIAPRO vouches for every piece of footage this booking expects → no need to wait out the 4h settle.
+ * Otherwise one Thai line: why this booking keeps the old rule. Pure (the gate already walked Drive).
+ * A card that never reached the NAS/Drive at all is invisible to this and to every other gate — the
+ * short settle (one sweep) plus the NAS-drained gate are what cover a card still being copied.
+ */
+export function fastPathBlocker(
+  gate: GateResult | null,
+  b: { cameraCount?: number | null; crewRequired?: string[] | null } & ShootWindow,
+): string {
+  if (!gate) return 'ตรวจกล่องไม่ได้ (Drive)'
+  if (!gate.ok) return gate.text
+  if (!gate.check || gate.check.cards === 0) return 'ไม่มี MEDIAPRO ให้เทียบ'
+  const files = (gate.files || []).filter(f => !isQuarantined(f))
+  // Sony originals no card lists are already `unverifiable` (gate not ok); this catches every other camera — and a
+  // custom-named Sony clip (title prefix) counts only when a MEDIAPRO actually lists it (review r1/r2)
+  const cards = gate.cards || []
+  const listed = new Set(cards.flatMap(c => c.materials.flatMap(m => m.files.map(r => baseName(r.split('/').pop() || '').toUpperCase()))))
+  const loose = files.filter(f => VIDEO_EXT.test(f.name) && !sonyClipPart(f.name) && !listed.has(baseName(f.name).toUpperCase()))
+  if (loose.length) return `มีไฟล์ภาพที่ไม่มี MEDIAPRO ${loose.length} ไฟล์ (${loose.slice(0, 2).map(f => f.name).join(', ')}${loose.length > 2 ? ' …' : ''})`
+  // review — one card dumped into two camera folders counts as two cameras and hides the one still missing
+  const camOf = (p: string[]) => p.map(s => CAM_DIR.exec(stripDup(s))).find(Boolean)?.[1].toUpperCase() || ''
+  const twin = cards.find((a, i) => cards.slice(i + 1).some(c => camOf(a.folderPath) && camOf(c.folderPath) && camOf(a.folderPath) !== camOf(c.folderPath)
+    && a.materials.some(m => c.materials.some(n => sameClip(m, n)))))
+  if (twin) return `การ์ดเดียวกันอยู่ในโฟลเดอร์กล้องสองตัว (${twin.folderPath.join('/')}) — นับกล้องไม่ได้`
+  const cov = cameraCoverage(files, b, gate.check.twinCopies)
+  if (cov.gap) return cov.gap
+  if (!(b.cameraCount && b.cameraCount > 0)) return 'ใบจองไม่ระบุจำนวนกล้อง — บอกไม่ได้ว่ากล้องมาครบ'
+  // review r2 — camera A's 2nd card filed under CAM-B still reads as "camera B arrived". FX6/FX3 names carry the camera
+  // ID letter (A009C001_…): when every original has one, fewer letters than cameras booked = a camera is still missing.
+  // (43 real jobs, 30 days: the team sets distinct IDs — only one job had fewer letters, and it was not fast anyway.)
+  const origs = files.filter(f => sonyClipPart(f.name)?.part === 'orig')
+  const letters = new Set<string | undefined>(origs.map(f => (/^([A-Z])\d{3}[A-Z]\d{3}_/i.exec(baseName(f.name)) || [])[1]?.toUpperCase()))
+  if (origs.length && !letters.has(undefined) && letters.size < b.cameraCount) {
+    return `คลิปมาจากกล้อง ${letters.size} ตัว (${[...letters].sort().join(', ')}) แต่จอง ${b.cameraCount} ตัว — อาจเป็นการ์ดใบที่สองของกล้องเดิม`
+  }
+  if (cov.uncounted) return 'มีไฟล์ภาพนอกโฟลเดอร์ CAM-x — นับกล้องไม่ได้'
+  if (bookingNeedsSound(b.crewRequired) && !files.some(f => AUDIO_EXT.test(f.name))) return 'ใบจองมีทีมเสียง แต่ยังไม่มีไฟล์เสียง'
+  // review (confirmed) — cards dumped DURING the shoot (field ingest at lunch, day 1 of a multi-day job) are complete per
+  // MEDIAPRO and cover every camera, while the last cards are still with the crew: the first walk after wrap would send.
+  // Some camera footage must have reached Drive after the (last day's) wrap. Audio is left out: sound-merge's box
+  // copies are stamped when copied, not when they arrived. No createdTime = cannot tell = no.
+  // A clip's arrival = its EARLIEST copy: a sync-storm "(1)" re-upload or a re-copied lunch card is not new footage (review r2)
+  const ends = shootEndsAt(b).getTime()
+  const arrived = new Map<string, number>()
+  for (const f of files) {
+    if (!isFootageFile(f)) continue
+    const t = Date.parse((f as { createdTime?: string | null }).createdTime || '')
+    const k = baseName(f.name).toUpperCase()
+    if (Number.isFinite(t)) arrived.set(k, Math.min(arrived.get(k) ?? t, t))
+  }
+  if (![...arrived.values()].some(t => t > ends)) {
+    return `ไฟล์ภาพทั้งหมดขึ้น Drive ก่อนเลิกกอง (${new Date(ends + 7 * 3_600_000).toISOString().slice(5, 16).replace('T', ' ')}) — การ์ดชุดสุดท้ายอาจยังอยู่กับทีม`
+  }
+  return ''
+}
+
+/** v1.287 — the fast path already said no for exactly these counts → not again until the footage changes (each try walks Drive). */
+export function readFastNo(snapshot: unknown, counts: { fileCount: number; totalBytes: number }): string | null {
+  const f = (snapshot as { fast?: { detail?: unknown; fileCount?: unknown; totalBytes?: unknown } } | null | undefined)?.fast
+  return f && typeof f.detail === 'string' && f.fileCount === counts.fileCount && f.totalBytes === counts.totalBytes ? f.detail : null
 }
 
 function envInt(name: string, fallback: number): number {
@@ -317,6 +394,14 @@ export type FootageReadyScanResult = {
   followedUp: string[]
   /** v1.268 — still waiting for the second notice, with why */
   followUpWaiting: Array<{ code: string; detail: string }>
+  /**
+   * v1.287 — bookings past the short settle that the MEDIAPRO fast path judged: ok = MEDIAPRO vouched, so the notice
+   * went ahead without waiting out FOOTAGE_READY_SETTLE_MS (whether it was DELIVERED is `notified` / `errors`, as for
+   * every notice) · !ok = keeps the old rule, with why · cached = judged on an earlier sweep for these exact counts
+   */
+  fast: Array<{ code: string; ok: boolean; detail: string; cached: boolean }>
+  /** v1.287 — fast-path notices (last FAST_WATCH_DAYS) after which more footage started arriving; ops is told once (dry run: would tell) */
+  fastMore: Array<{ code: string; detail: string }>
 }
 
 // `program` is widened here (the base type has name only) so the photo-album
@@ -375,6 +460,28 @@ export async function sweepFootagePayload(b: BookingForFootagePayload, dryRun: b
   return dryRun ? computeFootagePayload(b) : getCachedFootagePayload(b, { refresh: true })
 }
 
+/**
+ * Gate (g)'s Drive check: the LIVE box plus every folder named with this code (a drop folder still holding a
+ * half-copied card counts) — the same places the email announces. null = Drive could not say whether the box is alive.
+ */
+async function mediaproGateFor(b: CandidateRow, code: string): Promise<GateResult | null> {
+  const box = (b.driveFolders as Record<string, unknown> | null)?.box
+  const boxState = typeof box === 'string' ? await folderLiveness(box) : 'dead'
+  if (boxState === 'unknown') return null
+  const roots = [...new Set([...(boxState === 'alive' ? [box as string] : []), ...(await findFoldersByCode(code)).map(f => f.id)])]
+  // v1.260 — clips an unformatted card still lists from an earlier shoot do not hold the notice (they are named in the text)
+  return mediaproGate(roots, { shootFrom: new Date(b.shootDate).toISOString().slice(0, 10) })
+}
+
+/** v1.287 — `readySnapshot.fast` (see readFastNo). A changed count rewrites the snapshot, which drops it. */
+async function noteFastNo(b: { id: string; readySnapshot: unknown }, code: string, detail: string, counts: { fileCount: number; totalBytes: number }, now: Date): Promise<void> {
+  const base = b.readySnapshot && typeof b.readySnapshot === 'object' ? (b.readySnapshot as Record<string, unknown>) : {}
+  await prisma.booking.update({
+    where: { id: b.id },
+    data: { readySnapshot: { ...base, fast: { detail, ...counts, at: now.toISOString() } } as any },
+  }).catch(e => console.error('[footage-ready] noteFastNo failed:', code, e?.message || e))
+}
+
 /** v1.274 — `readySnapshot.held` (see readHeld). Written only when the reason or the footage changed. */
 async function noteHeld(b: { id: string; readySnapshot: unknown }, code: string, detail: string, fileCount: number, totalBytes: number, now: Date): Promise<void> {
   const prev = readHeld(b.readySnapshot)
@@ -391,8 +498,78 @@ export async function runFootageReadyScan(
 ): Promise<FootageReadyScanResult> {
   const result = await runReadySweep(opts)
   // a caller naming codes asks about THOSE bookings — follow-ups belong to the unattended sweep
-  if (result.forced.length === 0) await followUpCameraGaps(result)
+  if (result.forced.length === 0) {
+    await followUpCameraGaps(result)
+    await watchFastNotices(result)
+  }
   return result
+}
+
+// ── v1.287 — after a fast notice, more footage = say so ─────────────────────
+// The fast path trusts MEDIAPRO for the cards ON Drive; a card nobody has offloaded yet is invisible to every gate
+// (review, confirmed high). Real data (43 jobs, 30 days) never showed it, so the window stays short — and the day it
+// happens it must be loud, not silent: the NAS sending this code again, or a new upload row, after the notice.
+export const FAST_WATCH_DAYS = 3
+
+async function watchFastNotices(result: FootageReadyScanResult): Promise<void> {
+  const now = new Date()
+  try {
+    const notices = (await prisma.auditLog.findMany({
+      where: { action: { in: ['booking.auto_notified_ready', 'booking.ready_followup'] }, at: { gte: new Date(now.getTime() - FAST_WATCH_DAYS * DAY) } },
+      select: { entityId: true, bookingCode: true, at: true, action: true, changes: true },
+    })).filter(n => n.entityId && (n.changes as Record<string, unknown> | null)?.readyPath === 'mediapro')
+    if (!notices.length) return
+    const since = notices.reduce((m, n) => (n.at < m ? n.at : m), now)
+    const codes = [...new Set(notices.map(n => n.bookingCode).filter((c): c is string => !!c))]
+    // in flight NOW (fresh manifest only) — a failed read is said out loud, the other channels still run
+    let nasStatuses: Record<string, any> = {}
+    try {
+      const st = await latestNasState()
+      if (st.manifest && !nasManifestAge(st.manifest.at, now).stale) nasStatuses = st.statuses || {}
+    } catch (e: any) {
+      result.errors.push({ code: 'fast-watch', error: `อ่านสถานะ NAS ไม่ได้ — ช่องนี้ไม่ได้ตรวจรอบนี้: ${e?.message || e}` })
+    }
+    // durable records (review r2): a NAS batch that queued AND drained between two sweeps · a field card STARTED after
+    // the notice (its CARD_ row may have been created as a ticket long before) · browser uploads (row created at start)
+    const [events, uploads] = await Promise.all([
+      prisma.auditLog.findMany({
+        where: { action: { in: ['nas.folder_drained', 'ingest.start'] }, bookingCode: { in: codes }, at: { gte: since } },
+        select: { action: true, bookingCode: true, at: true },
+      }),
+      prisma.upload.findMany({
+        where: { bookingId: { in: notices.map(n => n.entityId!) }, createdAt: { gte: since }, NOT: { fileName: { startsWith: CARD_PREFIX } } },
+        select: { bookingId: true, createdAt: true, fileName: true },
+      }),
+    ])
+    const watched = new Set<string>()
+    for (const n of notices) {
+      const code = n.bookingCode || n.entityId!
+      if (watched.has(code)) continue // a fast notice and its fast follow-up: one alert
+      const pending = nasStatuses[code]?.lastPending || 0
+      const drained = events.filter(e => e.bookingCode === code && e.action === 'nas.folder_drained' && e.at > n.at).length
+      const cards = events.filter(e => e.bookingCode === code && e.action === 'ingest.start' && e.at > n.at).length
+      const fresh = uploads.filter(u => u.bookingId === n.entityId && u.createdAt > n.at)
+      if (!pending && !drained && !cards && !fresh.length) continue
+      watched.add(code)
+      const why = [
+        pending ? `NAS กำลังส่งของ ${code} อีก ${pending} ไฟล์` : '',
+        drained ? `NAS ส่งชุดใหม่ของ ${code} ขึ้น Drive แล้ว ${drained} รอบ` : '',
+        cards ? `ส่งการ์ดจากหน้างานเพิ่ม ${cards} ใบ` : '',
+        fresh.length ? `อัปโหลดใหม่ ${fresh.length} รายการ (${fresh.slice(0, 2).map(u => u.fileName).join(', ')})` : '',
+      ].filter(Boolean).join(' · ')
+      result.fastMore.push({ code, detail: why })
+      if (result.dryRun) continue
+      const what = n.action === 'booking.ready_followup' ? 'Footage ครบแล้ว (ฉบับตามกล้อง)' : 'Footage พร้อม'
+      const at = new Date(n.at.getTime() + 7 * 3_600_000).toISOString().slice(5, 16).replace('T', ' ')
+      // once per booking for the whole watch window (alertOps' throttle stamp; it also keeps a permanent audit row)
+      await alertOps(`ready-fast-more:${code}`, `ไฟล์มาเพิ่มหลังแจ้ง ${what} (ทางลัด MEDIAPRO) — ${code}`,
+        `${code}: แจ้ง "${what}" ไปแล้ว ${at} น. ด้วยทางลัด MEDIAPRO (ไม่รอ 4 ชม.) แต่หลังจากนั้น${why}\n` +
+        'แปลว่ายังมีการ์ดที่ตอนแจ้งยังไม่ขึ้น Drive — บอกทีมในใบนี้ว่าไฟล์ยังมาไม่หมด · ถ้าเกิดบ่อย เพิ่ม FOOTAGE_READY_VERIFIED_SETTLE_MS (หรือปิดทางลัดด้วยค่า ≥ SETTLE_MS)',
+        FAST_WATCH_DAYS * DAY)
+    }
+  } catch (e: any) {
+    result.errors.push({ code: 'fast-watch', error: e?.message || String(e) }) // loud: a broken watch must not look like "nothing arrived"
+  }
 }
 
 async function runReadySweep(
@@ -404,12 +581,14 @@ async function runReadySweep(
   const audience = footageReadyAudience()
   const lookbackDays = envInt('FOOTAGE_READY_LOOKBACK_DAYS', 3)
   const settleMs = envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000)
+  // v1.287 — ≥ settleMs turns the MEDIAPRO fast path off (the long settle is always reached first)
+  const verifiedSettleMs = envInt('FOOTAGE_READY_VERIFIED_SETTLE_MS', 20 * 60_000)
   const maxPerRun = envInt('FOOTAGE_READY_MAX_PER_RUN', 5)
   const since = new Date(now.getTime() - lookbackDays * DAY)
 
   const result: FootageReadyScanResult = {
     dryRun, forced, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
-    notified: [], settling: [], skipped: [], errors: [], followedUp: [], followUpWaiting: [],
+    notified: [], settling: [], skipped: [], errors: [], followedUp: [], followUpWaiting: [], fast: [], fastMore: [],
   }
   let inactive: string[] | undefined // v1.264 — users.active=false, read once per scan and only when a notice goes out
 
@@ -482,6 +661,9 @@ async function runReadySweep(
   // hears about the silent scanner from the relay instead.
   const nasState = await latestNasState().catch(() => ({ manifest: null, statuses: {} as Record<string, any> }))
   const nasStatuses = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? (nasState.statuses || {}) : {}
+  // v1.287 — the fast path leans on gate (d): it needs a NAS scan taken AFTER the first look at these counts (a card
+  // landing on the NAS since then would show as pending). Agent silent → gate (d) is off → the long settle only.
+  const nasSeenAt = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? Date.parse(nasState.manifest.at) : NaN
 
   const eligible: CandidateRow[] = []
   for (const b of rows) {
@@ -542,39 +724,55 @@ async function runReadySweep(
       // Forced = a human decided it is ready now, so the 4h stability window is
       // not theirs to wait out. The "footage actually exists" check above is NOT
       // bypassed — an email of empty folders is worse than no email.
-      const decision = forced.length > 0 ? { settled: true, write: null } : evaluateSettle(
-        { fileCount: payload.fileCount, totalBytes: payload.folders.reduce((n, f) => n + f.totalBytes, 0) },
-        parseReadySnapshot(b.readySnapshot),
-        now,
-        settleMs,
-      )
+      const counts = { fileCount: payload.fileCount, totalBytes: payload.folders.reduce((n, f) => n + f.totalBytes, 0) }
+      const snapshot = parseReadySnapshot(b.readySnapshot)
+      const decision = forced.length > 0 ? { settled: true, write: null } : evaluateSettle(counts, snapshot, now, settleMs)
+      let gate: GateResult | null = null
+      let readyPath: 'forced' | 'settle' | 'mediapro' = forced.length > 0 ? 'forced' : 'settle'
       if (!decision.settled) {
-        result.settling.push(code)
-        if (!dryRun && decision.write) {
-          await prisma.booking.update({ where: { id: b.id }, data: { readySnapshot: decision.write } }).catch(() => {})
+        // v1.287 — MEDIAPRO fast path. Only once these exact counts were already seen by an earlier walk at least
+        // verifiedSettleMs ago (one sweep): a card still being copied grows the counts or shows up on the NAS
+        // scan (~10 min) in between. At most ONE gate per walk either way, so a sweep costs no more than before.
+        if (!decision.write && snapshot && evaluateSettle(counts, snapshot, now, verifiedSettleMs).settled) {
+          const known = readFastNo(b.readySnapshot, counts)
+          if (known) result.fast.push({ code, ok: false, detail: known, cached: true })
+          else if (!(nasSeenAt > Date.parse(snapshot.at))) {
+            // not remembered: the scanner coming back changes the answer without the footage changing
+            result.fast.push({ code, ok: false, detail: 'ตัวสแกน NAS ไม่ได้รายงานหลังเห็นไฟล์ชุดนี้ — ไม่รู้ว่ายังมีการ์ดค้างส่งไหม', cached: false })
+          } else {
+            const g = await mediaproGateFor(b, code)
+            const why = fastPathBlocker(g, b)
+            result.fast.push({ code, ok: !why, detail: why || g!.text, cached: false })
+            if (!why) { gate = g; readyPath = 'mediapro' }
+            // only a comparison that RAN is remembered (same rule as noteHeld): "could not check" retries next sweep
+            else if (!dryRun && g?.check) await noteFastNo(b, code, why, counts, now)
+          }
         }
-        continue
+        if (!gate) {
+          result.settling.push(code)
+          if (!dryRun && decision.write) {
+            await prisma.booking.update({ where: { id: b.id }, data: { readySnapshot: decision.write } }).catch(() => {})
+          }
+          continue
+        }
       }
 
-      // Gate (g) — every file the cards' MEDIAPRO.XML lists must be in place. Checks the
-      // same places the email announces: the LIVE box plus every folder named with this
-      // code (a drop folder still holding a half-copied card counts). Runs in dry-run too
-      // (read-only), so a preview says exactly what the sweep would do.
-      const box = (b.driveFolders as Record<string, unknown> | null)?.box
-      const boxState = typeof box === 'string' ? await folderLiveness(box) : 'dead'
-      if (boxState === 'unknown') {
-        result.skipped.push({ code, reason: 'mediapro-incomplete', detail: 'ตรวจกล่องไม่ได้ (Drive) — รอรอบหน้า' })
-        continue
+      // Gate (g) — every file the cards' MEDIAPRO.XML lists must be in place (mediaproGateFor). Runs in
+      // dry-run too (read-only), so a preview says exactly what the sweep would do. The fast path above
+      // already ran it (and passed) — never twice in one walk.
+      if (!gate) {
+        gate = await mediaproGateFor(b, code)
+        if (!gate) {
+          result.skipped.push({ code, reason: 'mediapro-incomplete', detail: 'ตรวจกล่องไม่ได้ (Drive) — รอรอบหน้า' })
+          continue
+        }
       }
-      const roots = [...new Set([...(boxState === 'alive' ? [box as string] : []), ...(await findFoldersByCode(code)).map(f => f.id)])]
-      // v1.260 — clips an unformatted card still lists from an earlier shoot do not hold the notice (they are named in the text)
-      const gate = await mediaproGate(roots, { shootFrom: new Date(b.shootDate).toISOString().slice(0, 10) })
       if (!gate.ok) {
         result.skipped.push({ code, reason: 'mediapro-incomplete', detail: gate.text })
         // v1.274 — remember WHY, so the health check and the 📣 preview can say "files missing"
         // after this booking ages out of the window (re-running this gate costs minutes of Drive walks)
         // only a comparison that ran is evidence of missing files; check:null = "could not check" — keep any earlier verdict
-        if (!dryRun && gate.check) await noteHeld(b, code, gate.text, payload.fileCount, payload.folders.reduce((n, f) => n + f.totalBytes, 0), now)
+        if (!dryRun && gate.check) await noteHeld(b, code, gate.text, counts.fileCount, counts.totalBytes, now)
         continue
       }
       // the gate passed: an earlier hold is no longer true (a camera wait or failed send can still age this one out)
@@ -625,6 +823,7 @@ async function runReadySweep(
           folderCount: payload.folders.length,
           fileCount: payload.fileCount,
           mediapro: verified,
+          readyPath, // v1.287 — 'mediapro' = sent on MEDIAPRO's word, without the long settle
           ...(cov.gap ? { cameraGap: cov.gap, cameraCams: cov.cams } : {}), // v1.268 — the follow-up pass looks for this
           emailError: sent.error,
           forced: forced.length > 0 || undefined,
@@ -683,6 +882,7 @@ const isFootageFile = (f: { name: string }) => VIDEO_EXT.test(f.name) || !!sonyC
 async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void> {
   const now = new Date()
   const settleMs = envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000)
+  const verifiedSettleMs = envInt('FOOTAGE_READY_VERIFIED_SETTLE_MS', 20 * 60_000) // v1.287 — same rule as the first notice
   try {
     const notices = await prisma.auditLog.findMany({
       where: { action: { in: ['booking.auto_notified_ready', 'booking.notified_ready'] }, at: { gte: new Date(now.getTime() - FOLLOWUP_DAYS * DAY) } },
@@ -726,18 +926,22 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
         const openCards = await prisma.upload.count({ where: { bookingId: b.id, fileName: { startsWith: CARD_PREFIX }, status: { in: ['UPLOADING', 'ORPHANED'] } } })
         if (openCards > 0) { wait('ส่งจากหน้างานยังไม่ครบ'); continue }
         if ((nasStatuses[code]?.lastPending || 0) > 0) { wait('NAS ยังส่งไม่หมด'); continue }
-        const box = (b.driveFolders as Record<string, unknown> | null)?.box
-        const boxState = typeof box === 'string' ? await folderLiveness(box) : 'dead'
-        if (boxState === 'unknown') { wait('ตรวจกล่องไม่ได้ (Drive)'); continue }
-        const roots = [...new Set([...(boxState === 'alive' ? [box as string] : []), ...(await findFoldersByCode(code)).map(f => f.id)])]
-        const gate = await mediaproGate(roots, { shootFrom: new Date(b.shootDate).toISOString().slice(0, 10) })
+        const gate = await mediaproGateFor(b, code)
+        if (!gate) { wait('ตรวจกล่องไม่ได้ (Drive)'); continue }
         if (!gate.ok) { wait(gate.text); continue }
         const cov = cameraCoverage(gate.files || [], b, gate.check?.twinCopies)
         if (cov.gap) { wait(cov.gap); continue }
         // "the cameras arrived" must be TRUE, not "the rule went quiet" (review): countable, and more cameras than at the notice
         if (cov.uncounted) { wait('นับกล้องไม่ได้ (มีภาพอยู่นอกโฟลเดอร์ CAM-x) — ไม่ส่งฉบับ "กล้องครบ"'); continue }
         if (cov.cams.length <= first.cams) { wait(`ไม่มีกล้องใหม่ขึ้นมา (${cov.cams.length} กล้องเท่าตอนแจ้ง) — จำนวนกล้องในใบอาจถูกแก้`); continue }
-        if (now.getTime() - newestFileAt((gate.files || []).filter(isFootageFile)) < settleMs) { wait('ไฟล์ยังทยอยเข้า — รอให้นิ่ง'); continue }
+        // v1.287 — MEDIAPRO vouches for the whole box (and the NAS scanner is alive) → the short wait, as for the first
+        // notice · min: the kill switch (VERIFIED >= SETTLE) must give back the old wait, never a longer one
+        // review r2 — like the first notice: the NAS must have reported AFTER the newest file arrived
+        const newest = newestFileAt((gate.files || []).filter(isFootageFile))
+        const nasAfter = !!nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale && Date.parse(nasState.manifest.at) > newest
+        const short = nasAfter && !fastPathBlocker(gate, b)
+        const quiet = short ? Math.min(verifiedSettleMs, settleMs) : settleMs
+        if (now.getTime() - newest < quiet) { wait('ไฟล์ยังทยอยเข้า — รอให้นิ่ง'); continue }
         if (result.dryRun) { result.followedUp.push(code); continue }
         const sent = await sendCameraFollowUp(b, w, cov, gate.text, gate.files?.length || 0)
         if (!sent.delivered) { result.errors.push({ code, error: `follow-up: ${sent.error || 'no channel'}` }); continue } // retried next sweep
@@ -754,6 +958,7 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
                 ...(sent.failedRecipients.length ? { failedRecipients: sent.failedRecipients } : {}),
                 ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
                 cameraGapBefore: first.gap, cams: cov.cams, fileCount: gate.files?.length || 0, mediapro: gate.text,
+                readyPath: short && quiet < settleMs ? 'mediapro' : 'settle', // v1.287 — watchFastNotices watches the short ones
                 emailError: sent.error, operatorChannels: sent.operatorChannels,
               })),
             },
