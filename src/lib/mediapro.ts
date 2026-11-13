@@ -139,9 +139,9 @@ function mixedCardPaths(cards: MediaproCard[]): string[] {
   return [...out]
 }
 /** YYMMDD in an FX6/FX3 clip name → YYYY-MM-DD (null for C0001-style names) */
-const clipDate = (name: string) => { const m = /^[A-Z]\d{3}[A-Z]\d{3}_(\d{2})(\d{2})(\d{2})/i.exec(name); return m ? `20${m[1]}-${m[2]}-${m[3]}` : null }
+export const clipDate = (name: string) => { const m = /^[A-Z]\d{3}[A-Z]\d{3}_(\d{2})(\d{2})(\d{2})/i.exec(name); return m ? `20${m[1]}-${m[2]}-${m[3]}` : null }
 /** a camera whose clock was reset stamps 2021-01-01 — older than a year before the shoot is not "an earlier shoot", it is unknown */
-const yearBefore = (day: string) => new Date(Date.parse(day) - 366 * 864e5).toISOString().slice(0, 10)
+export const yearBefore = (day: string) => new Date(Date.parse(day) - 366 * 864e5).toISOString().slice(0, 10)
 
 export interface MediaproCheckOptions {
   /**

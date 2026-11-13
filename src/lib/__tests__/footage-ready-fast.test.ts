@@ -59,7 +59,7 @@ mock.module('../db', {
   namedExports: {
     prisma: {
       booking: {
-        findMany: async () => bookings,
+        findMany: async ({ where }: any) => { if (where?.readyNotifiedAt) { calWhere = where; return calRows } return bookings }, // v1.288 — the calendar ✅ pass reads announced bookings
         findFirst: async () => followBooking,
         update: async ({ data }: any) => { updates.push(data); return {} },
         updateMany: async () => ({ count: 1 }),
@@ -87,6 +87,19 @@ mock.module('../ops-alert', { namedExports: { alertOps: async (key: string, subj
 let nasAt: string | null = null // the NAS scanner's last manifest
 let nasStatuses: Record<string, any> = {}
 let uploadsAfter: any[] = []      // upload rows the fast-notice watch reads
+let calRows: any[] = []           // announced bookings the calendar ✅ pass reads
+let calWhere: any = null
+let calMarks: any[] = []
+let calThrow = false
+let calHang = false
+let calState = 'marked'
+mock.module('../google-calendar', {
+  namedExports: {
+    markCalendarFootageReady: async (eventId: string, at: Date, box: string | null, opts: any = {}) => {
+      calMarks.push({ eventId, at, box, dryRun: !!opts.dryRun }); if (calHang) await new Promise(() => {}); if (calThrow) throw new Error('Google 500 Backend Error'); return calState
+    },
+  },
+})
 mock.module('../nas-sync', {
   namedExports: {
     latestNasState: async () => ({ manifest: nasAt ? { at: nasAt, folders: [] } : null, statuses: nasStatuses }),
@@ -112,7 +125,7 @@ before(async () => {
 })
 beforeEach(() => {
   xmls = {}; bookings = [mkBooking()]; followBooking = null; files = sonyCard('CAM-A', ['A001C001_261110XF', 'A001C002_261110XF'])
-  audits = []; liveness = 'alive'; walks = 0; updates = []; written = []; mailed = []; nasAt = ago(5 * MIN); nasStatuses = {}; uploadsAfter = []; alerts = [] // scanner alive, scanned after the first look
+  audits = []; liveness = 'alive'; walks = 0; updates = []; written = []; mailed = []; nasAt = ago(5 * MIN); nasStatuses = {}; uploadsAfter = []; alerts = []; calRows = []; calMarks = []; calThrow = false; calHang = false; calState = 'marked' // scanner alive, scanned after the first look
   delete process.env.FOOTAGE_READY_VERIFIED_SETTLE_MS
 })
 const sent = () => written.find(w => w.action === 'booking.auto_notified_ready')
@@ -378,6 +391,7 @@ test('หลังแจ้งแบบทางลัด มีไฟล์ต�
   audits.push(
     { action: 'nas.folder_drained', bookingCode: C(3), at: new Date(Date.now() - HOUR) },            // queued + drained between sweeps
     { action: 'nas.folder_drained', bookingCode: C(4), at: new Date(Date.now() - 3 * HOUR) },        // before the notice = its own cards
+    { action: 'nas.folder_drained', bookingCode: C(4), at: new Date(Date.now() - HOUR), changes: { zeroSince: new Date(Date.now() - 2.5 * HOUR).toISOString() } }, // announced after, emptied before
     { action: 'ingest.start', bookingCode: C(5), at: new Date(Date.now() - HOUR) },                   // field card started after (ticket older)
   )
   uploadsAfter = [
@@ -425,6 +439,123 @@ test('review r2: คลิปตั้งชื่อเองที่ MEDIAPRO
   files = [file(root, 'MEDIAPRO.XML', 500, { id: 'mp-y', md5: 'y' }), file([...root, 'CLIP'], 'KND_0001.MP4', 900_000), file([...root, 'CLIP'], 'KND_0001M01.XML', 10),
     file([...root, 'CLIP'], 'KND_0002.MP4', 900_000)]
   assert.match((await fr.runFootageReadyScan({ dryRun: true })).fast[0].detail, /ไม่มี MEDIAPRO 1 ไฟล์ \(KND_0002\.MP4\)/)
+})
+
+// ── v1.288 — ✅ + ลิงก์กล่องบน event ปฏิทิน ─────────────────────────────────────
+const BOXID = '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
+const announced = (i: number, extra: any = {}) => ({ id: `c${i}`, bookingCode: `TSS-TSS-2611${String(i).padStart(2, '0')}-09`, calendarEventId: `ev${i}`,
+  driveFolders: { box: BOXID }, readyNotifiedAt: new Date(Date.now() - i * HOUR), ...extra })
+
+test('v1.288: ใบที่แจ้งแล้วได้ ✅ บน event (ทั้งของรอบนี้และย้อนหลัง 30 วัน) · บันทึก audit แล้วรอบหน้าไม่ทำซ้ำ · งานยกเลิกไม่ได้ ✅', async () => {
+  bookings = []
+  calRows = [announced(1)]
+  const r = await fr.runFootageReadyScan()
+  assert.deepEqual(r.calendarMarked, [calRows[0].bookingCode])
+  assert.deepEqual(calMarks.map(m => [m.eventId, m.box, m.at.getTime(), m.dryRun]), [['ev1', BOXID, calRows[0].readyNotifiedAt.getTime(), false]])
+  const row = written.find(w => w.action === 'booking.calendar_ready_marked')
+  assert.equal(row.entityId, 'c1')
+  assert.equal(row.changes.state, 'marked')
+  assert.equal(row.changes.key, fr.readyMarkKey('ev1', calRows[0].readyNotifiedAt, BOXID))
+  assert.deepEqual(calWhere.status, { in: ['CONFIRMED', 'COMPLETED'] })
+  assert.equal(calWhere.cancelRequestedAt, null)
+  audits = [{ action: 'booking.calendar_ready_marked', entityId: 'c1', at: new Date(), changes: row.changes }]
+  calMarks = []
+  const again = await fr.runFootageReadyScan()
+  assert.deepEqual(again.calendarMarked, [])
+  assert.equal(calMarks.length, 0)
+})
+
+test('v1.288 review: บันทึกผูกกับ event + เวลาแจ้ง + กล่อง — event ถูกสร้างใหม่ / กด 📣 ซ้ำ / เพิ่งรู้ id กล่อง = ใส่ใหม่ · ใบไม่มี id กล่องที่ 📣 ใส่ลิงก์จากเมลไว้ = ไม่เขียนทับ', async () => {
+  bookings = []
+  const base = announced(1)
+  const rec = (b: any, box: string | null) => ({ action: 'booking.calendar_ready_marked', entityId: b.id, at: new Date(), changes: { key: fr.readyMarkKey(b.calendarEventId, b.readyNotifiedAt, box) } })
+  audits = [rec(base, BOXID)]
+  calRows = [{ ...base, calendarEventId: 'ev-new' }]                               // reconcile re-created the event
+  await fr.runFootageReadyScan()
+  assert.deepEqual(calMarks.map(m => m.eventId), ['ev-new'])
+  calMarks = []
+  calRows = [{ ...base, readyNotifiedAt: new Date() }]                              // a second 📣 re-stamped
+  await fr.runFootageReadyScan()
+  assert.equal(calMarks.length, 1)
+  calMarks = []
+  audits = [rec({ ...base }, null)]
+  calRows = [base]                                                                  // box id learnt after a link-less mark
+  await fr.runFootageReadyScan()
+  assert.deepEqual(calMarks.map(m => m.box), [BOXID])
+  calMarks = []
+  const noBox = { ...base, driveFolders: {} }
+  audits = [rec(noBox, BOXID)]                                                      // 📣 marked with the box its mail resolved
+  calRows = [noBox]
+  await fr.runFootageReadyScan()
+  assert.equal(calMarks.length, 0, 'would rewrite the line WITHOUT the link')
+})
+
+test('v1.288: Google ล้ม = ขึ้น errors (ดัง) ไม่บันทึก รอบหน้าลองใหม่ · event ถูกลบ = บันทึกว่า gone ไม่ลองตลอดไป · ไม่มี event/ไม่มีเวลาแจ้ง = ข้าม', async () => {
+  bookings = []
+  calRows = [announced(1), { ...announced(2), calendarEventId: null }, { ...announced(3), readyNotifiedAt: null }]
+  calThrow = true
+  const r = await fr.runFootageReadyScan()
+  assert.match(r.errors.map(e => `${e.code} ${e.error}`).join(' | '), /TSS-TSS-261101-09 calendar ✅: Google 500/)
+  assert.equal(written.filter(w => w.action === 'booking.calendar_ready_marked').length, 0)
+  assert.equal(calMarks.length, 1, 'only the booking that has an event and a notice time')
+  calThrow = false; calState = 'gone'
+  const gone = await fr.runFootageReadyScan()
+  assert.deepEqual(gone.calendarMarked, [], 'gone is not "marked"')
+  assert.equal(written.find(w => w.action === 'booking.calendar_ready_marked').changes.state, 'gone')
+})
+
+test('v1.288 review: ใบที่ล้มซ้ำ ๆ ไม่กินคิว — ผลัดกันลอง (เพดาน 15/รอบ)', async () => {
+  bookings = []
+  calRows = Array.from({ length: 16 }, (_, i) => announced(i + 1))
+  calThrow = true
+  await fr.runFootageReadyScan()
+  assert.equal(calMarks.length, 15)
+  const first = new Set(calMarks.map(m => m.eventId))
+  calMarks = []
+  await fr.runFootageReadyScan()
+  assert.equal(calMarks[0].eventId, [...calRows.map(r => r.calendarEventId)].find(e => !first.has(e)), 'the one never tried goes first')
+})
+
+test('v1.288: dry run ถาม Google แบบอ่านอย่างเดียว ตอบตามจริง (already = ไม่นับ) · ใบที่รอบนี้จะแจ้งก็นับว่าจะได้ ✅', async () => {
+  bookings = []
+  calRows = Array.from({ length: 20 }, (_, i) => announced(i + 1))
+  const dry = await fr.runFootageReadyScan({ dryRun: true })
+  assert.equal(dry.calendarMarked.length, 15)
+  assert.ok(calMarks.every(m => m.dryRun), 'read-only calls only')
+  assert.equal(written.length, 0)
+  calMarks = []; calState = 'already'
+  assert.deepEqual((await fr.runFootageReadyScan({ dryRun: true })).calendarMarked, [], 'already marked → not "would mark"')
+  calRows = []; calState = 'marked'
+  bookings = [mkBooking({ calendarEventId: 'ev-x' })]                               // a fast-path notice this sweep
+  const withNotice = await fr.runFootageReadyScan({ dryRun: true })
+  assert.deepEqual(withNotice.notified, [CODE])
+  assert.deepEqual(withNotice.calendarMarked, [CODE])
+  calRows = Array.from({ length: 20 }, (_, i) => announced(i + 1))
+  const capped = await fr.runFootageReadyScan({ dryRun: true })
+  assert.equal(capped.calendarMarked.length, 15, 'the would-be notice takes a slot, as in the real run')
+  assert.equal(capped.calendarMarked[0], CODE)
+})
+
+test('v1.288: รอบ ?codes= (สั่งเอง) ไม่ไล่ใส่ ✅ ย้อนหลัง — เป็นงานของรอบอัตโนมัติ · dry run ของ ?codes= จึงไม่บอกว่าจะใส่ ✅ (ตรงกับรอบจริง)', async () => {
+  bookings = []
+  calRows = [announced(1)]
+  await fr.runFootageReadyScan({ codes: [CODE] })
+  assert.equal(calMarks.length, 0)
+  bookings = [mkBooking({ calendarEventId: 'ev-x' })]
+  const dry = await fr.runFootageReadyScan({ codes: [CODE], dryRun: true })
+  assert.deepEqual(dry.notified, [CODE])
+  assert.deepEqual(dry.calendarMarked, [])
+})
+
+test('v1.288 review: 📣 รอปฏิทินไม่เกินเพดาน — ค้าง = ตอบว่าลองใหม่ทีหลัง (รอบตรวจทำต่อ) ไม่ใช่ค้างจน proxy ตอบ 504', async () => {
+  calHang = true
+  const t0 = Date.now()
+  // guarded: without the deadline the call never settles — fail loudly instead of the runner cancelling the test
+  const r: any = await Promise.race([fr.markReadyOnCalendarWithin(announced(1) as any, 'x@y', null, 50),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('no deadline: the 📣 would hang')), 2000))])
+  assert.equal(r.ok, false)
+  assert.match(r.error || '', /did not answer/)
+  assert.ok(Date.now() - t0 < 2000)
 })
 
 // ── pure ──────────────────────────────────────────────────────────────────────

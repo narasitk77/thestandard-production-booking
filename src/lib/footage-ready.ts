@@ -59,6 +59,8 @@ import { bookingDisplayName } from './display'
 import { ADMIN_DIGEST, readHeld } from './footage-ready-health'
 import { mediaproGate, expectsCameraVideo, sameClip } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
+import { markCalendarFootageReady } from './google-calendar'
+import { getDriveLink } from './drive-links'
 import { baseName, isQuarantined, sonyClipPart, type FootageFileLike } from './footage-completeness'
 import { alertOps } from './ops-alert'
 import { CARD_PREFIX, isStaleCard, cardHoldsNotice } from './ingest'
@@ -402,6 +404,8 @@ export type FootageReadyScanResult = {
   fast: Array<{ code: string; ok: boolean; detail: string; cached: boolean }>
   /** v1.287 — fast-path notices (last FAST_WATCH_DAYS) after which more footage started arriving; ops is told once (dry run: would tell) */
   fastMore: Array<{ code: string; detail: string }>
+  /** v1.288 — calendar events given ✅ + the box link this sweep (dry run: would mark) — notices of the last READY_MARK_DAYS */
+  calendarMarked: string[]
 }
 
 // `program` is widened here (the base type has name only) so the photo-album
@@ -416,6 +420,7 @@ type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
   estimatedWrap: string | null
   callTime: string
   readySnapshot: unknown
+  calendarEventId?: string | null
   producer: string
   producerEmail: string | null
   coProducerEmail: string | null
@@ -441,7 +446,7 @@ type CandidateRow = Omit<BookingForFootagePayload, 'program'> & {
  * none. computeFootagePayload persists nothing, so dryRun stays write-free.
  */
 const CANDIDATE_SELECT = {
-  id: true, bookingCode: true, status: true, driveFolders: true,
+  id: true, bookingCode: true, status: true, driveFolders: true, calendarEventId: true,
   projectId: true, projectName: true, category: true, crewRequired: true,
   producer: true, producerEmail: true, coProducerEmail: true, createdByEmail: true, assignedEmails: true,
   directorEmail: true, director2Email: true, director3Email: true, cameraCount: true,
@@ -501,8 +506,111 @@ export async function runFootageReadyScan(
   if (result.forced.length === 0) {
     await followUpCameraGaps(result)
     await watchFastNotices(result)
+    await markReadyCalendars(result)
   }
   return result
+}
+
+// ── v1.288 — ✅ + box link on the calendar event of every announced booking ─────
+// One pass does all three jobs: the auto notice of this sweep, a 📣 / ?codes= notice whose inline mark failed, and
+// the backfill of notices sent before v1.288. Done = an audit `booking.calendar_ready_marked` row for THIS event, THIS
+// notice time and THIS box link (review v1.288): a re-created event, a second 📣 or a box id learnt later is marked
+// again. 'gone' (deleted event) is recorded too so it is not retried forever. A Google error is LOUD (result.errors)
+// and retried next sweep — rotated, so a handful of stuck ones cannot hold the 15 slots.
+export const READY_MARK_DAYS = 30
+const READY_MARK_MAX_PER_RUN = 15
+// ponytail: in-process rotation (reset on restart, same as followUpCheckedAt)
+const readyMarkTriedAt = new Map<string, number>()
+
+/** what a done-record must match: event + notice instant + box link */
+export const readyMarkKey = (eventId: string, readyAt: Date | string, boxId: string | null) => `${eventId}|${new Date(readyAt).toISOString()}|${boxId || ''}`
+
+/** Mark one booking's event and record it. Never throws: { ok:false, error } = retry later. */
+export async function markReadyOnCalendar(
+  b: { id: string; bookingCode: string | null; calendarEventId: string | null; driveFolders: unknown; readyNotifiedAt: Date | null },
+  actorEmail = 'footage-ready-worker',
+  /** the 📣 already resolved the box the mail links to — use it when the booking has no stored box id */
+  boxOverride: string | null = null,
+): Promise<{ ok: boolean; state?: 'marked' | 'already' | 'gone' | 'no-event'; error?: string }> {
+  if (!b.calendarEventId) return { ok: true, state: 'no-event' }
+  if (!b.readyNotifiedAt) return { ok: false, error: 'not announced' }
+  const boxId = getDriveLink(b.driveFolders, 'box') || boxOverride
+  try {
+    const state = await markCalendarFootageReady(b.calendarEventId, b.readyNotifiedAt, boxId)
+    await logAudit({ actorEmail, action: 'booking.calendar_ready_marked', entityType: 'Booking', entityId: b.id, bookingCode: b.bookingCode,
+      changes: { eventId: b.calendarEventId, readyAt: b.readyNotifiedAt.toISOString(), boxId, key: readyMarkKey(b.calendarEventId, b.readyNotifiedAt, boxId), state } })
+    return { ok: true, state }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+}
+
+/**
+ * The 📣's inline mark, with a hard deadline: the mail already went out, so a stalled Calendar must not keep the request
+ * open until the proxy answers 504 (the UI would say "ส่งไม่สำเร็จ" and someone would mail the whole team again). The
+ * sweep retries whatever this did not finish.
+ */
+export function markReadyOnCalendarWithin(
+  b: Parameters<typeof markReadyOnCalendar>[0], actorEmail: string, boxOverride: string | null, ms = 15_000,
+): ReturnType<typeof markReadyOnCalendar> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    markReadyOnCalendar(b, actorEmail, boxOverride),
+    new Promise<{ ok: boolean; error: string }>(resolve => { timer = setTimeout(() => resolve({ ok: false, error: `calendar did not answer in ${ms / 1000}s` }), ms) }),
+  ]).finally(() => clearTimeout(timer))
+}
+
+async function markReadyCalendars(result: FootageReadyScanResult): Promise<void> {
+  try {
+    const rows = (await prisma.booking.findMany({
+      where: {
+        deletedAt: null, cancelRequestedAt: null, status: { in: ['CONFIRMED', 'COMPLETED'] }, // a cancelled job's leftover event gets no ✅
+        calendarEventId: { not: null }, readyNotifiedAt: { gte: new Date(Date.now() - READY_MARK_DAYS * DAY) },
+      },
+      select: { id: true, bookingCode: true, calendarEventId: true, driveFolders: true, readyNotifiedAt: true },
+      orderBy: { readyNotifiedAt: 'desc' }, // the notice that just went out first — the backfill must not starve it
+    })).filter((r): r is typeof r & { calendarEventId: string; readyNotifiedAt: Date } => !!r.calendarEventId && !!r.readyNotifiedAt)
+    if (!rows.length) return
+    const keys = (await prisma.auditLog.findMany({
+      where: { action: 'booking.calendar_ready_marked', entityId: { in: rows.map(r => r.id) } },
+      select: { changes: true },
+    })).map(a => (a.changes as { key?: unknown } | null)?.key).filter((k): k is string => typeof k === 'string')
+    const done = new Set(keys)
+    // no stored box id: a mark made with the box the 📣 resolved for its mail still counts (re-marking here would
+    // rewrite the line WITHOUT that link)
+    const doneAnyBox = new Set(keys.map(k => k.split('|').slice(0, 2).join('|')))
+    const isDone = (r: { calendarEventId: string; readyNotifiedAt: Date; driveFolders: unknown }) => {
+      const box = getDriveLink(r.driveFolders, 'box')
+      return done.has(readyMarkKey(r.calendarEventId, r.readyNotifiedAt, box)) ||
+        (!box && doneAnyBox.has(readyMarkKey(r.calendarEventId, r.readyNotifiedAt, null).split('|').slice(0, 2).join('|')))
+    }
+    const todo = rows
+      .filter(r => !isDone(r))
+      .map((r, i) => ({ r, i }))
+      .sort((x, y) => (readyMarkTriedAt.get(x.r.id) || 0) - (readyMarkTriedAt.get(y.r.id) || 0) || x.i - y.i)
+      .map(x => x.r)
+    // a dry run already counted this sweep's would-be notices (they take slots first in the real run: newest)
+    const slots = READY_MARK_MAX_PER_RUN - (result.dryRun ? result.calendarMarked.length : 0)
+    for (const r of todo.slice(0, Math.max(0, slots))) {
+      const code = r.bookingCode || r.id
+      if (result.dryRun) {
+        // read-only: the same answer the real call would give (review v1.288 — a preview must match the run)
+        try {
+          const would = await markCalendarFootageReady(r.calendarEventId, r.readyNotifiedAt, getDriveLink(r.driveFolders, 'box'), { dryRun: true })
+          if (would === 'marked') result.calendarMarked.push(code)
+        } catch (e: any) { result.errors.push({ code, error: `calendar ✅: ${e?.message || e}` }) }
+        continue
+      }
+      readyMarkTriedAt.set(r.id, Date.now())
+      const m = await markReadyOnCalendar(r)
+      if (m.ok) { if (m.state === 'marked') result.calendarMarked.push(code) }
+      else result.errors.push({ code, error: `calendar ✅: ${m.error}` })
+    }
+    // no silent cap: say how many wait for the next sweep
+    if (todo.length > slots) console.log(`[footage-ready] calendar ✅: อีก ${todo.length - Math.max(0, slots)} ใบ รอบถัดไป`)
+  } catch (e: any) {
+    result.errors.push({ code: 'calendar-mark', error: e?.message || String(e) })
+  }
 }
 
 // ── v1.287 — after a fast notice, more footage = say so ─────────────────────
@@ -534,7 +642,7 @@ async function watchFastNotices(result: FootageReadyScanResult): Promise<void> {
     const [events, uploads] = await Promise.all([
       prisma.auditLog.findMany({
         where: { action: { in: ['nas.folder_drained', 'ingest.start'] }, bookingCode: { in: codes }, at: { gte: since } },
-        select: { action: true, bookingCode: true, at: true },
+        select: { action: true, bookingCode: true, at: true, changes: true },
       }),
       prisma.upload.findMany({
         where: { bookingId: { in: notices.map(n => n.entityId!) }, createdAt: { gte: since }, NOT: { fileName: { startsWith: CARD_PREFIX } } },
@@ -546,7 +654,12 @@ async function watchFastNotices(result: FootageReadyScanResult): Promise<void> {
       const code = n.bookingCode || n.entityId!
       if (watched.has(code)) continue // a fast notice and its fast follow-up: one alert
       const pending = nasStatuses[code]?.lastPending || 0
-      const drained = events.filter(e => e.bookingCode === code && e.action === 'nas.folder_drained' && e.at > n.at).length
+      // v1.288 — a drain is written DRAIN_SETTLE_MS after the queue emptied: judge it by when it emptied (changes.zeroSince)
+      const emptiedAt = (e: (typeof events)[number]) => {
+        const z = (e.changes as { zeroSince?: unknown } | null)?.zeroSince
+        return typeof z === 'string' && Number.isFinite(Date.parse(z)) ? new Date(z) : e.at
+      }
+      const drained = events.filter(e => e.bookingCode === code && e.action === 'nas.folder_drained' && emptiedAt(e) > n.at).length
       const cards = events.filter(e => e.bookingCode === code && e.action === 'ingest.start' && e.at > n.at).length
       const fresh = uploads.filter(u => u.bookingId === n.entityId && u.createdAt > n.at)
       if (!pending && !drained && !cards && !fresh.length) continue
@@ -588,7 +701,7 @@ async function runReadySweep(
 
   const result: FootageReadyScanResult = {
     dryRun, forced, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
-    notified: [], settling: [], skipped: [], errors: [], followedUp: [], followUpWaiting: [], fast: [], fastMore: [],
+    notified: [], settling: [], skipped: [], errors: [], followedUp: [], followUpWaiting: [], fast: [], fastMore: [], calendarMarked: [],
   }
   let inactive: string[] | undefined // v1.264 — users.active=false, read once per scan and only when a notice goes out
 
@@ -795,6 +908,9 @@ async function runReadySweep(
 
       if (dryRun) {
         result.notified.push(code) // would notify
+        // v1.288 — and its event would get ✅ (the calendar pass reads stamped bookings, which a dry run never makes) —
+        // only on an unattended sweep: a ?codes= run does not run that pass (the next sweep marks it)
+        if (b.calendarEventId && forced.length === 0) result.calendarMarked.push(code)
         continue
       }
 

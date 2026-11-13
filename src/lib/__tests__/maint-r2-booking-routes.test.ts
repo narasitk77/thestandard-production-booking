@@ -112,15 +112,19 @@ mock.module('../email', {
 })
 mock.module('../footage-folders', {
   namedExports: {
-    getCachedFootagePayload: async () => ({ folders: [{ label: 'EP01', fileCount: 3, totalBytes: 10, url: 'u' }], fileCount: 3, bookingFolderUrl: null }),
+    getCachedFootagePayload: async () => ({ folders: [{ label: 'EP01', fileCount: 3, totalBytes: 10, url: 'u' }], fileCount: 3, bookingFolderUrl: 'https://drive.google.com/drive/folders/1ResolvedBoxIdFromTheMail000' }),
     clearFootageCache: () => {},
   },
 })
 mock.module('../footage-report', { namedExports: { formatBytes: (n: number) => `${n} B` } })
+let calendarMarks: any[] = []
+let calendarFails = false
 mock.module('../footage-ready', {
   namedExports: {
     footageReadyRecipients: () => ({ people: ['pro@x.co', 'cam@ext.co'], inactive: [] }),
     inactiveUserEmails: async () => new Set(),
+    // v1.288 — the 📣 marks the calendar event; a failure is the sweep's to retry, never the click's
+    markReadyOnCalendarWithin: async (b: any, _actor: string, box: string | null) => { calendarMarks.push({ ...b, boxOverride: box }); return calendarFails ? { ok: false, error: 'Google 500' } : { ok: true, state: 'marked' } },
   },
 })
 mock.module('../ingest', { namedExports: { CARD_PREFIX: 'CARD_' } })
@@ -275,8 +279,30 @@ test("notify-ready: only the clicker's own CC got through → 502, not stamped",
 
 test('notify-ready: someone on the team got it → stamped (partial failure policy unchanged)', async () => {
   failFor = new Set(['cam@ext.co'])
+  calendarMarks = []
   const res = await notifyReady(req(), params)
   assert.equal(res.status, 200)
   await tick()
   assert.ok(updates.some(u => 'readyNotifiedAt' in u.data))
+  // v1.288 — ✅ on the event with the SAME instant that was stamped
+  const stamp = updates.find(u => 'readyNotifiedAt' in u.data).data.readyNotifiedAt
+  assert.equal(calendarMarks.length, 1)
+  assert.equal(calendarMarks[0].readyNotifiedAt.getTime(), stamp.getTime())
+  assert.equal(calendarMarks[0].boxOverride, '1ResolvedBoxIdFromTheMail000', 'the box the mail links to')
+  assert.equal((await res.json()).calendar, 'marked')
+})
+
+test('notify-ready v1.288: calendar ✅ failing does not fail the 📣 (the sweep retries) · nobody reached = no ✅', async () => {
+  failFor = new Set(['cam@ext.co'])
+  calendarFails = true
+  calendarMarks = []
+  try {
+    const res = await notifyReady(req(), params)
+    assert.equal(res.status, 200)
+    assert.equal((await res.json()).calendar, 'retry-later')
+  } finally { calendarFails = false }
+  calendarMarks = []
+  failFor = new Set(['pro@x.co', 'cam@ext.co'])
+  assert.equal((await notifyReady(req(), params)).status, 502)
+  assert.equal(calendarMarks.length, 0, 'not announced → the event stays as it is')
 })

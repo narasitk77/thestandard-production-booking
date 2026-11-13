@@ -242,6 +242,8 @@ export async function POST(
         const newEventId = await createCalendarEvent({
           id: booking.id,
           bookingCode: booking.bookingCode,
+          readyNotifiedAt: booking.readyNotifiedAt, // v1.288
+          driveFolders: booking.driveFolders,
           shootDate: booking.shootDate,
           shootEndDate: booking.shootEndDate,
           callTime: booking.callTime,

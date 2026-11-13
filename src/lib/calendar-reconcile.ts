@@ -250,6 +250,8 @@ function count(result: ReconcileResult, action: ReconcileAction) {
 type BookingForReconcile = {
   id: string
   bookingCode: string | null
+  readyNotifiedAt?: Date | string | null // v1.288 — a re-created event keeps ✅ + the box link
+  driveFolders?: unknown
   status: string
   shootDate: Date | string
   shootEndDate?: Date | string | null
@@ -316,6 +318,8 @@ type ProcessOptions = {
 async function createVerifiedCalendarEvent(booking: {
   id: string
   bookingCode?: string | null
+  readyNotifiedAt?: Date | string | null // v1.288
+  driveFolders?: unknown
   shootDate: Date | string
   shootEndDate?: Date | string | null
   callTime: string
@@ -452,6 +456,8 @@ async function processBooking(
       const { eventId, htmlLink } = await createVerifiedCalendarEvent({
         id: booking.id,
         bookingCode: booking.bookingCode,
+        readyNotifiedAt: booking.readyNotifiedAt,
+        driveFolders: booking.driveFolders,
         shootDate: booking.shootDate,
         shootEndDate: booking.shootEndDate,
         callTime: booking.callTime,
@@ -536,6 +542,8 @@ async function processBooking(
       const { eventId, htmlLink } = await createVerifiedCalendarEvent({
         id: booking.id,
         bookingCode: booking.bookingCode,
+        readyNotifiedAt: booking.readyNotifiedAt,
+        driveFolders: booking.driveFolders,
         shootDate: booking.shootDate,
         shootEndDate: booking.shootEndDate,
         callTime: booking.callTime,
@@ -703,6 +711,8 @@ async function processBooking(
         const { eventId, htmlLink } = await createVerifiedCalendarEvent({
           id: booking.id,
           bookingCode: booking.bookingCode,
+          readyNotifiedAt: booking.readyNotifiedAt,
+          driveFolders: booking.driveFolders,
           shootDate: booking.shootDate,
           shootEndDate: booking.shootEndDate,
           callTime: booking.callTime,

@@ -7,6 +7,7 @@ import { normalizeFreelancers, formatFreelancerLines, type Freelancer } from './
 import { bookingDisplayName } from './display'
 import { bookingCalendarAttendees } from './calendar-attendees'
 import { wrapsNextDay } from './shoot-window'
+import { getDriveLink } from './drive-links'
 
 // v1.41.0 — prefix added to the calendar event title when a booking needs a
 // company van (off-site shoots). Surfaced on both the web calendar and Google
@@ -298,6 +299,8 @@ function formatEquipment(cameraCount?: number | null, micCount?: number | null):
  */
 export function buildEventTitle(booking: {
   shootType: string
+  /** v1.288 — footage announced → the title leads with ✅ (see footageReadyMarks) */
+  readyNotifiedAt?: Date | string | null
   videoType?: string | null
   cameraCount?: number | null
   micCount?: number | null
@@ -328,12 +331,89 @@ export function buildEventTitle(booking: {
   // v1.111 — 🧱 marks a Block Shot at a glance (ops ask); van emoji leads as before.
   const withBlock = booking.isBlockShot ? `🧱 ${titleBody}` : titleBody
   const vanCount = booking.vanCount || 0
-  return vanCount > 0 ? `${VAN_EMOJI}${vanCount > 1 ? ` ×${vanCount}` : ''} ${withBlock}` : withBlock
+  const title = vanCount > 0 ? `${VAN_EMOJI}${vanCount > 1 ? ` ×${vanCount}` : ''} ${withBlock}` : withBlock
+  return booking.readyNotifiedAt ? withReadyMark(title) : title
+}
+
+// ── v1.288 — "ฟุตเทจพร้อม" on the calendar event ─────────────────────────────
+// นัท 12 พ.ย. 2569: ใส่ ✅ หน้าชื่องานและลิงก์กล่องใน event ตอนแจ้ง Footage พร้อม — เปิดปฏิทินแล้วรู้เลยว่างานไหนพร้อม
+// The builders add both whenever the booking carries readyNotifiedAt (so an edit that rebuilds the event keeps them);
+// markCalendarFootageReady() adds them to an event in place at notice time.
+
+export const READY_MARK = '✅'
+const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+// stops at a newline or '<' — an event edited in Google's UI stores HTML, where the whole description can be one line —
+// and takes the <a> Google wraps a pasted URL in, so a refresh never leaves the old link behind (review v1.288)
+const READY_LINE_RE = /📁 ฟุตเทจพร้อม[^\n<]*(?:<a\b[^>]*>[^<]*<\/a>)?/
+// tags Google's editor actually writes — a plain description that merely contains "<kai@x.com>" is not HTML
+const GOOGLE_HTML_RE = /<(?:br|p|a|b|i|u|ul|ol|li|div|span)\b[^>]*>/i
+
+/** `📁 ฟุตเทจพร้อม 12 พ.ย. 14:20 — <box link>` (Bangkok time; no link when the box id is unknown) */
+export function footageReadyLine(readyAt: Date | string, boxId: string | null): string {
+  const d = new Date(new Date(readyAt).getTime() + 7 * 3_600_000)
+  const hhmm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+  return `📁 ฟุตเทจพร้อม ${d.getUTCDate()} ${TH_MONTHS[d.getUTCMonth()]} ${hhmm}${boxId ? ` — https://drive.google.com/drive/folders/${boxId}` : ''}`
+}
+
+export const withReadyMark = (title: string) => (title.startsWith(READY_MARK) ? title : `${READY_MARK} ${title}`)
+
+/** Put the line first (or refresh it in place); HTML descriptions get <br>, plain ones a blank line. */
+export function withReadyLine(description: string, line: string): string {
+  const d = description || ''
+  if (READY_LINE_RE.test(d)) return d.replace(READY_LINE_RE, line)
+  if (!d) return line
+  return GOOGLE_HTML_RE.test(d) ? `${line}<br><br>${d}` : `${line}\n\n${d}`
+}
+
+/** Google calls on the notice path are bounded (googleapis has no default timeout, and retries a silent GET twice —
+ *  ~31 s; the 📣 request waits on this) */
+const READY_CALL = { timeout: 10_000, retry: false }
+
+/**
+ * Mark the event in place: ✅ before the title, the ready line above the description — and NOTHING else (time,
+ * place, guests and any hand edit stay as they are). sendUpdates 'none': the team already got the footage mail;
+ * Google's "Updated invitation" on top of it would be noise. Idempotent. Throws on a Google error (caller retries).
+ * `dryRun` reads only and answers what a real call would do ('marked' = would patch) — the preview matches the run.
+ * 'gone' only when Google says the event is DELETED (410 / status cancelled): a 404 can also be a lost permission on
+ * the calendar, so it throws (loud, retried) instead of being remembered as done (review v1.288).
+ */
+export async function markCalendarFootageReady(eventId: string, readyAt: Date | string, boxId: string | null, opts: { dryRun?: boolean } = {}): Promise<'marked' | 'already' | 'gone'> {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    throw new Error('Google service account not configured')
+  }
+  const calendar = google.calendar({ version: 'v3', auth: getAuth() })
+  let ev
+  try {
+    ev = (await calendar.events.get({ calendarId: CALENDAR_ID, eventId }, READY_CALL)).data
+  } catch (e: any) {
+    const status = e?.code ?? e?.response?.status
+    if (status === 410) return 'gone'
+    // 404: deleted event, or a calendar we can no longer read. Only a readable calendar makes it "gone" (recorded, not
+    // retried for 30 days of sweeps); otherwise it stays an error — loud and retried (review v1.288)
+    if (status === 404) {
+      await calendar.calendars.get({ calendarId: CALENDAR_ID }, READY_CALL).catch(() => { throw e })
+      return 'gone'
+    }
+    throw e
+  }
+  if (ev.status === 'cancelled') return 'gone'
+  const summary = withReadyMark(ev.summary || '')
+  const description = withReadyLine(ev.description || '', footageReadyLine(readyAt, boxId))
+  if (summary === (ev.summary || '') && description === (ev.description || '')) return 'already'
+  if (opts.dryRun) return 'marked'
+  // If-Match: an edit that patched the event between our read and this write must not be undone — 412 throws, the
+  // sweep re-reads and retries (review v1.288)
+  await calendar.events.patch({ calendarId: CALENDAR_ID, eventId, sendUpdates: 'none', requestBody: { summary, description } },
+    ev.etag ? { ...READY_CALL, headers: { 'If-Match': ev.etag } } : READY_CALL)
+  return 'marked'
 }
 
 export function buildEventDescription(booking: {
   id: string
   bookingCode?: string | null
+  /** v1.288 — footage announced → the ready line (with the box link) leads the description */
+  readyNotifiedAt?: Date | string | null
+  driveFolders?: unknown
   shootType: string
   videoType?: string | null
   locationName?: string | null
@@ -384,12 +464,15 @@ ${freelancers.length ? formatFreelancerLines(freelancers) : '—'}
 Production ID: ${booking.bookingCode || booking.id}
 Auto-generated by THE STANDARD Production Booking`
   const assigned = (assignedEmails || []).filter(Boolean)
-  return `${base}\n\nAssigned: ${assigned.join(', ') || '—'}`
+  const full = `${base}\n\nAssigned: ${assigned.join(', ') || '—'}`
+  return booking.readyNotifiedAt ? withReadyLine(full, footageReadyLine(booking.readyNotifiedAt, getDriveLink(booking.driveFolders, 'box'))) : full
 }
 
 export async function createCalendarEvent(booking: {
   id: string
   bookingCode?: string | null
+  readyNotifiedAt?: Date | string | null // v1.288 — a re-created event keeps ✅ + the box link
+  driveFolders?: unknown
   shootDate: Date | string
   shootEndDate?: Date | string | null
   callTime: string
@@ -674,6 +757,8 @@ export async function updateCalendarEventDetails(
   booking: {
     id: string
     bookingCode?: string | null
+    readyNotifiedAt?: Date | string | null // v1.288 — a rebuilt event keeps ✅ + the box link
+    driveFolders?: unknown
     shootDate: Date | string
     shootEndDate?: Date | string | null
     callTime: string

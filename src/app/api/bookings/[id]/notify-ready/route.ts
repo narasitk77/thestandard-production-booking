@@ -7,7 +7,7 @@ import { sendEmail, isEmailConfigured } from '@/lib/email'
 import { formatBytes } from '@/lib/footage-report'
 import { getCachedFootagePayload } from '@/lib/footage-folders'
 import { bookingDisplayName } from '@/lib/display'
-import { footageReadyRecipients, inactiveUserEmails } from '@/lib/footage-ready'
+import { footageReadyRecipients, inactiveUserEmails, markReadyOnCalendarWithin } from '@/lib/footage-ready'
 import { CARD_PREFIX } from '@/lib/ingest'
 import { EPISODE_ORDER } from '@/lib/episode-order'
 
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
       select: {
-        id: true, driveFolders: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true, readySnapshot: true,
+        id: true, driveFolders: true, bookingCode: true, status: true, deletedAt: true, crewRequired: true, readySnapshot: true, calendarEventId: true,
         assignedEmails: true, createdByEmail: true, producer: true, producerEmail: true, coProducerEmail: true,
         directorEmail: true, director2Email: true, director3Email: true,
         projectId: true, projectName: true, category: true, callTime: true, shootDate: true,
@@ -170,7 +170,8 @@ THE STANDARD Production Booking`
     // AUTO path). Stamped only when someone on the job got it (above).
     // A partial failure still stamps (one bad freelancer address must not make
     // the auto path re-mail everyone) — emailError names who missed it.
-    prisma.booking.update({ where: { id: booking.id }, data: { readyNotifiedAt: new Date() } })
+    const readyAt = new Date()
+    prisma.booking.update({ where: { id: booking.id }, data: { readyNotifiedAt: readyAt } })
       .catch(e => console.error('[notify-ready] readyNotifiedAt stamp failed (auto notice may duplicate):', e?.message || e))
 
     logAudit({
@@ -182,9 +183,16 @@ THE STANDARD Production Booking`
       changes: { recipients: delivered, ...(failedRecipients.length ? { failedRecipients } : {}), ...(skippedInactive.length ? { skippedInactive } : {}), folderCount: folders.length, fileCount, emailError },
     })
 
+    // v1.288 — ✅ + box link on the calendar event now; a failure is retried by the footage-ready sweep (never fails the 📣)
+    // the box the mail links to (resolved by name/code when the booking has no stored id) — review v1.288
+    const resolvedBox = /\/folders\/([A-Za-z0-9_-]{10,})/.exec(bookingFolderUrl || '')?.[1] || null
+    const calendar = await markReadyOnCalendarWithin({ ...booking, readyNotifiedAt: readyAt }, session.email, resolvedBox)
+    if (!calendar.ok) console.error('[notify-ready] calendar ✅ failed (sweep retries):', booking.bookingCode, calendar.error)
+
     return NextResponse.json({
       ok: true,
       emailed,
+      calendar: calendar.ok ? calendar.state : 'retry-later', // 'no-event' = this booking has no calendar event
       // delivered only — the card says "ส่งแล้ว N คน" from this list
       recipients: delivered,
       failedRecipients,

@@ -61,6 +61,7 @@ mock.module('../footage-ready', {
   namedExports: {
     footageReadyRecipients: () => ({ people: ['pro@x.co', 'crew@x.co'], inactive: [] }),
     inactiveUserEmails: async () => new Set(),
+    markReadyOnCalendarWithin: async () => ({ ok: true, state: 'marked' }), // v1.288
   },
 })
 mock.module('../ingest', { namedExports: { CARD_PREFIX: 'CARD_' } })

@@ -20,11 +20,13 @@ import { sendEmail, isEmailConfigured } from './email'
 import { notifyChat } from './notify'
 import { logAudit } from './audit'
 import { findFoldersByCode, listFilesRecursive, findChildFolder, SOUND_STAGING_DIR, listSoundStagingTree } from './google-drive'
+import { updateCardStates, quietShortCards, quietUnreadableCards, notOnDrive, shortCardText, CARD_RETRY_MS, type NasCardReport, type CardState } from './nas-cards'
+import { alertOps } from './ops-alert'
 
 const IGNORE_RE = /^_SHOOT\b.*\.txt$/i
 
-export interface NasManifestFolder { name: string; files: Array<{ p: string; size: number }> }
-export interface NasManifest { at: string; host?: string; folders: NasManifestFolder[] }
+export interface NasManifestFolder { name: string; files: Array<{ p: string; size: number }>; cards?: NasCardReport[]; truncated?: boolean; lastWrite?: number }
+export interface NasManifest { at: string; host?: string; folders: NasManifestFolder[]; skipped?: string[] }
 
 export interface FolderSyncReport {
   name: string
@@ -157,7 +159,21 @@ ${lines.join('\n')}
  * Ingest a manifest push: track queue states, email on queue-drain (with the
  * live Drive count), daily digest every 22h. Returns the (light) report.
  */
-export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncReport> {
+// v1.288 — one ingest at a time: the agent POSTs every minute now, and a slow ingest (drain counts, card checks on Drive)
+// overlapped by the next POST read the same row twice → the same drain / card alert sent twice (review v1.288).
+// ponytail: in-process chain — one app process serves this route; a DB advisory lock if that ever changes
+let ingestChain: Promise<unknown> = Promise.resolve()
+export function ingestNasManifest(manifest: NasManifest): Promise<NasSyncReport> {
+  const run = ingestChain.then(() => ingestOnce(manifest))
+  ingestChain = run.catch(() => {})
+  return run
+}
+
+/** v1.288 — the queue must stay empty this long before "✅ ส่งขึ้น Drive ครบ": with a scan every minute, the short
+ *  empty gap between two cards read as a drain (and mailed + chatted it) every time */
+export const DRAIN_SETTLE_MS = 9 * 60_000
+
+async function ingestOnce(manifest: NasManifest): Promise<NasSyncReport> {
   const row = await prisma.nasSyncState.findUnique({ where: { key: 'latest' } })
   const prev = (row?.status as any) || {}
   const statuses: any = { ...(prev.folders || {}) }
@@ -174,41 +190,60 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
     const cur = byCode.get(f.code)
     byCode.set(f.code, cur ? { name: `${cur.name} + ${f.name}`, nasPending: cur.nasPending + f.nasPending } : { name: f.name, nasPending: f.nasPending })
   }
+  const announceDrain = async (code: string, name: string, p: any, maxSeen: number) => {
+    let driveNote = ''
+    let driveCount: { files: number; bytes: number } | null = null
+    try {
+      driveCount = await countDriveFilesByCode(code)
+      driveNote = `\nบน Drive ตอนนี้: ${driveCount.files} ไฟล์ (${fmt(driveCount.bytes)})`
+    } catch { /* best-effort */ }
+    if (emailOk) {
+      await sendEmail({
+        to: [reportEmailTo()!],
+        subject: `✅ ส่งขึ้น Drive ครบ: ${name}`,
+        text: `คิว NAS ของ "${name}" ระบายหมดแล้ว — ไฟล์ทั้งหมดถูกส่งขึ้น Production Team (Drive) แล้ว${driveNote}\n\nกด "รวมไฟล์เข้ากล่องนี้" ในหน้า upload ของงานได้เลย\n${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'}/admin\n\n— THE STANDARD Production Booking`,
+      }).catch(e => console.error('[nas-sync] drain email failed:', e?.message || e))
+    }
+    // v1.147.2 (ops) — chat ping on the same drain transition, alongside the
+    // email. Independent of emailOk; notifyChat no-ops when no chat webhook
+    // is configured and never throws.
+    await notifyChat(`✅ ซิงค์ขึ้น Drive ครบ: ${name} — คิว NAS ระบายหมดแล้ว${driveNote.replace('\n', ' · ')}`)
+    // v1.262 — a durable record of the drain: the Hermes relay reads these to tell the operator's
+    // Discord room (chat + email above are best-effort). v1.288 — zeroSince = when the queue really emptied (the row
+    // itself is written DRAIN_SETTLE_MS later; footage-ready's fast-notice watch compares against this)
+    await logAudit({
+      actorEmail: 'nas-sync', action: 'nas.folder_drained', entityType: 'NasFolder', entityId: name, bookingCode: code,
+      changes: { folder: name, ...(p.zeroSince ? { zeroSince: p.zeroSince } : {}), ...(driveCount ? { driveFiles: driveCount.files, driveBytes: driveCount.bytes } : {}) },
+    })
+    statuses[code] = { ...p, lastPending: 0, maxSeen, drainPending: false, drainedAt: new Date().toISOString() }
+  }
+  const settled = (p: any) => p.drainPending && Date.now() - Date.parse(p.zeroSince || '') >= DRAIN_SETTLE_MS
   for (const [code, f] of byCode) {
     const p = statuses[code] || {}
     const maxSeen = Math.max(p.maxSeen || 0, f.nasPending)
-    // Transition: queue had files, now drained → the sync shipped everything.
+    // v1.288 — queue had files and is now empty: lastPending goes to 0 at once (footage-ready's gate reads it), but
+    // the drain is ANNOUNCED only once it has stayed empty DRAIN_SETTLE_MS (a gap between two cards is not a drain)
     if ((p.lastPending || 0) > 0 && f.nasPending === 0) {
-      let driveNote = ''
-      let driveCount: { files: number; bytes: number } | null = null
-      try {
-        driveCount = await countDriveFilesByCode(code)
-        driveNote = `\nบน Drive ตอนนี้: ${driveCount.files} ไฟล์ (${fmt(driveCount.bytes)})`
-      } catch { /* best-effort */ }
-      if (emailOk) {
-        await sendEmail({
-          to: [reportEmailTo()!],
-          subject: `✅ ส่งขึ้น Drive ครบ: ${f.name}`,
-          text: `คิว NAS ของ "${f.name}" ระบายหมดแล้ว — ไฟล์ทั้งหมดถูกส่งขึ้น Production Team (Drive) แล้ว${driveNote}\n\nกด "รวมไฟล์เข้ากล่องนี้" ในหน้า upload ของงานได้เลย\n${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://probook.thestandard.co'}/admin\n\n— THE STANDARD Production Booking`,
-        }).catch(e => console.error('[nas-sync] drain email failed:', e?.message || e))
-      }
-      // v1.147.2 (ops) — chat ping on the same drain transition, alongside the
-      // email. Independent of emailOk; notifyChat no-ops when no chat webhook
-      // is configured and never throws.
-      await notifyChat(`✅ ซิงค์ขึ้น Drive ครบ: ${f.name} — คิว NAS ระบายหมดแล้ว${driveNote.replace('\n', ' · ')}`)
-      // v1.262 — a durable record of the drain: the Hermes relay reads these to tell the operator's
-      // Discord room (chat + email above are best-effort)
-      await logAudit({
-        actorEmail: 'nas-sync', action: 'nas.folder_drained', entityType: 'NasFolder', entityId: f.name, bookingCode: code,
-        changes: { folder: f.name, ...(driveCount ? { driveFiles: driveCount.files, driveBytes: driveCount.bytes } : {}) },
-      })
-      statuses[code] = { ...p, lastPending: 0, maxSeen, drainedAt: new Date().toISOString() }
-    } else {
-      statuses[code] = { ...p, lastPending: f.nasPending, maxSeen }
+      statuses[code] = { ...p, lastPending: 0, maxSeen, drainPending: true, zeroSince: new Date().toISOString(), drainName: f.name }
+      continue
     }
+    // Transition confirmed: the queue stayed empty → the sync shipped everything.
+    if (f.nasPending === 0 && settled(p)) await announceDrain(code, f.name, p, maxSeen)
+    else statuses[code] = { ...p, lastPending: f.nasPending, maxSeen, ...(f.nasPending > 0 ? { drainPending: false } : {}) }
+  }
+  // v1.288 review — a folder that emptied and then LEFT the NAS (the noon prune trashes the merged landing, Cloud Sync
+  // removes the NAS copy) while waiting out the settle: it shipped — say so. A folder the agent could not READ
+  // (manifest.skipped) is not gone: it waits.
+  const unreadable = new Set((manifest.skipped || []).map(n => codeOf(n)).filter(Boolean))
+  for (const [code, p] of Object.entries(statuses) as Array<[string, any]>) {
+    if (byCode.has(code) || unreadable.has(code) || !settled(p)) continue
+    await announceDrain(code, p.drainName || code, p, p.maxSeen || 0)
   }
 
-  const next: any = { folders: statuses, lastDailyAt: prev.lastDailyAt || null }
+  // v1.288 — MEDIAPRO read on the NAS: remember what each card should hold and what arrived; a finished copy that is
+  // short (and the missing originals are not on Drive either) is told to the team while the card is still in hand
+  const cards = await checkNasCards(prev.cards || {}, manifest.folders, (row?.manifest as NasManifest | null | undefined)?.folders)
+  const next: any = { folders: statuses, lastDailyAt: prev.lastDailyAt || null, cards }
   const lastDaily = next.lastDailyAt ? new Date(next.lastDailyAt).getTime() : 0
   if (emailOk && Date.now() - lastDaily > 22 * 3600_000) {
     // Daily digest gets live Drive counts (heavier — once a day is fine).
@@ -228,6 +263,85 @@ export async function ingestNasManifest(manifest: NasManifest): Promise<NasSyncR
   })
 
   return report
+}
+
+/** v1.288 review — the card check walks Drive inside the (serialized) ingest: a hung call must not stall every later
+ *  manifest. Past this, the manifest is stored with the card states as they were; the late check sends nothing. */
+export const cardCheck = { deadlineMs: 90_000 } // an object so a test can shorten it
+
+async function checkNasCards(prev: Record<string, CardState>, folders: NasManifestFolder[], before: NasManifestFolder[] | undefined): Promise<Record<string, CardState>> {
+  const deadlineMs = cardCheck.deadlineMs
+  const now = new Date()
+  const base = updateCardStates(prev, folders, before, codeOf, now)
+  const cards = { ...base }
+  const run = { cancelled: false }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = await Promise.race([
+    judgeCards(cards, now, run).then(() => false),
+    new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), deadlineMs) }),
+  ]).finally(() => clearTimeout(timer))
+  if (!late) return cards
+  run.cancelled = true
+  console.error(`[nas-sync] card check ran past ${deadlineMs / 1000}s (Drive) — not judged this manifest`)
+  return base
+}
+
+async function judgeCards(cards: Record<string, CardState>, now: Date, run: { cancelled: boolean }): Promise<void> {
+  try {
+    for (const { key, state } of quietUnreadableCards(cards, now)) {
+      if (run.cancelled) return
+      const r = await alertOps(`nas-card-unreadable:${key}`, `MEDIAPRO อ่านไม่ได้บน NAS — ${state.code || state.folder}`,
+        `${state.folder} · ${state.dir || '(ราก)'}: MEDIAPRO.XML อ่านไม่ได้ (${state.error}) — ตรวจไม่ได้ว่าการ์ดนี้เข้า NAS ครบไหม\n` +
+        'ด่าน MEDIAPRO บน Drive จะตรวจอีกรอบตอนไฟล์ขึ้นครบ · ถ้าไฟล์นี้เสียจริง ให้ก็อปการ์ดใหม่')
+      if (r.delivered) cards[key] = { ...cards[key], alertedUnreadable: true }
+    }
+    const first = quietShortCards(cards, now, () => null)
+    if (!first.length) return
+    // the v1.260 rule needs each booking's first shoot day (clips dated before it = an unformatted card's leftovers)
+    const codes = [...new Set(first.map(c => c.state.code).filter((c): c is string => !!c))]
+    const rows = codes.length ? await prisma.booking.findMany({ where: { bookingCode: { in: codes } }, select: { bookingCode: true, shootDate: true } }) : []
+    const from = new Map(rows.map(r => [r.bookingCode, new Date(r.shootDate).toISOString().slice(0, 10)]))
+    const listings = new Map<string, Array<{ name: string; folderPath?: string[] }> | null>()
+    const later = new Date(now.getTime() + CARD_RETRY_MS).toISOString()
+    for (const { key, state, missing } of quietShortCards(cards, now, c => (c && from.get(c)) || null)) {
+      // Not on the NAS ≠ missing: Cloud Sync uploads and removes a clip between two scans. The proof is THIS booking's
+      // own Drive folders (landing / box / staging, found by its code), every name, one listing — a global name search
+      // found another job's C0031.MP4 and skipped names past 20 (review v1.288). Cannot list = cannot judge = silent.
+      if (!state.code) { cards[key] = { ...cards[key], retryAfter: later }; continue } // no Production ID: no folders to check
+      let drive = listings.get(state.code)
+      if (drive === undefined) {
+        drive = null
+        try {
+          const roots = await findFoldersByCode(state.code)
+          const all: Array<{ name: string; folderPath?: string[] }> = []
+          let capped = false
+          for (const r of roots) {
+            const list = await listFilesRecursive(r.id, { maxFiles: 20000 })
+            if (list.length >= 20000) capped = true
+            all.push(...list)
+          }
+          if (roots.length && !capped) drive = all
+          else console.warn('[nas-sync] card check: Drive folders of', state.code, roots.length ? 'too large to list' : 'not found', '— not judged')
+        } catch (e: any) {
+          console.warn('[nas-sync] card check: Drive listing failed — retry next manifest:', state.code, e?.message || e)
+        }
+        listings.set(state.code, drive)
+      }
+      if (!drive) { cards[key] = { ...cards[key], retryAfter: later }; continue }
+      const gone = notOnDrive(missing, state.dir, drive)
+      if (!gone) { cards[key] = { ...cards[key], retryAfter: later }; continue } // card path not proven on Drive yet
+      const sig = missing.slice().sort().join('|')
+      if (!gone.length) { cards[key] = { ...cards[key], alerted: sig }; continue } // all up already — not looked up again
+      const text = shortCardText(state, gone)
+      if (run.cancelled) return // abandoned by the deadline: the next manifest judges it again
+      const told = await notifyChat(text)
+      await alertOps(`nas-card-short:${key}:${sig}`, `การ์ดเข้า NAS ไม่ครบ — ${state.code}`, text)
+      // remembered only once the TEAM heard it (ops alone cannot stop the card being formatted) — else retried next minute
+      cards[key] = told ? { ...cards[key], alerted: sig } : { ...cards[key], retryAfter: later }
+    }
+  } catch (e: any) {
+    console.error('[nas-sync] card check failed:', e?.message || e) // the manifest itself must still be stored
+  }
 }
 
 /** Latest stored manifest + statuses (for the admin button). */
