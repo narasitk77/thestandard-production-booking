@@ -4302,3 +4302,10 @@ problem and not a deployment problem.
 - เฝ้าต่อ: audit `booking.auto_notified_ready` ที่ `changes.readyPath='mediapro'` + Discord ops "ไฟล์มาเพิ่มหลังแจ้ง Footage พร้อม (ทางลัด MEDIAPRO)"
 - ค้าง (เสนอแล้ว รอนัท): v1.288 แปะ ✅ + ลิงก์กล่องใน event ปฏิทินตอนแจ้ง (sendUpdates none) + เติมย้อนหลัง 55 ใบ · ตัวสแกน NAS ตรวจ MEDIAPRO + ทุก 1 นาที
 
+
+## 2026-11-13 — v1.287.1 = ต้องตอบแบบสำรวจก่อนเริ่ม New Booking · deployed 09:38
+- นัทสั่ง "ให้คนที่ log in เข้ามาใช้บริการ ตอบ Survey ก่อนเลย ถึงจะเริ่ม New Booking ได้ ใครทำไปแล้วก็ไม่ต้องทำ" · `/new` (server component) เช็ก `mustAnswerSurvey` = เปิดรับ + ยังไม่ตอบ → redirect `/survey?next=/new<query เดิม>` · ตอบแล้วขึ้นปุ่ม "ไปจองคิวต่อ →" (`<a>` เต็มหน้า กัน router cache)
+- ปิดรับที่ /admin/survey = ด่านหายทันที · ไม่กั้น `POST /api/bookings` (MCP/Veela/สคริปต์) · อ่านสถานะ DB ไม่ได้ = หน้า /new ล้มดัง ๆ ไม่ปล่อยผ่าน
+- gate: เทสต์ 1736/1736 · tsc · `npm run build` · CI + Docker ของ dd3915c ผ่าน · backup ก่อน deploy โดย deploy.py · จุดถอย sha-f9ff300 · 09:38 /api/version = 1.287.1 in-sync
+- ตรวจบนพรอด: บัญชีแอดมินนัท (ยังไม่ตอบ) เปิด `/new?clone=TEST-1` → เด้งไป `/survey?next=%2Fnew%3Fclone%3DTEST-1` พร้อมแถบแจ้ง ✓
+- **ยังไม่ได้ตรวจ:** ฝั่ง "ตอบแล้วเข้า /new ได้" และปุ่มพากลับ (ต้องกดส่งคำตอบจริง ไม่ได้ส่งแทนนัท) · แชตอื่นเตรียม v1.288.0 ค้างในโฟลเดอร์หลัก (ยังไม่ push) — ต้อง rebase บน dd3915c และเรียง CHANGELOG ให้ 1.288.0 อยู่เหนือ 1.287.1
