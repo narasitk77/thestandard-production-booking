@@ -4334,3 +4334,18 @@ problem and not a deployment problem.
   TSS-EXE-261202-01) · claim 0 · error 0 → apply → แถว 913/914/915 · ตรวจในชีตจริงแล้ว (915 = EP 261117-01, -02 · CONFIRMED · event id ครบ)
 - ช่องโหว่ที่ยังอยู่: append ล้มไม่มีใครรู้และไม่มีตัวซ่อมเอง · backfill ไม่เขียน audit ตอน append — เสนอนัทแล้ว
 
+
+## 2026-11-13 (บ่าย) — v1.289.0 รหัสตอนแก้อัตโนมัติเฉพาะที่ฐานของปุ๊กจดไว้ · DEPLOYED `sha-742c671` (14:21) พร้อม `EPISODE_SYNC_AUTOAPPLY=1`
+นัท 13 พ.ย. (ตอบรายการค้าง): *"แก้อัตโนมัติก่อนได้ ถ้าตรงกับ database ของปุ๊กทำได้เลย ถ้าไม่ส่งให้ผม approve ก่อน + แจ้งสาเหตุด้วย"*
+- ฐานของปุ๊ก = Lark Base Deliverables ของ PMDC (Airtable ปลด 7 ก.ย., PAT ถูกเพิกถอน 15 ก.ย.) · probook อ่านตรงไม่ได้ (ไม่มี credential Lark/facade) ·
+  ที่อ่านได้ = คอลัมน์ **Previous IDs** (T) บน PD ทั้ง 5 แท็บ ที่ ep-retype ของ PMDC เขียนในงานเดียวกับที่เปลี่ยนรหัสใน Lark (เพิ่ม 11 พ.ย. commit 20213535 ของ pmdc-ops)
+- PMDC booking-sync อ่านชีท Bookings ด้วย Sheets API (OAuth panu.w) **ไม่ใช่** Apps Script getBookings · รัน 03:35 + 04:00 · อ่านใบ CANCELLED ด้วย · H = Highlight เป็นชนิดจริงของ PMDC
+- ทำมือก่อน deploy: PP-26-074 H01–H07 → S01–S07 ในใบ CANCELLED AGN-261111-01/-02 (PMDC retype 19 ต.ค. ปุ๊กอนุมัติ และแก้คอลัมน์ Q ของเราเป็น S ไปแล้ว — เหลือ DB) ·
+  dry-run 7 คู่ไม่มีด่าน → apply 13:45 · ตรวจ: ชีทแถว 798/818 = S · DB 3 ใบ = S · audit `booking.episode_renamed` 10 แถว · รายงาน drift ว่าง
+- Hermes `probook-episode-drift` ลงทะเบียน (job `a2d515b5d6c9`) ย้าย 05:30 → **03:15** (ก่อน booking-sync) · สคริปต์ติดตั้งแล้ว (สำรอง `.bak-20261113-v1289`)
+- รีวิวแย้ง 3 เลนส์ก่อน deploy → แก้ใน 742c671: เกินเพดาน 5 คู่ ข้อความไล่คู่ให้นัทอนุมัติ · renumbered บอกคู่ · คอมเมนต์สวิตช์ใน compose ·
+  ep-retype ล้มกลางทาง (Previous IDs ลงก่อน Lark) → ด่านโฟลเดอร์ Drive กันไว้ (ขั้น Drive ของ ep-retype มาหลัง Lark)
+- deploy: `deploy.py 742c671 --set EPISODE_SYNC_AUTOAPPLY=1` · `--check` ผ่าน · backup-2026-11-13T071641.sql.gz 1.43MB · จุดถอย `sha-fe72e4e` (v1.288.0) ·
+  14:21:42 ครบสามชั้น 1.289.0 in-sync · ตรวจ: env ในคอนเทนเนอร์ AUTOAPPLY=1 · POST {auto} ตอบ autoApplyEnabled:true drift [] · สคริปต์ Hermes --dry-run เงียบ
+- ⚠️ **ถอยต่ำกว่า v1.289 ต้องตั้ง `EPISODE_SYNC_AUTOAPPLY=0` ก่อน** (อิมเมจเก่าแก้เองด้วยกฎชื่อตอนอย่างเดียว)
+- ยังไม่ได้พิสูจน์บน prod: ทางเขียนอัตโนมัติ (ไม่มีคู่ให้แก้วันนี้) — ครั้งแรกคือคืนหลัง PMDC retype ครั้งถัดไป · ข้อขอปุ๊ก (ยังไม่ส่ง): ให้ ep-retype เขียน Previous IDs หลัง Lark readback
