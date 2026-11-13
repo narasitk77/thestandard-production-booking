@@ -4309,3 +4309,18 @@ problem and not a deployment problem.
 - gate: เทสต์ 1736/1736 · tsc · `npm run build` · CI + Docker ของ dd3915c ผ่าน · backup ก่อน deploy โดย deploy.py · จุดถอย sha-f9ff300 · 09:38 /api/version = 1.287.1 in-sync
 - ตรวจบนพรอด: บัญชีแอดมินนัท (ยังไม่ตอบ) เปิด `/new?clone=TEST-1` → เด้งไป `/survey?next=%2Fnew%3Fclone%3DTEST-1` พร้อมแถบแจ้ง ✓
 - **ยังไม่ได้ตรวจ:** ฝั่ง "ตอบแล้วเข้า /new ได้" และปุ่มพากลับ (ต้องกดส่งคำตอบจริง ไม่ได้ส่งแทนนัท) · แชตอื่นเตรียม v1.288.0 ค้างในโฟลเดอร์หลัก (ยังไม่ push) — ต้อง rebase บน dd3915c และเรียง CHANGELOG ให้ 1.288.0 อยู่เหนือ 1.287.1
+
+## 2026-11-13 — v1.288.0 = ✅ + ลิงก์กล่องใน event ปฏิทินตอนแจ้ง Footage พร้อม · ตัวสแกน NAS อ่าน MEDIAPRO · DEPLOYED `sha-fe72e4e` (10:22)
+นัท (12 พ.ย.): "ใส่ ✅ หน้าชื่องานและลิงก์กล่องใน event ปฏิทินตอนแจ้ง Footage พร้อม — ทำไมต้องรอ ทำไมตรวจเองไม่ได้" · "ให้ตัวสแกน NAS ตรวจ MEDIAPRO ได้ตั้งแต่ไฟล์เข้า NAS — โอเค"
+- รีวิวอิสระ 4 รอบ (verifier 3 ตัวตายเพราะ DNS 12 พ.ย. → รันซ้ำ 13 พ.ย. ยืนยันจริงทั้ง 3) · ข้อที่ยืนยันแก้ครบ · mutation ปฏิทิน 28/28 · NAS 43/43
+- rebase บน v1.287.1/v1.287.2 ของอีกแชต (เลข 1.288.0 กันไว้ให้) · ไฟล์ Hermes 2 ไฟล์ที่อีกแชตแก้ค้างคืนกลับครบ (checksum ตรง) · deploy นี้พา **v1.287.2** (Location "Other ในออฟฟิศ") ขึ้นพรอดด้วย
+- deploy: ทั้งชุด 1771 · `npm run build` rc 0 · `--check` ผ่าน · backup-2026-11-13T031425.sql.gz 1.42MB · จุดถอย `sha-dd3915c` (v1.287.1) · 10:22:38 `/api/version` 1.288.0 in-sync ·
+  หลัง shoot-review 10:01 ก่อน prune 12:00
+- ตรวจหลัง deploy: รอบ footage-ready แรก `calendar=15 errors=0` + "อีก 43 ใบ รอบถัดไป" (58 ใบใน 30 วัน) · event จริง NWS-KYM-261109-01 = "✅ [NWS] Key Message — 2 EPs · 🎥 2 · 🎙 1" +
+  บรรทัดแรก "📁 ฟุตเทจพร้อม 9 พ.ย. 22:52 — <ลิงก์กล่อง>" · เวลา/สถานที่/แขกไม่เปลี่ยน
+- ตัวสแกน NAS: `/volume1/HermesNotes/probook/nas_manifest_agent.py` เปลี่ยนเป็นตัวใหม่ 10:22 (สำรองตัวเดิมเป็น `nas_manifest_agent.py.v1262.bak` — ตรงกับรีโปทุกไบต์ก่อนเปลี่ยน · วางผ่าน SMB share HermesNotes
+  mount ด้วย Keychain adminit · ไม่ต้องแก้ Task Scheduler) · รอบ 10:30 = python 3.8.15 `ok 31 folders · 2600 files · 50 MEDIAPRO → 200` · server ได้ `lastWrite` ครบ 31 โฟลเดอร์ ·
+  50 การ์ด = ซาก sync-storm ของ POP-PIV-261007-02 (`M4ROOT (1) (1)`) — จำลองการตัดสินกับ Drive จริงก่อนถึงเวลา: 50/50 ต้นฉบับอยู่ในโฟลเดอร์ Drive ของใบ = ไม่เตือน ·
+  ผลจริงบนพรอด 10:41: ตัดสินครบ 50/50 · แจ้งเตือน 0 · ไม่มีค้างลองใหม่ · heartbeat ของ agent 10:30:06 → 10:39:13 → รอบใหม่ 10:41
+- ถอย: `python3 scripts/ops/rollback.py` (พรอด) · NAS: ก็อป `.v1262.bak` ทับ `nas_manifest_agent.py`
+
