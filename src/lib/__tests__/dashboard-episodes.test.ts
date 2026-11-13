@@ -195,6 +195,31 @@ test('parseEpisodeTabs: banner/junk/malformed rows are ignored', () => {
   assert.deepEqual(eps.map(e => e.episodeId), ['PP-26-025-S02'])
 })
 
+test('parseEpisodeTabs: v1.289 "Previous IDs" (PMDC\'s rename record, PD col T) is found by header; junk entries are dropped, never guessed', () => {
+  // the live PD header on 13 Nov 2026: 18 columns + '📦 Project Folder' + 'Previous IDs'
+  const header = [...PD_HEADER, '📦 Project Folder', 'Previous IDs']
+  assert.equal(resolveEpsColumns(header).previousIds, 19)
+  const at = (episodeId: string, prev: string) => { const r = pdRow(episodeId, 'Pending'); r[19] = prev; return r }
+  const eps = parseEpisodeTabs([[header,
+    at('PP-26-056-S01', 'PP-26-056-H01'),
+    at('PP-26-076-H02', 'PP-26-076-S01, PP-26-076-S02'),
+    at('PP-26-077-S01', 'h01; -  PP-26-077-L1 '),        // lowercase / dash / malformed: nothing usable
+    pdRow('PP-26-078-S01', 'Pending'),                   // row shorter than col T
+  ]])
+  assert.deepEqual(eps.map(e => [e.episodeId, e.previousIds]), [
+    ['PP-26-056-S01', ['PP-26-056-H01']],
+    ['PP-26-076-H02', ['PP-26-076-S01', 'PP-26-076-S02']],
+    ['PP-26-077-S01', []],
+    ['PP-26-078-S01', []],
+  ])
+})
+
+test('parseEpisodeTabs: a tab with no "Previous IDs" header (legacy _EPs, an old PD layout) records none — no fallback column', () => {
+  assert.equal(resolveEpsColumns(PD_HEADER).previousIds, -1)
+  const eps = parseEpisodeTabs([[PD_HEADER, pdRow('PP-26-025-S01', 'Pending')], [LEGACY_EPS_HEADER, legacyRow('PP-26-013-L01', 'Pending')]])
+  assert.deepEqual(eps.map(e => e.previousIds), [[], []])
+})
+
 test('parseEpisodeTabs: episode type parsed from the ID suffix', () => {
   const eps = parseEpisodeTabs([[PD_HEADER, pdRow('PP-26-025-L01', 'Pending')]])
   assert.equal(eps[0].type, 'L')

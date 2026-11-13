@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """probook-episode-drift — รายงานประจำวัน: รหัสตอนในใบจอง (Episode.episodeId) ตรงกับ Producer Dashboard ไหม
-Hermes `--no-agent` · cron `30 5 * * *` (05:30 เวลาไทย — ก่อนรอบ sync ใบจองของ PMDC) · stdlib ล้วน ไม่มี LLM
+Hermes `--no-agent` · cron `15 3 * * *` (03:15 เวลาไทย — หลัง sheet-sync ของ PMDC 03:00 ก่อน booking-sync 03:35/04:00 ·
+เดิม 05:30 ซึ่งช้ากว่า booking-sync การแก้จึงถึง PMDC ช้าไปหนึ่งคืน) · stdlib ล้วน ไม่มี LLM
 เรียก /api/internal/episode-sync/run (v1.286) จากในคอนเทนเนอร์แอปผ่าน Portainer exec (secret อยู่ในคอนเทนเนอร์)
 
 ที่มา: 4 พ.ย. 2569 Dashboard เปลี่ยน PP-26-056-H01 → S01 แต่ใบจองยังผูก H01 ทำให้ PMDC ขึ้น "Unresolved Episode"
@@ -8,9 +9,10 @@ Hermes `--no-agent` · cron `30 5 * * *` (05:30 เวลาไทย — ก่
 
 ทำอะไร:
   1. GET  รายงาน drift (อ่านอย่างเดียว) — อ่าน Dashboard ไม่ได้/ว่าง/ชี้ชีททดสอบ = ⚠️ ไม่ใช่ "ไม่มี drift"
-  2. ถ้ามีคู่ที่เชื่อได้ (หายหนึ่ง โผล่ใหม่หนึ่ง + ชื่อตอนเฉพาะที่ตรงกัน) → POST {auto:true, apply:true}
+  2. ถ้ามีคู่ที่ตรงกับฐานของปุ๊ก (v1.289: แถว Dashboard จดรหัสเดิมไว้ในคอลัมน์ Previous IDs ซึ่ง ep-retype ของ PMDC
+     เขียนในงานเดียวกับที่เปลี่ยนรหัสใน Lark) → POST {auto:true, apply:true} · นัทสั่ง 13 พ.ย. "ตรงกับ database ของปุ๊กทำได้เลย"
      เซิร์ฟเวอร์ตัดสินว่าเขียนจริงไหม: เฉพาะเมื่อ stack ตั้ง EPISODE_SYNC_AUTOAPPLY=1 (ค่าเริ่มต้น 0 = dry-run + บอกตรง ๆ)
-  3. drift ที่ไม่เชื่อให้แก้เอง → ⚠️ รายโปรเจกต์ พร้อม "คู่ที่น่าจะใช่" ถ้ามี (คนสั่งแก้ทีละคู่ผ่าน call_internal.py)
+  3. ที่เหลือ = รอนัทอนุมัติ → ⚠️ รายโปรเจกต์ พร้อมสาเหตุ และ "คู่ที่น่าจะใช่" ถ้ามี (คนสั่งแก้ทีละคู่ผ่าน call_internal.py)
 
 ผลลัพธ์ (README scripts/hermes "หลักการที่ต้องรักษาไว้"):
   - ไม่มี drift = เงียบ · มีข้อค้นพบ = พิมพ์ดัง ๆ แต่ exit 0 (สคริปต์ทำงานสำเร็จ — ปัญหาอยู่ที่ข้อมูล)
@@ -92,8 +94,12 @@ def why_line(d):
     s = d.get("suggested") or {}
     pair = f"{s.get('from')} → {s.get('to')}" if s else "?"
     reason = d.get("reason")
+    if reason == "label-only":
+        return f"คู่ที่น่าจะใช่: {pair} ชื่อตอนตรงกัน แต่ PMDC ไม่ได้จดรหัสเดิมไว้ใน Previous IDs (ไม่มีหลักฐานจากฐานของปุ๊ก) — ถ้าถูก ให้อนุมัติคู่นี้"
+    if reason == "pmdc-conflict":
+        return f"PMDC จดรหัสเดิมนี้ไว้ใน Previous IDs มากกว่าหนึ่งแถว ({', '.join(d.get('recordedIn') or [])}) — ไม่รู้ว่าเปลี่ยนเป็นตัวไหน ต้องถามปุ๊ก"
     if reason == "weak-label":
-        return f"คู่ที่น่าจะใช่: {pair} แต่ชื่อตอนใน Dashboard ไม่เฉพาะพอให้แก้อัตโนมัติ — ถ้าถูก ให้สั่งแก้คู่นี้"
+        return f"คู่ที่น่าจะใช่: {pair} แต่ PMDC ไม่ได้จดไว้ และชื่อตอนใน Dashboard ไม่เฉพาะพอจะยืนยัน — ถ้าถูก ให้อนุมัติคู่นี้"
     if reason == "label-mismatch":
         return f"ถ้าคู่คือ {pair} ชื่อตอนใน Dashboard ไม่ตรงกับที่ใบจองเก็บ — ไม่เชื่อว่าเป็นตอนเดียวกัน"
     if reason == "several":
@@ -159,7 +165,7 @@ def compose(report, auto, auto_err=None):
                 out += [f"  ℹ️ {n}" for n in notes]
     rest = lines_for_drift(drift)
     if rest:
-        out.append("⚠️ รหัสตอนที่ Dashboard ไม่มีแล้ว และไม่เชื่อพอจะแก้เอง — ต้องคนตัดสิน (PMDC ขึ้น Unresolved Episode ทุกคืนจนกว่าจะแก้):")
+        out.append("⚠️ รหัสตอนที่ Dashboard ไม่มีแล้ว และไม่ตรงกับฐานของปุ๊กโดยตรง — รอนัทอนุมัติ (PMDC ขึ้น Unresolved Episode ทุกคืนจนกว่าจะแก้):")
         out += rest
     return "\n".join(out)
 
@@ -335,6 +341,11 @@ def self_test():
     # POST ล้ม/ไม่รู้ผล: ต้องยังมีข้อค้นพบจาก GET และบอกว่าอาจแก้ไปแล้ว
     t = compose({**ok, "drift": [cand, weak]}, None, TimeoutError("timed out"))
     assert "ไม่รู้ผล" in t and "PP-26-056-H01→PP-26-056-S01" in t and "TimeoutError" in t and "คู่ที่น่าจะใช่" in t
+    # v1.289: label-only / pmdc-conflict ต้องบอกว่าทำไมไม่แก้เอง และไปรอนัท
+    lonly = {**weak, "reason": "label-only"}
+    conf = {**weak, "reason": "pmdc-conflict", "recordedIn": ["PP-26-056-S01", "PP-26-056-S02"]}
+    t = compose({**ok, "drift": [lonly, conf]}, None)
+    assert "รอนัทอนุมัติ" in t and "ไม่ได้จดรหัสเดิมไว้ใน Previous IDs" in t and "มากกว่าหนึ่งแถว (PP-26-056-S01, PP-26-056-S02)" in t, t
     # เหตุผลแต่ละแบบพูดความจริง (no-unclaimed ห้ามบอกว่า "ไม่มีรหัสใหม่")
     t = compose({**ok, "drift": [weak, sev, noun, gone]}, None)
     assert "คู่ที่น่าจะใช่: PP-26-056-H01 → PP-26-056-S01" in t

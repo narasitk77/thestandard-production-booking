@@ -14,18 +14,20 @@
  *   1. planDrift / driftReport — diff the codes bookings hold against the Dashboard.
  *   2. renameEpisodeCode       — the one safe way to change a code everywhere it lives.
  *
- * WHAT THE DIFF CAN AND CANNOT KNOW: it sees "H01 is gone", never "H01 became S01". It trusts a
- * pair for AUTOMATIC renaming only when all of these hold: exactly ONE code of the project
- * vanished, exactly ONE Dashboard code of the project is held by no booking, both carry the SAME
- * episode number (only the type letter changed — H01→S01 — a renumbering is a different episode as
- * often as it is a fix: "Highlight day 1" deleted + "Highlight day 2" left), the Dashboard row has
- * its OWN label (an EP value — not empty, not "-", not the project name every unlabelled episode
- * shares) that no other episode of the project carries, and every booking row of the vanished code
- * stored exactly that label as its title. Anything weaker is reported to a human — with the likely
- * pair named (`suggested`) when there is exactly one of each. The real incident is such a case:
- * H01 and S01 both carry only the project name, so it is `weak-label`, fixed by an operator.
- * The exact fix is for the Dashboard to remember the old code (a "Previous IDs" column like the
- * Bookings tab has) — asked of ปุ๊ก on 11 Nov.
+ * WHAT THE DIFF CAN AND CANNOT KNOW: the codes alone say "H01 is gone", never "H01 became S01".
+ * v1.289 — Nat's rule (13 Nov): rename AUTOMATICALLY only when it matches ปุ๊ก's database; anything
+ * else goes to Nat for approval WITH the reason. The one record of ปุ๊ก's database we can read is the
+ * PD tabs' "Previous IDs" column: PMDC's ep-retype writes the old code there in the same job that
+ * renames the Lark Deliverable in place (pmdc-ops automation/impact/keys.yaml: PD col C and Lark are
+ * paired sources; Previous IDs added 11 Nov at our request). So a pair is a `rename-candidate` only
+ * when exactly ONE Dashboard row of the project lists the vanished code in its Previous IDs.
+ * Two rows listing it = `pmdc-conflict`. No record = the label heuristic below, which now only
+ * SUGGESTS: exactly ONE code vanished, exactly ONE Dashboard code held by no booking, the SAME
+ * episode number, the Dashboard row has its OWN label (not empty, "-", or the project name) that no
+ * other episode carries, and every booking row stored exactly that label → `label-only` (strong, but
+ * not ปุ๊ก's record); weaker → `weak-label` / `label-mismatch` / `renumbered`, with the pair named
+ * (`suggested`) when there is exactly one of each. Renames before 11 Nov have no Previous IDs entry
+ * (PP-26-074 H→S, 19 Oct, was applied by hand on 13 Nov from PMDC's own records).
  * KNOWN SILENT GAP: the frozen legacy "_EPs" tab (and a stale duplicate PD row) is unioned into the
  * Dashboard list, so a renamed code that still sits there looks alive — that drift is NOT reported.
  * Loud ones: a Dashboard cell parseEpisodeTabs rejects (zero-width space, lowercase) shows up as a
@@ -79,12 +81,13 @@ export type EpRow = {
   deleted: boolean
   uploadCount: number
 }
-export type DashEp = { episodeId: string; label: string; ownLabel: boolean }
+/** previousIds = the row's "Previous IDs" cell (PMDC's record of a rename); absent = none recorded */
+export type DashEp = { episodeId: string; label: string; ownLabel: boolean; previousIds?: string[] }
 
 // ── 1. drift ──────────────────────────────────────────────────────────────────
 
 export type DriftKind = 'rename-candidate' | 'ambiguous' | 'orphan-only'
-export type DriftReason = 'weak-label' | 'label-mismatch' | 'renumbered' | 'several' | 'no-unclaimed'
+export type DriftReason = 'label-only' | 'pmdc-conflict' | 'weak-label' | 'label-mismatch' | 'renumbered' | 'several' | 'no-unclaimed'
 export type Drift = {
   project: string
   kind: DriftKind
@@ -96,12 +99,14 @@ export type Drift = {
   unclaimed: string[]
   /** booking codes holding an orphan */
   bookings: string[]
-  /** only for rename-candidate: safe to apply automatically */
+  /** only for rename-candidate: PMDC recorded it (Previous IDs) — safe to apply automatically */
   candidate?: { from: string; to: string }
   /** one vanished + one unclaimed but not trusted automatically: the likely pair, for a human to confirm */
   suggested?: { from: string; to: string }
   /** every code the Dashboard lists for the project — so a human can decide without opening the sheet */
   dashboardCodes?: string[]
+  /** only for pmdc-conflict: the Dashboard rows whose Previous IDs all list the vanished code */
+  recordedIn?: string[]
 }
 
 /**
@@ -128,11 +133,28 @@ export function planDrift(rows: EpRow[], dash: DashEp[]): Drift[] {
   const out: Drift[] = []
   for (const [project, byCode] of Array.from(held.entries()).sort(([a], [b]) => a.localeCompare(b))) {
     const d = dashBy.get(project) ?? new Map<string, DashEp>()
-    const orphans = Array.from(byCode.keys()).filter(c => !d.has(c)).sort()
+    const allOrphans = Array.from(byCode.keys()).filter(c => !d.has(c)).sort()
+    if (allOrphans.length === 0) continue
+    const bookingsOf = (codes: string[]) =>
+      Array.from(new Set(codes.flatMap(c => byCode.get(c)!.map(r => r.bookingCode ?? r.bookingId)))).sort()
+    const dashboardCodes = Array.from(d.keys()).sort()
+    const allUnclaimed = dashboardCodes.filter(c => !byCode.has(c))
+    // ปุ๊ก's record first (see the header): the vanished code listed in exactly ONE row's Previous IDs
+    const recordedTo = new Set<string>()
+    const orphans: string[] = []
+    for (const o of allOrphans) {
+      const tos = Array.from(d.values()).filter(x => x.previousIds?.includes(o)).map(x => x.episodeId)
+      const one = { project, orphans: [o], unclaimed: allUnclaimed, bookings: bookingsOf([o]) }
+      if (tos.length === 1) {
+        out.push({ ...one, kind: 'rename-candidate', candidate: { from: o, to: tos[0] } })
+        recordedTo.add(tos[0])
+      } else if (tos.length > 1) {
+        out.push({ ...one, kind: 'ambiguous', reason: 'pmdc-conflict', recordedIn: tos.sort(), dashboardCodes })
+      } else orphans.push(o)
+    }
     if (orphans.length === 0) continue
-    const unclaimed = Array.from(d.keys()).filter(c => !byCode.has(c)).sort()
-    const bookings = Array.from(new Set(orphans.flatMap(c => byCode.get(c)!.map(r => r.bookingCode ?? r.bookingId)))).sort()
-    const base = { project, orphans, unclaimed, bookings, dashboardCodes: Array.from(d.keys()).sort() }
+    const unclaimed = allUnclaimed.filter(c => !recordedTo.has(c))
+    const base = { project, orphans, unclaimed, bookings: bookingsOf(orphans), dashboardCodes }
     if (orphans.length === 1 && unclaimed.length === 1) {
       const pair = { from: orphans[0], to: unclaimed[0] }
       const target = d.get(pair.to)!
@@ -140,12 +162,9 @@ export function planDrift(rows: EpRow[], dash: DashEp[]): Drift[] {
       const titlesMatch = byCode.get(pair.from)!.every(r => norm(r.title) === want)
       const distinctive = target.ownLabel && Array.from(d.values()).filter(x => norm(x.label) === want).length === 1
       const sameNumber = numberOf(pair.from) === numberOf(pair.to)
-      if (titlesMatch && distinctive && sameNumber) {
-        out.push({ project, kind: 'rename-candidate', orphans, unclaimed, bookings, candidate: pair })
-      } else {
-        const reason: DriftReason = !titlesMatch ? 'label-mismatch' : !distinctive ? 'weak-label' : 'renumbered'
-        out.push({ ...base, kind: 'ambiguous', reason, suggested: pair })
-      }
+      // no record from PMDC: even the strongest label match only goes to Nat (label-only)
+      const reason: DriftReason = !titlesMatch ? 'label-mismatch' : !distinctive ? 'weak-label' : !sameNumber ? 'renumbered' : 'label-only'
+      out.push({ ...base, kind: 'ambiguous', reason, suggested: pair })
     } else if (unclaimed.length === 0) {
       out.push({ ...base, kind: 'orphan-only', reason: 'no-unclaimed' })
     } else {
@@ -397,7 +416,7 @@ async function loadDrift(): Promise<Loaded> {
   const dash = await listAllDashboardEpisodes()
   if (!dash.ok) return { ok: false, error: `อ่าน Dashboard ไม่ได้: ${dash.error}` }
   if (dash.episodes.length === 0) return { ok: false, error: 'Dashboard ไม่มีตอนเลย — ไม่ตัดสินจากความว่างเปล่า (โครงชีทเปลี่ยน?)' }
-  const de = dash.episodes.map(e => ({ episodeId: e.episodeId, label: dashLabel(e), ownLabel: hasOwnLabel(e) }))
+  const de = dash.episodes.map(e => ({ episodeId: e.episodeId, label: dashLabel(e), ownLabel: hasOwnLabel(e), previousIds: e.previousIds }))
   const rows = await loadRows({ episodeId: { startsWith: 'PP-' } })
   return { ok: true, dash: de, rows, drift: planDrift(rows, de) }
 }

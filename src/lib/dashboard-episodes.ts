@@ -44,11 +44,15 @@ function getAuth() {
 
 export type ProjectEpisode = {
   episodeId: string   // PP-26-006-L01
-  type: string        // L | S | A | T (parsed from the suffix)
+  type: string        // L | S | A | T | H (parsed from the suffix; H = Highlight, a real PMDC type since Jul 2026)
   status: string      // Pre-production | Production | Post-production | Published
   ep: string          // the "EP." label (e.g. "-", "Short", "1. มารีญา")
   productCode: string
   projectName: string
+  /** v1.289 — codes this row carried before PMDC renamed it. PMDC's ep-retype writes the "Previous IDs"
+   *  column (PD tabs, since 11 Nov 2026) in the same job that renames the Lark Deliverable, so it is
+   *  ปุ๊ก's database saying "from became this". [] when the tab has no such column (_EPs) or the cell is empty. */
+  previousIds: string[]
 }
 
 /**
@@ -67,16 +71,19 @@ export type EpsColumns = {
   ep: number
   productCode: number
   projectName: number
+  /** -1 = the tab has no "Previous IDs" header (no fallback position: guessing a column here could invent a rename) */
+  previousIds: number
 }
 
 // Current layout: A ProjectID · B Episode Type · C Episode ID · D Project
-// Name · E Director · F Product Code · G EP. · H Status · I… extras
+// Name · E Director · F Product Code · G EP. · H Status · I… extras · T Previous IDs (PD tabs)
 const EPS_FALLBACK_COLUMNS: EpsColumns = {
   episodeId: 2,   // C
   status: 7,      // H
   ep: 6,          // G
   productCode: 5, // F
   projectName: 3, // D
+  previousIds: -1,
 }
 
 const EPS_HEADERS: Record<keyof EpsColumns, RegExp> = {
@@ -85,6 +92,7 @@ const EPS_HEADERS: Record<keyof EpsColumns, RegExp> = {
   ep: /^ep\.?$/i,
   productCode: /^product\s*code$/i,
   projectName: /^project\s*name$/i,
+  previousIds: /^previous\s*ids?$/i,
 }
 
 export function resolveEpsColumns(header: unknown[] | undefined): EpsColumns {
@@ -165,6 +173,8 @@ export function parseEpisodeTabs(tabValues: string[][][]): ProjectEpisode[] {
         ep: String(row[cols.ep] || '').trim(),
         productCode: String(row[cols.productCode] || '').trim(),
         projectName: String(row[cols.projectName] || '').trim(),
+        // a malformed entry is dropped, not guessed at: no record = the rename goes to a human
+        previousIds: cols.previousIds < 0 ? [] : String(row[cols.previousIds] || '').split(/[\s,;]+/).filter(s => EPISODE_ID_RE.test(s)),
       })
     }
   }
@@ -234,7 +244,8 @@ export async function fetchAllEpisodeRows(
 
   const res = await sheets.spreadsheets.values.batchGet({
     spreadsheetId,
-    ranges: tabs.map(t => `'${t.replace(/'/g, "''")}'!A1:R`),
+    // A1:Z — "Previous IDs" sits in T on the PD tabs (v1.289); columns are found by header, so a wider read is safe
+    ranges: tabs.map(t => `'${t.replace(/'/g, "''")}'!A1:Z`),
   })
 
   const rows = parseEpisodeTabs(

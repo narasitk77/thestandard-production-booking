@@ -131,10 +131,10 @@ const ep = (id: string, episodeId: string, bookingId: string, sequence: number, 
 type Row = import('../episode-sync').EpRow
 const row = (episodeId: string, bookingId: string, o: Partial<Row> = {}): Row =>
   ({ id: `r-${bookingId}-${episodeId}`, episodeId, title: T, bookingId, bookingCode: bookingId.toUpperCase(), status: 'CONFIRMED', deleted: false, uploadCount: 0, ...o })
-/** Dashboard rows for planDrift: `own` = codes that carry a label of their own (label = HL unless given) */
-const D = (codes: string[], own: Record<string, string> = {}) =>
-  codes.map(episodeId => ({ episodeId, label: own[episodeId] ?? T, ownLabel: episodeId in own }))
-const dashEps = (...rows: Array<[string, string]>) => rows.map(([episodeId, ep]) => ({ episodeId, ep, projectName: T }))
+/** Dashboard rows for planDrift: `own` = codes that carry a label of their own (label = HL unless given) · `prev` = PMDC's Previous IDs */
+const D = (codes: string[], own: Record<string, string> = {}, prev: Record<string, string[]> = {}) =>
+  codes.map(episodeId => ({ episodeId, label: own[episodeId] ?? T, ownLabel: episodeId in own, previousIds: prev[episodeId] ?? [] }))
+const dashEps = (...rows: Array<[string, string, string[]?]>) => rows.map(([episodeId, ep, previousIds]) => ({ episodeId, ep, projectName: T, previousIds: previousIds ?? [] }))
 const holding = (code: string) => eps.filter(e => e.episodeId === code).map(e => e.id)
 
 beforeEach(() => {
@@ -148,10 +148,10 @@ beforeEach(() => {
     { id: 'b2', bookingCode: 'AGN-261126-02', status: 'CONFIRMED', deletedAt: null, calendarEventId: 'ev2' },
     { id: 'b3', bookingCode: 'AGN-261126-01', status: 'CONFIRMED', deletedAt: null, calendarEventId: 'ev3' },   // holds only L01
   ]
-  // default fixture: H01 has a label of its own (HL) — the strong case the automatic path may act on
+  // default fixture: PMDC recorded H01 → S01 (Previous IDs) — the only case the automatic path may act on (v1.289)
   eps = [ep('e1', L, 'b1', 1), ep('e2', H, 'b1', 2, 0, HL), ep('e3', L, 'b2', 1), ep('e4', H, 'b2', 2, 0, HL), ep('e5', L, 'b3', 1)]
   mix = [{ episodeRowId: 'e2', episodeCode: H }, { episodeRowId: 'e1', episodeCode: L }]
-  dashboard = { ok: true, episodes: dashEps([L, ''], [S, HL]) }
+  dashboard = { ok: true, episodes: dashEps([L, ''], [S, HL, [H]]) }
 })
 
 // ── labels (pure) ───────────────────────────────────────────────────────────────
@@ -168,10 +168,42 @@ test("dashLabel / hasOwnLabel: '' and '-' and the project name are NOT a label o
 
 // ── planDrift (pure) ────────────────────────────────────────────────────────────
 
-test('planDrift: one vanished + one unclaimed + an own, unique, matching label = rename-candidate across ALL bookings holding it', () => {
-  const rows = [row(L, 'b1'), row(H, 'b1', { title: HL }), row(L, 'b2'), row(H, 'b2', { title: HL }), row(L, 'b3')]
-  const d = sync.planDrift(rows, D([L, S], { [S]: HL }))
+test('planDrift: PMDC recorded the rename (Previous IDs) = rename-candidate across ALL bookings holding it — even with no labels at all (THE REAL INCIDENT)', () => {
+  const rows = [row(L, 'b1'), row(H, 'b1'), row(L, 'b2'), row(H, 'b2'), row(L, 'b3')]
+  const d = sync.planDrift(rows, D([L, S], {}, { [S]: [H] }))
   assert.deepEqual(d, [{ project: 'PP-26-056', kind: 'rename-candidate', orphans: [H], unclaimed: [S], bookings: ['B1', 'B2'], candidate: { from: H, to: S } }])
+})
+
+test('planDrift: an own, unique, matching label WITHOUT a PMDC record is label-only — suggested for Nat, never a candidate', () => {
+  const rows = [row(L, 'b1'), row(H, 'b1', { title: HL }), row(L, 'b2'), row(H, 'b2', { title: HL })]
+  const d = sync.planDrift(rows, D([L, S], { [S]: HL }))
+  assert.equal(d[0].kind, 'ambiguous')
+  assert.equal(d[0].reason, 'label-only')
+  assert.equal(d[0].candidate, undefined)
+  assert.deepEqual(d[0].suggested, { from: H, to: S })
+})
+
+test('planDrift: two Dashboard rows both list the vanished code = pmdc-conflict, names both rows, never a candidate', () => {
+  const S2 = 'PP-26-056-S02'
+  const d = sync.planDrift([row(L, 'b1'), row(H, 'b1')], D([L, S, S2], {}, { [S]: [H], [S2]: [H] }))
+  assert.equal(d.length, 1)
+  assert.equal(d[0].reason, 'pmdc-conflict')
+  assert.deepEqual(d[0].recordedIn, [S, S2])
+  assert.equal(d[0].candidate, undefined)
+})
+
+test('planDrift: a recorded pair and an unrecorded orphan in one project — the recorded one is a candidate, its new code is NOT offered to the other', () => {
+  const A1 = 'PP-26-056-A01', A2 = 'PP-26-056-T01'
+  const d = sync.planDrift([row(L, 'b1'), row(H, 'b1'), row(A1, 'b2', { title: 'Teaser' })],
+    D([L, S, A2], { [A2]: 'Teaser' }, { [S]: [H] }))
+  assert.deepEqual(d.map(x => [x.kind, x.reason ?? null, x.orphans]), [['rename-candidate', null, [H]], ['ambiguous', 'label-only', [A1]]])
+  assert.deepEqual(d[0].candidate, { from: H, to: S })
+  assert.deepEqual(d[1].unclaimed, [A2], 'S01 belongs to the recorded pair')
+  assert.deepEqual(d[1].suggested, { from: A1, to: A2 })
+})
+
+test('planDrift: a Previous IDs entry for a code still on the Dashboard is not a rename (nothing vanished)', () => {
+  assert.deepEqual(sync.planDrift([row(L, 'b1'), row(H, 'b1')], D([L, H, S], {}, { [S]: [H] })), [])
 })
 
 test('planDrift: THE REAL INCIDENT — both sides carry only the project name → weak-label: the pair is SUGGESTED for a human, never auto', () => {
@@ -204,7 +236,7 @@ test('planDrift: EVERY row holding the vanished code must carry the label — on
 
 test('planDrift: label comparison ignores whitespace noise but nothing else', () => {
   const d = sync.planDrift([row(L, 'b1'), row(H, 'b1', { title: HL })], D([L, S], { [S]: `  Highlight\t reel ` }))
-  assert.equal(d[0].kind, 'rename-candidate')
+  assert.equal(d[0].reason, 'label-only')
 })
 
 test('planDrift: spare unbooked episodes make the pairing a guess → ambiguous (several), nothing suggested', () => {
@@ -231,7 +263,7 @@ test('planDrift: two vanished = not a candidate · a whole project missing from 
 })
 
 test('planDrift: soft-deleted bookings COUNT — their sheet rows stay and PMDC reads CANCELLED rows too', () => {
-  const onlyDeleted = sync.planDrift([row(L, 'b3'), row(H, 'b1', { deleted: true, title: HL })], D([L, S], { [S]: HL }))
+  const onlyDeleted = sync.planDrift([row(L, 'b3'), row(H, 'b1', { deleted: true })], D([L, S], {}, { [S]: [H] }))
   assert.equal(onlyDeleted[0].kind, 'rename-candidate')
   assert.deepEqual(onlyDeleted[0].bookings, ['B1'])
   const claimed = sync.planDrift([row(L, 'b3'), row(H, 'b1'), row(S, 'b9', { deleted: true })], D([L, S]))
@@ -585,6 +617,16 @@ test('autoApplyDrift: a pair the dry run REFUSES is reported WITH the dry-run an
   assert.ok(!order.some(o => o.startsWith('sheet:') || o === 'tx'))
 })
 
+test('autoApplyDrift: label-only (strong labels, no PMDC record) is reported for Nat, never renamed — even with the switch ON', async () => {
+  process.env.EPISODE_SYNC_AUTOAPPLY = '1'
+  dashboard = { ok: true, episodes: dashEps([L, ''], [S, HL]) }
+  const r = await sync.autoApplyDrift({ apply: true, actor: 'episode-sync' })
+  assert.equal(r.drift![0].reason, 'label-only')
+  assert.deepEqual(r.results, [])
+  assert.ok(!order.some(o => o.startsWith('sheet:') || o === 'tx'))
+  assert.deepEqual(holding(H), ['e2', 'e4'])
+})
+
 test('autoApplyDrift: ambiguous and label-mismatch projects are reported but never renamed', async () => {
   process.env.EPISODE_SYNC_AUTOAPPLY = '1'
   dashboard = { ok: true, episodes: dashEps([L, ''], [S, HL], ['PP-26-056-S02', 'Other']) }
@@ -601,7 +643,7 @@ test('autoApplyDrift: ambiguous and label-mismatch projects are reported but nev
 const addProject = (n: number, uploads = 0) => {
   bks.push({ id: `bx${n}`, bookingCode: `AGN-27010${n}-01`, status: 'CONFIRMED', deletedAt: null, calendarEventId: null })
   eps.push(ep(`ex${n}`, `PP-26-10${n}-H01`, `bx${n}`, 1, uploads, `Clip ${n}`))
-  dashboard.episodes.push({ episodeId: `PP-26-10${n}-S01`, ep: `Clip ${n}`, projectName: `Project ${n}` })
+  dashboard.episodes.push({ episodeId: `PP-26-10${n}-S01`, ep: `Clip ${n}`, projectName: `Project ${n}`, previousIds: [`PP-26-10${n}-H01`] })
 }
 
 test('autoApplyDrift: TRIPWIRES — more candidates than the cap, or more orphans than the orphan cap, refuse the whole run (bad read / bulk edit), nothing written', async () => {
@@ -613,7 +655,7 @@ test('autoApplyDrift: TRIPWIRES — more candidates than the cap, or more orphan
   assert.ok(r.drift, 'the drift list still comes back so the operator can act')
   assert.ok(!order.some(o => o.startsWith('sheet:') || o === 'tx'))
   // orphan tripwire: one real candidate, but a pile of vanished codes around it (a tab that did not parse)
-  bks = bks.slice(0, 3); eps = eps.filter(e => !e.id.startsWith('ex')); dashboard = { ok: true, episodes: dashEps([L, ''], [S, HL]) }
+  bks = bks.slice(0, 3); eps = eps.filter(e => !e.id.startsWith('ex')); dashboard = { ok: true, episodes: dashEps([L, ''], [S, HL, [H]]) }
   for (let i = 0; i <= sync.MAX_ORPHANS_FOR_AUTO; i++) {
     bks.push({ id: `bo${i}`, bookingCode: `AGN-2702${String(i).padStart(2, '0')}-01`, status: 'CONFIRMED', deletedAt: null, calendarEventId: null })
     eps.push(ep(`eo${i}`, `PP-26-3${String(i).padStart(2, '0')}-L01`, `bo${i}`, 1))
