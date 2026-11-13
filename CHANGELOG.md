@@ -7,6 +7,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.287.2] — 2026-11-13 · Location "Other ในออฟฟิศ" สำหรับ Studio / Event (ในออฟฟิศ) — พื้นที่เฉพาะ / ไม่มีห้องให้จอง
+
+### ที่มา
+นัท: *"ถ้าเลือก Location เป็นที่ออฟฟิศ ทั้ง Event และ Studio เปิดช่องให้สามารถระบุได้เป็น Other กรณีเป็นพื้นที่เฉพาะ หรือไม่มีห้องให้จอง"* ·
+ใช้เลข 1.287.2 เพราะ 1.288.0 มีงานอื่นจองไว้
+
+### Added
+- ฟอร์มจอง ขั้น Location (Studio / Event ในออฟฟิศ): ตัวเลือก **"Other — ระบุพื้นที่เอง"** ท้ายลิสต์ห้อง → ช่อง Specify Location (บังคับกรอก) ·
+  ใต้ช่องแจ้ง *"เนื่องจากเป็นการระบุเอง ไม่ได้เป็นห้องที่อยู่ในระบบจองห้องประชุม จึงไม่มีการจองห้องผ่านระบบ"* · บันทึกเป็น `TSD · Other — <ข้อความ>`
+- `locations.ts`: `office-other` (group `EXTERNAL` โดยตั้งใจ) → room-booking ข้ามด้วย `skip: external` (ไม่ขึ้นป้าย "ต้องจองห้องเอง") ·
+  room-availability = `not-a-room` · ฟอร์มไม่ยิงตรวจห้องชน · `resolveLocationId` แปลงข้อความกลับเป็น `office-other` (ฟอร์มแก้ไขใช้ทางนี้)
+- เทสต์ `office-other-location.test.ts` (mutation: ย้ายไปกลุ่มห้อง → ล้ม)
+
+### Notes
+- หน้าแก้ไขของ admin / RoutinePlanner เห็นตัวเลือกนี้ในกลุ่ม External / Other แต่ไม่มีช่องพิมพ์พื้นที่ (เหมือน "Other (specify)" เดิม)
+
 ## [1.287.1] — 2026-11-13 · ต้องตอบแบบสำรวจก่อนเริ่ม New Booking (นัทสั่ง: "ตอบ Survey ก่อนเลย ถึงจะเริ่ม New Booking ได้ ใครทำไปแล้วก็ไม่ต้องทำ")
 
 ### Changed

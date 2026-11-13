@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { OUTLETS, CREW_OPTIONS, SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
-import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation, roomDefaultCameras } from '@/lib/locations'
+import { LOCATIONS, LOCATION_GROUPS, locationNeedsManualText, findLocation, roomDefaultCameras, OFFICE_OTHER_ID } from '@/lib/locations'
 import NumberStepper from '@/app/_components/NumberStepper'
 import { isAcceptableQuRef, isQuPending, QU_PENDING, QU_FIELD_HINT } from '@/lib/qu-ref'
 import { defaultCoProducerFor } from '@/lib/outlet-coproducer'
@@ -502,7 +502,8 @@ export default function BookingWizard() {
   // clearTimeout ทิ้ง timer 400ms ก่อนมันจะได้ยิงทุกครั้ง → fetch ไม่เคยเกิดขึ้น
   // คีย์สตริงทำให้ "ค่าเท่าเดิม = คีย์เดิม = effect ไม่ re-run" ซึ่งกันปัญหานี้
   // ทั้งคลาส ไม่ต้องไปไล่ว่าตัวไหนกระพริบ
-  const roomCheckKey = (!offsite && locationId && shootDate && callTime)
+  // v1.289 — "Other ในออฟฟิศ" ไม่ใช่ห้อง (group EXTERNAL) → ไม่ต้องตรวจ ไม่งั้นแบนเนอร์ "กำลังตรวจ" กะพริบเปล่า ๆ
+  const roomCheckKey = (!offsite && selectedLocation && selectedLocation.group !== 'EXTERNAL' && shootDate && callTime)
     ? JSON.stringify({ locationId, shootDate, shootEndDate: shootEndDate || null, callTime, estimatedWrap: estimatedWrap || null })
     : ''
   useEffect(() => {
@@ -1387,6 +1388,10 @@ export default function BookingWizard() {
                           ))}
                         </optgroup>
                       ))}
+                      {/* v1.289 — พื้นที่เฉพาะ / ไม่มีห้องให้จอง (ทั้ง Studio และ Event ในออฟฟิศ) */}
+                      <optgroup label="อื่น ๆ (ไม่จองห้องผ่านระบบ)">
+                        <option value={OFFICE_OTHER_ID}>Other — ระบุพื้นที่เอง</option>
+                      </optgroup>
                     </select>
                     <FieldError message={fieldErrors.locationId} />
 
@@ -1404,12 +1409,19 @@ export default function BookingWizard() {
                           id="locationCustom"
                           type="text"
                           className={`ops-input ${fieldErrors.locationCustom ? 'ops-input-invalid' : ''}`}
-                          placeholder="ชื่อสถานที่ · ที่อยู่ · หรือลิงก์ Google Maps"
+                          placeholder={locationId === OFFICE_OTHER_ID
+                            ? 'เช่น ลานจอดรถชั้น 1 · ดาดฟ้า · โต๊ะทีมชั้น 3'
+                            : 'ชื่อสถานที่ · ที่อยู่ · หรือลิงก์ Google Maps'}
                           value={locationCustom}
                           onChange={e => setLocationCustom(e.target.value)}
                           aria-invalid={!!fieldErrors.locationCustom}
                         />
                         <FieldError message={fieldErrors.locationCustom} />
+                        {locationId === OFFICE_OTHER_ID && (
+                          <FieldHelp>
+                            เนื่องจากเป็นการระบุเอง ไม่ได้เป็นห้องที่อยู่ในระบบจองห้องประชุม จึงไม่มีการจองห้องผ่านระบบ
+                          </FieldHelp>
+                        )}
                       </div>
                     )}
                   </div>

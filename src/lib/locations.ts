@@ -36,7 +36,16 @@ export const LOCATIONS: Location[] = [
   { id: 'external-remote',      name: 'Remote / Online',         fullName: 'Remote / Online', group: 'EXTERNAL' },
   { id: 'external-event',       name: 'External Event Venue',    fullName: 'External Event', group: 'EXTERNAL' },
   { id: 'external-other',       name: 'Other (specify)',         fullName: 'Other', group: 'EXTERNAL' },
+
+  // v1.289 — พื้นที่ในออฟฟิศที่ไม่ใช่ห้องในระบบจองห้องประชุม (ลานจอด ดาดฟ้า โต๊ะทีม ฯลฯ)
+  // เลือกได้ใน BookingWizard ตอน Studio / Event (ในออฟฟิศ) แล้วพิมพ์ระบุพื้นที่เอง
+  // group 'EXTERNAL' โดยตั้งใจ: ทุกที่ที่ถามว่า "จองห้องในระบบกลางได้ไหม"
+  // (room-booking · room-availability · isInHouseRoom · room-schedule) ตัดสินจาก group นี้
+  // → ไม่จองห้อง ไม่ตรวจห้องชน ไม่ขึ้นป้าย "ต้องจองห้องเอง" (ไม่มีห้องให้จอง)
+  { id: 'office-other',         name: 'Other ในออฟฟิศ (ระบุพื้นที่เอง)', fullName: 'TSD · Other', group: 'EXTERNAL' },
 ]
+
+export const OFFICE_OTHER_ID = 'office-other'
 
 export const LOCATION_GROUPS: { key: 'STUDIO' | 'A' | 'B' | 'EXTERNAL'; label: string }[] = [
   { key: 'STUDIO',   label: 'Studio (TSD)' },
@@ -68,5 +77,5 @@ export function findLocation(idOrName: string | null | undefined): Location | un
 
 export function locationNeedsManualText(id: string): boolean {
   // External venues that need a manual specification field
-  return id === 'external-on-location' || id === 'external-event' || id === 'external-other'
+  return id === 'external-on-location' || id === 'external-event' || id === 'external-other' || id === OFFICE_OTHER_ID
 }
