@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Check, Loader2 } from 'lucide-react'
-import { SURVEY, OTHER_MAX, TEXT_MAX, type Question, type SurveyDef } from '@/lib/survey'
+import { SURVEY, OTHER_MAX, TEXT_MAX, safeNext, type Question, type SurveyDef } from '@/lib/survey'
 
 /* =============================================================================
    /survey — แบบสำรวจการใช้งาน (v1.279: ทุกข้อในหน้าเดียว · เดิม v1.278 ทีละคำถาม)
@@ -27,6 +27,8 @@ export default function SurveyPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  // v1.287.1 — มาจากด่านหน้า New Booking: ?next=/new → ตอบเสร็จแล้วพากลับ (อ่านใน effect ไม่ใช้ useSearchParams — ไม่ต้องห่อ Suspense)
+  const [next, setNext] = useState<string | null>(null)
   const refs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const load = useCallback(async () => {
@@ -38,7 +40,7 @@ export default function SurveyPage() {
       setStatus(d)
     } catch (e: any) { setLoadError(e.message || 'โหลดแบบสำรวจไม่ได้') }
   }, [])
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(); setNext(safeNext(new URLSearchParams(window.location.search).get('next'))) }, [load])
 
   if (loadError) {
     return (
@@ -54,15 +56,15 @@ export default function SurveyPage() {
   const S = status.survey ?? SURVEY
   const preview = !!status.canPreview && !status.open
   if (!preview && !status.open) {
-    return <Shell><Center emoji="🕒" title="ตอนนี้แบบสำรวจไม่ได้เปิดรับคำตอบ" /></Shell>
+    return <Shell><Center emoji="🕒" title="ตอนนี้แบบสำรวจไม่ได้เปิดรับคำตอบ" next={next} /></Shell>
   }
   if (!preview && status.answered) {
-    return <Shell><Center emoji="🙏" title="คุณตอบแบบสำรวจนี้ไปแล้ว ขอบคุณครับ" /></Shell>
+    return <Shell><Center emoji="🙏" title="คุณตอบแบบสำรวจนี้ไปแล้ว ขอบคุณครับ" next={next} /></Shell>
   }
   if (done) {
     return <Shell>{preview
       ? <Center emoji="🧪" title="หน้าตัวอย่าง — คำตอบนี้ไม่ได้ถูกบันทึก" />
-      : <Center emoji="🙏" title="ส่งแล้ว ขอบคุณที่สละเวลาตอบครับ" />}</Shell>
+      : <Center emoji="🙏" title="ส่งแล้ว ขอบคุณที่สละเวลาตอบครับ" next={next} />}</Shell>
   }
 
   const set = (a: Answers) => {
@@ -95,6 +97,7 @@ export default function SurveyPage() {
   return (
     <Shell>
       {preview && <PreviewNote text="🧪 ยังไม่เปิดรับคำตอบ — นี่คือหน้าตัวอย่าง กรอกได้ แต่ไม่มีอะไรถูกบันทึก" />}
+      {next && <div className="mb-5 text-sm text-gray-800 bg-amber-50 border border-amber-200 rounded-lg p-3">ขอเวลา 1–2 นาที ตอบแบบสำรวจนี้ก่อน แล้วไปจองคิวต่อได้เลยครับ — ตอบครั้งเดียว ครั้งหน้าไม่ต้องตอบอีก</div>}
       <h1 className="text-xl font-semibold text-gray-900 leading-snug">{S.title}</h1>
       <p className="mt-2 text-[15px] text-gray-700 leading-relaxed">{S.intro}</p>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -244,12 +247,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <div className="max-w-md mx-auto px-4 pt-6 pb-28 sm:pt-10">{children}</div>
 }
 
-function Center({ emoji, title, body }: { emoji: string; title: string; body?: string }) {
+function Center({ emoji, title, body, next }: { emoji: string; title: string; body?: string; next?: string | null }) {
   return (
     <div className="text-center py-10 space-y-3">
       <div className="text-5xl">{emoji}</div>
       <div className="text-base font-medium text-gray-900">{title}</div>
       {body && <p className="text-sm text-gray-600">{body}</p>}
+      {/* <a> ธรรมดา ไม่ใช่ <Link>: โหลดหน้าใหม่เต็ม ๆ — ไม่งั้น router cache อาจยังจำผล redirect เดิมของ /new ได้ถึง 30 วิ แล้วเด้งกลับมาที่นี่ */}
+      {next && <div><a href={next} className="inline-block mt-1 px-5 py-2.5 rounded-lg text-white text-sm font-medium" style={{ background: BRAND }}>ไปจองคิวต่อ →</a></div>}
       <Link href="/" className="inline-block pt-2 text-sm underline" style={{ color: BRAND }}>กลับหน้าแรก</Link>
     </div>
   )

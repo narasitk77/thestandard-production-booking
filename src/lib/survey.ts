@@ -63,6 +63,17 @@ export const TEAMS: Option[] = [
 export const TEAM_MIN = 3
 
 /**
+ * v1.287.1 — หน้า New Booking (/new) ส่งคนที่ยังไม่ตอบมาที่ /survey?next=<path เดิม> แล้วพากลับหลังตอบ
+ * รับเฉพาะ path ในเว็บเรา ("/…" ที่ไม่ใช่ "//host" หรือ "/\\host") — ไม่งั้นลิงก์ ?next=https://… กลายเป็น open redirect
+ */
+export function safeNext(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > 500) return null
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return null
+  if (/[\u0000-\u001f]/.test(raw)) return null
+  return raw
+}
+
+/**
  * v1.285.1 — "กล่อง" ของคนตอบ (ใส่ฝั่ง server ตอนบันทึก เก็บในคำตอบเป็น `seg`): booker = จองคิวเอง (สร้าง/Producer/Co-Producer ของใบที่ถ่ายใน 180 วัน)
  * other = ล็อกอินเข้ามาตอบแต่ไม่ได้จองเอง (ไม่เคยใช้ / ใช้ทางอ้อม / ทีมจัดคิว) — ไว้วัดว่าคนที่ไม่ได้ใช้เองรู้สึกต่างจากคนใช้ไหม
  */

@@ -104,6 +104,15 @@ export async function saveSurveyAnswer(key: string, email: string, group: string
   }
 }
 
+/**
+ * v1.287.1 — ต้องตอบก่อนเริ่ม New Booking ไหม = เปิดรับอยู่ + คนนี้ยังไม่ตอบ (นัทสั่ง 13 พ.ย.)
+ * ปิดรับคำตอบที่ /admin/survey = ด่านหายทันที (นี่คือสวิตช์ปิด) · ไม่ try/catch: DB ล้ม = หน้า /new ล้มดัง ๆ (error.tsx) ไม่ปล่อยผ่านเงียบ ๆ
+ * ด่านอยู่ที่หน้า /new เท่านั้น — ไม่กั้น POST /api/bookings (MCP key / Veela / สคริปต์ ไม่มีหน้าให้ตอบ)
+ */
+export async function mustAnswerSurvey(key: string, email: string): Promise<boolean> {
+  return (await isSurveyOpen(key)) && !(await hasAnswered(key, email))
+}
+
 export async function hasAnswered(key: string, email: string): Promise<boolean> {
   const row = await prisma.surveyParticipant.findUnique({ where: { surveyKey_email: { surveyKey: key, email: email.toLowerCase() } } })
   return !!row

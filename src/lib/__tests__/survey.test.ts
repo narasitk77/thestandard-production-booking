@@ -3,7 +3,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateAnswers, summarize, applyOverrides, validateOverrides, SURVEY, TEAMS, TEAM_MIN, TEXT_MAX, OTHER_MAX, type SurveyDef } from '../survey'
+import { safeNext, validateAnswers, summarize, applyOverrides, validateOverrides, SURVEY, TEAMS, TEAM_MIN, TEXT_MAX, OTHER_MAX, type SurveyDef } from '../survey'
 
 // v1.284.2 — `keep` / `change` (Q4 / Q5) are required typed answers, so the base answer carries one of each
 const BASE = { team: 'nws', efficiency: '4', satisfaction: '3', keep: 'ดูสถานะคิวได้เอง', change: 'ฟอร์มจองยาวไป' }
@@ -214,4 +214,13 @@ test('v1.285.1 — segments are shown only when both boxes reach the minimum; sc
   const six = [row('booker', '5'), row('booker', '5'), row('booker', '4'), row('other', '2'), row('other', '2'), row('other', '3')]
   assert.equal(summarize([...six, row(undefined, '1')], 3).segments, null)
   assert.notEqual(summarize([...six, row(undefined, '1'), row(undefined, '1'), row(undefined, '1')], 3).segments, null)
+})
+
+// v1.287.1 — /new sends unanswered users to /survey?next=…; next must stay inside our own site
+test('v1.287.1 — safeNext accepts same-site paths only (no open redirect)', () => {
+  assert.equal(safeNext('/new'), '/new')
+  assert.equal(safeNext('/new?clone=PP-26-001&mode=routine'), '/new?clone=PP-26-001&mode=routine')
+  for (const bad of ['https://evil.example', '//evil.example', '/\\evil.example', 'new', '', '/a\nb', 'javascript:alert(1)', null, undefined, 42, '/' + 'x'.repeat(600)]) {
+    assert.equal(safeNext(bad), null, String(bad))
+  }
 })
