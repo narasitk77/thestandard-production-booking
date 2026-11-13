@@ -4324,3 +4324,13 @@ problem and not a deployment problem.
   ผลจริงบนพรอด 10:41: ตัดสินครบ 50/50 · แจ้งเตือน 0 · ไม่มีค้างลองใหม่ · heartbeat ของ agent 10:30:06 → 10:39:13 → รอบใหม่ 10:41
 - ถอย: `python3 scripts/ops/rollback.py` (พรอด) · NAS: ก็อป `.v1262.bak` ทับ `nas_manifest_agent.py`
 
+## 2026-11-13 (บ่าย) — แถวชีต Bookings หายเงียบ 3 ใบ (ปุ๊กแจ้ง NWS-KYM-261117-01) · กู้ด้วย backfill แล้ว
+- ปุ๊ก (#009C1A): NWS-KYM-261117-01 สร้าง 9 พ.ย. 09:24 ยืนยันแล้ว ขึ้นปฏิทิน แต่ไม่มีแถวในชีต → PMDC รับจากปฏิทินแทน ไม่มีรหัสงาน/EP
+- ตรวจ (อ่านอย่างเดียว): DB `sheetRowIndex` ว่าง · ไม่มี audit เรื่องชีตเลย · ชีตคอลัมน์ A ไม่มีรหัสนี้ (แถว 890 = 08:55, 891 = 09:38 ลงปกติ) ·
+  ใบที่ไม่มีแถวใน 60 วัน = 3: LIF-LGV-261005-01 (30 ก.ย.) · NWS-KYM-261109-01 (3 พ.ย.) · NWS-KYM-261117-01 (9 พ.ย.)
+- สาเหตุ: `create-booking` ยิง `appendBookingRow` ไม่ await · ล้ม = `console.error` อย่างเดียว (ไม่มี audit/alert/retry) · log วันนั้นหายไปกับคอนเทนเนอร์
+  ที่ deploy ทับ → ข้อความ error เดิมกู้ไม่ได้ · ข้อมูลในใบไม่มีปัญหา (ดันซ้ำลงปกติ) → ล้มชั่วคราวฝั่ง Sheets API
+- กู้: `POST /api/admin/backfill-bookings-sheet` (Chrome session ADMIN ของนัท) dry-run = append 3 + เติม Drive Box ID 2 ช่อง (TSS-GEB-261125-01,
+  TSS-EXE-261202-01) · claim 0 · error 0 → apply → แถว 913/914/915 · ตรวจในชีตจริงแล้ว (915 = EP 261117-01, -02 · CONFIRMED · event id ครบ)
+- ช่องโหว่ที่ยังอยู่: append ล้มไม่มีใครรู้และไม่มีตัวซ่อมเอง · backfill ไม่เขียน audit ตอน append — เสนอนัทแล้ว
+
