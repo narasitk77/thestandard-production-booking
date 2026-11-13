@@ -100,6 +100,8 @@ def why_line(d):
         return f"PMDC จดรหัสเดิมนี้ไว้ใน Previous IDs มากกว่าหนึ่งแถว ({', '.join(d.get('recordedIn') or [])}) — ไม่รู้ว่าเปลี่ยนเป็นตัวไหน ต้องถามปุ๊ก"
     if reason == "weak-label":
         return f"คู่ที่น่าจะใช่: {pair} แต่ PMDC ไม่ได้จดไว้ และชื่อตอนใน Dashboard ไม่เฉพาะพอจะยืนยัน — ถ้าถูก ให้อนุมัติคู่นี้"
+    if reason == "renumbered":
+        return f"คู่ที่น่าจะใช่: {pair} ชื่อตอนตรงกัน แต่เลขตอนต่างกัน และ PMDC ไม่ได้จดไว้ใน Previous IDs — อาจเป็นคนละตอน ถ้าถูก ให้อนุมัติคู่นี้"
     if reason == "label-mismatch":
         return f"ถ้าคู่คือ {pair} ชื่อตอนใน Dashboard ไม่ตรงกับที่ใบจองเก็บ — ไม่เชื่อว่าเป็นตอนเดียวกัน"
     if reason == "several":
@@ -146,8 +148,9 @@ def compose(report, auto, auto_err=None):
                        "(รันซ้ำปลอดภัย — คู่ที่แก้แล้วจะตอบว่าเปลี่ยนไปแล้ว)")
         elif auto is None:
             out.append(f"🔎 คู่ที่เชื่อได้ (สคริปต์รัน --dry-run จึงไม่ได้เรียก auto): {pairs}")
-        elif auto.get("results") is None:
-            out.append(f"⚠️ แก้รหัสตอนอัตโนมัติไม่ได้ลงมือ: {auto.get('error') or 'ไม่ระบุสาเหตุ'}")
+        elif auto.get("results") is None:   # เพดาน/อ่านไม่ได้: ไม่มีผลรายคู่ → ต้องบอกคู่เอง ไม่งั้นนัทไม่มีอะไรให้อนุมัติ
+            out.append(f"⚠️ แก้รหัสตอนอัตโนมัติไม่ได้ลงมือ: {auto.get('error') or 'ไม่ระบุสาเหตุ'} — คู่ที่ PMDC จดไว้ใน Previous IDs รอนัทอนุมัติ:")
+            out += [f"  • {d['candidate']['from']} → {d['candidate']['to']} · ใบ {', '.join(d['bookings'][:8])}" for d in cands]
         else:
             if not auto.get("applied"):
                 out.append("🔎 คู่ที่เชื่อได้ แต่ **ยังไม่ได้แก้** (สวิตช์ EPISODE_SYNC_AUTOAPPLY ปิดอยู่) — ถ้ายืนยันว่าถูก ให้นัทสั่งเปิดสวิตช์หรือสั่งแก้ทีละคู่:")
@@ -332,7 +335,9 @@ def self_test():
     t = compose({**ok, "drift": [cand]}, {"ok": True, "applied": True, "results": [{**res, "dryRun": False, "warnings": ["x: ชีท"]}]})
     assert "เตือน: x: ชีท" in t
     t = compose({**ok, "drift": [cand]}, {"ok": False, "error": "เกินเพดาน", "drift": [cand]})
-    assert "ไม่ได้ลงมือ: เกินเพดาน" in t
+    assert "ไม่ได้ลงมือ: เกินเพดาน" in t and "• PP-26-056-H01 → PP-26-056-S01 · ใบ AGN-261026-01, AGN-261126-02" in t, "เกินเพดาน: ต้องบอกคู่ให้นัทอนุมัติ"
+    t = compose({**ok, "drift": [{**weak, "reason": "renumbered", "suggested": {"from": "PP-26-056-H01", "to": "PP-26-056-S03"}}]}, None)
+    assert "PP-26-056-H01 → PP-26-056-S03" in t and "เลขตอนต่างกัน" in t, t
     fail = {"ok": False, "from": "PP-26-056-H01", "to": "PP-26-056-S01", "blockers": [], "error": "เขียนชีทไม่สำเร็จ", "bookings": []}
     t = compose({**ok, "drift": [cand]}, {"ok": False, "applied": True, "failed": 1, "results": [fail]})
     assert "มีคู่ที่ไม่สำเร็จ" in t and "✗ PP-26-056-H01 → PP-26-056-S01: ไม่สำเร็จ — เขียนชีทไม่สำเร็จ" in t

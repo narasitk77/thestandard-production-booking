@@ -28,6 +28,10 @@
  * not ปุ๊ก's record); weaker → `weak-label` / `label-mismatch` / `renumbered`, with the pair named
  * (`suggested`) when there is exactly one of each. Renames before 11 Nov have no Previous IDs entry
  * (PP-26-074 H→S, 19 Oct, was applied by hand on 13 Nov from PMDC's own records).
+ * HALF-DONE RETYPE: ep-retype writes PD col C + Previous IDs BEFORE the Lark record and stops (no undo) if a later
+ * step fails, so a record can exist while Lark still holds the old code. Its Drive step (renaming the project's EP
+ * folder "<code> · …") runs AFTER Lark, so in that state a folder named with the old code still exists and the
+ * Drive-folder guard in doRename refuses the rename (reported, ok:false). Projects with no EP folder are not covered.
  * KNOWN SILENT GAP: the frozen legacy "_EPs" tab (and a stale duplicate PD row) is unioned into the
  * Dashboard list, so a renamed code that still sits there looks alive — that drift is NOT reported.
  * Loud ones: a Dashboard cell parseEpisodeTabs rejects (zero-width space, lowercase) shows up as a
