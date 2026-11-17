@@ -27,6 +27,9 @@ Hermes `--no-agent` · stdlib ล้วน ไม่มี LLM · อ่าน�
 import base64
 import json
 import os
+import re
+import socket
+import subprocess
 import sys
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -107,7 +110,9 @@ def probe(exp):
     eid = json.loads(call(f"/api/endpoints/{ep}/docker/containers/production-booking-app/exec",
                           {"AttachStdout": True, "AttachStderr": True, "Tty": True, "Cmd": ["sh", "-c", sh]}).read())["Id"]
     raw = call(f"/api/endpoints/{ep}/docker/exec/{eid}/start", {"Detach": False, "Tty": True}).read().decode("utf-8", "replace")
-    line = next((l for l in raw.splitlines() if l.startswith("OUT>")), None)
+    # split("\n") ไม่ใช่ splitlines(): splitlines ตัดที่ U+2028/U+0085/\x1c… ด้วย — ข้อมูล prod มี U+2028 อยู่ 1 ตัว
+    # = JSON ขาดกลางบรรทัด → tuy-digest ล้มถาวรตั้งแต่ 11 พ.ย. 2569 17:30 ("Unterminated string") · Tty ให้ \r\n → rstrip("\r")
+    line = next((l.rstrip("\r") for l in raw.split("\n") if l.startswith("OUT>")), None)
     if line is None:
         raise RuntimeError(f"คอนเทนเนอร์ไม่ตอบผลการตรวจ: {raw[-200:]!r}")
     d = json.loads(line[4:])
@@ -213,31 +218,101 @@ def _delivery_error(job_name):
     return None
 
 
-def undelivered_lines(job_name, outbox):
-    """บรรทัดที่ต้องพิมพ์ซ้ำเพราะรอบก่อนส่งไม่ออก (ลิสต์ว่าง = ไม่มีอะไรค้าง)"""
+OUTBOX_MAX_LINES = 60
+
+
+def _ob_rounds(saved):
+    """ไฟล์ OUTBOX → รอบที่ยังค้าง [{runAt, text}] · รูปเดิม {runAt, text} (ก่อน 17 พ.ย. 2569) = หนึ่งรอบ"""
+    if isinstance(saved, dict) and isinstance(saved.get("rounds"), list):
+        return [r for r in saved["rounds"] if isinstance(r, dict) and r.get("text")]
+    if isinstance(saved, dict) and saved.get("text"):
+        return [{"runAt": saved.get("runAt", "ก่อนหน้า"), "text": str(saved["text"])}]
+    return []
+
+
+def undelivered(job_name, outbox):
+    """-> {"rounds": [...], "dropped": n} รอบที่ Hermes ยังส่งไม่ถึง · rounds ว่าง = ไม่มีอะไรค้าง
+    (รอบก่อนส่งถึงแล้ว = ล้างไฟล์ทิ้งที่นี่)"""
     if not _delivery_error(job_name):
         if os.path.exists(outbox):
             try:
                 os.remove(outbox)   # ถึงมือแล้ว
             except Exception:
                 pass
-        return []
+        return {"rounds": [], "dropped": 0}
     saved = _ob_read(outbox)
-    if not isinstance(saved, dict) or not saved.get("text"):
-        return []
-    return [
-        f"📮 ส่งซ้ำ — รายงานรอบ {saved.get('runAt', 'ก่อนหน้า')} ส่งไม่ออก",
-        *str(saved["text"]).splitlines(),
-        "— จบรายงานที่ส่งซ้ำ —",
-        "",
-    ]
+    dropped = saved.get("dropped") if isinstance(saved, dict) else 0
+    return {"rounds": _ob_rounds(saved), "dropped": dropped if isinstance(dropped, int) else 0}
 
 
-def remember_report(outbox, text):
-    """เก็บรายงานรอบนี้เผื่อส่งไม่ออก · heartbeat ไม่ต้องเก็บ (ดู hb ที่ผู้เรียก):
-    heartbeat ที่หายไปแก้ตัวเองรอบหน้า แต่ *คำเตือน* ที่หายคือความเสียหายจริง"""
-    if text:
-        _ob_write(outbox, {"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text})
+def resend_lines(carried):
+    """บรรทัดส่งซ้ำ — รอบละหนึ่งบล็อก เก่าไปใหม่ ไม่ซ้อนกัน · รอบที่ถูกตัดทิ้ง = บอกจำนวนและที่อ่านฉบับเต็ม"""
+    out = []
+    if carried["rounds"] and carried.get("dropped"):
+        out.append(f"📮 รายงานเก่าที่ส่งไม่ออกอีก {carried['dropped']} รอบถูกตัดทิ้ง (เพดาน {OUTBOX_MAX_LINES} บรรทัด) — "
+                   "ฉบับเต็มอยู่ใน ~/.hermes/cron/output/")
+    for r in carried["rounds"]:
+        out += [f"📮 ส่งซ้ำ — รายงานรอบ {r.get('runAt', 'ก่อนหน้า')} ส่งไม่ออก", *str(r["text"]).splitlines(),
+                "— จบรายงานที่ส่งซ้ำ —", ""]
+    return out
+
+
+def remember_report(outbox, carried, text):
+    """เก็บ *เนื้อรายงานของรอบนี้เอง* ต่อท้ายรอบที่ยังค้าง (carried) เผื่อรอบนี้ส่งไม่ออกอีก
+    ห้ามเก็บ payload ทั้งก้อน: payload มีบล็อกส่งซ้ำ + บรรทัด ‼️ อยู่แล้ว → รอบถัดไปห่อซ้ำเป็นชั้น ๆ
+    (14–17 พ.ย. 2569 episode-drift ส่งรายงาน 3 คืนซ้อนกัน 3 ชั้น) · heartbeat ไม่ต้องเก็บ (ผู้เรียกส่ง "" มา):
+    heartbeat ที่หายไปแก้ตัวเองรอบหน้า แต่ *คำเตือน* ที่หายคือความเสียหายจริง
+    เกิน OUTBOX_MAX_LINES = ทิ้งรอบเก่าสุดก่อน (นับไว้ บอกตอนส่งซ้ำ) · เหลือรอบเดียวที่ยาวเกิน = ตัดท้ายพร้อมบอก"""
+    rounds = list(carried["rounds"]) + ([{"runAt": time.strftime("%Y-%m-%d %H:%M"), "text": text}] if text else [])
+    if not rounds:
+        return
+    dropped = carried.get("dropped") or 0
+    while len(rounds) > 1 and sum(len(str(r["text"]).splitlines()) for r in rounds) > OUTBOX_MAX_LINES:
+        rounds.pop(0)
+        dropped += 1
+    lines = str(rounds[0]["text"]).splitlines()
+    if len(rounds) == 1 and len(lines) > OUTBOX_MAX_LINES:
+        rounds[0] = {**rounds[0], "text": "\n".join(
+            lines[:OUTBOX_MAX_LINES] + [f"… ตัดอีก {len(lines) - OUTBOX_MAX_LINES} บรรทัด (ฉบับเต็มอยู่ใน ~/.hermes/cron/output/)"])}
+    _ob_write(outbox, {"rounds": rounds, "dropped": dropped})
+
+
+# ── DARKWAKE: รอแมคตื่นจริงก่อนทำงาน (ซ้ำทุกสคริปต์ Hermes โดยเจตนา — README scripts/hermes ข้อ 8) ──
+# 14–17 พ.ย. 2569: แมคบุ๊กหลับ (ใช้แบต) แต่ตื่นแบบ DarkWake ทุก ~15 นาที ครั้งละ 2–20 วิ (pmset -g log) · Hermes ได้ CPU
+# ช่วงนั้นแล้วยิงงานที่ถึงเวลาทันทีทั้งที่ Wi-Fi/DNS ยังไม่มา → episode-drift 'nodename nor servname' 3 คืนติด ·
+# rental-sheet 'read operation timed out' · relay TimeoutError · trash-watch ค้างกลางคำขอ 12 ชม. (นาฬิกา monotonic
+# ไม่เดินตอนหลับ timeout ของ socket และของ Hermes จึงไม่ทำงาน) → รอจน Graphics กลับมา (ตื่นจริง) แล้วค่อยทำ
+# ห้าม "ข้ามเงียบ" แทนการรอ: Hermes เขียน last_delivery_error ทับทุกรอบ รอบที่ไม่มีอะไรส่งจะลบร่องรอยว่ารอบก่อน
+# ส่งไม่ออก แล้ว OUTBOX ถูกลบทิ้ง · ไม่แน่ใจ (ไม่มี pmset / อ่านไม่ออก) = ถือว่าตื่น ทำงานตามปกติ ห้ามเงียบเพราะเดา
+def dark_wake(out=None):
+    """True เฉพาะเมื่อ `pmset -g systemstate` บอกชัดว่ามี CPU แต่ไม่มี Graphics (= DarkWake)"""
+    if out is None:
+        try:
+            out = subprocess.run(["/usr/bin/pmset", "-g", "systemstate"], capture_output=True, text=True, timeout=10).stdout
+        except Exception:
+            return False
+    m = re.search(r"Capabilities are:([^\n]*)", out or "")
+    caps = m.group(1).split() if m else []
+    return "CPU" in caps and "Graphics" not in caps
+
+
+def await_full_wake(cap_s=1800, dns_s=60, _dark=None, _sleep=time.sleep, _now=time.monotonic, _resolve=socket.getaddrinfo):
+    """บล็อกจนแมคตื่นจริง แล้วรอ DNS อีกไม่เกิน dns_s วิ (แมคเพิ่งตื่น = DNS ยังไม่มา 10–60 วิ) · เพดาน cap_s นับ
+    monotonic = นาฬิกาเดียวกับ timeout 3600 วิ ของ Hermes (ไม่เดินตอนหลับ) · เกินเพดาน/DNS ไม่มา = ทำงานต่อเลย
+    ให้ทางล้มเดิมของสคริปต์ดังเอง ดีกว่าโดน Hermes ฆ่ากลางทาง · _dark/_sleep/_now/_resolve = ของปลอมใน self-test"""
+    dark = _dark or dark_wake
+    t0 = _now()
+    while dark() and _now() - t0 < cap_s:
+        _sleep(3)
+    t1 = _now()
+    while True:
+        try:
+            _resolve("google.com", 443)
+            return
+        except OSError:
+            if _now() - t1 >= dns_s:
+                return
+            _sleep(2)
 
 
 # ── SELF-FAILURE vs FINDING ───────────────────────────────────────────────────
@@ -266,7 +341,7 @@ def hermes_fail_view(stdout):
 
 
 def exit_plan(payload):
-    """-> (stdout ที่จะพิมพ์, exit code) — ที่เดียวที่ตัดสิน exit code ของรอบ (OUTBOX เก็บสิ่งที่คืนจากที่นี่)"""
+    """-> (stdout ที่จะพิมพ์, exit code) — ที่เดียวที่ตัดสิน exit code ของรอบ (OUTBOX เก็บแค่เนื้อรายงานของรอบ — ไม่ใช่สิ่งที่คืนจากที่นี่)"""
     if not _SELF_FAIL:
         return payload, 0
     if hermes_fail_view(payload)[1]:
@@ -346,6 +421,27 @@ def self_test():
     s, t = judge(exp, {**ok, "folders": {**ok["folders"], "T-1": []}}, at)
     assert s == "fail" and "T-1" in t, t
 
+    # ── ตัวอ่านผลจากคอนเทนเนอร์: ข้อมูลมี U+2028 (เกิดจริง 11 พ.ย. 2569) ต้องอ่านออก — splitlines() ตัด JSON ขาดกลาง ──
+    import io as _io
+
+    class _Resp(_io.BytesIO):
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+    _real_urlopen, _real_env = urllib.request.urlopen, read_env
+
+    def _fake_portainer(raw):
+        def urlopen(req, timeout=None):
+            assert req.full_url.startswith("https://selftest.invalid/"), f"self-test เกือบยิงเน็ตจริง: {req.full_url}"
+            return _Resp(b'{"Id": "e1"}' if req.full_url.endswith("/exec") else raw.encode())
+        return urlopen
+    globals()["read_env"] = lambda p: {"PORTAINER_URL": "https://selftest.invalid", "PORTAINER_API_KEY": "k"}
+    data = {"audit": [row], "folders": {"T-1": [{"id": "x", "name": "งาน\u2028ทดสอบ (T-1)", "trashed": True, "trashedTime": None}]}}
+    urllib.request.urlopen = _fake_portainer("OUT>" + json.dumps(data, ensure_ascii=False) + "\r\n")
+    assert probe(exp) == data, "U+2028 ในชื่อโฟลเดอร์ต้องไม่ทำให้ JSON ขาด"
+    urllib.request.urlopen, globals()["read_env"] = _real_urlopen, _real_env
+
     # ── exit code ↔ สิ่งที่ห้องได้จริง (exit_plan) — ทางจริง main()+run_once() ด้วยของปลอม ไม่แตะ prod ──
     import tempfile
     g, tmp, real_main = globals(), tempfile.mkdtemp(prefix="v1285-selftest-"), main
@@ -367,11 +463,11 @@ def self_test():
         got = hermes_fail_view(out)[0] if code else out
         assert all(e in got for e in essential), (code, got)
 
-    def run(expects):
+    def run(expects, delivery_err=None):
         _SELF_FAIL.clear()
         _TO_MARK.clear()
         g["EXPECT"] = expects
-        _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": None}]})
+        _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": delivery_err}]})
         return run_once()
 
     must_reach(["ตรวจไม่ได้", "tick หน้า"], *run([{**past, "id": "down"}]))
@@ -380,7 +476,99 @@ def self_test():
     assert code == 0 and out.startswith("‼️") and "🔴 K-1" in out and "ตรวจไม่ได้" in out and "judged" in _TO_MARK, (code, out)
     g["main"] = lambda: {}["k" * 300]
     must_reach(["พังกลางคัน", "KeyError"], *run([]))
+
+    # ── OUTBOX ไม่ซ้อนชั้น (14–17 พ.ย. 2569: 3 คืนส่งไม่ออก → รายงานห่อกันเป็นชั้น ๆ 3 ชั้น) ──
+    os.remove(OUTBOX)
+    for _ in range(4):                   # พังทุกรอบ และทุกรอบ Hermes ส่งไม่ออก
+        out, code = run([], "DNS")
+    saved = _ob_read(OUTBOX)
+    assert len(saved["rounds"]) == 4 and not any("📮" in r["text"] or "‼️" in r["text"] for r in saved["rounds"]), saved
+    assert out.count("📮 ส่งซ้ำ") == 3 and out.count("พังกลางคัน") == 4 and out.count("‼️") == 1, out
+    out, code = run([], None)            # รอบก่อนส่งถึง → ไม่ส่งซ้ำ เหลือแค่ของรอบนี้
+    assert "📮" not in out and len(_ob_read(OUTBOX)["rounds"]) == 1, out
+    # รูปไฟล์เดิม (ก่อน 17 พ.ย.) ยังส่งซ้ำได้หนึ่งครั้ง ไม่หาย
+    _ob_write(OUTBOX, {"runAt": "2026-11-16 03:15", "text": "⚠️ OLD-FORMAT"})
+    out, code = run([], "DNS")
+    assert out.count("📮 ส่งซ้ำ — รายงานรอบ 2026-11-16 03:15") == 1 and "⚠️ OLD-FORMAT" in out, out
+    # ผลตรวจจริง (judged ‼️ ปน down) ส่งไม่ออก → ที่เก็บคือเนื้อรายงานเปล่า ๆ ไม่มีหัว ‼️ · รอบหน้าส่งซ้ำครั้งเดียว
     g["main"] = real_main
+    os.remove(OUTBOX)
+    out, code = run([{**past, "id": "judged"}, {**past, "id": "down"}], "DNS")
+    (r1,) = _ob_read(OUTBOX)["rounds"]
+    assert out.startswith("‼️") and "‼️" not in r1["text"] and "🔴 K-1" in r1["text"] and "ตรวจไม่ได้" in r1["text"], r1
+    out, code = run([{**past, "id": "down"}], "DNS")
+    assert out.count("📮 ส่งซ้ำ") == 1 and out.count("🔴 K-1") == 1 and out.count("‼️") == 1, out
+    # รอบนี้ไม่มีอะไรของตัวเอง (ครบแล้ว/ยังไม่ถึงเวลา = เงียบ) แต่ยังมีรอบค้าง → ไฟล์ต้องเก็บรอบค้างไว้ เผื่อส่งซ้ำไม่ออกอีก
+    _ob_write(OUTBOX, {"rounds": [{"runAt": "2026-11-16 19:25", "text": "⚠️ CARRIED"}], "dropped": 0})
+    out, code = run([], "DNS")
+    assert code == 0 and out.count("📮 ส่งซ้ำ — รายงานรอบ 2026-11-16 19:25") == 1 and "⚠️ CARRIED" in out, out
+    assert _ob_read(OUTBOX) == {"rounds": [{"runAt": "2026-11-16 19:25", "text": "⚠️ CARRIED"}], "dropped": 0}, _ob_read(OUTBOX)
+    out, code = run([], "DNS")           # ส่งซ้ำก็ไม่ออกอีก → ยังส่งซ้ำ (ครั้งเดียว ไม่ซ้อน)
+    assert out.count("📮 ส่งซ้ำ") == 1 and out.count("⚠️ CARRIED") == 1, out
+    out, code = run([], None)            # ถึงแล้ว → ล้างไฟล์ ไม่มีอะไรพิมพ์
+    assert out == "" and code == 0 and not os.path.exists(OUTBOX), (out, code)
+    # เพดาน 60 บรรทัด: ทิ้งรอบเก่าสุดแล้ว *บอก* · รอบเดียวยาวเกิน = ตัดท้ายพร้อมบอก
+    g["main"] = lambda: print("\n".join(f"บรรทัด {i}" for i in range(25)))
+    for _ in range(3):
+        run([], "DNS")
+    saved = _ob_read(OUTBOX)
+    assert len(saved["rounds"]) == 2 and saved["dropped"] == 1, saved
+    out, code = run([], "DNS")
+    assert "อีก 1 รอบถูกตัดทิ้ง" in out and out.count("📮 ส่งซ้ำ") == 2, out
+    os.remove(OUTBOX)
+    g["main"] = lambda: print("\n".join(f"บรรทัด {i}" for i in range(80)))
+    run([], "DNS")
+    (only,) = _ob_read(OUTBOX)["rounds"]
+    assert only["text"].count("\n") == OUTBOX_MAX_LINES and "ตัดอีก 20 บรรทัด" in only["text"], only
+    g["main"] = real_main
+
+    # ── DARKWAKE ──
+    assert dark_wake("Current System Capabilities are: CPU Graphics Audio Network \nCurrent Power State: 4\n") is False
+    assert dark_wake("Current System Capabilities are: CPU Network \nCurrent Power State: 4\n") is True
+    assert dark_wake("Current System Capabilities are: CPU \n") is True
+    for junk in ("", "pmset: command not found", "Current System Capabilities are: \n", "Graphics CPU"):
+        assert dark_wake(junk) is False, junk   # ไม่แน่ใจ = ตื่น (ห้ามเงียบเพราะเดา)
+    clock, hits = [0.0], []
+
+    def tick(s):
+        clock[0] += s
+    states = iter([True, True, True, False])
+    await_full_wake(_dark=lambda: next(states), _sleep=tick, _now=lambda: clock[0], _resolve=lambda h, p: hits.append(h))
+    assert clock[0] == 9 and hits == ["google.com"], (clock, hits)   # รอข้าม 3 DarkWake แล้วทำงาน
+    clock[0], tries = 0.0, [0]
+
+    def flaky(h, p):
+        tries[0] += 1
+        if tries[0] < 3:
+            raise OSError("nodename nor servname provided")
+    await_full_wake(_dark=lambda: False, _sleep=tick, _now=lambda: clock[0], _resolve=flaky)
+    assert tries[0] == 3 and clock[0] == 4, (tries, clock)          # ตื่นแล้วแต่ DNS ยังไม่มา = รอ
+    clock[0] = 0.0
+
+    def dead(h, p):
+        raise OSError("down")
+    await_full_wake(cap_s=30, dns_s=10, _dark=lambda: True, _sleep=tick, _now=lambda: clock[0], _resolve=dead)
+    assert 30 <= clock[0] <= 45, clock                              # หลับเกินเพดาน/DNS ไม่มา = ทำงานต่อ ไม่ค้าง
+    entry = open(__file__, encoding="utf-8").read().split('if __name__ == "__main__":')[-1]
+    assert 0 <= entry.find("await_full_wake()") < entry.find("run_once()"), "ทางจริงต้องรอแมคตื่นก่อน run_once()"
+    # --self-test / --dry-run (คนสั่งเอง) ไม่รอ: ทั้งสองทางต้องออกไปก่อนถึง await_full_wake()
+    assert 0 <= entry.find("self_test()") < entry.find("main(dry_run=True)") < entry.find("await_full_wake()"), entry
+    # ทางจริงเรียก await_full_wake() *ครั้งเดียว* ในบล็อก __main__ เท่านั้น — ไม่ใช่คอมเมนต์ (ตรวจข้อความหลุด)
+    # และไม่อยู่ในฟังก์ชันที่ self-test เรียก (เทสต์ต้องไม่แตะ pmset/DNS จริง) · ตัวปลอมในเทสต์ส่ง keyword เสมอ
+    import ast
+    _tree = ast.parse(open(__file__, encoding="utf-8").read())
+    _real = [n for n in ast.walk(_tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "await_full_wake"
+             and not n.args and not n.keywords]
+    _entry = [n for n in _tree.body if isinstance(n, ast.If) and "__main__" in ast.dump(n.test)]
+    assert len(_entry) == 1 and len(_real) == 1 and any(n is _real[0] for n in ast.walk(_entry[0])), \
+        "await_full_wake() ต้องถูกเรียกครั้งเดียวบนทางจริงในบล็อก __main__"
+    # เพดาน OUTBOX ทิ้ง *รอบเก่าสุด* ก่อน (ไม่ใช่ใหม่สุด) และนับรวมกับที่เคยทิ้ง
+    import tempfile as _tf
+    _p, _h = os.path.join(_tf.mkdtemp(prefix="ob-cap-"), "ob.json"), OUTBOX_MAX_LINES // 2
+    remember_report(_p, {"rounds": [{"runAt": "r1", "text": "\n".join(["OLD"] * _h)},
+                                    {"runAt": "r2", "text": "\n".join(["MID"] * _h)}], "dropped": 2}, "\n".join(["NEW"] * _h))
+    _s = _ob_read(_p)
+    assert [r["runAt"] for r in _s["rounds"]][0] == "r2" and _s["rounds"][-1]["text"].startswith("NEW") and _s["dropped"] == 3, _s
     print("self-test ok")
 
 def run_once():
@@ -402,9 +590,9 @@ def run_once():
         report = (report + "\n" + crash).strip()
 
     # ลำดับสำคัญ: อ่าน+ล้าง outbox ของรอบก่อนให้เสร็จ แล้วจึงเขียนของรอบนี้ทับ
-    resend = undelivered_lines(JOB_NAME, OUTBOX)
-    payload, code = exit_plan("\n".join(resend + ([report] if report else [])))
-    remember_report(OUTBOX, "\n".join(payload.splitlines()[:60]))
+    carried = undelivered(JOB_NAME, OUTBOX)
+    payload, code = exit_plan("\n".join(resend_lines(carried) + ([report] if report else [])))
+    remember_report(OUTBOX, carried, report)   # เนื้อรอบนี้เท่านั้น — ไม่ใช่ payload (ซ้อนชั้น 14–17 พ.ย.)
     return payload, code
 
 
@@ -415,6 +603,7 @@ if __name__ == "__main__":
     if "--dry-run" in sys.argv:
         main(dry_run=True)
         sys.exit(1 if _SELF_FAIL else 0)
+    await_full_wake()   # Hermes ยิงงานตอน DarkWake ได้ — รอเครื่องตื่นจริงก่อน (ดูบล็อก DARKWAKE)
     out, code = run_once()
     if out:
         print(out)
