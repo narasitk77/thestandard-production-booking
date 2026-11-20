@@ -158,17 +158,30 @@ def _ob_rounds(saved):
 
 def undelivered(job_name, outbox):
     """-> {"rounds": [...], "dropped": n} รอบที่ Hermes ยังส่งไม่ถึง · rounds ว่าง = ไม่มีอะไรค้าง
-    (รอบก่อนส่งถึงแล้ว = ล้างไฟล์ทิ้งที่นี่)"""
-    if not _delivery_error(job_name):
+    (รอบก่อนส่งถึงแล้ว = ล้างไฟล์ทิ้งที่นี่) · ค้าง = last_delivery_error มีค่า *หรือ* ไฟล์มีธง "undelivered"
+    (hold_outbox จดไว้ตอนรอบที่ไม่ได้ทำงานเพราะแมคยังหลับ — Hermes เขียน last_delivery_error ทับเป็น None ไปแล้ว)"""
+    saved = _ob_read(outbox)
+    rounds = _ob_rounds(saved)
+    held = isinstance(saved, dict) and saved.get("undelivered") is True
+    if not rounds or not (_delivery_error(job_name) or held):
         if os.path.exists(outbox):
             try:
-                os.remove(outbox)   # ถึงมือแล้ว
+                os.remove(outbox)   # ถึงมือแล้ว (หรือไม่มีอะไรให้ส่งซ้ำ)
             except Exception:
                 pass
         return {"rounds": [], "dropped": 0}
-    saved = _ob_read(outbox)
     dropped = saved.get("dropped") if isinstance(saved, dict) else 0
-    return {"rounds": _ob_rounds(saved), "dropped": dropped if isinstance(dropped, int) else 0}
+    return {"rounds": rounds, "dropped": dropped if isinstance(dropped, int) else 0}
+
+
+def hold_outbox(job_name, outbox):
+    """รอบที่ไม่ทำงานเพราะแมคยังหลับ (await_full_wake() คืน False): ออกเงียบ แต่ Hermes จะเขียน last_delivery_error
+    ทับเป็น None ทั้งที่รอบก่อนยังส่งไม่ถึง → จดธง "undelivered" ไว้ในไฟล์เอง ให้ undelivered() รอบหน้ายังส่งซ้ำ"""
+    if not _delivery_error(job_name):
+        return
+    saved = _ob_read(outbox)
+    if isinstance(saved, dict) and _ob_rounds(saved) and saved.get("undelivered") is not True:
+        _ob_write(outbox, {**saved, "undelivered": True})
 
 
 def resend_lines(carried):
@@ -208,8 +221,9 @@ def remember_report(outbox, carried, text):
 # ช่วงนั้นแล้วยิงงานที่ถึงเวลาทันทีทั้งที่ Wi-Fi/DNS ยังไม่มา → episode-drift 'nodename nor servname' 3 คืนติด ·
 # rental-sheet 'read operation timed out' · relay TimeoutError · trash-watch ค้างกลางคำขอ 12 ชม. (นาฬิกา monotonic
 # ไม่เดินตอนหลับ timeout ของ socket และของ Hermes จึงไม่ทำงาน) → รอจน Graphics กลับมา (ตื่นจริง) แล้วค่อยทำ
-# ห้าม "ข้ามเงียบ" แทนการรอ: Hermes เขียน last_delivery_error ทับทุกรอบ รอบที่ไม่มีอะไรส่งจะลบร่องรอยว่ารอบก่อน
-# ส่งไม่ออก แล้ว OUTBOX ถูกลบทิ้ง · ไม่แน่ใจ (ไม่มี pmset / อ่านไม่ออก) = ถือว่าตื่น ทำงานตามปกติ ห้ามเงียบเพราะเดา
+# รอ ไม่ข้ามเงียบ: Hermes เขียน last_delivery_error ทับทุกรอบ รอบที่ไม่มีอะไรส่งจะลบร่องรอยว่ารอบก่อนส่งไม่ออก ·
+# ข้อยกเว้นเดียว (20 พ.ย.): หลับครบเพดานและไม่มีเน็ต = ไม่ทำรอบนี้ โดย hold_outbox() จดธง "undelivered" ในไฟล์แทน ·
+# ไม่แน่ใจ (ไม่มี pmset / อ่านไม่ออก) = ถือว่าตื่น ทำงานตามปกติ ห้ามเงียบเพราะเดา
 def dark_wake(out=None):
     """True เฉพาะเมื่อ `pmset -g systemstate` บอกชัดว่ามี CPU แต่ไม่มี Graphics (= DarkWake)"""
     if out is None:
@@ -222,23 +236,33 @@ def dark_wake(out=None):
     return "CPU" in caps and "Graphics" not in caps
 
 
-def await_full_wake(cap_s=1800, dns_s=60, _dark=None, _sleep=time.sleep, _now=time.monotonic, _resolve=socket.getaddrinfo):
-    """บล็อกจนแมคตื่นจริง แล้วรอ DNS อีกไม่เกิน dns_s วิ (แมคเพิ่งตื่น = DNS ยังไม่มา 10–60 วิ) · เพดาน cap_s นับ
-    monotonic = นาฬิกาเดียวกับ timeout 3600 วิ ของ Hermes (ไม่เดินตอนหลับ) · เกินเพดาน/DNS ไม่มา = ทำงานต่อเลย
-    ให้ทางล้มเดิมของสคริปต์ดังเอง ดีกว่าโดน Hermes ฆ่ากลางทาง · _dark/_sleep/_now/_resolve = ของปลอมใน self-test"""
+def await_full_wake(cap_s=1800, dns_s=600, _dark=None, _sleep=time.sleep, _now=time.monotonic, _resolve=socket.getaddrinfo):
+    """-> True = ทำงานได้ · False = ยังหลับครบเพดานและไม่มีเน็ต (ไม่ทำรอบนี้ — ผู้เรียก hold_outbox() แล้วออกเงียบ)
+    บล็อกจนแมคตื่นจริง แล้วรอ DNS อีกไม่เกิน dns_s วิ · เพดาน cap_s นับ monotonic = นาฬิกาเดียวกับ timeout 3600 วิ
+    ของ Hermes (ไม่เดินตอนหลับ) · _dark/_sleep/_now/_resolve = ของปลอมใน self-test
+    18 พ.ย. 2569: หลับ 15.6 ชม. มี DarkWake 90 ครั้งรวม 2,012 วิ → เพดาน 1800 หมดตอน 08:2x แล้วเดิมปล่อยรันตอนหลับ
+    (relay/rental/trash ล้มเน็ตล่ม) → ครบเพดาน: มีเน็ต (Power Nap เสียบไฟ) = ทำ · ไม่มี = ไม่ทำรอบนี้ Hermes ยิงรอบหน้าเอง
+    19 พ.ย. 2569: ตื่นจริง 09:50 (เสียบ USB-C) แต่เน็ตมา ~10:00 → DNS 60 วิไม่พอ idfirst/rental/trash ล้ม → รอ 10 นาที
+    ตื่นจริงแล้วเน็ตไม่มาเกิน dns_s = ทำงานต่อ (True) ให้ทางเน็ตล่มของสคริปต์บอกเอง — เครื่องตื่นแต่ออฟไลน์จริงต้องรู้"""
     dark = _dark or dark_wake
-    t0 = _now()
-    while dark() and _now() - t0 < cap_s:
-        _sleep(3)
-    t1 = _now()
-    while True:
+
+    def online():
         try:
             _resolve("google.com", 443)
-            return
+            return True
         except OSError:
-            if _now() - t1 >= dns_s:
-                return
-            _sleep(2)
+            return False
+    t0 = _now()
+    while dark():
+        if _now() - t0 >= cap_s:
+            return online()
+        _sleep(3)
+    t1 = _now()
+    while not online():
+        if _now() - t1 >= dns_s:
+            return True
+        _sleep(5)
+    return True
 
 
 # ── SELF-FAILURE vs FINDING ───────────────────────────────────────────────────
@@ -482,22 +506,29 @@ def self_test():
     def tick(s):
         clock[0] += s
     states = iter([True, True, True, False])
-    await_full_wake(_dark=lambda: next(states), _sleep=tick, _now=lambda: clock[0], _resolve=lambda h, p: hits.append(h))
-    assert clock[0] == 9 and hits == ["google.com"], (clock, hits)   # รอข้าม 3 DarkWake แล้วทำงาน
+    ok = await_full_wake(_dark=lambda: next(states), _sleep=tick, _now=lambda: clock[0], _resolve=lambda h, p: hits.append(h))
+    assert ok is True and clock[0] == 9 and hits == ["google.com"], (ok, clock, hits)   # รอข้าม 3 DarkWake แล้วทำงาน
     clock[0], tries = 0.0, [0]
 
     def flaky(h, p):
         tries[0] += 1
         if tries[0] < 3:
             raise OSError("nodename nor servname provided")
-    await_full_wake(_dark=lambda: False, _sleep=tick, _now=lambda: clock[0], _resolve=flaky)
-    assert tries[0] == 3 and clock[0] == 4, (tries, clock)          # ตื่นแล้วแต่ DNS ยังไม่มา = รอ
+    ok = await_full_wake(_dark=lambda: False, _sleep=tick, _now=lambda: clock[0], _resolve=flaky)
+    assert ok is True and tries[0] == 3 and clock[0] == 10, (ok, tries, clock)   # ตื่นแล้วแต่ DNS ยังไม่มา = รอ
     clock[0] = 0.0
 
     def dead(h, p):
         raise OSError("down")
-    await_full_wake(cap_s=30, dns_s=10, _dark=lambda: True, _sleep=tick, _now=lambda: clock[0], _resolve=dead)
-    assert 30 <= clock[0] <= 45, clock                              # หลับเกินเพดาน/DNS ไม่มา = ทำงานต่อ ไม่ค้าง
+    ok = await_full_wake(cap_s=30, dns_s=10, _dark=lambda: True, _sleep=tick, _now=lambda: clock[0], _resolve=dead)
+    assert ok is False and clock[0] == 30, (ok, clock)              # หลับครบเพดาน + ไม่มีเน็ต = ไม่ทำรอบนี้ (18 พ.ย. ล้ม 3 ตัว)
+    clock[0] = 0.0
+    ok = await_full_wake(cap_s=30, _dark=lambda: True, _sleep=tick, _now=lambda: clock[0], _resolve=lambda h, p: None)
+    assert ok is True and clock[0] == 30, (ok, clock)               # หลับครบเพดานแต่มีเน็ต (Power Nap เสียบไฟ) = ทำ
+    clock[0] = 0.0
+    ok = await_full_wake(dns_s=12, _dark=lambda: False, _sleep=tick, _now=lambda: clock[0], _resolve=dead)
+    assert ok is True and 12 <= clock[0] <= 17, (ok, clock)         # ตื่นจริงแต่ออฟไลน์เกิน dns_s = ทำต่อ ให้ทางเน็ตล่มบอกเอง
+    assert await_full_wake.__defaults__[:2] == (1800, 600), await_full_wake.__defaults__   # 19 พ.ย.: เน็ตมาหลังตื่น ~10 นาที
     entry = open(__file__, encoding="utf-8").read().split('if __name__ == "__main__":')[-1]
     assert entry.find("sys.exit(0)") < entry.find("await_full_wake()") < entry.find("run_once()"), \
         "ทางจริงต้องรอแมคตื่นก่อน run_once() (และไม่อยู่ในทาง --self-test)"
@@ -510,6 +541,29 @@ def self_test():
     _entry = [n for n in _tree.body if isinstance(n, ast.If) and "__main__" in ast.dump(n.test)]
     assert len(_entry) == 1 and len(_real) == 1 and any(n is _real[0] for n in ast.walk(_entry[0])), \
         "await_full_wake() ต้องถูกเรียกครั้งเดียวบนทางจริงในบล็อก __main__"
+    # และผลของมันต้องถูกใช้: `if not await_full_wake(): hold_outbox(...); sys.exit(0)` — ไม่ทำงานตอนหลับครบเพดาน
+    _guard = [n for n in ast.walk(_entry[0]) if isinstance(n, ast.If) and isinstance(n.test, ast.UnaryOp)
+              and isinstance(n.test.op, ast.Not) and n.test.operand is _real[0]]
+    _gcalls = {getattr(c.func, "id", None) or getattr(c.func, "attr", None) for g_ in _guard for b in g_.body
+               for c in ast.walk(b) if isinstance(c, ast.Call)}
+    assert len(_guard) == 1 and {"hold_outbox", "exit"} <= _gcalls, ("ต้อง hold_outbox แล้ว exit เมื่อยังหลับ", _gcalls)
+    # ── hold_outbox: รอบที่ไม่ทำงานเพราะยังหลับ ห้ามทำให้ของค้างส่งหาย (Hermes เขียน last_delivery_error ทับเป็น None) ──
+    _ob_write(OUTBOX, {"rounds": [{"runAt": "2026-11-18 13:21", "text": "⚠️ HELD-REPORT"}], "dropped": 0})
+    _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": "DNS"}]})
+    hold_outbox(JOB_NAME, OUTBOX)
+    assert _ob_read(OUTBOX).get("undelivered") is True, _ob_read(OUTBOX)
+    _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": None}]})   # รอบที่ hold: Hermes ล้างเป็น None
+    hold_outbox(JOB_NAME, OUTBOX)                         # hold ซ้ำตอน error ว่าง = ไม่แตะธง
+    _c = undelivered(JOB_NAME, OUTBOX)
+    assert [r["text"] for r in _c["rounds"]] == ["⚠️ HELD-REPORT"], _c
+    out, code = run(None)                                 # รอบถัดไปที่ทำงานจริง: ส่งซ้ำ + เขียนไฟล์ใหม่ไม่มีธง
+    assert "⚠️ HELD-REPORT" in out and "undelivered" not in (_ob_read(OUTBOX) or {}), (out, _ob_read(OUTBOX))
+    assert undelivered(JOB_NAME, OUTBOX)["rounds"] == [] and not os.path.exists(OUTBOX)   # ส่งถึง → ล้าง
+    _ob_write(HERMES_JOBS, {"jobs": [{"name": JOB_NAME, "last_delivery_error": "DNS"}]})
+    hold_outbox(JOB_NAME, OUTBOX)
+    assert not os.path.exists(OUTBOX), "ไม่มีของค้าง = hold ห้ามสร้างไฟล์"
+    _ob_write(OUTBOX, {"rounds": [], "undelivered": True})
+    assert undelivered(JOB_NAME, OUTBOX)["rounds"] == [] and not os.path.exists(OUTBOX), "ธงลอย ๆ ไม่มีรอบ = ล้างทิ้ง"
     # เพดาน OUTBOX ทิ้ง *รอบเก่าสุด* ก่อน (ไม่ใช่ใหม่สุด) และนับรวมกับที่เคยทิ้ง
     import tempfile as _tf
     _p, _h = os.path.join(_tf.mkdtemp(prefix="ob-cap-"), "ob.json"), OUTBOX_MAX_LINES // 2
@@ -517,6 +571,24 @@ def self_test():
                                     {"runAt": "r2", "text": "\n".join(["MID"] * _h)}], "dropped": 2}, "\n".join(["NEW"] * _h))
     _s = _ob_read(_p)
     assert [r["runAt"] for r in _s["rounds"]][0] == "r2" and _s["rounds"][-1]["text"].startswith("NEW") and _s["dropped"] == 3, _s
+    # รูปของรอบที่ข้ามต้องเป๊ะ (รีวิว 20 พ.ย.): hold_outbox(JOB_NAME, OUTBOX) ก่อน แล้ว sys.exit(0) — ลำดับถูก exit 0 ไม่พิมพ์ ไม่ทำอย่างอื่น
+    import ast as _ast
+    _t = _ast.parse(open(__file__, encoding="utf-8").read())
+    _m = [n for n in _t.body if isinstance(n, _ast.If) and "__main__" in _ast.dump(n.test)][0]
+    _g = [n for n in _ast.walk(_m) if isinstance(n, _ast.If) and _ast.unparse(n.test) == "not await_full_wake()"]
+    assert len(_g) == 1 and [_ast.unparse(b) for b in _g[0].body] == ["hold_outbox(JOB_NAME, OUTBOX)", "sys.exit(0)"], \
+        ([_ast.unparse(b) for b in _g[0].body] if _g else "ไม่พบ if not await_full_wake()")
+    # hold_outbox ห้ามติดธงเมื่อรอบก่อนส่งถึงแล้ว (last_delivery_error ว่าง) — ไม่งั้นรายงานที่ถึงแล้วถูกส่งซ้ำ (รีวิว 20 พ.ย.)
+    import tempfile as _tf3
+    _gl, _d = globals(), _tf3.mkdtemp(prefix="hold-gate-")
+    _jobs_saved = _gl["HERMES_JOBS"]
+    _gl["HERMES_JOBS"] = os.path.join(_d, "jobs.json")
+    _ob_write(_gl["HERMES_JOBS"], {"jobs": [{"name": JOB_NAME, "last_delivery_error": None}]})
+    _obp = os.path.join(_d, "ob.json")
+    _ob_write(_obp, {"rounds": [{"runAt": "x", "text": "DELIVERED"}], "dropped": 0})
+    hold_outbox(JOB_NAME, _obp)
+    assert "undelivered" not in _ob_read(_obp), _ob_read(_obp)
+    _gl["HERMES_JOBS"] = _jobs_saved
     print("self-test ok")
 
 
@@ -524,7 +596,9 @@ if __name__ == "__main__":
     if "--self-test" in sys.argv:
         self_test()
         sys.exit(0)
-    await_full_wake()   # Hermes ยิงงานตอน DarkWake ได้ — รอเครื่องตื่นจริงก่อน (ดูบล็อก DARKWAKE)
+    if not await_full_wake():   # Hermes ยิงงานตอน DarkWake ได้ — รอเครื่องตื่นจริงก่อน (ดูบล็อก DARKWAKE)
+        hold_outbox(JOB_NAME, OUTBOX)   # หลับครบเพดานและไม่มีเน็ต: ไม่ทำรอบนี้ · จดว่ารอบก่อนยังค้างส่ง
+        sys.exit(0)
     # ห่อ main() ด้วย run_once() เพื่อให้บล็อก OUTBOX + exit_plan ครอบ *ทุกทางออก* ของ main()
     # (สคริปต์นี้ return ออกกลางทางหลายจุด) โดยไม่ต้องไปแก้ print ทีละที่
     out, code = run_once()

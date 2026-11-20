@@ -11,7 +11,7 @@
 | `probook-idfirst-monitor.py` | `30 9 * * *` | อ่าน `/api/internal/id-first-stats` เก็บ snapshot 14 วัน; แจ้งเมื่อ fallback พุ่ง / hit ตกเกือบ 0 / endpoint ล่ม 2 วันติด |
 | `probook-landing-cleanup.py` | `0 12 * * *` | `landing/manage?prune=today` แบบ dry-run → apply → verify; ลบเฉพาะ drop folder ที่ว่าง (ฟุตเทจส่งเข้ากล่องแล้ว) |
 | `probook-tuy-digest.py` | `30 8,17 * * *` | **ส่งข้อความหาคน** (ไม่ใช่ watchdog): สรุปใบจองที่เปลี่ยนตั้งแต่รอบก่อน → Pig → ตุ้ย (`person:ตุ้ย`) · นัทสั่ง 10 พ.ย. 2569 · ทุกฉบับเก็บที่ `~/.hermes/state/probook/tuy-digest/` (`log.jsonl` + `.md` ฉบับละไฟล์) · กุญแจ Pig อ่านจาก `~/.zshrc` ตอนรัน · `--dry-run` / `--self-test` |
-| `probook-episode-drift.py` | `15 3 * * *` | **v1.286 · v1.289** — รหัสตอนในใบจองตรงกับ Producer Dashboard ไหม (03:15 = ก่อน booking-sync ของ PMDC 03:35): GET `/api/internal/episode-sync/run` (อ่านอย่างเดียว) → ถ้ามีคู่ที่ PMDC จดไว้ในคอลัมน์ Previous IDs (= ตรงกับฐานของปุ๊ก) POST `{auto:true,apply:true}` (เขียนจริงเฉพาะเมื่อ stack ตั้ง `EPISODE_SYNC_AUTOAPPLY=1` · ค่าเริ่มต้น 0 = รายงาน) · เงียบเมื่อไม่มี drift · ลงทะเบียนแล้ว 13 พ.ย. 2569 (job `a2d515b5d6c9`) · ที่เหลือส่งนัทอนุมัติพร้อมสาเหตุ · ชื่อ job ต้องเป็น `probook-episode-drift` ตรงตัว (OUTBOX หา last_delivery_error ด้วยชื่อ): `hermes cron create '15 3 * * *' --name probook-episode-drift --script probook-episode-drift.py --no-agent --deliver discord:<ห้อง hermes-agent>` |
+| `probook-episode-drift.py` | `15 3 * * *` | **v1.286 · v1.289** — รหัสตอนในใบจองตรงกับ Producer Dashboard ไหม (03:15 = ก่อน booking-sync ของ PMDC 03:35): GET `/api/internal/episode-sync/run` (อ่านอย่างเดียว) → ถ้ามีคู่ที่ PMDC จดไว้ในคอลัมน์ Previous IDs (= ตรงกับฐานของปุ๊ก) POST `{auto:true,apply:true}` (เขียนจริงเฉพาะเมื่อ stack ตั้ง `EPISODE_SYNC_AUTOAPPLY=1` · ค่าเริ่มต้น 0 = รายงาน) · เงียบเมื่อไม่มี drift · ลงทะเบียนแล้ว 13 พ.ย. 2569 (job `a2d515b5d6c9`) · ยิง Portainer ลองซ้ำ 4 รอบ (0/30/90/180 วิ) เพราะ 03:15 เซิร์ฟเวอร์ยุ่งกับ shoot-marker รอบ 03:00 (19–20 พ.ย. timeout สองคืน) — POST ซ้ำเฉพาะตอนสร้าง exec ไม่สำเร็จ · ที่เหลือส่งนัทอนุมัติพร้อมสาเหตุ · ชื่อ job ต้องเป็น `probook-episode-drift` ตรงตัว (OUTBOX หา last_delivery_error ด้วยชื่อ): `hermes cron create '15 3 * * *' --name probook-episode-drift --script probook-episode-drift.py --no-agent --deliver discord:<ห้อง hermes-agent>` |
 
 ## หลักการที่ต้องรักษาไว้
 
@@ -94,9 +94,15 @@
    - `dark_wake()` อ่าน `pmset -g systemstate` — True **เฉพาะ**เมื่อมี `CPU` แต่ไม่มี `Graphics` · อ่านไม่ออก/ไม่มี
      pmset = ถือว่าตื่น (ห้ามเงียบเพราะเดา)
    - **รอ ไม่ข้าม**: Hermes เขียน `last_delivery_error` ทับทุกรอบ รอบที่ข้ามเงียบ ๆ จะลบร่องรอยว่ารอบก่อน
-     ส่งไม่ออก แล้ว OUTBOX (ข้อ 4) ถูกลบทิ้ง · สคริปต์ที่ยังรันอยู่ Hermes ไม่ยิงซ้ำและไม่ปลด (live future)
-   - เพดาน 1800 วิ แบบ monotonic (นาฬิกาเดียวกับ timeout ของ Hermes) · ตื่นแล้วรอ DNS อีก ≤60 วิ ·
-     เกินเพดาน = ทำงานต่อ ให้ทางล้มเดิมของสคริปต์ดังเอง
+     ส่งไม่ออก แล้ว OUTBOX (ข้อ 4) ถูกลบทิ้ง · สคริปต์ที่ยังรันอยู่ Hermes ไม่ยิงซ้ำและไม่ปลด (live future) ·
+     ข้อยกเว้นเดียวคือครบเพดานแล้วยังหลับและไม่มีเน็ต (ข้อถัดไป) ซึ่งต้อง `hold_outbox()` ก่อนออก
+   - เพดาน 1800 วิ แบบ monotonic (นาฬิกาเดียวกับ timeout ของ Hermes) · ครบเพดานแล้วยังหลับ: มีเน็ต (Power Nap
+     เสียบไฟ) = ทำงาน · ไม่มีเน็ต = `await_full_wake()` คืน False → **ไม่ทำรอบนี้** `hold_outbox()` แล้ว exit 0
+     (18 พ.ย. 2569: หลับ 15.6 ชม. DarkWake รวม 2,012 วิ เพดานหมด 08:2x แล้วเดิมปล่อยรันตอนหลับ → relay/rental/trash ล้ม)
+   - ตื่นจริงแล้วรอ DNS อีก ≤10 นาที (19 พ.ย.: เสียบ USB-C ตื่น 09:50 แต่เน็ตมา ~10:00 — 60 วิเดิมไม่พอ) · เกินนั้น = ทำงานต่อ
+     ให้ทางเน็ตล่มของสคริปต์บอกเอง (เครื่องตื่นแต่ออฟไลน์จริงต้องรู้)
+   - `hold_outbox()`: รอบที่ไม่ทำงานถูก Hermes เขียน `last_delivery_error` ทับเป็น None → ถ้ารอบก่อนส่งไม่ออก จดธง
+     `"undelivered": true` ในไฟล์ OUTBOX เอง · `undelivered()` นับธงนี้เหมือน error · รอบจริงถัดไปเขียนไฟล์ใหม่ธงหายเอง
    - เรียกเฉพาะทางรันจริง (ไม่ใช่ `--self-test`/`--dry-run`/`--test=`) และก่อนแตะเน็ต/state/outbox
    - ทางแก้ระดับเครื่อง (ไม่ให้แมคหลับ / ย้าย Hermes ไปเครื่องที่เปิดตลอด) เป็นเรื่องของนัท — โค้ดนี้แค่
      ทำให้รอบที่ตกช่วงหลับไปรันตอนตื่น แทนที่จะล้มแล้วตะโกน
