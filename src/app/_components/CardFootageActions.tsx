@@ -8,6 +8,7 @@
 // Each card owns its own state, so several can run at once.
 import { useState } from 'react'
 import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
+import { heldConfirmWarning } from '@/lib/footage-ready-health'
 
 // ── maint 2026-11-08 — pure readers of the two server replies (tested in
 // src/lib/__tests__/maint-B5-ui-card-actions.test.ts). UploadSection imports
@@ -122,7 +123,8 @@ export default function CardFootageActions({
       const folders = p.folderCount ?? p.folders ?? '?'
       if (!recips.length) { setMsg('ไม่มีผู้รับ (ยังไม่ได้ assign / ไม่มีอีเมล)'); return }
       // v1.274 — the auto path was holding this one back: say why before a human overrides it
-      const heldWarn = p.held?.detail ? `⚠️ ระบบอัตโนมัติยังไม่แจ้ง เพราะไฟล์ไม่ครบ (ตรวจ ${String(p.held.at || '').slice(0, 10)}): ${p.held.detail}\nส่งตอนนี้ = ทีมจะได้แจ้งว่าพร้อมทั้งที่ยังขาดไฟล์\n\n` : ''
+      // v1.290 — a stale hold (footage changed since) still warns: re-check with a dry-run first
+      const heldWarn = heldConfirmWarning(p.held, p.code)
       if (!confirm(`${heldWarn}ส่งเมล "ไฟล์พร้อม" ให้ ${recips.length} คน?\n\n${recips.join('\n')}\n\nโฟลเดอร์ที่แนบ: ${folders}`)) { setMsg(null); return }
       setMsg('⏳ กำลังส่งเมล…')
       const r = await fetch(`/api/bookings/${bookingId}/notify-ready`, { method: 'POST', credentials: 'include' })

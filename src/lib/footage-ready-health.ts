@@ -79,6 +79,12 @@ export type PendingBooking = {
   /** v1.274 — the sweep's last MEDIAPRO hold (readySnapshot.held), if any, and the bytes to judge it by */
   held?: HeldNote | null
   totalBytes?: number
+  /** v1.290 — nas_sync_state lastPending for this code, read the way the sweep's gate (d) reads it
+   *  (fresh manifest only). >0 = a forced run?codes= stops at the NAS gate before it looks at Drive. */
+  nasPending?: number
+  /** v1.290 — last shoot day is older than the daily footage check walks (FOOTAGE_INTEGRITY_DAYS):
+   *  fileCount is whatever the cache last saw, nobody re-walks it. */
+  pastCheck?: boolean
 }
 
 /**
@@ -100,21 +106,65 @@ export function heldStill(h: HeldNote | null | undefined, fileCount: number, tot
   return h && h.fileCount === fileCount && h.totalBytes === totalBytes ? h : null
 }
 
+/**
+ * v1.290 — the hold the 📣 preview reports. null = the sweep never held it. A hold whose footage changed since is
+ * still returned, flagged `stale`: changed footage is not evidence the box is complete (NWS-KYM-261026-01: held at
+ * 20 files, 1,019 after editors added exports, MEDIAPRO still missing) — hiding it let 📣 go out with no warning.
+ */
+export function previewHeld(snapshot: unknown, fileCount: number, totalBytes: number): (HeldNote & { stale?: true }) | null {
+  const h = readHeld(snapshot)
+  if (!h) return null
+  return heldStill(h, fileCount, totalBytes) ? h : { ...h, stale: true }
+}
+
+/** v1.290 — the warning both 📣 confirm dialogs put first ('' = no hold). The button runs no MEDIAPRO gate. */
+export function heldConfirmWarning(held: { detail?: unknown; at?: unknown; stale?: unknown } | null | undefined, code?: string | null): string {
+  if (!held || typeof held.detail !== 'string' || !held.detail) return ''
+  if (held.stale) {
+    return `⚠️ ไฟล์เปลี่ยนหลังตรวจ (เดิมถูกถือเพราะ ${held.detail}) — ตรวจซ้ำด้วย footage-ready/run?dryRun=1&codes=${code || '<code>'} ก่อนกด\n` +
+      'ปุ่มนี้ไม่ตรวจ MEDIAPRO — ส่งตอนนี้ทีมอาจได้แจ้งว่าพร้อมทั้งที่ยังขาดไฟล์\n\n'
+  }
+  return `⚠️ ระบบอัตโนมัติยังไม่แจ้ง เพราะไฟล์ไม่ครบ (ตรวจ ${String(held.at || '').slice(0, 10)}): ${held.detail}\nส่งตอนนี้ = ทีมจะได้แจ้งว่าพร้อมทั้งที่ยังขาดไฟล์\n\n`
+}
+
 export type PendingBuckets = {
   /** Footage is on Drive, still inside the window — the sweep should get to it. */
   waiting: string[]
   /** Footage is on Drive and the shoot is older than the window: the auto path
-   *  will never look at it again. Someone has to press 📣 by hand. */
+   *  will never look at it again. v1.290 — someone has to run footage-ready/run?codes=
+   *  (every gate incl. MEDIAPRO); 📣 only after a dry-run says it would notify — the button gates nothing. */
   agedOut: string[]
-  /** v1.274 — aged out AND the sweep's MEDIAPRO gate was holding it (footage unchanged
-   *  since): pressing 📣 would announce incomplete footage — the button does not gate. */
-  agedOutHeld: Array<{ code: string; detail: string; at: string }>
+  /** v1.274 — aged out AND the sweep's MEDIAPRO gate was holding it: pressing 📣 would
+   *  announce incomplete footage — the button does not gate. v1.290 — `stale`: the footage
+   *  changed after that check, so the reason may be old; it stays here (re-check with a
+   *  dry-run) instead of falling back to "press 📣" (NWS-KYM-261026-01: held at 20 files,
+   *  1,019 after editors added exports, MEDIAPRO still missing). */
+  agedOutHeld: Array<{ code: string; detail: string; at: string; stale?: true }>
+  /** v1.290 — aged out AND the NAS still reports files pending for this code: a forced
+   *  run?codes= meets gate (d) first ("nas-still-sending" unless what is parked there is already on
+   *  Drive), so this is not "files on Drive, press 📣". */
+  agedOutNas: Array<{ code: string; pending: number }>
+  /** v1.290 — the aged-out codes above (any of the three) whose last shoot day is past the
+   *  daily footage check: their file counts are an old cache. */
+  pastCheck: string[]
   /** Shoot is over but no walk has ever happened — starvation symptom. */
   neverWalked: string[]
 }
 
 /** How old an un-walked shoot must be before silence counts as starvation. */
 export const COLD_AFTER_MS = 18 * 60 * 60_000
+
+/**
+ * v1.290 — the instant the WORKER stops sweeping a booking whose last shoot day is `windowDate`.
+ * runReadySweep filters `shootDate/shootEndDate >= now − lookback` on @db.Date columns and Prisma
+ * truncates that bound to its UTC date, so day D is swept through D+lookback inclusive = until
+ * (D+lookback+1) 00:00Z. The old millisecond cutoff (now − lookback) declared a booking aged out
+ * ~24 h before the worker let go of it.
+ */
+export function sweptUntil(windowDate: Date, lookbackDays: number): number {
+  const d = new Date(windowDate)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) + (lookbackDays + 1) * 86_400_000
+}
 
 /**
  * Split the un-notified shoots into the three states an operator can act on.
@@ -132,19 +182,23 @@ export function bucketPending(
   lookbackDays: number,
   coldAfterMs: number = COLD_AFTER_MS,
 ): PendingBuckets {
-  const cutoff = now.getTime() - lookbackDays * 86_400_000
-  const out: PendingBuckets = { waiting: [], agedOut: [], agedOutHeld: [], neverWalked: [] }
+  const out: PendingBuckets = { waiting: [], agedOut: [], agedOutHeld: [], agedOutNas: [], pastCheck: [], neverWalked: [] }
   for (const r of rows) {
     const code = r.bookingCode || '(no code)'
     const at = new Date(r.windowDate).getTime()
-    const inWindow = at >= cutoff
+    const inWindow = now.getTime() < sweptUntil(r.windowDate, lookbackDays)
     if (r.fileCount > 0) {
       // Footage exists — worth mailing even for a job the sweep skips, so the
-      // by-design skip must NOT suppress these two buckets.
-      const held = heldStill(r.held, r.fileCount, r.totalBytes ?? -1)
-      if (inWindow) out.waiting.push(code)
-      else if (held) out.agedOutHeld.push({ code, detail: held.detail, at: held.at })
-      else out.agedOut.push(code)
+      // by-design skip must NOT suppress these buckets.
+      if (inWindow) { out.waiting.push(code); continue }
+      if (r.pastCheck) out.pastCheck.push(code)
+      // the order the sweep's gates run in: (d) NAS stops a forced run before (g) MEDIAPRO is looked at
+      if ((r.nasPending || 0) > 0) out.agedOutNas.push({ code, pending: r.nasPending! })
+      else if (r.held) {
+        // v1.290 — a hold whose footage changed since is NOT evidence the box is complete: fail closed
+        const still = heldStill(r.held, r.fileCount, r.totalBytes ?? -1)
+        out.agedOutHeld.push({ code, detail: r.held.detail, at: r.held.at, ...(still ? {} : { stale: true as const }) })
+      } else out.agedOut.push(code)
     } else if (!r.walkedAt && inWindow && !r.skippedByDesign && now.getTime() - at >= coldAfterMs) {
       out.neverWalked.push(code)
     }
@@ -159,6 +213,10 @@ export type HealthInput = {
   sends: SendStats
   pending: PendingBuckets
   shootsOver: number      // shoots that ended inside the window (the denominator)
+  /** v1.290 — FOOTAGE_INTEGRITY_DAYS, for the "past the daily check" count */
+  checkDays: number
+  /** v1.290 — nas_sync_state could not be read: an aged-out booking may be stuck at the NAS gate unseen */
+  nasError?: string | null
 }
 
 /**
@@ -180,18 +238,46 @@ export function footageReadyAlerts(h: HealthInput): string[] {
   if (h.sends.total === 0 && h.shootsOver > 0) {
     a.push(`🔴 ${h.windowDays} วันนี้ถ่ายจบ ${h.shootsOver} ใบ แต่ไม่มีการแจ้งอัตโนมัติออกไปเลย`)
   }
+  // v1.290 — (d) the stats query reaches back further than the daily check (FOOTAGE_READY_AGED_OUT_DAYS);
+  // say how many of each list are counted from a cache nobody re-walks any more
+  const past = new Set(h.pending.pastCheck)
+  const pastNote = (codes: string[]) => {
+    const n = codes.filter(c => past.has(c)).length
+    return n > 0 ? ` · ในนี้ ${n} ใบถ่ายเกิน ${h.checkDays} วัน (ตรวจฟุตเทจรายวันไม่เดินซ้ำแล้ว — จำนวนไฟล์เป็นค่าเก่า)` : ''
+  }
   if (h.pending.agedOut.length > 0) {
+    // v1.290 — not "press 📣": the button checks only that files exist (no MEDIAPRO, no NAS)
+    // NAS unreadable: some of these may be stuck at gate (d) unseen, and the sweep reads a failed NAS read as
+    // "no manifest" = gate off, so a real run?codes= would not stop there either — never offer it first
+    const how = h.nasError
+      ? `· ⚠️ อ่านสถานะ NAS ไม่ได้ (${h.nasError.slice(0, 80)}) — ไม่รู้ว่าใบไหนค้างด่าน NAS: ` +
+        `รอจนอ่านสถานะ NAS ได้ แล้วตรวจก่อนด้วย footage-ready/run?dryRun=1&codes=<code> · อย่าเพิ่งรัน run?codes= จริงหรือกด 📣`
+      : `· ตรวจ+ส่งด้วย footage-ready/run?codes=<code> (ผ่านทุกด่านรวม MEDIAPRO = ส่งเอง) ` +
+        `· จะกด 📣 เองต้องให้ run?dryRun=1&codes=<code> บอกว่าจะแจ้งก่อน (ปุ่มไม่ตรวจ MEDIAPRO)`
     a.push(
-      `🟠 ${h.pending.agedOut.length} ใบมีฟุตเทจบน Drive แล้วแต่หลุดหน้าต่างแจ้งอัตโนมัติ ` +
-      `ต้องกด 📣 เอง: ${h.pending.agedOut.join(', ')}`,
+      `🟠 ${h.pending.agedOut.length} ใบมีฟุตเทจบน Drive แล้วแต่หลุดหน้าต่างแจ้งอัตโนมัติ: ${h.pending.agedOut.join(', ')} ` +
+      how + pastNote(h.pending.agedOut),
+    )
+  }
+  if (h.pending.agedOutNas.length > 0) {
+    a.push(
+      `🟠 ${h.pending.agedOutNas.length} ใบหลุดหน้าต่างแจ้งอัตโนมัติ และ NAS ยังรายงานไฟล์ค้างส่ง — ด่าน NAS ของ run?codes= อาจกันอยู่ อย่ากด 📣: ` +
+      h.pending.agedOutNas.map(x => `${x.code} (ค้าง ${x.pending} ไฟล์)`).join(' · ') +
+      ` · ดูว่าผ่านด่าน NAS ไหม: footage-ready/run?dryRun=1&codes=<code> · เทียบไฟล์ NAS กับ Drive: /api/admin/nas-sync-report?verify=1` +
+      pastNote(h.pending.agedOutNas.map(x => x.code)),
     )
   }
   if (h.pending.agedOutHeld.length > 0) {
     a.push(
-      `🟠 ${h.pending.agedOutHeld.length} ใบหลุดหน้าต่างแจ้งอัตโนมัติ และไฟล์ยังไม่ครบ — อย่าเพิ่งกด 📣 ` +
+      `🟠 ${h.pending.agedOutHeld.length} ใบหลุดหน้าต่างแจ้งอัตโนมัติ และด่าน MEDIAPRO กันไว้ (ไฟล์ไม่ครบ) — อย่าเพิ่งกด 📣 ` +
       `(ปุ่มไม่ตรวจ MEDIAPRO ทีมจะได้แจ้งว่าพร้อมทั้งที่ขาดไฟล์): ` +
-      h.pending.agedOutHeld.map(x => `${x.code} — ${x.detail.slice(0, 140)} (ตรวจ ${x.at.slice(0, 10)})`).join(' · ') +
-      ` · ถ้าไฟล์มาครบแล้ว: footage-ready/run?codes=<code> ตรวจซ้ำ (ครบ = ส่งเอง)`,
+      h.pending.agedOutHeld.map(x => `${x.code} — ${x.detail.slice(0, 140)} (ตรวจ ${x.at.slice(0, 10)}` +
+        (x.stale ? ` · ไฟล์เปลี่ยนหลังตรวจ เหตุผลนี้อาจเก่า → ตรวจซ้ำ footage-ready/run?dryRun=1&codes=${x.code})` : ')')).join(' · ') +
+      (h.nasError
+        // same reason as agedOut above: a failed NAS read turns gate (d) off in the sweep — never offer a real run first
+        ? ` · ⚠️ อ่านสถานะ NAS ไม่ได้ — ถ้าไฟล์มาครบแล้ว รอจนอ่านสถานะ NAS ได้ แล้วตรวจก่อนด้วย footage-ready/run?dryRun=1&codes=<code>`
+        : ` · ถ้าไฟล์มาครบแล้ว: footage-ready/run?codes=<code> ตรวจซ้ำ (ครบ = ส่งเอง)`) +
+      pastNote(h.pending.agedOutHeld.map(x => x.code)),
     )
   }
   if (h.pending.neverWalked.length > 0) {

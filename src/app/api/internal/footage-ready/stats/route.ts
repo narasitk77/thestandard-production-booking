@@ -16,6 +16,7 @@ import { internalSecretAllowed } from '@/lib/internal-auth'
 import { footageReadyAudience } from '@/lib/footage-ready'
 import { isPhotoAlbumBooking, PHOTO_ALBUM_EPISODE_CODE } from '@/lib/outlet-folders'
 import { isShootOver } from '@/lib/shoot-window'
+import { latestNasState, nasManifestAge } from '@/lib/nas-sync'
 import {
   summarizeSends, bucketPending, footageReadyAlerts, readHeld,
   type SendRow, type PendingBooking,
@@ -70,7 +71,13 @@ export async function GET(request: NextRequest) {
   // `fileCount` can be believed. Was lookback+4 = 8 days, which is why
   // AGN-260904-01 / EVT-EVF-260901-01 / KND-KNF-260916-01 never showed here.
   // Windowed on the LAST shoot day, the same OR the check uses.
-  const agedOutFrom = new Date(now.getTime() - Math.max(windowDays, lookbackDays + 4, envInt('FOOTAGE_INTEGRITY_DAYS', 30)) * DAY)
+  // v1.290 — and further still (FOOTAGE_READY_AGED_OUT_DAYS, default 60): a never-notified booking WITH
+  // footage used to drop off this report on day 31 and nobody was told (WLT-MNW-261012-01, NWS-GLF-261012-01).
+  // Rows past the daily check only count when the cache saw files (bucketPending), and the alert says how
+  // many of them there are (`pastCheck`) — their counts are a cache nobody re-walks.
+  const checkDays = envInt('FOOTAGE_INTEGRITY_DAYS', 30)
+  const agedOutDays = envInt('FOOTAGE_READY_AGED_OUT_DAYS', 60)
+  const agedOutFrom = new Date(now.getTime() - Math.max(windowDays, lookbackDays + 4, checkDays, agedOutDays) * DAY)
   const candidates = await prisma.booking.findMany({
     where: {
       status: { in: ['CONFIRMED', 'COMPLETED'] },
@@ -88,6 +95,20 @@ export async function GET(request: NextRequest) {
       episodes: { select: { program: { select: { code: true } } } },
     },
   })
+  // v1.290 — gate (d) exactly as runReadySweep reads it (statuses only while the manifest is fresh; stale = gate
+  // off): an aged-out booking the NAS still reports pending is skipped by run?codes= too, so it must not be
+  // listed as "files on Drive". A failed read is said in the alert, never taken as "nothing pending".
+  let nasStatuses: Record<string, { lastPending?: unknown } | undefined> = {}
+  const nas: { manifestAt: string | null; stale: boolean | null; error: string | null } = { manifestAt: null, stale: null, error: null }
+  try {
+    const st = await latestNasState()
+    nas.manifestAt = st.manifest?.at ?? null
+    nas.stale = !st.manifest || nasManifestAge(st.manifest.at, now).stale
+    if (!nas.stale) nasStatuses = st.statuses || {}
+  } catch (e: any) {
+    nas.error = e?.message || String(e)
+  }
+
   const pendingRows: PendingBooking[] = candidates
     // callTime — same overnight reading as the worker's gate (footage-ready.ts)
     .filter(b => isShootOver({ shootDate: b.shootDate, shootEndDate: b.shootEndDate, estimatedWrap: b.estimatedWrap, callTime: b.callTime }, now))
@@ -104,6 +125,8 @@ export async function GET(request: NextRequest) {
         totalBytes: Array.isArray(c?.folders)
           ? (c!.folders as Array<{ totalBytes?: unknown }>).reduce((n, f) => n + (typeof f?.totalBytes === 'number' ? f.totalBytes : 0), 0)
           : -1,
+        nasPending: Number(nasStatuses[b.bookingCode as string]?.lastPending) || 0,
+        pastCheck: end.getTime() < now.getTime() - checkDays * DAY,
         // The same two-sided photo-album gate the sweep applies (booking program
         // AND episode programs) — otherwise a lighting-only job nags forever.
         skippedByDesign:
@@ -127,6 +150,8 @@ export async function GET(request: NextRequest) {
     workerEnabled: enabled(process.env.FOOTAGE_READY_WORKER_ENABLED),
     audience: footageReadyAudience(),
     lookbackDays,
+    checkDays,
+    agedOutDays,
     settleHours: Math.round(envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000) / 360_000) / 10,
     // v1.287 — the wait when MEDIAPRO vouches for the whole box (≥ settleHours = fast path off)
     verifiedSettleMinutes: Math.round(envInt('FOOTAGE_READY_VERIFIED_SETTLE_MS', 20 * 60_000) / 60_000),
@@ -141,7 +166,9 @@ export async function GET(request: NextRequest) {
     sends,
     pending,
     shootsOver,
+    checkDays,
+    nasError: nas.error,
   })
 
-  return NextResponse.json({ ok: alerts.length === 0, windowDays, config, shootsOver, sends, pending, alerts })
+  return NextResponse.json({ ok: alerts.length === 0, windowDays, config, shootsOver, sends, pending, nas, alerts })
 }

@@ -234,15 +234,17 @@ async function ingestOnce(manifest: NasManifest): Promise<NasSyncReport> {
   // v1.288 review — a folder that emptied and then LEFT the NAS (the noon prune trashes the merged landing, Cloud Sync
   // removes the NAS copy) while waiting out the settle: it shipped — say so. A folder the agent could not READ
   // (manifest.skipped) is not gone: it waits.
-  const unreadable = new Set((manifest.skipped || []).map(n => codeOf(n)).filter(Boolean))
+  const unreadable = new Set((manifest.skipped || []).map(n => codeOf(n)).filter((c): c is string => !!c))
   for (const [code, p] of Object.entries(statuses) as Array<[string, any]>) {
     if (byCode.has(code) || unreadable.has(code) || !settled(p)) continue
     await announceDrain(code, p.drainName || code, p, p.maxSeen || 0)
   }
+  const before = row?.manifest as NasManifest | null | undefined
+  await releaseVanished(statuses, new Set([...byCode.keys(), ...unreadable]), manifest, before)
 
   // v1.288 — MEDIAPRO read on the NAS: remember what each card should hold and what arrived; a finished copy that is
   // short (and the missing originals are not on Drive either) is told to the team while the card is still in hand
-  const cards = await checkNasCards(prev.cards || {}, manifest.folders, (row?.manifest as NasManifest | null | undefined)?.folders)
+  const cards = await checkNasCards(prev.cards || {}, manifest.folders, before?.folders)
   const next: any = { folders: statuses, lastDailyAt: prev.lastDailyAt || null, cards }
   const lastDaily = next.lastDailyAt ? new Date(next.lastDailyAt).getTime() : 0
   if (emailOk && Date.now() - lastDaily > 22 * 3600_000) {
@@ -263,6 +265,76 @@ async function ingestOnce(manifest: NasManifest): Promise<NasSyncReport> {
   })
 
   return report
+}
+
+const GONE_SAMPLE = 50
+const fileKey = (f: { p: string; size: number }) => `${f.p.split('/').pop() || f.p}|${f.size}`
+const bkk = (iso: string) => new Date(iso).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })
+
+/**
+ * v1.290 — a folder that LEFT the NAS while files were still queued (moved/deleted by hand, the landing trashed
+ * mid-upload): the loop in ingestOnce walks only folders in this manifest, so its lastPending stayed >0 for good and
+ * every reader of it (footage-ready gate d, follow-up, fast-watch, field upload) held the booking forever — 11 codes
+ * on 20 Nov 2026, some since July. Gone DRAIN_SETTLE_MS → the NAS gate opens and ops hear it; footage-ready still
+ * checks Drive + MEDIAPRO itself. NOT a drain: nobody knows the files arrived — no ✅ mail, no 'nas.folder_drained'
+ * (fast-watch reads that as "new files arrived"), a 'nas.folder_vanished' row instead.
+ * Holds (gate stays shut): unreadable (manifest.skipped) · empty scan · the sampled files now sit in another NAS folder
+ * (renamed without the code) · more than half of last scan's coded folders missing at once (half-mounted view).
+ */
+async function releaseVanished(statuses: any, present: Set<string>, manifest: NasManifest, before: NasManifest | null | undefined): Promise<void> {
+  for (const code of present) {
+    if (!statuses[code]?.goneSince) continue
+    const { goneSince, goneFiles, ...p } = statuses[code]
+    statuses[code] = p // back on the NAS (or there but unreadable): a later disappearance starts a new clock
+  }
+  const gone = (Object.entries(statuses) as Array<[string, any]>).filter(([code, p]) => (p.lastPending || 0) > 0 && !present.has(code))
+  if (!gone.length || !manifest.folders.length) return // an empty scan proves nothing
+  // ponytail: compares with the previous scan only — a partial view that persists past one round is judged as real
+  // from the next round on; keep a sticky reference set if the agent ever scans over SMB again (it runs on DSM now)
+  const was = [...new Set((before?.folders || []).map(f => codeOf(f.name)).filter((c): c is string => !!c))]
+  const lost = was.filter(c => !present.has(c))
+  if (lost.length * 2 > was.length) {
+    console.warn(`[nas-sync] ${lost.length}/${was.length} coded NAS folders missing at once — vanished folders not judged this round`)
+    await alertOps('nas-view-drop', `NAS: โฟลเดอร์ที่มีรหัสงานหายพร้อมกัน ${lost.length}/${was.length} — ยังไม่ปลดด่าน NAS`,
+      `สแกน NAS รอบนี้ไม่เห็น ${lost.length} จาก ${was.length} โฟลเดอร์ที่มีรหัสงานซึ่งรอบก่อนเห็น (${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ' …' : ''})\n` +
+      `อาจสแกน/เมานต์ไม่ครบ — รอบนี้จึงไม่ปลดด่าน NAS ของโฟลเดอร์ที่หายทั้งที่ยังค้างไฟล์ (${gone.length} รหัส) · ถ้าถูกลบพร้อมกันจริง (prune) รอบถัดไปตัดสินตามปกติ`)
+    return
+  }
+  const now = new Date()
+  let onNas: Map<string, string> | null = null // "name|size" → the NAS folder holding it now
+  const released: string[] = []
+  let total = 0
+  for (const [code, p] of gone) {
+    if (!Number.isFinite(Date.parse(p.goneSince || ''))) {
+      // the biggest files: a camera clip's name+size is unique, card sidecars (CUEUP.XML …) repeat across cards
+      const sample = (before?.folders || []).filter(f => codeOf(f.name) === code).flatMap(f => f.files)
+        .filter(f => f.size > 0 && !IGNORE_RE.test(f.p.split('/').pop() || '')).sort((a, b) => b.size - a.size).slice(0, GONE_SAMPLE)
+      statuses[code] = { ...p, goneSince: now.toISOString(), goneFiles: sample.map(fileKey) }
+      continue
+    }
+    if (now.getTime() - Date.parse(p.goneSince) < DRAIN_SETTLE_MS) continue
+    onNas ??= new Map(manifest.folders.flatMap(f => f.files.map(x => [fileKey(x), f.name] as [string, string])))
+    const movedTo = [...new Set(((p.goneFiles || []) as string[]).map(k => onNas!.get(k)).filter((n): n is string => !!n))]
+    if (movedTo.length) {
+      await alertOps(`nas-moved:${code}`, `ไฟล์ของ ${code} ไปอยู่โฟลเดอร์อื่นบน NAS — ด่าน NAS ยังปิด`,
+        `${code}: โฟลเดอร์รหัสนี้หายจาก NAS ทั้งที่ยังค้าง ${p.lastPending} ไฟล์ แต่ไฟล์ชุดเดิมยังอยู่บน NAS ใน ${movedTo.slice(0, 3).join(' · ')}\n` +
+        `(ถูกเปลี่ยนชื่อ/ย้ายจนชื่อไม่มีรหัสงาน?) ด่าน NAS ของ ${code} ปิดไว้จนกว่าไฟล์ชุดนั้นจะส่งขึ้น Drive หมด — ถ้าย้ายผิด แก้ชื่อโฟลเดอร์ให้มี (${code})`)
+      continue
+    }
+    const { goneSince, goneFiles, ...rest } = p
+    statuses[code] = { ...rest, lastPending: 0, vanishedPending: p.lastPending, vanishedAt: now.toISOString() }
+    await logAudit({
+      actorEmail: 'nas-sync', action: 'nas.folder_vanished', entityType: 'NasFolder', entityId: code, bookingCode: code,
+      changes: { pending: p.lastPending, goneSince, ...(p.maxSeen ? { maxSeen: p.maxSeen } : {}) },
+    })
+    total += p.lastPending
+    released.push(`• ${code} — ค้าง ${p.lastPending} ไฟล์ · หายจาก NAS ตั้งแต่ ${bkk(goneSince)}`)
+  }
+  if (!released.length) return
+  // everyMs 0: every batch is news (a fixed key with the 6-h throttle would swallow a second batch)
+  await alertOps('nas-vanished', `โฟลเดอร์หายจาก NAS ทั้งที่ยังค้างไฟล์ — ปลดด่าน NAS ${released.length} งาน`,
+    `โฟลเดอร์หายจาก NAS ทั้งที่ยังค้าง ${total} ไฟล์ — ปลดด่าน NAS แล้ว footage-ready จะตรวจ Drive+MEDIAPRO เอง\n${released.join('\n')}\n` +
+    'ไม่ได้แปลว่าไฟล์ขึ้น Drive ครบ (จึงไม่มีเมล ✅) — ใบที่ยังขาด ด่าน MEDIAPRO/เวลารอของ footage-ready ยังกันไว้ · ถ้าโฟลเดอร์ถูกย้ายผิด แก้ชื่อให้มีรหัสงาน', 0)
 }
 
 /** v1.288 review — the card check walks Drive inside the (serialized) ingest: a hung call must not stall every later

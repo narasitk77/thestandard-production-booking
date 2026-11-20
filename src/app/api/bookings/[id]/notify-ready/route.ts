@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readHeld, heldStill } from '@/lib/footage-ready-health'
+import { previewHeld } from '@/lib/footage-ready-health'
 import { prisma } from '@/lib/db'
 import { getSession, canUploadToBooking } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
@@ -95,8 +95,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     if (preview) {
       // v1.274 — this button does not run the MEDIAPRO gate; say what the auto path saw before a human overrides it
-      const held = heldStill(readHeld(booking.readySnapshot), fileCount, folders.reduce((n: number, f: any) => n + (f.totalBytes || 0), 0))
-      return NextResponse.json({ preview: true, recipients, skippedInactive, folderCount: folders.length, fileCount, emailConfigured: isEmailConfigured(),
+      // v1.290 — a hold whose footage changed since comes back too, `stale: true` (null = never held); `code` for the dry-run hint
+      const held = previewHeld(booking.readySnapshot, fileCount, folders.reduce((n: number, f: any) => n + (f.totalBytes || 0), 0))
+      return NextResponse.json({ preview: true, code, recipients, skippedInactive, folderCount: folders.length, fileCount, emailConfigured: isEmailConfigured(),
         held })
     }
 

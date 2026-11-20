@@ -318,3 +318,105 @@ test('maint: mediaproGate box + landing — การ์ดที่ถูก ho
   assert.match(g.text, /การ์ดคนละใบ/)
   assert.ok(g.check, 'a comparison that ran (the hold is evidence, not "could not check")')
 })
+
+// ── v1.290 — การ์ดเดียวแยกคลิปข้าม EP แต่ MEDIAPRO อยู่ EP เดียว (WLT-NGI-261116-01) ─────────────────────
+// prod 20 พ.ย. 2569: EP01/CAM-A/M4ROOT มี MEDIAPRO ระบุ C002C001–003 · ทีมย้าย C002–003 ไป EP02/CAM-A/clip+sub (ไม่มี MEDIAPRO)
+// → EP02/CAM-A กับ CAM-B ถูกนับเป็น "การ์ด Sony ไม่มี MEDIAPRO" ทั้งที่ทุกคลิปอยู่ครบ
+
+const NGI1 = ['EP01 · การเงินแบบแท็บ รวิศ', 'CAM-A', 'M4ROOT'], NGI2 = ['EP02 · ลงทุน', 'CAM-A']
+const NGI = ['C002C001_261116QP', 'C002C002_261116GA', 'C002C003_261116NO']
+// real layout: EP01 keeps C001 + every thumbnail · EP02 holds only clip/ + sub/ (lowercase) of C002, C003
+const ngiEp2 = (clip: string, dir = NGI2) => [f([...dir, 'clip'], `${clip}.MP4`, 1_000_000), f([...dir, 'clip'], `${clip}M01.XML`, 10), f([...dir, 'sub'], `${clip}S03.MP4`, 500)]
+const ngiFiles = (dir = NGI2, root = NGI1) => [
+  f([...root, 'CLIP'], `${NGI[0]}.MP4`, 1_000_000), f([...root, 'CLIP'], `${NGI[0]}M01.XML`, 10), f([...root, 'SUB'], `${NGI[0]}S03.MP4`, 500),
+  ...NGI.map(c => f([...root, 'THMBNL'], `${c}T01.JPG`, 10)), ...ngiEp2(NGI[1], dir), ...ngiEp2(NGI[2], dir),
+]
+const ngiCards = (...extra: string[]) => [{ folderPath: NGI1, materials: mp.parseMediapro(m4card('ngi', ...[...NGI, ...extra].map(c => [c, 1000] as [string, number]))) }]
+
+test('v1.290: MEDIAPRO อยู่ EP01 ที่เดียว · EP02 มีแค่ clip/sub ของคลิปที่ระบุ (WLT-NGI-261116-01) → ครบ และบอกในข้อความ gate', async () => {
+  const ok = mp.mediaproCheck(ngiFiles(), ngiCards(), { shootFrom: '2026-11-16' })
+  assert.equal(mp.mediaproComplete(ok), true, mp.mediaproGapText(ok))
+  assert.deepEqual(ok.unverifiable, [])
+  assert.deepEqual(ok.splitCards, [NGI2.join('/')])
+  assert.equal(ok.listed, 12)
+  const mpFile = f(NGI1, 'MEDIAPRO.XML', 500)
+  xmls[mpFile.id] = m4card('ngi', ...NGI.map(c => [c, 1000] as [string, number]))
+  trees.box = [...ngiFiles(), mpFile]
+  const g = await mp.mediaproGate(['box'], { shootFrom: '2026-11-16' })
+  assert.equal(g.ok, true, g.text)
+  assert.match(g.text, /การ์ดที่แยกคลิปข้าม EP 1 โฟลเดอร์ .*EP02 · ลงทุน\/CAM-A/)
+})
+
+test('v1.290: คลิปใน EP02 ที่ MEDIAPRO ไม่ระบุ → ตรวจไม่ได้เหมือนเดิม · คลิปที่ระบุแต่ไม่อยู่ทั้งสองที่ → ขาด', () => {
+  const extra = mp.mediaproCheck([...ngiFiles(), f([...NGI2, 'clip'], 'C002C004_261116ZZ.MP4', 1_000_000)], ngiCards(), { shootFrom: '2026-11-16' })
+  assert.deepEqual(extra.unverifiable, [NGI2.join('/')])
+  assert.deepEqual(extra.splitCards, [])
+  assert.equal(mp.mediaproComplete(extra), false)
+  // C003 original gone from EP02 (and never in EP01) → missing, the folder is still that card's
+  const gone = mp.mediaproCheck(ngiFiles().filter((x: any) => x.name !== `${NGI[2]}.MP4`), ngiCards(), { shootFrom: '2026-11-16' })
+  assert.deepEqual(gone.missing.map(x => x.file), [`CLIP/${NGI[2]}.MP4`])
+  assert.deepEqual(gone.unverifiable, [])
+  assert.equal(mp.mediaproComplete(gone), false)
+  // listed in the MEDIAPRO, in neither folder → missing as today
+  const never = mp.mediaproCheck(ngiFiles(), ngiCards('C002C004_261116ZZ'), { shootFrom: '2026-11-16' })
+  assert.equal(never.missing.length, 4)
+  assert.ok(never.missing.every(x => x.file.includes('C002C004_261116ZZ')))
+  assert.equal(mp.mediaproComplete(never), false)
+})
+
+test('v1.290: ไม่ยืมข้ามกล้อง · ไม่ยืมชื่อ C0001 (เริ่มใหม่ทุกการ์ด) · สำเนาชื่อเดียวกันที่ md5 ต่าง → ตรวจไม่ได้', () => {
+  // camera A's clips filed under EP02/CAM-B: no CAM-B MEDIAPRO lends to it
+  const camB = ['EP02 · ลงทุน', 'CAM-B']
+  const cross = mp.mediaproCheck(ngiFiles(camB), ngiCards(), { shootFrom: '2026-11-16' })
+  assert.deepEqual(cross.unverifiable, [camB.join('/')])
+  assert.deepEqual(cross.splitCards, [])
+  // the same EP (a "CAM-A (1)" folder beside the card) is not "another EP" — out of this rule's scope, unverifiable as before
+  const sameEp = ['EP01 · การเงินแบบแท็บ รวิศ', 'CAM-A (1)']
+  assert.deepEqual(mp.mediaproCheck(ngiFiles(sameEp), ngiCards(), { shootFrom: '2026-11-16' }).unverifiable, [sameEp.join('/')])
+  // C0001-style names: a name listed on EP01's card proves nothing about a card folder in EP02
+  const c1 = ['EP01', 'CAM-A', 'PRIVATE', 'M4ROOT'], c2 = ['EP02', 'CAM-A']
+  const m4 = (clip: string) => material(clip, 500, '50p', 'AVC50_1920_1080_H422P@L42', 'CLIP', 'SUB').replace(/\.MXF/g, '.MP4').replace('./Thmbnl/', './THMBNL/')
+  const short = mp.mediaproCheck([f([...c1, 'CLIP'], 'C0001.MP4'), f([...c2, 'CLIP'], 'C0002.MP4')], [{ folderPath: c1, materials: mp.parseMediapro(xml(m4('C0001'), m4('C0002'))) }])
+  assert.deepEqual(short.unverifiable, [c2.join('/')])
+  // a second copy of an EP02 clip elsewhere with different bytes: the bigger one is what the card counted → EP02's stays unverifiable
+  const other = { ...f([...NGI1, 'CLIP'], `${NGI[1]}.MP4`, 2_000_000), md5: 'other-bytes' }
+  assert.deepEqual(mp.mediaproCheck([...ngiFiles(), other], ngiCards(), { shootFrom: '2026-11-16' }).unverifiable, [NGI2.join('/')])
+  // ...the same bytes (md5) = one file twice → still that card's
+  const ep2 = ngiFiles()
+  const mxf = ep2.find((x: any) => x.name === `${NGI[1]}.MP4`)
+  const same = mp.mediaproCheck([...ep2, { ...f(['EP01 · การเงินแบบแท็บ รวิศ', 'Project'], `${NGI[1]}.MP4`, 1_000_000), md5: mxf.md5 }], ngiCards(), { shootFrom: '2026-11-16' })
+  assert.equal(mp.mediaproComplete(same), true, mp.mediaproGapText(same))
+})
+
+test('v1.290: ไม่มี MEDIAPRO เลย (NWS-KYM-261026-01 · KND-ENU-261105-01 — การ์ดแยกข้าม EP) → ทุกการ์ดยังตรวจไม่ได้', () => {
+  const ep = (e: string, cam: string, clip: string) => [f([e, cam, 'CLIP'], `${clip}.MP4`), f([e, cam, 'CLIP'], `${clip}M01.XML`), f([e, cam, 'SUB'], `${clip}S03.MP4`), f([e, cam, 'THMBNL'], `${clip}T01.JPG`)]
+  const files = [...ep('EP01 · Microbiome', 'CAM-A', 'B006R001_261026AL'), ...ep('EP01 · Microbiome', 'CAM-B', 'A017C001_261026LC'),
+    ...ep('EP02 · เราวิ่งกันไปทำไม', 'CAM-A', 'B006R002_261026UQ'), ...ep('EP02 · เราวิ่งกันไปทำไม', 'CAM-B', 'A017C002_261026OE')]
+  const r = mp.mediaproCheck(files, [], { shootFrom: '2026-10-26' })
+  assert.equal(r.unverifiable.length, 4)
+  assert.deepEqual(r.splitCards, [])
+  assert.equal(mp.mediaproComplete(r), false)
+  // a card still arriving (only THMBNL so far, no clip file at all) is not "every clip listed" by vacuous truth
+  const half = mp.mediaproCheck([...ngiFiles(), f(['EP02 · ลงทุน', 'CAM-C', 'M4ROOT', 'THMBNL'], 'C9C001_261116AAT01.JPG')], ngiCards(), { shootFrom: '2026-11-16' })
+  assert.deepEqual(half.unverifiable, ['EP02 · ลงทุน/CAM-C/M4ROOT'])
+})
+
+test('v1.290 รีวิว: ด่านกันพลาดของการ์ดแยกข้าม EP — วิดีโอชื่อไม่ใช่ Sony · md5 ว่างทั้งคู่ · ไม่มีป้าย CAM → ตรวจไม่ได้เหมือนเดิม', () => {
+  const opts = { shootFrom: '2026-11-16' }
+  // (a) a non-Sony-named video beside the listed clips: no MEDIAPRO lists it → the lender card proves nothing about it
+  const foreign = mp.mediaproCheck([...ngiFiles(), f([...NGI2, 'clip'], 'NGI_A0001.MP4', 1_000_000)], ngiCards(), opts)
+  assert.deepEqual(foreign.unverifiable, [NGI2.join('/')])
+  assert.deepEqual(foreign.splitCards, [])
+  // (b) EP02's copy has no md5 and a bigger same-name copy (no md5 either) sits elsewhere: the lender counted the
+  //     bigger one, and null === null is not "the same bytes" → EP02's copy may be the half-copied one
+  const noMd5 = ngiFiles().map((x: any) => (x.name === `${NGI[1]}.MP4` ? { ...x, md5: null } : x))
+  const bigger = { ...f([NGI1[0], 'Project'], `${NGI[1]}.MP4`, 2_000_000), md5: null }
+  const nul = mp.mediaproCheck([...noMd5, bigger], ngiCards(), opts)
+  assert.deepEqual(nul.unverifiable, [NGI2.join('/')])
+  assert.deepEqual(nul.splitCards, [])
+  // (c) no CAM label on either side: "" === "" is not "the same camera"
+  const bare1 = ['EP01', 'M4ROOT'], bare2 = ['EP02', 'Footage']
+  const bare = mp.mediaproCheck(ngiFiles(bare2, bare1), [{ folderPath: bare1, materials: ngiCards()[0].materials }], opts)
+  assert.deepEqual(bare.unverifiable, [bare2.join('/')])
+  assert.deepEqual(bare.splitCards, [])
+})

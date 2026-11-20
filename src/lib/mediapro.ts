@@ -14,6 +14,7 @@
  * - ขนาดต่อเฟรม (size ÷ dur) ต่ำกว่าครึ่งของคลิปแบบเดียวกัน (videoType+fps ≥3 คลิป) = น่าจะก็อปไม่จบ —
  *   วัดจากของจริง 16 กล่อง: คลิปครบต่ำสุด 0.65× (ช่วงสูงกว่ามีได้ถึง 18× ในคลิปสั้น ๆ จึงดูแค่ขาต่ำ)
  * - การ์ด Sony (XDROOT/M4ROOT หรือโฟลเดอร์ Clip ที่มีไฟล์ชื่อกล้อง Sony) ที่ไม่มี MEDIAPRO.XML = ตรวจไม่ได้ ≠ ครบ
+ *   (v1.290 ยกเว้น: ทุกไฟล์ในนั้นอยู่ใน MEDIAPRO ของกล้องเดียวกันใน EP อื่น = การ์ดเดียวที่ถูกแยกคลิปข้าม EP — splitCards)
  * - กล้องที่ไม่ใช่ Sony ไม่มี MEDIAPRO → ไม่มีอะไรให้เทียบ (ด่านนี้ผ่าน · ด่านอื่นเดิมยังทำงาน)
  *   ponytail: การ์ดที่ไม่ได้ format ข้ามวันจะมีคลิปวันก่อนใน MEDIAPRO — ก็อปแค่บางคลิป = ถูกหาว่าขาด (ทางปลอดภัย:
  *   แค่ไม่แจ้งอัตโนมัติ · 📣 แจ้งมือยังใช้ได้) · ถ้าเจอบ่อยให้กรองด้วยวันที่ในชื่อคลิป
@@ -55,6 +56,12 @@ export interface MediaproCheck {
    * 12/12 files = ALL/CAM A/XDROOT). Nothing in them can be missing that the listed card would not report → passes.
    */
   twinCopies: string[]
+  /**
+   * v1.290 — card roots with no MEDIAPRO whose every clip file a MEDIAPRO of the SAME camera in ANOTHER EP lists: one
+   * card split across EPs with its index left in one EP (WLT-NGI-261116-01). The lender card's check covers them.
+   * Optional only so hand-built checks elsewhere stay valid; mediaproCheck always sets it.
+   */
+  splitCards?: string[]
   /**
    * maint 2026-11-08 — paths where two DIFFERENT cards (no clip in common, sameClip) are indexed AND list a clip name in
    * common. C0001 restarts on every card: footage-ready's gate walks the box and the landing drop together, so a card
@@ -169,6 +176,10 @@ export function sonyCardRoots(files: FileLike[]): string[][] {
   return [...roots.values()]
 }
 
+// กล้องจากชื่อโฟลเดอร์ ("CAM-A" · "CAM B" · "CAM A-1" = การ์ดของกล้อง A · "CAM-C (1)") — regex เดียวกับ CAM_DIR ใน footage-ready
+const CAM_DIR = /^CAM[\s._-]*([A-Z]|\d{1,2})(?:[\s._-]*\d{1,2})?$/i
+const camOf = (p: string[]) => p.map(s => CAM_DIR.exec(s.trim().replace(/(?:\s*\(\d+\))+$/, ''))).find(Boolean)?.[1].toUpperCase() || ''
+
 export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: MediaproCheckOptions = {}): MediaproCheck {
   const live = files.filter(f => !isQuarantined(f))
   const byPath = new Map<string, FileLike[]>()
@@ -186,7 +197,7 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
   const inScope = (f: FileLike, scope: string[]) => pathKey((f.folderPath || []).slice(0, scope.length)) === pathKey(scope)
   const biggest = (fs: FileLike[]) => fs.reduce<FileLike | null>((a, f) => (!a || (f.size || 0) > (a.size || 0) ? f : a), null)
 
-  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [], twinCopies: [], mixed: mixedCardPaths(cards) }
+  const res: MediaproCheck = { cards: cards.length, listed: 0, missing: [], stale: [], zero: [], suspect: [], unverifiable: [], unverifiablePaths: [], twinCopies: [], splitCards: [], mixed: mixedCardPaths(cards) }
   const verified = new Map<string, FileLike[]>() // md5 → the non-empty files a card lists that are here
   const seen = new Set<string>()
   const listedIn = new Map<string, string[][]>()
@@ -254,8 +265,26 @@ export function mediaproCheck(files: FileLike[], cards: MediaproCard[], opts: Me
     return clipFiles.some(f => sonyClipPart(f.name)?.part === 'orig') &&
       clipFiles.every(f => !!f.md5 && (verified.get(f.md5) || []).some(g => !under(g, dir)))
   }
+  // v1.290 — one card split across EPs, MEDIAPRO left in ONE EP (WLT-NGI-261116-01: EP01/CAM-A/M4ROOT lists C002C001–003,
+  // the team moved C002–003 into EP02/CAM-A/clip+sub). A root with no MEDIAPRO is that card's when EVERY media file in it
+  // is listed by a MEDIAPRO of the SAME camera in ANOTHER EP: FX6/FX3 names are looked up box-wide above, so the lender
+  // card already checked these very files (0-byte / suspect / a listed clip in neither folder = missing, as before).
+  // Fail closed: only box-unique names (C0001 restarts on every card — a name match proves nothing), and only a file
+  // that IS the copy the lender checked — another copy of the name elsewhere must have the same md5, or the one counted
+  // could be the full copy while this one is half-copied. Anything else stays unverifiable exactly as before.
+  const isSplitCard = (dir: string[]) => {
+    const cam = camOf(dir)
+    const lenders = cam ? cards.filter(c => camOf(c.folderPath) === cam && up(c.folderPath[0] || '') !== up(dir[0] || '')) : []
+    const names = new Set(lenders.flatMap(c => c.materials.flatMap(m => m.files.map(r => up(baseName(r.split('/').pop() || ''))))))
+    const media = live.filter(f => under(f, dir) && (sonyClipPart(f.name) || /\.(MXF|MP4|MOV)$/i.test(baseName(f.name))))
+    return media.some(f => sonyClipPart(f.name)?.part === 'orig') && media.every(f => {
+      const name = up(baseName(f.name))
+      return hasUniqueClipName(name) && names.has(name) && (byName.get(name) || []).every(g => g === f || (!!f.md5 && g.md5 === f.md5))
+    })
+  }
   for (const dir of [...roots, ...unlisted.values()]) {
     if (isTwinCopy(dir)) res.twinCopies.push(dir.join('/'))
+    else if (isSplitCard(dir)) res.splitCards!.push(dir.join('/'))
     else res.unverifiablePaths.push(dir)
   }
   res.unverifiable = res.unverifiablePaths.map(r => r.join('/'))
@@ -321,6 +350,7 @@ export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptio
       text: ok
         ? [check.cards ? `ครบตาม MEDIAPRO ${check.cards} การ์ด · ${check.listed - check.stale.length} ไฟล์` : 'ไม่มีการ์ด Sony (ไม่มี MEDIAPRO ให้เทียบ)',
             check.twinCopies.length ? `สำเนาการ์ดที่ตรงทุกไบต์ ${check.twinCopies.length} โฟลเดอร์ (${check.twinCopies.slice(0, 2).map(p => p.split('/').slice(-2).join('/')).join(', ')})` : '',
+            check.splitCards?.length ? `การ์ดที่แยกคลิปข้าม EP ${check.splitCards.length} โฟลเดอร์ ตรวจตาม MEDIAPRO ของกล้องเดียวกันใน EP อื่น (${check.splitCards.slice(0, 2).map(p => p.split('/').slice(-2).join('/')).join(', ')})` : '',
             mediaproStaleText(check)].filter(Boolean).join(' · ')
         : mediaproGapText(check),
     }

@@ -64,6 +64,12 @@ async function runOnce() {
     // v1.268 — warned bookings still waiting for their "cameras complete" follow-up
     for (const w of json.followUpWaiting || []) console.log(`[footage-ready] follow-up waiting ${w.code}: ${String(w.detail || '').slice(0, 200)}`)
     for (const s of blocked) console.log(`[footage-ready] held ${s.code} (${s.reason}): ${String(s.detail || '').slice(0, 300)}`)
+    // v1.290 — gate (d): files parked on the NAS compared with Drive. Released = all on Drive → full settle (never the
+    // MEDIAPRO fast path); the ones still held are in the nas-still-sending lines below (same detail, not logged twice)
+    for (const p of json.nasParked || []) if (p.ok) console.log(`[footage-ready] nas-parked released ${p.code}: ${String(p.detail || '').slice(0, 300)}`)
+    for (const s of json.skipped || []) {
+      if (s.reason === 'nas-still-sending' && s.detail) console.log(`[footage-ready] held ${s.code} (nas-still-sending): ${String(s.detail).slice(0, 300)}`)
+    }
     // maint 2026-11-08 — WHICH booking failed and why (incl. "no delivery channel succeeded"): the count alone left
     // four errors=1–2 runs (5–7 Nov) untraceable — the reason was only in the HTTP body, which nothing kept
     for (const e of json.errors || []) console.error(`[footage-ready] error ${e.code}: ${String(e.error || '').slice(0, 300)}`)

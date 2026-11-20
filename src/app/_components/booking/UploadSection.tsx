@@ -5,6 +5,7 @@ import { X, CheckCircle2, AlertCircle, Loader2, Trash2, ExternalLink, RefreshCw,
 import { uploadToDrive as driveUpload, completeWithRetry, type RetryStatus } from '@/lib/upload-client'
 import { cameraUploadOptions, buildEpisodeFolderName, episodeLeadUsesId } from '@/lib/outlet-folders'
 import { CARD_HOLD_FIX } from '@/lib/reconciler/guards'
+import { heldConfirmWarning } from '@/lib/footage-ready-health'
 // the queue card's readers of the same two replies — one rule for both screens
 import { mergePollState, notifyResultMessage, type MergePoll } from '@/app/_components/CardFootageActions'
 
@@ -343,7 +344,8 @@ export default function UploadSection({ booking, defaultCamera }: Props) {
     const who: string[] = preview.recipients
     if (!who.length) { setNotifyMsg({ ok: false, text: 'ไม่มีผู้รับ (ยังไม่ได้ assign / ไม่มีอีเมล)' }); return }
     // v1.274 — the auto path was holding this one back: say why before a human overrides it
-    const heldWarn = preview.held?.detail ? `⚠️ ระบบอัตโนมัติยังไม่แจ้ง เพราะไฟล์ไม่ครบ (ตรวจ ${String(preview.held.at || '').slice(0, 10)}): ${preview.held.detail}\nส่งตอนนี้ = ทีมจะได้แจ้งว่าพร้อมทั้งที่ยังขาดไฟล์\n\n` : ''
+    // v1.290 — a stale hold (footage changed since) still warns: re-check with a dry-run first
+    const heldWarn = heldConfirmWarning(preview.held, preview.code || booking.bookingCode)
     if (!confirm(`${heldWarn}ส่งลิงก์แจ้ง "footage พร้อมแล้ว" ถึง ${who.length} คน?\n\n${who.join('\n')}`)) return
     setNotifying(true)
     try {

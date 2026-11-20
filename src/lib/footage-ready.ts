@@ -16,6 +16,11 @@
  *                      "พร้อม"; FAILED (set by an admin) is the only release. A card
  *                      silent 20 min and not parked is flipped to ORPHANED + alertOps.
  *   d) NAS drained   — the NAS queue for this code is absent or lastPending=0
+ *                      v1.290 — OR its NAS folder has had no write for FOOTAGE_READY_SETTLE_MS (NAS clock: scan
+ *                      time − lastWrite) and every file still on it is on Drive by name+size (Cloud Sync uploaded
+ *                      but left the copy — nasParked). Cannot tell (Drive error, cut-off listing, no lastWrite,
+ *                      unreadable) = still held. Released this way = the full settle (f), never the MEDIAPRO fast
+ *                      path; the audit row carries `nasParked`. The camera follow-up uses the same rule.
  *   e) footage exists— fresh Drive walk (sweepFootagePayload — dryRun too)
  *                      sees >0 folders and >0 files. The Drive walk is the ONLY
  *                      signal that covers BOTH delivery paths (browser uploads
@@ -52,7 +57,7 @@ import { notifyChatDetailed, notifyEmailDigest } from './notify'
 import { getCachedFootagePayload, computeFootagePayload, type FootagePayload, type BookingForFootagePayload } from './footage-folders'
 import { isPhotoAlbumBooking, bookingNeedsSound } from './outlet-folders'
 import { isShootOver, shootEndsAt, type ShootWindow } from './shoot-window'
-import { latestNasState, nasManifestAge } from './nas-sync'
+import { latestNasState, nasManifestAge, verifyNasMirror, codeOf, type NasManifest } from './nas-sync'
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
@@ -406,6 +411,11 @@ export type FootageReadyScanResult = {
   fastMore: Array<{ code: string; detail: string }>
   /** v1.288 — calendar events given ✅ + the box link this sweep (dry run: would mark) — notices of the last READY_MARK_DAYS */
   calendarMarked: string[]
+  /**
+   * v1.290 — gate (d) codes whose NAS folder sat silent a whole settle with files still on it, compared with Drive
+   * (name+size): ok = every one is on Drive → went on to gates (e)–(g) · !ok = still held as nas-still-sending, with why
+   */
+  nasParked: Array<{ code: string; ok: boolean; detail: string }>
 }
 
 // `program` is widened here (the base type has name only) so the photo-album
@@ -631,9 +641,11 @@ async function watchFastNotices(result: FootageReadyScanResult): Promise<void> {
     const codes = [...new Set(notices.map(n => n.bookingCode).filter((c): c is string => !!c))]
     // in flight NOW (fresh manifest only) — a failed read is said out loud, the other channels still run
     let nasStatuses: Record<string, any> = {}
+    let nasManifest: NasManifest | null = null
+    const settleMs = envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000)
     try {
       const st = await latestNasState()
-      if (st.manifest && !nasManifestAge(st.manifest.at, now).stale) nasStatuses = st.statuses || {}
+      if (st.manifest && !nasManifestAge(st.manifest.at, now).stale) { nasStatuses = st.statuses || {}; nasManifest = st.manifest }
     } catch (e: any) {
       result.errors.push({ code: 'fast-watch', error: `อ่านสถานะ NAS ไม่ได้ — ช่องนี้ไม่ได้ตรวจรอบนี้: ${e?.message || e}` })
     }
@@ -653,7 +665,9 @@ async function watchFastNotices(result: FootageReadyScanResult): Promise<void> {
     for (const n of notices) {
       const code = n.bookingCode || n.entityId!
       if (watched.has(code)) continue // a fast notice and its fast follow-up: one alert
-      const pending = nasStatuses[code]?.lastPending || 0
+      // v1.290 review r2 — files Cloud Sync left on the NAS keep lastPending>0 for good: the SAME parked files as before
+      // the notice are not more footage (nasParkedSince — anything it cannot vouch for still counts)
+      const pending = (nasStatuses[code]?.lastPending || 0) > 0 && !nasParkedSince(nasManifest, code, settleMs, n.at) ? nasStatuses[code].lastPending : 0
       // v1.288 — a drain is written DRAIN_SETTLE_MS after the queue emptied: judge it by when it emptied (changes.zeroSince)
       const emptiedAt = (e: (typeof events)[number]) => {
         const z = (e.changes as { zeroSince?: unknown } | null)?.zeroSince
@@ -685,6 +699,85 @@ async function watchFastNotices(result: FootageReadyScanResult): Promise<void> {
   }
 }
 
+// ── v1.290 — gate (d): files parked on the NAS that are already on Drive ──────
+export const NAS_PARKED_MAX_PER_RUN = 3
+// ponytail: in-process rotation (reset on restart, same as readyMarkTriedAt)
+const nasParkedTriedAt = new Map<string, number>()
+
+/**
+ * '' = every NAS folder carrying this code had had no write (hidden temp files included — the agent's lastWrite, epoch
+ * seconds) for settleMs when the NAS took this scan → worth comparing with Drive. Otherwise why not; held without walking
+ * Drive. Pure. Quiet is measured on the NAS's own clock (manifest.at − lastWrite, review r2): server time against a NAS
+ * timestamp would let a NAS clock running behind release a folder still being written.
+ * Whatever the manifest cannot vouch for holds: unreadable, gone (nas-sync's job), cut-off listing (the agent stops its
+ * walk there, so lastWrite is cut too), no lastWrite, unparsable scan time.
+ */
+export function nasParkedBlocker(manifest: NasManifest | null, code: string, settleMs: number): string {
+  if (!manifest) return 'ไม่มี manifest ของ NAS'
+  if ((manifest.skipped || []).some(n => codeOf(n) === code)) return 'ตัวสแกนอ่านโฟลเดอร์ NAS ของใบนี้ไม่ได้'
+  const folders = manifest.folders.filter(f => codeOf(f.name) === code)
+  if (!folders.length) return 'ไม่เห็นโฟลเดอร์ของใบนี้บน NAS รอบล่าสุด'
+  if (folders.some(f => f.truncated)) return 'รายการไฟล์บน NAS ถูกตัด — เทียบไม่ครบ'
+  if (folders.some(f => typeof f.lastWrite !== 'number' || !Number.isFinite(f.lastWrite))) return 'ตัวสแกนไม่ได้บอกเวลาเขียนล่าสุด'
+  const scannedAt = Date.parse(manifest.at)
+  if (!Number.isFinite(scannedAt)) return `อ่านเวลาสแกนของ NAS ไม่ได้ (${String(manifest.at).slice(0, 40)})`
+  const quietMs = scannedAt - nasNewestWriteMs(folders)
+  if (quietMs < settleMs) return `NAS เขียนไฟล์ล่าสุด ${Math.max(0, Math.round(quietMs / 60_000))} นาทีก่อนสแกนรอบล่าสุด`
+  return ''
+}
+
+/** newest lastWrite (ms, NAS clock) of folders nasParkedBlocker already vouched for */
+const nasNewestWriteMs = (folders: NasManifest['folders']) => Math.max(...folders.map(f => (f.lastWrite as number) * 1000))
+
+/**
+ * v1.290 review r2 — what a pending NAS queue for this code means AFTER a notice: true = the same parked files that were
+ * there before it (NAS quiet a whole settle as of this scan AND its newest write not after the notice) — not more
+ * footage. Anything the manifest cannot vouch for, or any write after the notice, = false (counted, loud).
+ */
+export function nasParkedSince(manifest: NasManifest | null, code: string, settleMs: number, noticeAt: Date): boolean {
+  if (nasParkedBlocker(manifest, code, settleMs)) return false
+  return nasNewestWriteMs(manifest!.folders.filter(f => codeOf(f.name) === code)) <= noticeAt.getTime()
+}
+
+/** Every file on the NAS under this code, by name+size, on Drive (landing + every folder named with the code)? Never throws. */
+async function nasParkedOnDrive(manifest: NasManifest | null, code: string): Promise<{ ok: boolean; detail: string; error?: boolean; missing: string[] }> {
+  const folders = (manifest?.folders || []).filter(f => codeOf(f.name) === code)
+  // verifyNasMirror of no folders = allMatch — never a pass
+  if (!folders.length) return { ok: false, error: true, detail: 'ไม่เห็นโฟลเดอร์ของใบนี้บน NAS', missing: [] }
+  try {
+    const v = await verifyNasMirror({ at: manifest!.at, folders })
+    const nasFiles = v.folders.reduce((n, f) => n + f.nasFiles, 0)
+    const short = v.folders.reduce((n, f) => n + f.missingOnDrive, 0)
+    if (v.allMatch && short === 0) return { ok: true, detail: `ไฟล์ค้างบน NAS ${nasFiles} ไฟล์ อยู่บน Drive ครบแล้ว (ชื่อ+ขนาด)`, missing: [] }
+    const missing = v.folders.flatMap(f => f.missingSample)
+    return { ok: false, detail: `ไฟล์ค้างบน NAS ${short}/${nasFiles} ไฟล์ไม่มีบน Drive (ชื่อ+ขนาด): ${missing.slice(0, 3).join(', ')}${short > 3 ? ' …' : ''}`, missing }
+  } catch (e: any) {
+    return { ok: false, error: true, detail: `เทียบไฟล์ค้างบน NAS กับ Drive ไม่ได้ — ถือไว้: ${e?.message || e}`, missing: [] }
+  }
+}
+
+/**
+ * nasParkedOnDrive + what both callers (first notice, camera follow-up) do with a "no": a Drive error is LOUD
+ * (result.errors) and holds · files missing = ops alert (real run only, once per key per week). The alert says until
+ * when the auto path keeps re-checking and what a human does after — it must not promise a release it will not make.
+ */
+async function nasParkedCheck(
+  manifest: NasManifest | null, code: string, settleMs: number, result: FootageReadyScanResult,
+  hold: { key: string; what: string; until: Date; after: string },
+): Promise<Awaited<ReturnType<typeof nasParkedOnDrive>>> {
+  const v = await nasParkedOnDrive(manifest, code)
+  if (v.error) result.errors.push({ code, error: `nas-parked: ${v.detail}` }) // fail closed, said out loud
+  else if (!v.ok && !result.dryRun) {
+    const until = new Date(hold.until.getTime() + 7 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ')
+    await alertOps(hold.key, `ไฟล์ค้างบน NAS ไม่มีบน Drive — ${code}`,
+      `${code}: โฟลเดอร์ NAS ของใบนี้ไม่มีอะไรเขียนมาเกิน ${Math.round(settleMs / 3_600_000)} ชม. แต่${v.detail}\n${v.missing.join('\n')}\n` +
+      `${hold.what} ถูกถือไว้ (nas-still-sending) · Cloud Sync ค้าง/ข้ามไฟล์? ตรวจบน NAS\n` +
+      `ระบบเทียบใหม่ทุกรอบถึง ${until} น. เท่านั้น — ขึ้นครบในช่วงนั้นปล่อยเอง · หลังจากนั้นระบบไม่ดูใบนี้แล้ว: ${hold.after}`,
+      7 * DAY)
+  }
+  return v
+}
+
 async function runReadySweep(
   opts: { dryRun?: boolean; codes?: string[] },
 ): Promise<FootageReadyScanResult> {
@@ -701,7 +794,7 @@ async function runReadySweep(
 
   const result: FootageReadyScanResult = {
     dryRun, forced, audience, scanned: 0, eligible: 0, walked: 0, deferred: 0, deferredCodes: [],
-    notified: [], settling: [], skipped: [], errors: [], followedUp: [], followUpWaiting: [], fast: [], fastMore: [], calendarMarked: [],
+    notified: [], settling: [], skipped: [], errors: [], followedUp: [], followUpWaiting: [], fast: [], fastMore: [], calendarMarked: [], nasParked: [],
   }
   let inactive: string[] | undefined // v1.264 — users.active=false, read once per scan and only when a notice goes out
 
@@ -779,6 +872,7 @@ async function runReadySweep(
   const nasSeenAt = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? Date.parse(nasState.manifest.at) : NaN
 
   const eligible: CandidateRow[] = []
+  const parked: CandidateRow[] = [] // v1.290 — held by gate (d) alone, NAS folder silent a whole settle: compared with Drive below
   for (const b of rows) {
     const code = b.bookingCode as string
     // callTime — an overnight single-day shoot (wrap ≤ call) is not over on its own shoot day's morning
@@ -803,9 +897,39 @@ async function runReadySweep(
     }
     const nas = nasStatuses[code]
     if (nas && (nas.lastPending || 0) > 0) {
-      result.skipped.push({ code, reason: 'nas-still-sending' }); continue
+      const why = nasParkedBlocker(nasState.manifest, code, settleMs)
+      if (why) result.skipped.push({ code, reason: 'nas-still-sending', detail: `NAS ค้าง ${nas.lastPending} ไฟล์ · ${why}` })
+      else parked.push(b)
+      continue
     }
     eligible.push(b)
+  }
+  // v1.290 — files left on the NAS after Cloud Sync uploaded them keep lastPending>0 for good (KND-TMH-261117-01: 100
+  // files untouched since 18 Nov, every one on Drive). Read-only Drive compare — the dry run checks the same codes and
+  // decides the same; only the rotation stamp and the ops alert are the real run's. Capped + least-recently-checked
+  // first: each check lists the landing and every folder named with the code.
+  const byTry = [...parked].sort((x, y) => (nasParkedTriedAt.get(x.id) || 0) - (nasParkedTriedAt.get(y.id) || 0))
+  const parkedCap = forced.length > 0 ? byTry.length : NAS_PARKED_MAX_PER_RUN
+  for (const b of byTry.slice(parkedCap)) {
+    const code = b.bookingCode as string
+    result.skipped.push({ code, reason: 'nas-still-sending', detail: `NAS ค้าง ${nasStatuses[code].lastPending} ไฟล์ (นิ่งแล้ว) — เทียบกับ Drive รอบหน้า` })
+  }
+  // review r2 — released here = the NAS still reports files for this code: never the MEDIAPRO fast path (the full settle,
+  // readyPath 'settle'), and the notice's audit row says so. watchFastNotices would otherwise read those very parked
+  // files as "more footage after a fast notice".
+  const parkedReleased = new Map<string, string>() // booking id → why it was released
+  for (const b of byTry.slice(0, parkedCap)) {
+    const code = b.bookingCode as string
+    if (!dryRun) nasParkedTriedAt.set(b.id, now.getTime())
+    const v = await nasParkedCheck(nasState.manifest, code, settleMs, result, {
+      key: `nas-parked-missing:${code}`, what: 'แจ้ง "footage พร้อม" ของใบนี้',
+      // the window the sweep reads: shootDate/shootEndDate ≥ now − lookback (@db.Date = 00:00Z)
+      until: new Date(new Date(b.shootEndDate || b.shootDate).getTime() + lookbackDays * DAY),
+      after: `ขึ้นครบเมื่อไรสั่ง footage-ready/run?codes=${code} เอง (ตรวจทุกด่านเหมือนเดิม)`,
+    })
+    result.nasParked.push({ code, ok: v.ok, detail: v.detail })
+    if (v.ok) { eligible.push(b); parkedReleased.set(b.id, v.detail); continue }
+    result.skipped.push({ code, reason: 'nas-still-sending', detail: v.detail })
   }
   result.eligible = eligible.length
 
@@ -846,7 +970,7 @@ async function runReadySweep(
         // v1.287 — MEDIAPRO fast path. Only once these exact counts were already seen by an earlier walk at least
         // verifiedSettleMs ago (one sweep): a card still being copied grows the counts or shows up on the NAS
         // scan (~10 min) in between. At most ONE gate per walk either way, so a sweep costs no more than before.
-        if (!decision.write && snapshot && evaluateSettle(counts, snapshot, now, verifiedSettleMs).settled) {
+        if (!decision.write && snapshot && !parkedReleased.has(b.id) && evaluateSettle(counts, snapshot, now, verifiedSettleMs).settled) {
           const known = readFastNo(b.readySnapshot, counts)
           if (known) result.fast.push({ code, ok: false, detail: known, cached: true })
           else if (!(nasSeenAt > Date.parse(snapshot.at))) {
@@ -940,6 +1064,8 @@ async function runReadySweep(
           fileCount: payload.fileCount,
           mediapro: verified,
           readyPath, // v1.287 — 'mediapro' = sent on MEDIAPRO's word, without the long settle
+          // v1.290 — sent while the NAS still reported files for this code (all on Drive by name+size): the lasting trace
+          ...(parkedReleased.has(b.id) ? { nasParked: parkedReleased.get(b.id) } : {}),
           ...(cov.gap ? { cameraGap: cov.gap, cameraCams: cov.cams } : {}), // v1.268 — the follow-up pass looks for this
           emailError: sent.error,
           forced: forced.length > 0 || undefined,
@@ -1041,7 +1167,21 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
         // v1.277 — same hold as the first notice: an open or dead field card is not "arrived"
         const openCards = await prisma.upload.count({ where: { bookingId: b.id, fileName: { startsWith: CARD_PREFIX }, status: { in: ['UPLOADING', 'ORPHANED'] } } })
         if (openCards > 0) { wait('ส่งจากหน้างานยังไม่ครบ'); continue }
-        if ((nasStatuses[code]?.lastPending || 0) > 0) { wait('NAS ยังส่งไม่หมด'); continue }
+        // v1.290 review r2 — the same parked rule as gate (d): a NAS folder quiet a whole settle whose files are all on
+        // Drive no longer holds this forever. One compare per follow-up candidate (≤ FOLLOWUP_MAX_PER_RUN a sweep).
+        let nasParked = ''
+        const pending = nasStatuses[code]?.lastPending || 0
+        if (pending > 0) {
+          const why = nasParkedBlocker(nasState.manifest, code, settleMs)
+          if (why) { wait(`NAS ยังส่งไม่หมด (ค้าง ${pending} ไฟล์ · ${why})`); continue }
+          const v = await nasParkedCheck(nasState.manifest, code, settleMs, result, {
+            key: `nas-parked-missing-followup:${code}`, what: 'ฉบับ "Footage ครบแล้ว" (ตามกล้อง) ของใบนี้',
+            until: new Date(w.at.getTime() + FOLLOWUP_DAYS * DAY),
+            after: 'บอกทีมในใบเองเมื่อกล้องที่ขาดขึ้น Drive ครบ',
+          })
+          if (!v.ok) { wait(`NAS ยังส่งไม่หมด (ค้าง ${pending} ไฟล์ นิ่งแล้ว · ${v.detail})`); continue }
+          nasParked = v.detail
+        }
         const gate = await mediaproGateFor(b, code)
         if (!gate) { wait('ตรวจกล่องไม่ได้ (Drive)'); continue }
         if (!gate.ok) { wait(gate.text); continue }
@@ -1055,7 +1195,8 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
         // review r2 — like the first notice: the NAS must have reported AFTER the newest file arrived
         const newest = newestFileAt((gate.files || []).filter(isFootageFile))
         const nasAfter = !!nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale && Date.parse(nasState.manifest.at) > newest
-        const short = nasAfter && !fastPathBlocker(gate, b)
+        // parked = never the short wait (same as the first notice): the watch would read those files as "more footage"
+        const short = !nasParked && nasAfter && !fastPathBlocker(gate, b)
         const quiet = short ? Math.min(verifiedSettleMs, settleMs) : settleMs
         if (now.getTime() - newest < quiet) { wait('ไฟล์ยังทยอยเข้า — รอให้นิ่ง'); continue }
         if (result.dryRun) { result.followedUp.push(code); continue }
@@ -1075,6 +1216,7 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
                 ...(sent.skippedInactive.length ? { skippedInactive: sent.skippedInactive } : {}),
                 cameraGapBefore: first.gap, cams: cov.cams, fileCount: gate.files?.length || 0, mediapro: gate.text,
                 readyPath: short && quiet < settleMs ? 'mediapro' : 'settle', // v1.287 — watchFastNotices watches the short ones
+                ...(nasParked ? { nasParked } : {}), // v1.290 — sent while the NAS still reported files for this code
                 emailError: sent.error, operatorChannels: sent.operatorChannels,
               })),
             },
