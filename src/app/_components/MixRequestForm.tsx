@@ -415,7 +415,16 @@ export default function MixRequestForm({ onDone, initialBookingCode }: {
           {truncated && <span className="text-amber-700"> · แสดงแค่ {bookings.length} ใบ (เรียงวันถ่ายใหม่→เก่า) ถ้าไม่เจอ ใช้แบบใส่รหัส</span>}
         </p>
         {rows.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-500">ไม่มีงานที่ตรงกับ &quot;{filter.trim()}&quot;</p>
+          // v1.291 — ช่องนี้กรองแค่ลิสต์ "งานของฉัน" ที่โหลดมา (ไม่เกิน 60 ใบ ในช่วงวัน) · คนพิมพ์ EP ID ของงานเก่ากว่า/ของคนอื่น
+          // เคยเจอแค่ "ไม่มีงานที่ตรงกับ…" แล้วเข้าใจว่าระบบไม่มีรหัสนั้น → ส่งรหัสเดิมไปค้นทั้งระบบได้ในคลิกเดียว
+          <div className="mt-2 text-sm text-gray-600">
+            <p>ไม่มีใน &quot;งานของฉัน&quot; ที่ตรงกับ &quot;{filter.trim()}&quot; — ลิสต์นี้มีแค่งานของคุณในช่วงวันข้างบน ไม่ใช่ทั้งระบบ</p>
+            <button
+              type="button"
+              onClick={() => { const q = filter.trim(); setMode('code'); setErr(null); setCode(q); runCheck(q) }}
+              className="mt-1 underline text-gray-900"
+            >ค้นทั้งระบบด้วยรหัส &quot;{filter.trim()}&quot;</button>
+          </div>
         ) : (
           <ul className="mt-2 max-h-80 overflow-y-auto border border-gray-200 rounded-md bg-white divide-y divide-gray-100">
             {rows.map(b => {
