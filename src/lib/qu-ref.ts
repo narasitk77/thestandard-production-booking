@@ -131,6 +131,10 @@ export function agencyRefForEdit(
   ruleApplies: boolean,
 ): { value: string | null } | { error: string } {
   if (!raw || !ruleApplies) return { value: raw || null }
+  // v1.291 — a value sent back untouched stays exactly as stored: forms resend agencyRef on every
+  // save, and the dash normalisation would otherwise rewrite a legacy 'QU4862' nobody edited
+  // (audit row + "[แก้ไขงาน] Agency Ref" mail + sheet + calendar push for a change no one made).
+  if (raw === stored) return { value: stored }
   if (isAcceptableQuRef(raw)) return { value: normalizeQuRef(raw) }
   if (normalizeQuRef(raw) === normalizeQuRef(stored)) return { value: stored ?? null }
   return { error: quRefRejectMessage(raw) }

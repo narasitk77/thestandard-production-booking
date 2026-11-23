@@ -1267,7 +1267,7 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
                 <div className="text-xs text-gray-400 mb-0.5">Agency Ref</div>
                 {/* v1.183 — ตัวยึด "ยังไม่มีเลข QU" ต้องอ่านออกทันทีว่ายังไม่ใช่เลขจริง
                     ตัวตัดสินเดียวกับบอทเตือน/หน้าใบจอง (needsRealQuRef): ว่าง ตัวยึด หรือข้อความไม่มีเลข */}
-                {needsRealQuRef(booking.agencyRef) ? (
+                {booking.category === 'ADVERTORIAL' && needsRealQuRef(booking.agencyRef) ? (
                   <div className="text-amber-700">⏳ ยังไม่มีเลข QU{booking.agencyRef ? ` (${booking.agencyRef})` : ''} — ต้องกลับมาเติมเลขจริง</div>
                 ) : (
                   <div className="text-gray-800">{booking.agencyRef || '—'}</div>

@@ -85,7 +85,7 @@ beforeEach(() => {
 const settle = async () => { for (let i = 0; i < 60; i++) await new Promise(r => setImmediate(r)) }
 
 const studio = (o: any = {}) => ({
-  id: 'b1', bookingCode: 'TSS-SCI-261216-01', locationId: 'tsd-studio-2', locationName: 'Studio 2 (TSD, 1/F)',
+  id: 'b1', bookingCode: 'TSS-SCI-261216-01', shootType: 'STUDIO', locationId: 'tsd-studio-2', locationName: 'Studio 2 (TSD, 1/F)',
   shootDate: new Date(`${DAY}T00:00:00Z`), shootEndDate: null, callTime: '13:00', estimatedWrap: '15:00',
   producer: 'P', producerEmail: OWNER, createdByEmail: OWNER, projectName: null,
   outlet: { code: 'TSS', name: 'The Secret Sauce' }, program: { name: 'Show' }, episodes: [],
@@ -125,6 +125,13 @@ test('manual-hold job moved past its hand-made hold is re-checked at once', asyn
   assert.equal(current.roomBookingNo, 'BK-0900')
 })
 
+test('an INVALID job the producer just fixed is retried at once (was: up to 6 h)', async () => {
+  current = studio({ roomBookingStatus: 'INVALID', roomBookingError: 'hub: bad payload' })
+  sync.resyncRoomForBooking('b1', 'เจ้าของงานแก้: callTime')
+  await settle()
+  assert.equal(posts.length, 1)
+})
+
 test('other no-room states are left to the hourly reconcile (no POST)', async () => {
   for (const [s, e] of [['UNKNOWN', 'timeout'], ['SKIPPED', 'skip: no-location'], [null, null]]) {
     current = studio({ roomBookingStatus: s, roomBookingError: e })
@@ -141,7 +148,8 @@ test('room released after an edit but the new location is not a room → ops is 
   assert.equal(cancels.length, 1)
   assert.equal(current.roomBookingNo, null, 'the old room was released')
   assert.equal(current.roomBookingError, 'skip: no-location')
-  assert.deepEqual(alerts.map(a => a.key), ['room-lost:TSS-SCI-261216-01'], 'was: silent on every layer')
+  // v1.291 review: same key as the reconciler's daily room-unresolved alert, so the hourly pass does not repeat it
+  assert.deepEqual(alerts.map(a => a.key), ['room-unresolved:TSS-SCI-261216-01'], 'was: silent on every layer')
   assert.match(alerts[0].text, /BK-0555/)
   assert.match(alerts[0].text, /ชื่อสถานที่ "Studio 2 \(TSD\)" ไม่ตรงกับห้องในระบบ/)
 })

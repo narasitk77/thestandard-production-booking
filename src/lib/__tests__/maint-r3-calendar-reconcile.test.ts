@@ -25,6 +25,8 @@ let detailsCalls: any[] = []
 let event: any
 let onEventRead: (() => void) | null = null
 let deletedIds: string[] = []
+/** null = the main pass gets the row (the mock ignores its where); [] = a CONFIRMED-only main pass skips it */
+let mainRows: any[] | null = null
 
 const matches = (where: any): boolean => Object.entries(where).every(([k, v]: [string, any]) => {
   if (k === 'OR') return v.some(matches)
@@ -42,7 +44,8 @@ mock.module('../db', {
     prisma: {
       booking: {
         findUnique: async ({ select }: any) => (select ? { calendarEventId: row.calendarEventId } : { ...row }),
-        findMany: async ({ where }: any) => (where.calendarEventId ? [] : [{ ...row }]),
+        findMany: async ({ where }: any) => (where.calendarSyncError ? (matches(where) ? [{ ...row }] : [])
+          : where.calendarEventId ? [] : (mainRows ?? [{ ...row }])),
         update: async ({ data }: any) => { write(data); return { ...row } },
         updateMany: async ({ where, data }: any) => {
           if (!matches(where)) return { count: 0 }
@@ -100,7 +103,7 @@ beforeEach(() => {
     outlet: { code: 'TSS', name: 'The Secret Sauce' }, program: { code: 'TSS', name: 'TSS' }, episodes: [],
   }
   event = { exists: true, attendees: ['crew@x.co', 'pro@x.co'], htmlLink: null, start: WANT.startTime, end: WANT.endTime }
-  audits = []; alerts = []; attendeeCalls = []; detailsCalls = []; deleteOk = true; detailsOk = true; onEventRead = null; deletedIds = []
+  audits = []; alerts = []; attendeeCalls = []; detailsCalls = []; deleteOk = true; detailsOk = true; onEventRead = null; deletedIds = []; mainRows = null
 })
 
 // ── 1. removeCancelledBookingEvent ─────────────────────────────────────────
@@ -260,6 +263,36 @@ test('a failed QU push does not replace a pending full-details marker (that retr
   detailsCalls = []
   await mod.reconcileSingleBooking('b1')
   assert.deepEqual(detailsCalls, [{ sendUpdates: 'all' }])
+})
+
+test('COMPLETED + failed QU push: the tick retries it description-only and silent (the main pass reads CONFIRMED only)', async () => {
+  detailsOk = false
+  await mod.pushCalendarDetails('ev1', row, QU_PUSH)
+  row.status = 'COMPLETED'
+  mainRows = []                       // the real main query never returns a COMPLETED row
+  detailsOk = true; detailsCalls = []
+  await mod.reconcileCalendarGuests({})
+  assert.deepEqual(detailsCalls, [QU_PUSH], 'was: never retried although the marker promised it')
+  assert.equal(row.calendarSyncStatus, 'OK')
+  assert.equal(row.calendarSyncError, null)
+  assert.ok(audits.some(a => a.action === 'calendar.reconcile_details_patched' && a.changes.completed && a.changes.sendUpdates === 'none'))
+  // still failing → stays FAILED with the same marker, counted, no guest mail path
+  detailsOk = false
+  await mod.pushCalendarDetails('ev1', row, QU_PUSH)
+  const QU_MARKER = row.calendarSyncError
+  detailsCalls = []
+  const r = await mod.reconcileCalendarGuests({})
+  assert.deepEqual(detailsCalls, [QU_PUSH])
+  assert.equal(row.calendarSyncError, QU_MARKER)
+  assert.equal(r.failed, 1)
+})
+
+test('COMPLETED with a FULL details marker is not touched by the QU sweep (a full retry could mail guests)', async () => {
+  row.status = 'COMPLETED'; row.calendarSyncStatus = 'FAILED'; row.calendarSyncError = MARKER
+  mainRows = []
+  detailsCalls = []
+  await mod.reconcileCalendarGuests({})
+  assert.deepEqual(detailsCalls, [])
 })
 
 // ── 6. auto-complete mid-create (adversarial review 23 Nov, sibling of SPT-OTH-261106-02) ──

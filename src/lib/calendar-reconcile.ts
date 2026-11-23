@@ -1005,6 +1005,7 @@ export async function reconcileCalendarGuests(options: {
   }
 
   await sweepCancelledEvents(result, options)
+  await sweepCompletedDescriptionRetries(result, options)
   // Rides this tick for its cadence (10 min, in the web process that owns the append queue) — it is
   // not a calendar job, so its own failure never fails the calendar pass. Failures alert inside it;
   // a throw (DB down) gets a line Hermes' BAD_RE catches.
@@ -1017,6 +1018,60 @@ export async function reconcileCalendarGuests(options: {
 }
 
 const CANCELLED_SWEEP_LIMIT = 50
+const COMPLETED_DESC_RETRY_LIMIT = 20
+
+/**
+ * v1.291 — a producer fills in the QU on a COMPLETED advertorial (the main way QUs arrive);
+ * its description-only push failed (DESCRIPTION_PATCH_FAILED). The main pass is CONFIRMED-only,
+ * so without this the marker's "reconciler retries every 10 minutes" was a promise nobody kept.
+ * Retries ONLY that silent description patch — never the full processBooking (it could re-create
+ * a past event or patch guests, which mails people). A still-failing row stays FAILED, counts in
+ * result.failed, and rotates by updatedAt so it cannot starve the rest.
+ */
+async function sweepCompletedDescriptionRetries(result: ReconcileResult, options: { actorEmail?: string | null; dryRun?: boolean }) {
+  if (options.dryRun) return
+  const rows = await prisma.booking.findMany({
+    where: {
+      deletedAt: null,
+      status: 'COMPLETED',
+      calendarEventId: { not: null },
+      calendarSyncStatus: 'FAILED',
+      calendarSyncError: DESCRIPTION_PATCH_FAILED,
+    },
+    include: {
+      outlet: true,
+      program: true,
+      episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
+    },
+    orderBy: { updatedAt: 'asc' },
+    take: COMPLETED_DESC_RETRY_LIMIT,
+  })
+  const retry = EDIT_RETRY.get(DESCRIPTION_PATCH_FAILED)!
+  for (const b of rows) {
+    const ok = await updateCalendarEventDetails(b.calendarEventId!, b as any, retry)
+      .catch((e: any) => { console.error(`[calendar-reconcile] QU description retry threw for ${b.bookingCode || b.id}:`, e?.message || e); return false })
+    if (!ok) {
+      result.failed += 1
+      result.items.push({ bookingId: b.id, bookingCode: b.bookingCode, eventId: b.calendarEventId, action: 'failed',
+        assignedEmails: cleanEmails(b.assignedEmails), error: DESCRIPTION_PATCH_FAILED })
+      await prisma.booking.updateMany({ where: { id: b.id, calendarSyncError: DESCRIPTION_PATCH_FAILED }, data: { calendarLastSyncedAt: new Date() } })
+      continue
+    }
+    // CAS on the same marker: a newer full-details failure written meanwhile is not wiped
+    await prisma.booking.updateMany({
+      where: { id: b.id, calendarSyncStatus: 'FAILED', calendarSyncError: DESCRIPTION_PATCH_FAILED },
+      data: { calendarSyncStatus: 'OK', calendarSyncError: null, calendarLastSyncedAt: new Date() },
+    })
+    await logAudit({
+      actorEmail: options.actorEmail ?? 'calendar-reconcile',
+      action: 'calendar.reconcile_details_patched',
+      entityType: 'Booking',
+      entityId: b.id,
+      bookingCode: b.bookingCode,
+      changes: { eventId: b.calendarEventId, reason: 'retry-after-failed-edit', sendUpdates: retry.sendUpdates, descriptionOnly: true, completed: true },
+    })
+  }
+}
 
 /**
  * Cancelled / soft-deleted bookings that still hold a calendarEventId = the

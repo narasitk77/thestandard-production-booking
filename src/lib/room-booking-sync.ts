@@ -438,7 +438,7 @@ export function resyncRoomForBooking(bookingId: string, reason: string): void {
         where: { id: bookingId },
         select: {
           roomBookingNo: true, bookingCode: true, status: true, deletedAt: true,
-          roomBookingStatus: true, roomBookingError: true, locationName: true,
+          roomBookingStatus: true, roomBookingError: true, locationName: true, shootType: true,
         },
       })
       if (!b || b.deletedAt || b.status === 'CANCELLED') return  // เส้นทางยกเลิกดูแลอยู่แล้ว
@@ -493,12 +493,15 @@ export function resyncRoomForBooking(bookingId: string, reason: string): void {
       })
       // 2026-11-23 — ห้องเดิมคืนไปแล้ว แต่ตารางใหม่ประกอบเป็นห้อง/เวลาไม่ได้ = ใบนี้ไม่มีห้อง และไม่มีอะไรจองให้
       // (TSS-SCI-261209-01: แก้สถานที่เป็น 'Studio 2 (TSD)' พิมพ์เอง → BK-0555 ถูกคืน → SKIPPED no-location เงียบทุกชั้น)
-      if (s.status === 'SKIPPED' && UNRESOLVED_SKIPS.has(s.reason)) {
+      // v1.291 review — same key + 24 h as the reconciler's 'room-unresolved' (STUDIO only, like it), so an edit that
+      // loses the room alerts once at once and the hourly reconciler does not alert the same thing again.
+      if (s.status === 'SKIPPED' && UNRESOLVED_SKIPS.has(s.reason) && b.shootType === 'STUDIO') {
         const code = b.bookingCode || bookingId
-        const a = await alertOps(`room-lost:${code}`, `[probook] ${code} ห้องเดิมถูกคืนแล้ว แต่ตารางใหม่จองห้องไม่ได้`,
+        const a = await alertOps(`room-unresolved:${code}`, `[probook] ${code} ห้องเดิมถูกคืนแล้ว แต่ตารางใหม่จองห้องไม่ได้`,
           `🚪 ${code} ห้องเดิม${r.status === 'CANCELLED' ? ` (${r.bookingNo})` : ''} ถูกคืนแล้วหลังแก้ใบ (${reason})\n` +
           `   แต่ตารางใหม่จองห้องไม่ได้: ${unresolvedRoomText(s.reason, b.locationName)}\n` +
-          `   ใบนี้ไม่มีห้อง — แก้ใบให้เลือกห้องจากรายการ / กรอกเวลาให้ครบ หรือจองมือที่ ${ROOM_BOOKING_BASE_URL}/booking`)
+          `   ใบนี้ไม่มีห้อง — แก้ใบให้เลือกห้องจากรายการ / กรอกเวลาให้ครบ หรือจองมือที่ ${ROOM_BOOKING_BASE_URL}/booking`,
+          24 * 3_600_000)
         if (a.attempted && !a.delivered) console.error(`[room-booking] room-lost ${code}: ops alert reached no channel`)
       }
     } catch (e: any) {
@@ -520,7 +523,8 @@ async function retryUnbookedNow(
   b: { bookingCode: string | null; roomBookingStatus: string | null; roomBookingError: string | null },
   reason: string,
 ): Promise<void> {
-  const retry = b.roomBookingStatus === 'CONFLICT'
+  // v1.291 review — INVALID too: the reconciler spaces INVALID 6 h, so a producer who fixes the data would wait that long
+  const retry = b.roomBookingStatus === 'CONFLICT' || b.roomBookingStatus === 'INVALID'
     || (b.roomBookingStatus === 'SKIPPED' && b.roomBookingError === 'skip: manual-hold')
   if (!retry || !roomBookingEnabled()) return
   const claimed = await prisma.booking.updateMany({
