@@ -24,6 +24,7 @@ let attendeeCalls: any[] = []
 let detailsCalls: any[] = []
 let event: any
 let onEventRead: (() => void) | null = null
+let deletedIds: string[] = []
 
 const matches = (where: any): boolean => Object.entries(where).every(([k, v]: [string, any]) => {
   if (k === 'OR') return v.some(matches)
@@ -31,6 +32,7 @@ const matches = (where: any): boolean => Object.entries(where).every(([k, v]: [s
   if (v instanceof Date) return cur instanceof Date && cur.getTime() === v.getTime()
   // Prisma `not` never matches NULL (SQL <>)
   if (v && typeof v === 'object' && 'not' in v) return cur != null && cur !== v.not
+  if (v && typeof v === 'object' && 'in' in v) return v.in.includes(cur)
   return cur === v
 })
 const write = (data: any) => { Object.assign(row, data, { updatedAt: new Date(row.updatedAt.getTime() + 1000) }) }
@@ -68,7 +70,7 @@ mock.module('../google-calendar', {
   namedExports: {
     computeEventTimes: () => WANT,
     createCalendarEvent: async () => 'ev-new',
-    deleteCalendarEvent: async () => deleteOk,
+    deleteCalendarEvent: async (id: string) => { deletedIds.push(id); return deleteOk },
     getCalendarEventAttendees: async () => { onEventRead?.(); return event },
     updateCalendarEventAttendees: async (id: string, emails: string[]) => { attendeeCalls.push({ id, emails }); return true },
     updateCalendarEventDetails: async (_id: string, _b: any, opts: any) => { detailsCalls.push(opts); return detailsOk },
@@ -98,7 +100,7 @@ beforeEach(() => {
     outlet: { code: 'TSS', name: 'The Secret Sauce' }, program: { code: 'TSS', name: 'TSS' }, episodes: [],
   }
   event = { exists: true, attendees: ['crew@x.co', 'pro@x.co'], htmlLink: null, start: WANT.startTime, end: WANT.endTime }
-  audits = []; alerts = []; attendeeCalls = []; detailsCalls = []; deleteOk = true; detailsOk = true; onEventRead = null
+  audits = []; alerts = []; attendeeCalls = []; detailsCalls = []; deleteOk = true; detailsOk = true; onEventRead = null; deletedIds = []
 })
 
 // ── 1. removeCancelledBookingEvent ─────────────────────────────────────────
@@ -258,4 +260,36 @@ test('a failed QU push does not replace a pending full-details marker (that retr
   detailsCalls = []
   await mod.reconcileSingleBooking('b1')
   assert.deepEqual(detailsCalls, [{ sendUpdates: 'all' }])
+})
+
+// ── 6. auto-complete mid-create (adversarial review 23 Nov, sibling of SPT-OTH-261106-02) ──
+// The reconciler walks past-shoot CONFIRMED rows first; a GET /api/bookings auto-completes one while its
+// event is being created. A CONFIRMED-only CAS then deleted the fresh event and the row, now COMPLETED,
+// was never read again (the walk takes CONFIRMED only) — no event for good.
+test('no event yet: auto-complete lands mid-create → the fresh event is kept and the row is OK', async () => {
+  row.calendarEventId = null; row.calendarSyncStatus = 'FAILED'
+  onEventRead = () => { row.status = 'COMPLETED' }   // the verify read inside createVerifiedCalendarEvent
+  const r = await mod.reconcileSingleBooking('b1')
+  assert.equal(r!.action, 'created')
+  assert.deepEqual(deletedIds, [])
+  assert.equal(row.calendarEventId, 'ev-new')
+  assert.equal(row.calendarSyncStatus, 'OK')
+  assert.equal(row.status, 'COMPLETED')
+})
+
+test('vanished event: auto-complete lands mid-recreate → the fresh event replaces the dead id', async () => {
+  event = { exists: false, attendees: ['crew@x.co', 'pro@x.co'], htmlLink: null }
+  onEventRead = () => { row.status = 'COMPLETED' }
+  const r = await mod.reconcileSingleBooking('b1')
+  assert.equal(r!.action, 'created')
+  assert.deepEqual(deletedIds, [])
+  assert.equal(row.calendarEventId, 'ev-new')
+})
+
+test('cancelled mid-create → the fresh event is still dropped', async () => {
+  row.calendarEventId = null
+  onEventRead = () => { row.status = 'CANCELLED' }
+  await mod.reconcileSingleBooking('b1')
+  assert.deepEqual(deletedIds, ['ev-new'])
+  assert.equal(row.calendarEventId, null)
 })

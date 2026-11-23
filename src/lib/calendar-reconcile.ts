@@ -530,8 +530,11 @@ async function processBooking(
       // v1.146 review fix — also re-check status/deletedAt (matches approve.ts's
       // CAS): a booking cancelled/soft-deleted while this event was being
       // created must not get the fresh event attached to it.
+      // COMPLETED counts as still approved (same as the approve route): this walk takes past-shoot
+      // CONFIRMED rows first, and a GET /api/bookings auto-completing one mid-create made the CAS
+      // miss → the fresh event was deleted and the row, now COMPLETED, was never read again.
       const saved = await prisma.booking.updateMany({
-        where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: null },
+        where: { id: booking.id, status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, calendarEventId: null },
         data: {
           calendarEventId: eventId,
           // v1.32.2 — record sync state alongside the event id so UI
@@ -615,8 +618,9 @@ async function processBooking(
       // v1.146 review fix — also re-check status/deletedAt (matches approve.ts's
       // CAS): a booking cancelled/soft-deleted mid-recreate must not get the
       // fresh event attached to it.
+      // COMPLETED still approved — see the create CAS above
       const savedRe = await prisma.booking.updateMany({
-        where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: booking.calendarEventId },
+        where: { id: booking.id, status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, calendarEventId: booking.calendarEventId },
         data: {
           calendarEventId: eventId,
           calendarSyncStatus: 'OK',
@@ -791,8 +795,9 @@ async function processBooking(
         // create/recreate paths above. A booking cancelled/soft-deleted while
         // the attendees-patch retry was in flight could get this fresh event
         // attached to it, with no cleanup path ever touching it afterward.
+        // COMPLETED still approved — see the create CAS above
         const savedPatchFail = await prisma.booking.updateMany({
-          where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: oldEventId },
+          where: { id: booking.id, status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, calendarEventId: oldEventId },
           data: {
             calendarEventId: eventId,
             calendarSyncStatus: 'OK',
