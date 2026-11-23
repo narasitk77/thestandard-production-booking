@@ -45,7 +45,10 @@ export async function GET(request: NextRequest) {
       recordHeartbeat('room-booking-reconcile',
         // ล้ม + รอห้อง ต้องอยู่ในโน้ต — ใบ CONFLICT ไม่อยู่ใน "ค้าง" แล้ว (ย้ายไป conflictWaiting)
         `ค้าง ${result.staleStuck.length} · ปลดแล้ว ${result.staleCancelled.length} · จองใหม่ ${result.booked.length}` +
-        ` · ล้ม ${result.failed.length} · รอห้อง ${result.conflictWaiting.length}`,
+        ` · ล้ม ${result.failed.length} · รอห้อง ${result.conflictWaiting.length}` +
+        // 2026-11-23 — เดือนที่อ่านไม่ได้ / งานสตูดิโอที่จองห้องให้ไม่ได้ ต้องเห็นในโน้ต (เดิมหายเงียบ)
+        (result.unreadable?.length ? ` · อ่านไม่ได้ ${result.unreadable.join(',')}` : '') +
+        (result.unresolved?.length ? ` · ไม่มีห้อง ${result.unresolved.length}` : ''),
       ).catch(() => {})
     }
     return NextResponse.json(result)

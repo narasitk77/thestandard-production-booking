@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { prisma } from './db'
 import { mcpRequestActorEmail } from './mcp/auth'
 import type { Prisma } from '@prisma/client'
@@ -10,6 +11,7 @@ import {
   findManualHold, bangkokToUtcIso, roomBookingMarker, ROOM_BOOKING_BASE_URL,
 } from './room-booking'
 import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './room-booking-sync'
+import { unresolvedRoomText } from './room-badge'
 
 /**
  * ตัวคืนสภาพการจองห้อง — ทำให้ระบบกลางตรงกับคิวถ่ายของเรา
@@ -76,6 +78,16 @@ export interface RoomReconcileResult {
    * ใบท้ายคิวจึงต้องมีตัวเลขให้เห็น ไม่ใช่หายเงียบ (bug class 4)
    */
   deferred: number
+  /**
+   * 2026-11-23 — เดือน (`YYYY-M`) ที่อ่านจากระบบกลางไม่ได้รอบนี้ · ใบในเดือนนั้นถูกข้ามแบบ "ตัดสินไม่ได้"
+   * เดิมข้ามเงียบ ไม่นับลงช่องไหน — พอร์ทัลล่ม/ย้ายโดเมนทั้งสัปดาห์ log ก็ยังดูปกติ (12–19 ต.ค.)
+   */
+  unreadable: string[]
+  /**
+   * 2026-11-23 — งานสตูดิโอที่ยังไม่มีห้องและระบบจองให้ไม่ได้ เพราะข้อมูลใบจองไม่พอ (ชื่อสถานที่ไม่ตรงห้อง /
+   * ไม่มีเวลา / เวลาพัง) · เดิมตกท้ายลูปเงียบ ๆ (TSS-SCI-261209-01 'Studio 2 (TSD)' ไม่มีห้อง ไม่มีใครรู้)
+   */
+  unresolved: { code: string; reason: string }[]
   dryRun: boolean
 }
 
@@ -170,7 +182,7 @@ export async function reconcileRoomBookings(opts: {
       ...ROOM_BOOKING_SELECT,
       roomBookingNo: true, roomBookingRef: true, roomBookingStatus: true, roomBookingAt: true,
       roomBookingError: true,
-      status: true, deletedAt: true,
+      status: true, deletedAt: true, shootType: true,
     },
     orderBy: { shootDate: 'asc' },
   })
@@ -200,11 +212,14 @@ export async function reconcileRoomBookings(opts: {
 
   const out: RoomReconcileResult = {
     scanned: rows.length, staleCancelled: [], staleStuck: [],
-    wrongRoomReleased: [], vanished: [], notEnabled: [], conflictWaiting: [], booked: [], failed: [], deferred: 0, dryRun,
+    wrongRoomReleased: [], vanished: [], notEnabled: [], conflictWaiting: [], booked: [], failed: [], deferred: 0,
+    unreadable: [], unresolved: [], dryRun,
   }
   let writes = 0
   /** ใบที่ยังไม่มีห้องเพราะ CONFLICT (รอลองใหม่ + ลองแล้วยังชน) → เตือนซ้ำรายวันหลังลูป */
   const stillConflict: any[] = []
+  /** งานสตูดิโอที่ข้อมูลไม่พอจะจองห้อง → เตือนซ้ำรายวันหลังลูป */
+  const unresolvedRows: any[] = []
 
   /**
    * v1.207 — การจองที่ยังมีชีวิตในระบบเขา ดึงเดือนละครั้งแล้วใช้ร่วมกัน
@@ -236,8 +251,12 @@ export async function reconcileRoomBookings(opts: {
       }
       monthCache.set(key, idx)
       return idx
-    } catch {
-      // อ่านไม่ได้ = ตัดสินไม่ได้ → ห้ามสรุปว่าหาย (จะกลายเป็นจองซ้ำ)
+    } catch (e: any) {
+      // อ่านไม่ได้ = ตัดสินไม่ได้ → ห้ามสรุปว่าหาย (จะกลายเป็นจองซ้ำ) — แต่ต้องนับ ไม่ใช่ข้ามเงียบ
+      if (!out.unreadable.includes(key)) {
+        out.unreadable.push(key)
+        console.warn(`[room-reconcile] อ่านระบบกลางเดือน ${key} ไม่ได้ — ข้ามใบในเดือนนั้น:`, e?.message || e)
+      }
       return null
     }
   }
@@ -397,6 +416,17 @@ export async function reconcileRoomBookings(opts: {
       if (!dryRun && !already) await stampSkipped(b.id, 'no-room-mapping')
       continue
     }
+    // 2026-11-23 — งานสตูดิโอที่ข้อมูลไม่พอจะจองห้อง (expectedTarget 'unknown') ไม่มีบล็อกไหนรับ → ตกท้ายลูปเงียบ
+    // (TSS-SCI-261209-01: แก้สถานที่เป็น 'Studio 2 (TSD)' พิมพ์เอง → ห้องเดิมถูกคืน ใบใหม่ไม่มีห้อง ไม่มีป้าย ไม่มีเตือน)
+    // ลงรายการ + stamp เหตุผล (ป้ายบนการ์ด · เฉพาะตอนค่าเปลี่ยน) + เตือน ops วันละครั้งหลังลูป · ไม่นับ writes (ไม่ได้ยิงระบบเขา)
+    // เฉพาะ STUDIO — งานนอกสถานที่ไม่มี locationId เป็นเรื่องปกติ
+    if (!b.roomBookingNo && want.kind === 'unknown' && b.shootType === 'STUDIO' && roomBookingEnabled()) {
+      out.unresolved.push({ code, reason: want.reason })
+      const already = b.roomBookingStatus === 'SKIPPED' && b.roomBookingError === `skip: ${want.reason}`
+      if (!dryRun && !already) await stampSkipped(b.id, want.reason)
+      unresolvedRows.push({ ...b, reason: want.reason })
+      continue
+    }
     if (!b.roomBookingNo && b.roomBookingStatus === 'CONFLICT' && b.roomBookingAt
         && Date.now() - new Date(b.roomBookingAt).getTime() < CONFLICT_RETRY_MS) {
       out.conflictWaiting.push(code)
@@ -474,13 +504,47 @@ export async function reconcileRoomBookings(opts: {
   }
 
   if (!dryRun && out.staleStuck.length > 0) {
-    const lines = out.staleStuck.map(s => `• ${[s.bookingNo, s.code].filter(Boolean).join(' — ')} (${s.reason})`).join('\n')
-    await notifyChat(
-      `🚪 **ห้องค้างในระบบกลาง ${out.staleStuck.length} รายการ**\n` +
-      `คิวถ่ายยกเลิก/ย้ายไปแล้ว แต่ผมปลดห้องเองไม่ได้\n\n${lines}\n\n` +
-      // IT เปิดสิทธิ์ยกเลิกให้ service key แล้ว (25 ส.ค.) — ที่ค้างตรงนี้คือปลดไม่ได้จริงรอบนี้ ระบบลองใหม่เองรอบหน้า
-      `ปลดมือที่ ${ROOM_BOOKING_BASE_URL}/booking — หรือรอรอบถัดไป ระบบจะลองปลดเองอีกครั้ง`,
-    ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
+    // 2026-11-23 — เดิมโพสต์ห้องทีมทุกชั่วโมง หัวตายตัว "คิวถ่ายยกเลิก/ย้ายไปแล้ว" ทั้งที่เหตุผลจริงต่างกัน (ตัดสินไม่ได้ /
+    // ระบบกลางไม่ส่งเวลา / อ่านไม่ได้ / ปลดไม่สำเร็จ) และทิ้งผลการส่ง → alertOps (มีตัวกันซ้ำ + ผลรายช่อง) บรรทัดละใบพร้อม
+    // เหตุผลของใบนั้น · ข้อความเดียวต่อรอบ ไม่ใช่ต่อใบ: ฟีดเขาเปลี่ยนทีเดียวโดนทุกใบที่มีห้อง (~60) = 60 อีเมลพร้อมกัน
+    // key ตามชุดใบ — ชุดใหม่ (มีใบเพิ่ม/ลด) เตือนทันที ชุดเดิมซ้ำวันละครั้ง
+    const set = out.staleStuck.map(s => s.code).sort().join(',')
+    const key = `room-stale:${createHash('sha1').update(set).digest('hex').slice(0, 12)}`
+    const lines = out.staleStuck.map(s => `• ${s.code}${s.bookingNo ? ` (${s.bookingNo})` : ''} — ${s.reason}`).join('\n')
+    const r = await alertOps(key, `[probook] ห้องในระบบกลางต้องตรวจมือ ${out.staleStuck.length} รายการ`,
+      `🚪 ห้องในระบบกลางที่ระบบจัดการเองไม่ได้รอบนี้ ${out.staleStuck.length} รายการ\n${lines}\n` +
+      `   ตรวจ/ปลดมือที่ ${ROOM_BOOKING_BASE_URL}/booking — ระบบลองเองทุกรอบชั่วโมง (เตือนซ้ำวันละครั้งถ้ายังค้าง)`,
+      ROOM_CONFLICT_REPEAT_MS)
+    if (r.attempted && !r.delivered) console.error(`[room-reconcile] stale-room alert (${out.staleStuck.length}) reached no channel`)
+  }
+
+  // 2026-11-23 — พอร์ทัลอ่านไม่ได้ / จองล้มแบบ UNKNOWN·INVALID ต้องถึงคน (เดิมมีแค่ 'ล้ม=N' ใน log ทุกชั่วโมง ไม่มีใครอ่าน
+  // — 12–19 ต.ค. จอง/คืนห้องไม่ได้ 7 วัน) · ไม่นับ CONFLICT: มีเส้นเตือนของตัวเองแล้ว (room-conflict / -waiting)
+  const failing = out.failed.filter(f => f.status === 'UNKNOWN' || f.status === 'INVALID')
+  if (!dryRun && (out.unreadable.length || failing.length)) {
+    const r = await alertOps('room-booking-failing', `[probook] ระบบจองห้องกลางอ่าน/จองไม่ได้`,
+      [
+        `🚪 ระบบจองห้องกลาง ${ROOM_BOOKING_BASE_URL} ใช้งานไม่ได้บางส่วนรอบนี้`,
+        ...(out.unreadable.length ? [`   อ่านเดือนไม่ได้: ${out.unreadable.join(', ')} — ใบในเดือนนั้นตรวจ/จองไม่ได้ (ไม่แตะห้อง)`] : []),
+        ...failing.slice(0, 10).map(f => `   • ${f.code} ${f.status}: ${f.message || '-'}`),
+        ...(failing.length > 10 ? [`   … อีก ${failing.length - 10} ใบ`] : []),
+        '   (เตือนซ้ำทุก 6 ชม. ถ้ายังล้มอยู่)',
+      ].join('\n'))
+    if (r.attempted && !r.delivered) console.error('[room-reconcile] hub-failing alert reached no channel')
+  }
+
+  if (!dryRun) {
+    for (const b of unresolvedRows) {
+      const code = b.bookingCode || b.id
+      const when = `${b.shootDate.toISOString().slice(0, 10)} ${b.callTime || '?'}–${b.estimatedWrap || '?'}`
+      const r = await alertOps(`room-unresolved:${code}`, `[probook] ${code} ยังไม่มีห้อง — ระบบจองให้ไม่ได้`,
+        `🚪 ${code} (งานสตูดิโอ) ยังไม่มีห้อง — ${unresolvedRoomText(b.reason, b.locationName)}\n` +
+        `   ${when} · ระบบจองห้องให้ไม่ได้จนกว่าจะแก้ใบจอง (เลือกห้องจากรายการ / กรอกเวลาให้ครบ) · ` +
+        `จองมือที่ ${ROOM_BOOKING_BASE_URL}/booking\n` +
+        `   (เตือนซ้ำวันละครั้งจนกว่าจะแก้)`,
+        ROOM_CONFLICT_REPEAT_MS)
+      if (r.attempted && !r.delivered) console.error(`[room-reconcile] unresolved-room reminder for ${code} reached no channel`)
+    }
   }
 
   if (!dryRun) {

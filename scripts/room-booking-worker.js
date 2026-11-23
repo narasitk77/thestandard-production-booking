@@ -64,7 +64,10 @@ async function runOnce() {
       ` รอห้อง=${(j.conflictWaiting || []).length}` +
       ((j.conflictWaiting || []).length ? ` (${j.conflictWaiting.join(',')})` : '') +
       // ชนเพดาน max = ใบท้ายคิวยังไม่ได้ตรวจรอบนี้ — ต้องเห็นตัวเลข ไม่งั้นท้ายคิวหายเงียบ
-      (j.deferred ? ` เลื่อนรอบหน้า=${j.deferred} (ชน max=${max})` : ''),
+      (j.deferred ? ` เลื่อนรอบหน้า=${j.deferred} (ชน max=${max})` : '') +
+      // 2026-11-23 — เดือนที่อ่านระบบกลางไม่ได้ (ใบในเดือนนั้นถูกข้าม) / งานสตูดิโอที่ข้อมูลไม่พอจองห้อง — เดิมไม่มีในบรรทัดนี้
+      ((j.unreadable || []).length ? ` อ่านไม่ได้=${j.unreadable.join(',')}` : '') +
+      ((j.unresolved || []).length ? ` ไม่มีห้อง=${j.unresolved.map(u => `${u.code}(${u.reason})`).join(',')}` : ''),
     )
   } catch (err) {
     console.error('[room-booking] run failed:', err?.message || err)

@@ -45,8 +45,13 @@ mock.module('../db', {
 })
 mock.module('../notify', { namedExports: { notifyChat: async (t: string) => { posted.push(t); return true } } })
 mock.module('../audit', { namedExports: { logAudit: async () => {} } })
+const alerts: { key: string; text: string; everyMs?: number }[] = []
 mock.module('../ops-alert', {
-  namedExports: { alertOps: async () => ({ attempted: true, delivered: true, discord: true, lark: false, email: false }) },
+  namedExports: {
+    alertOps: async (key: string, _s: string, text: string, everyMs?: number) => {
+      alerts.push({ key, text, everyMs }); return { attempted: true, delivered: true, discord: true, lark: false, email: false }
+    },
+  },
 })
 mock.module('../room-booking-sync', {
   namedExports: {
@@ -76,7 +81,7 @@ globalThis.fetch = (async (url: any) => {
 
 let mod: typeof import('../room-booking-reconcile')
 before(async () => { mod = await import('../room-booking-reconcile') })
-beforeEach(() => { synced.length = 0; updates.length = 0; posted.length = 0; hubGets = 0; hubDown = false })
+beforeEach(() => { synced.length = 0; updates.length = 0; posted.length = 0; alerts.length = 0; hubGets = 0; hubDown = false })
 
 async function run(opts: { dryRun?: boolean; max?: number } = {}) {
   const saved = { en: process.env.ROOM_BOOKING_ENABLED, rooms: process.env.ROOM_BOOKING_ROOMS, key: process.env.ROOM_BOOKING_SERVICE_KEY }
@@ -192,13 +197,19 @@ test('Lounge (no-room-mapping) gets its "book it yourself" stamp once, without u
 })
 
 test('stale-room notice links the hub portal and no longer says "wait for IT"', async () => {
-  // cancelled booking still holding a room; no service key → cancel is forbidden → staleStuck → crew notice
+  // cancelled booking still holding a room; no service key → cancel is forbidden → staleStuck → notice
+  // 2026-11-23 — the notice is an ops alert now (throttled, delivery checked), not an hourly crew-room post,
+  // and each line carries that booking's own reason instead of a fixed "cancelled/moved" heading
   rows = [row({ id: 'c1', bookingCode: 'CANC-01', status: 'CANCELLED', roomBookingNo: 'BK-0555', roomBookingRef: 555 })]
   const r = await run()
   assert.equal(r.staleStuck.length, 1)
-  assert.equal(posted.length, 1)
-  assert.match(posted[0], /https:\/\/hub\.thestandard\.co\/booking/)
-  assert.doesNotMatch(posted[0], /service\.thestandard\.co|รอ IT/)
+  assert.deepEqual(posted, [], 'no hourly crew-room post')
+  const stale = alerts.filter(a => a.key.startsWith('room-stale:'))
+  assert.equal(stale.length, 1)
+  assert.match(stale[0].text, /https:\/\/hub\.thestandard\.co\/booking/)
+  assert.doesNotMatch(stale[0].text, /service\.thestandard\.co|รอ IT|คิวถ่ายยกเลิก\/ย้ายไปแล้ว/)
+  assert.match(stale[0].text, /CANC-01 \(BK-0555\) — คีย์ยังไม่มีสิทธิ์ยกเลิก/)
+  assert.equal(stale[0].everyMs, 24 * 3_600_000)
 })
 
 after(() => { globalThis.fetch = realFetch })
