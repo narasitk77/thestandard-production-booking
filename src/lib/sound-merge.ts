@@ -14,7 +14,7 @@
 import { prisma } from '@/lib/db'
 import {
   findChildFolder, listChildFolders, copyFileToFolder, listFilesRecursive, findEpisodeFolderUrls,
-  ensureFolderPath, hasDriveCredentials, SOUND_STAGING_DIR, listSoundStagingBookingFolders,
+  ensureFolderPath, hasDriveCredentials, SOUND_STAGING_DIR, listSoundStagingBookingFolders, type DriveFile,
 } from '@/lib/google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode, bookingNeedsSound,
@@ -91,6 +91,62 @@ export async function resolveAudioTarget(
     ? await ensureFolderPath(firstEp.epId, ['AUDIO'])
     : await ensureFolderPath(boxTargetId, ['AUDIO'])
   return { audioId, existingIds }
+}
+
+/**
+ * maint 23 Nov 2026 — what to copy from staging, for BOTH paths (runSoundMerge + mergeBookingSound). Every staging
+ * subfolder used to be poured into one AUDIO folder:
+ *  - the same CONTENT twice in staging (POP-7TG-260826-01: REC-001/REC-002.WAV, identical md5) became two copies in the
+ *    box → copied once now. md5 ONLY — never name|size: WLT-EXI-260701-01's graded WAV at the staging root and the raw
+ *    WAV in RAW/Audio Files share name AND size but not content; a name|size dedupe would drop one of them silently.
+ *  - one NAME for different content (that same pair; also DAY01–03 of a multi-day job) landed side by side in one folder
+ *    and the editor could not tell which was which → such names keep their staging sub-path under AUDIO.
+ * The box dedup is unchanged (name|size against every AUDIO location, recursive). Nothing is ever deleted.
+ */
+export function soundCopyPlan(
+  stagingFiles: DriveFile[],
+  have: Set<string>,
+): Array<{ f: DriveFile; path: string[] }> {
+  const seenMd5 = new Set<string>()
+  const distinct: DriveFile[] = []
+  for (const f of stagingFiles) {
+    if (f.md5 && seenMd5.has(f.md5)) continue // the same content already planned
+    if (f.md5) seenMd5.add(f.md5)
+    distinct.push(f)
+  }
+  const count = new Map<string, number>()
+  for (const f of distinct) count.set(f.name, (count.get(f.name) || 0) + 1)
+  return distinct
+    .filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
+    .map(f => ({ f, path: (count.get(f.name) || 0) > 1 ? f.folderPath : [] }))
+}
+
+/** Copy the planned staging files into the box AUDIO (dry run: plan only). One copy rule for both paths. */
+async function copyStagedAudio(
+  code: string,
+  stagingFiles: DriveFile[],
+  target: { audioId: string | null; existingIds: string[] },
+  dryRun: boolean,
+): Promise<{ planned: number; copied: number; err: number }> {
+  const have = new Set<string>()
+  for (const id of target.existingIds) {
+    for (const f of await listFilesRecursive(id, { maxFiles: 2000 })) have.add(`${f.name}|${f.size ?? ''}`)
+  }
+  const plan = soundCopyPlan(stagingFiles, have)
+  if (dryRun || !plan.length) return { planned: plan.length, copied: 0, err: 0 }
+  const audioId = target.audioId!
+  const dirs = new Map<string, string>()
+  let copied = 0, err = 0
+  for (const { f, path } of plan) {
+    try {
+      const key = path.join('/')
+      let dest = key ? dirs.get(key) : audioId
+      if (!dest) { dest = await ensureFolderPath(audioId, path); dirs.set(key, dest) }
+      await copyFileToFolder(f.id, dest, f.name)
+      copied++
+    } catch (e: any) { err++; console.error('[sound-merge] copy failed:', code, f.name, e?.message || e) }
+  }
+  return { planned: plan.length, copied, err }
 }
 
 export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<SoundMergeResult> {
@@ -194,21 +250,9 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);
       // dedup spans every existing AUDIO location so nothing is re-copied.
       const target = await resolveAudioTarget(boxTargetId, { create: !opts.dryRun })
-      const have = new Set<string>()
-      for (const id of target.existingIds) {
-        for (const f of await listFilesRecursive(id, { maxFiles: 2000 })) have.add(`${f.name}|${f.size ?? ''}`)
-      }
-      const toCopy = stagingFiles.filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
-
-      if (opts.dryRun) { base.merged += toCopy.length; base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied: toCopy.length }); continue }
-      if (toCopy.length === 0) { base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied: 0 }); continue }
-
-      const audioId = target.audioId!
-      let copied = 0
-      for (const f of toCopy) {
-        try { await copyFileToFolder(f.id, audioId, f.name); copied++ }
-        catch (e: any) { base.errors++; console.error('[sound-merge] copy failed:', b.bookingCode, f.name, e?.message || e) }
-      }
+      const c = await copyStagedAudio(code, stagingFiles, target, !!opts.dryRun)
+      const copied = opts.dryRun ? c.planned : c.copied // dry run: would-copy
+      base.errors += c.err
       base.merged += copied
       base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied })
     } catch (e: any) {
@@ -307,20 +351,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);
   // dedup spans every existing AUDIO location so nothing is re-copied.
   const target = await resolveAudioTarget(boxTargetId, { create: !dryRun })
-  const have = new Set<string>()
-  for (const id of target.existingIds) {
-    for (const f of await listFilesRecursive(id, { maxFiles: 2000 })) have.add(`${f.name}|${f.size ?? ''}`)
-  }
-  const toCopy = stagingFiles.filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
+  const c = await copyStagedAudio(code, stagingFiles, target, dryRun)
   const boxUrl = boxTargetId ? `https://drive.google.com/drive/folders/${boxTargetId}` : null
-  if (dryRun) return { staged: stagingFiles.length, copied: toCopy.length, err: 0, boxFolderUrl: boxUrl }
-  if (toCopy.length === 0) return { staged: stagingFiles.length, copied: 0, err: 0, boxFolderUrl: boxUrl }
-
-  const audioId = target.audioId!
-  let copied = 0, err = 0
-  for (const f of toCopy) {
-    try { await copyFileToFolder(f.id, audioId, f.name); copied++ }
-    catch (e: any) { err++; console.error('[sound-merge] copy failed:', code, f.name, e?.message || e) }
-  }
-  return { staged: stagingFiles.length, copied, err, boxFolderUrl: boxUrl }
+  return { staged: stagingFiles.length, copied: dryRun ? c.planned : c.copied, err: c.err, boxFolderUrl: boxUrl }
 }
