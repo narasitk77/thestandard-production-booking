@@ -9,6 +9,7 @@ import {
   createRoomBooking, findExistingRoomBooking, cancelRoomBooking,
   roomBookingEnabled, roomBookingAllowed, RoomSkipReason,
   listRoomBookings, findMarkerBooking, findManualHold, roomBookingMarker,
+  ownHoldCoverage, ownRoomRows, overlaps, ROOM_BOOKING_BASE_URL,
 } from './room-booking'
 import { EPISODE_ORDER } from './episode-order'
 
@@ -233,7 +234,7 @@ export async function syncRoomBooking(bookingId: string, opts: { force?: boolean
     // ไปไว้ conflictWaiting) และสถานะถูก stamp เป็น CONFLICT ไปแล้วข้างบน = รอบหน้าไม่แจ้งซ้ำ
     // ⇒ ห้ามหายเงียบ: อ่านเวลา/รายการชนไม่ได้ก็ยังโพสต์ (บอกว่าอ่านไม่ได้) และโพสต์ไม่ถึง → alertOps
     if (b.roomBookingStatus !== 'CONFLICT') {
-      void notifyRoomConflict(code, b.locationName, roomId, built.payload)
+      void notifyRoomConflict(code, b.locationName, roomId, built.payload, [b.producerEmail, b.createdByEmail])
     }
     return { status: 'CONFLICT', message: out.message }
   }
@@ -250,6 +251,8 @@ async function notifyRoomConflict(
   locationName: string | null | undefined,
   roomId: number,
   p: { startDate: string; startTime: string; endDate: string; endTime: string },
+  /** โปรดิวเซอร์ + คนเปิดใบ — ใช้แยก "คนของงานนี้จองเองไว้ไม่ครบช่วง" ออกจาก "คนอื่นจอง" */
+  ownerEmails: Array<string | null | undefined> = [],
 ): Promise<void> {
   const head = [
     `🚪 จองห้องให้ ${code} ไม่ได้ — ห้องไม่ว่าง`,
@@ -267,12 +270,20 @@ async function notifyRoomConflict(
       try {
         const clashes = await describeRoomClash({ roomId, startAt, endAt })
         const manual = clashes.filter(c => !c.isProbook)
+        // 2026-11-23 — คนของงานนี้จองเองแต่ไม่ครบช่วง (WLT-NGI-261116-01: 08:00–11:00 งานถึง 12:00) ห้ามบอกว่า
+        // "ห้องได้แล้ว" — ต้องบอกว่าถือไว้ช่วงไหน ขาดช่วงไหน · ยังเป็น CONFLICT (ห้องขาดจริง)
+        const own = ownHoldCoverage(clashes, { startAt, endAt }, ownerEmails)
+        const spans = (xs: [string, string][]) => xs.map(([a, b]) => `${bkkTime(a)}–${bkkTime(b)}`).join(', ')
         detail = [
           ...(clashes.length ? ['   ชนกับ:'] : []),
           // ไม่ส่งหัวข้อการจองของคนอื่นออกไป — ชื่อคนจอง + เวลา พอให้ไปคุยต่อได้
           ...clashes.slice(0, 5).map(c =>
             `   • ${bkkTime(c.startAt)}–${bkkTime(c.endAt)} ${c.bookingNo} ${c.isProbook ? '(โปรบุ๊คจองเอง)' : `· จองมือโดย ${c.bookedBy || 'ไม่ทราบชื่อ'}${c.department ? ` (${c.department})` : ''}`}`),
-          ...(manual.length ? ['   ⚠️ มีคนจองห้องนี้ด้วยมือในพอร์ทัล — ถ้าเป็นงานเดียวกัน ห้องได้แล้ว ไม่ต้องทำอะไร'] : []),
+          ...(own && own.missing.length
+            ? [`   ⚠️ คนของงานนี้จองห้องเองไว้ ${spans(own.held)} แต่ขาด ${spans(own.missing)} — ` + (own.blocked
+                ? 'ช่วงที่ขาดมีการจองอื่นอยู่ (ดูรายการข้างบน) — คุยกับคนจองหรือเปลี่ยนเวลา'
+                : `ต่อเวลาในพอร์ทัล ${ROOM_BOOKING_BASE_URL}/booking`)]
+            : manual.length ? ['   ⚠️ มีคนจองห้องนี้ด้วยมือในพอร์ทัล — ถ้าเป็นงานเดียวกัน ห้องได้แล้ว ไม่ต้องทำอะไร'] : []),
         ]
       } catch (e: any) {
         detail = [`   ⚠️ อ่านรายการที่ชนจากระบบกลางไม่ได้: ${e?.message || e}`]
@@ -495,9 +506,13 @@ export function releaseRoomForBooking(bookingId: string, reason: string): void {
     try {
       const b = await prisma.booking.findUnique({
         where: { id: bookingId },
-        select: { roomBookingNo: true, bookingCode: true },
+        select: { ...ROOM_BOOKING_SELECT, roomBookingNo: true, roomBookingError: true },
       })
-      if (!b?.roomBookingNo) return
+      if (!b) return
+      if (!b.roomBookingNo) {
+        if (b.roomBookingError === 'skip: manual-hold') await warnManualHoldLeft(b, reason)
+        return
+      }
       const r = await cancelRoomBookingFor(bookingId)
       if (r.status !== 'CANCELLED') {
         // คืนห้องไม่สำเร็จ = ห้องค้างอยู่ในระบบเขาโดยไม่มีใครใช้ ต้องเห็น ไม่ใช่เงียบ
@@ -512,4 +527,46 @@ export function releaseRoomForBooking(bookingId: string, reason: string): void {
       console.error('[room-booking] releaseRoomForBooking error:', e?.message || e)
     }
   })()
+}
+
+/**
+ * 2026-11-23 — ใบที่ห้องเป็นการจองมือของคนของงาน (manual-hold) ถูกยกเลิก/ลบ: ฝั่งเราไม่มีเลขห้อง และ service key
+ * ยกเลิกของคนอื่นไม่ได้ (403) ⇒ เดิมออกเงียบ ห้องค้างให้คิวที่ตายแล้ว (BK-0404 War Room 26 พ.ย. ของ KND-KNF-261126-01)
+ * บอก operator ทาง alertOps (ไม่ใช่ห้องทีม) — **ต่อเมื่ออ่านระบบกลางแล้วเจอการจองมือนั้นจริง** พร้อมเลข BK
+ * ห้ามยืนยันลอย ๆ: เจ้าของอาจยกเลิกไปแล้ว หรือที่ "ถือไว้" คือห้องที่โปรบุ๊คจองให้งานอื่นของคนเดียวกัน
+ * (findManualHold v1.227.3 นับรวม) ซึ่งยังใช้อยู่ — ไปตามให้ยกเลิก = ไปปลดห้องของงานที่ยังมีชีวิต
+ * ถ่ายไปแล้ว = ไม่มีอะไรให้คืน · อ่านไม่ได้ = เตือนให้ตรวจเอง (ไม่เงียบ)
+ * ponytail: 1 GET ต่อใบ — ยกเลิก routine ทั้งกลุ่มที่เป็น manual-hold หลายใบจะยิงพร้อมกัน (ทั้งประวัติมี manual-hold 7 ใบ)
+ */
+async function warnManualHoldLeft(
+  b: Parameters<typeof buildPayloadForBooking>[0] & { locationName: string | null; createdByEmail: string | null },
+  reason: string,
+): Promise<void> {
+  const code = b.bookingCode || b.id
+  const ymd = (d: Date) => d.toISOString().slice(0, 10)
+  if (ymd(b.shootEndDate ?? b.shootDate) < ymd(new Date(Date.now() + 7 * 3_600_000))) return
+  const where = `${b.locationName || '?'} ${ymd(b.shootDate)} ${b.callTime || '?'}–${b.estimatedWrap || '?'}`
+  let what: string
+  try {
+    const built = buildPayloadForBooking(b)
+    if (!('payload' in built)) throw new Error('ประกอบห้อง/ช่วงเวลาของใบนี้ไม่ได้')
+    const p = built.payload
+    const startAt = bangkokToUtcIso(p.startDate, p.startTime)
+    const endAt = bangkokToUtcIso(p.endDate, p.endTime)
+    if (!startAt || !endAt) throw new Error('แปลงเวลาถ่ายไม่ได้')
+    const marker = roomBookingMarker(code)
+    const month = await listRoomBookings(b.shootDate.getUTCFullYear(), b.shootDate.getUTCMonth() + 1)
+    const left = ownRoomRows(month, p.roomId, [b.producerEmail, b.createdByEmail], marker, [p.title.replace(marker, '').trim()])
+      .filter(r => !r.isProbook && overlaps(startAt, endAt, r.startAt!, r.endAt!))
+    if (!left.length) return   // ยกเลิกไปแล้ว / ที่ถือไว้คือห้องที่โปรบุ๊คจองให้งานอื่น — ไม่มีอะไรต้องตาม
+    what = `ห้องที่คนของงานจองมือไว้ยังอยู่ในระบบกลาง: ` +
+      left.map(r => `${r.bookingNo} ${bkkTime(r.startAt)}–${bkkTime(r.endAt)} โดย ${r.bookedBy || '?'}`).join(', ') +
+      ` (${where}) — เจ้าของต้องยกเลิกเอง`
+  } catch (e: any) {
+    what = `ตรวจไม่ได้ว่าห้องที่คนของงานจองมือไว้ (${where}) ยังค้างไหม: ${e?.message || e} — ตรวจในพอร์ทัล`
+  }
+  const a = await alertOps(`room-manual-hold-left:${code}`,
+    `[probook] ${code} ยกเลิกแล้ว — ห้องที่จองมือไว้อาจยังค้างในระบบกลาง`,
+    `🚪 ${code} ยกเลิกแล้ว แต่${what}\n   ${ROOM_BOOKING_BASE_URL}/booking (${reason})`)
+  if (a.attempted && !a.delivered) console.error(`[room-booking] manual-hold left for ${code}: ops alert reached no channel`)
 }

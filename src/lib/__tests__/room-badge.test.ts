@@ -38,13 +38,16 @@ test('ห้องที่ยังไม่เปิดให้จองอ�
   const b = roomBadge('SKIPPED', 'skip: room-not-enabled')!
   assert.equal(b.tone, 'manual')
   assert.match(b.label, /ต้องจองห้องเอง/)
-  assert.match(b.title, /service\.thestandard\.co/, 'ต้องบอกด้วยว่าไปจองที่ไหน')
+  // พอร์ทัลย้ายไป hub ตั้งแต่ ~12 ต.ค. 2569 — โดเมนเก่าเป็นแค่หน้าประกาศย้าย
+  assert.match(b.title, /hub\.thestandard\.co/, 'ต้องบอกด้วยว่าไปจองที่ไหน')
+  assert.doesNotMatch(b.title, /service\.thestandard\.co/)
 })
 
 test('ห้องที่ระบบกลางไม่มีเลย (Lounge) → "ต้องจองห้องเอง" พร้อมเหตุผลของมันเอง', () => {
   const b = roomBadge('SKIPPED', 'skip: no-room-mapping')!
   assert.equal(b.tone, 'manual')
   assert.match(b.title, /ไม่มีในระบบจองส่วนกลาง/)
+  assert.match(b.title, /hub\.thestandard\.co/)
 })
 
 test('คนของงานจองห้องเองไว้แล้ว → ป้ายเขียว "ห้องจองเองไว้แล้ว" (ไม่ใช่เตือนภัย)', () => {

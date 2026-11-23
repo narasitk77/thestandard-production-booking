@@ -38,6 +38,21 @@ test('รูปแบบ `ชื่อเต็ม — ข้อความเ�
   assert.equal(resolveLocationId('Studio 1 (TSD) — เซ็ตไฟพิเศษ'), 'tsd-studio-1')
 })
 
+// เคสจริง TSS-SCI-261209-01 (5 พ.ย. 2569): แก้ 'Studio 1 (TSD)' เป็น 'Studio 2 (TSD)' ในช่องพิมพ์อิสระ
+// → null → คืนห้องเดิม ไม่จองใหม่ ไม่เตือน · ตัดวงเล็บท้ายที่มี TSD แล้วจับคู่ซ้ำ
+test('ชื่อห้อง + วงเล็บ TSD ที่ไม่ตรง fullName → ตัดวงเล็บแล้วจับคู่ใหม่', () => {
+  assert.equal(resolveLocationId('Studio 2 (TSD)'), 'tsd-studio-2')
+  assert.equal(resolveLocationId('War Room (TSD)'), 'tsd-a-war-4f')
+  assert.equal(resolveLocationId('studio 2 (tsd, 5/F)'), 'tsd-studio-2')
+  assert.equal(resolveLocationId('Studio 2 (TSD) — โต๊ะกลมดำ'), 'tsd-studio-2')
+})
+
+test('วงเล็บที่ไม่มีคำว่า TSD ไม่ถูกตัด — ไม่เดา', () => {
+  assert.equal(resolveLocationId('Studio 2 (ลาดพร้าว)'), null)
+  assert.equal(resolveLocationId('Studio 1 RCA (TSD)'), null)   // RCA ยังห้ามแมปแม้มีวงเล็บ TSD
+  assert.equal(resolveLocationId('Meeting Room 2 (TSD)'), null)  // ชื่อสั้นที่ไม่มีใน name/ALIASES
+})
+
 // ⚠️ เคสอันตรายที่สุด: RCA เป็นสตูดิโอนอกตึก ไม่ใช่ Studio 1 ของ TSD
 test('"Studio 1 RCA" ต้องไม่แมปเป็น Studio 1 ในตึก', () => {
   assert.equal(resolveLocationId('Studio 1 RCA'), null)

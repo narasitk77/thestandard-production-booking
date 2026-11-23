@@ -7,7 +7,7 @@ import { alertOps } from './ops-alert'
 import {
   findExistingRoomBooking, cancelRoomBooking, roomIdForLocation,
   roomTargetForBooking, roomBookingEnabled, roomBookingAllowed, listRoomBookings,
-  findManualHold, bangkokToUtcIso, roomBookingMarker,
+  findManualHold, bangkokToUtcIso, roomBookingMarker, ROOM_BOOKING_BASE_URL,
 } from './room-booking'
 import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './room-booking-sync'
 
@@ -71,6 +71,11 @@ export interface RoomReconcileResult {
   conflictWaiting: string[]
   booked: { code: string; bookingNo: string }[]
   failed: { code: string; status: string; message?: string }[]
+  /**
+   * 2026-11-23 — ใบที่ยังไม่ได้ตรวจเพราะชนเพดาน `max` ของรอบนี้ (0 = ตรวจครบ) · ลำดับ shootDate asc คงที่ (UNKNOWN ต่อท้าย)
+   * ใบท้ายคิวจึงต้องมีตัวเลขให้เห็น ไม่ใช่หายเงียบ (bug class 4)
+   */
+  deferred: number
   dryRun: boolean
 }
 
@@ -88,7 +93,8 @@ export interface RoomReconcileResult {
  *   - `target`  รู้ชัดว่าควรเป็นห้องไหน ช่วงไหน
  */
 type Expected =
-  | { kind: 'none' }
+  // skip: ห้องในตึกที่ระบบกลางไม่มี (Lounge) — ต้องขึ้นป้าย "ต้องจองห้องเอง" (stamp ในลูป)
+  | { kind: 'none'; skip?: 'no-room-mapping' }
   | { kind: 'unknown'; reason: string }
   | { kind: 'target'; target: { roomId: number; startAt: string; endAt: string } }
 
@@ -104,7 +110,8 @@ function expectedTarget(b: any): Expected {
   })
   if (!('skip' in t)) return { kind: 'target', target: t.target }
   // งานนอกตึก / ห้องที่ระบบกลางไม่มี = ไม่ควรมีห้องจริง ๆ ปลดได้
-  if (t.skip === 'external' || t.skip === 'no-room-mapping') return { kind: 'none' }
+  if (t.skip === 'external') return { kind: 'none' }
+  if (t.skip === 'no-room-mapping') return { kind: 'none', skip: 'no-room-mapping' }
   // ที่เหลือ (no-location / no-times / bad-times) = ข้อมูลไม่พอ ไม่ใช่คำตอบว่า "ไม่เอาห้อง"
   return { kind: 'unknown', reason: t.skip }
 }
@@ -167,10 +174,17 @@ export async function reconcileRoomBookings(opts: {
     },
     orderBy: { shootDate: 'asc' },
   })
+  // 2026-11-23 — UNKNOWN ยังลองใหม่ทุกรอบ (ไม่รู้ผล = รอบหน้าต้องอ่านกลับ — POST ที่ timeout อาจจองติดไปแล้ว ต้องรับเลข
+  // ให้เร็ว ไม่งั้นยกเลิกใบระหว่างนั้น releaseRoomForBooking ไม่มีเลขให้คืน ห้องค้างเงียบ) แต่**ต่อท้ายคิว**:
+  // ใบใหม่ได้เพดาน `max` ก่อน ไม่ถูก UNKNOWN หัวคิวกินโควตาทุกชั่วโมง · sort คงลำดับ shootDate เดิมในกลุ่ม
+  const retryLast = (r: { roomBookingNo: string | null; roomBookingStatus: string | null }) =>
+    Number(!r.roomBookingNo && r.roomBookingStatus === 'UNKNOWN')
+  rows.sort((a, b) => retryLast(a) - retryLast(b))
 
+  const monthKey = (d: Date) => `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`
   /** คนของงานนี้จองห้องเองไว้แล้วไหม — คืนชื่อคนจอง ถ้าใช่ (ใช้ข้อมูลเดือนที่อ่านมาแล้ว) */
   async function manualHeld(bk: any, p: any): Promise<string | null> {
-    const key = `${bk.shootDate.getUTCFullYear()}-${bk.shootDate.getUTCMonth() + 1}`
+    const key = monthKey(bk.shootDate)
     if (!monthRows.has(key)) await liveIndex(bk.shootDate)
     const rows = monthRows.get(key)
     if (!rows) return null
@@ -186,7 +200,7 @@ export async function reconcileRoomBookings(opts: {
 
   const out: RoomReconcileResult = {
     scanned: rows.length, staleCancelled: [], staleStuck: [],
-    wrongRoomReleased: [], vanished: [], notEnabled: [], conflictWaiting: [], booked: [], failed: [], dryRun,
+    wrongRoomReleased: [], vanished: [], notEnabled: [], conflictWaiting: [], booked: [], failed: [], deferred: 0, dryRun,
   }
   let writes = 0
   /** ใบที่ยังไม่มีห้องเพราะ CONFLICT (รอลองใหม่ + ลองแล้วยังชน) → เตือนซ้ำรายวันหลังลูป */
@@ -232,8 +246,12 @@ export async function reconcileRoomBookings(opts: {
   const sameInstant = (a: string | null, b: string | null) =>
     a != null && b != null && Date.parse(a) === Date.parse(b)
 
-  for (const b of rows as any[]) {
-    if (writes >= max) break
+  for (const [i, b] of (rows as any[]).entries()) {
+    if (writes >= max) {
+      out.deferred = rows.length - i
+      console.warn(`[room-reconcile] ชนเพดาน max=${max} — เลื่อน ${out.deferred} ใบไปรอบหน้า`)
+      break
+    }
     const code = b.bookingCode || b.id
     const want = expectedTarget(b)
 
@@ -370,6 +388,15 @@ export async function reconcileRoomBookings(opts: {
     // กันทั้งบริษัท ทับใบอื่นที่จองได้จริง และเด้งเข้ากลุ่ม LINE แอดมินของ IT ทุกรอบ
     // (ใบเดียวยิงได้ถึง ~1,000 ครั้งกว่าจะพ้นหน้าต่าง 45 วัน). ยังลองใหม่อยู่ —
     // แค่ทุก 6 ชม. เผื่อคนที่จองทับไว้ยกเลิกไป
+    //
+    // 2026-11-23 — ห้องในตึกที่ระบบกลางไม่มี (Lounge): expectedTarget คืน 'none' และไม่มีบล็อกไหน stamp
+    // ⇒ ใบที่สร้างตรงเข้า Lounge ไม่มีป้าย "ต้องจองห้องเอง" (TSS-TSC-261014-01 / -261021-01 / -261103-01)
+    // รูปเดียวกับบล็อก room-not-enabled ข้างล่าง: เขียนเฉพาะตอนค่าเปลี่ยน ไม่นับ writes (ไม่ได้ยิงระบบเขา)
+    if (!b.roomBookingNo && want.kind === 'none' && want.skip === 'no-room-mapping' && roomBookingEnabled()) {
+      const already = b.roomBookingStatus === 'SKIPPED' && b.roomBookingError === 'skip: no-room-mapping'
+      if (!dryRun && !already) await stampSkipped(b.id, 'no-room-mapping')
+      continue
+    }
     if (!b.roomBookingNo && b.roomBookingStatus === 'CONFLICT' && b.roomBookingAt
         && Date.now() - new Date(b.roomBookingAt).getTime() < CONFLICT_RETRY_MS) {
       out.conflictWaiting.push(code)
@@ -392,17 +419,38 @@ export async function reconcileRoomBookings(opts: {
     if (!b.roomBookingNo && want.kind === 'target' && roomBookingEnabled() && roomBookingAllowed(want.target.roomId)) {
       const built = buildPayloadForBooking(b)
       if ('skip' in built || 'error' in built) continue
+      // 2026-11-23 — INVALID (ข้อมูล/คีย์ของเราผิด — ลองซ้ำไม่ช่วยจนกว่าจะแก้) เว้นวรรคแบบเดียวกับ CONFLICT: เดิมลองใหม่
+      // ทุกชั่วโมงและนับเข้า `max` ⇒ ≥max ใบแบบนี้หัวคิว (เรียง shootDate คงที่) = ใบหลัง ๆ ไม่มีวันถูกจอง (bug class 4)
+      // ระหว่างรอยังรายงานใน failed ทุกรอบ — ไม่หายเงียบ · อยู่ก่อน dry-run เพื่อให้ preview ตรงของจริง
+      // UNKNOWN ไม่เว้น (ดู retryLast ข้างบน — ต่อท้ายคิวแทน)
+      if (b.roomBookingStatus === 'INVALID' && b.roomBookingAt
+          && Date.now() - new Date(b.roomBookingAt).getTime() < CONFLICT_RETRY_MS) {
+        out.failed.push({ code, status: b.roomBookingStatus, message: `รอลองใหม่ (เว้น 6 ชม.): ${b.roomBookingError || '-'}` })
+        continue
+      }
+      // **preview ต้องไม่โกหก** — ของจริง `syncRoomBooking` จะเช็คก่อนว่าคนของงานนี้
+      // จองห้องเองไว้แล้วหรือยัง แล้วข้าม ถ้า dry-run ตัดจบตรงนี้เฉย ๆ มันจะรายงาน
+      // ว่า "จะจอง" ทั้งที่ของจริงไม่จอง — คนอ่าน preview เพื่อ**ตัดสินใจ** ฉะนั้น
+      // preview ที่ต่างจากของจริงคือ preview ที่ไม่ควรมี (บทเรียน v1.202.3)
+      // 2026-11-23 — เส้นจริงถามเฉพาะใบที่ stamp manual-hold ไว้แล้ว (ใบอื่น syncRoomBooking อ่านเดือนเอง)
+      const stampedHold = b.roomBookingStatus === 'SKIPPED' && b.roomBookingError === 'skip: manual-hold'
+      const held = dryRun || stampedHold ? await manualHeld(b, built.payload) : null
+      // stamp manual-hold ไว้แล้ว แต่รอบนี้อ่านเดือนจากระบบกลางไม่ได้ = ตัดสินไม่ได้ → ไม่แตะ (ป้ายเดิมคือความจริงล่าสุด)
+      // ไม่ไหลไป syncRoomBooking ซึ่งน่าจะอ่านไม่ได้เหมือนกันแล้ว stamp ทับเป็น UNKNOWN = ป้าย "ห้องยังไม่ได้จอง" หลอก
+      if (stampedHold && !held && !monthRows.has(monthKey(b.shootDate))) {
+        out.failed.push({ code, status: 'UNKNOWN', message: 'อ่านระบบกลางไม่ได้ — คงสถานะจองมือเดิม ไม่แตะ' })
+        continue
+      }
       if (dryRun) {
-        // **preview ต้องไม่โกหก** — ของจริง `syncRoomBooking` จะเช็คก่อนว่าคนของงานนี้
-        // จองห้องเองไว้แล้วหรือยัง แล้วข้าม ถ้า dry-run ตัดจบตรงนี้เฉย ๆ มันจะรายงาน
-        // ว่า "จะจอง" ทั้งที่ของจริงไม่จอง — คนอ่าน preview เพื่อ**ตัดสินใจ** ฉะนั้น
-        // preview ที่ต่างจากของจริงคือ preview ที่ไม่ควรมี (บทเรียน v1.202.3)
-        const held = await manualHeld(b, built.payload)
         out.booked.push(held
           ? { code, bookingNo: `(ข้าม — ${held} จองห้องเองไว้แล้ว)` }
           : { code, bookingNo: '(จะจอง)' })
         continue
       }
+      // 2026-11-23 — stamp manual-hold ไว้แล้วและยังถือมืออยู่จริง: ไม่นับเพดาน ไม่เรียก syncRoomBooking
+      // เดิม writes++ ทุกชั่วโมง + GET เดือนต่อใบ ⇒ ≥max ใบแบบนี้หัวคิว = ใบหลังไม่มีวันถูกจอง
+      // manualHeld ใช้เดือนที่อ่านแคชไว้ในรอบ · ถือมือหายไปแล้ว (null) → ไหลไปจองตามปกติ
+      if (stampedHold && held) continue
       writes++
       // ผ่าน syncRoomBooking เท่านั้น — มันอ่านกลับก่อนยิงเสมอ (กันจองซ้ำ)
       const r = await syncRoomBooking(b.id)
@@ -421,7 +469,7 @@ export async function reconcileRoomBookings(opts: {
       `🚪 **ห้องหายไปจากระบบกลาง ${out.vanished.length} รายการ**\n` +
       `probook คิดว่าจองไว้ แต่ไม่พบในระบบแล้ว (น่าจะมีคนยกเลิกฝั่งนั้น)\n\n` +
       out.vanished.map(c => `• ${c}`).join('\n') +
-      `\n\nกองพวกนี้กำลังจะไม่มีห้อง — จองใหม่ที่ https://service.thestandard.co/booking หรือเปิด ROOM_BOOKING_ENABLED ให้ระบบจองคืนเอง`,
+      `\n\nกองพวกนี้กำลังจะไม่มีห้อง — จองใหม่ที่ ${ROOM_BOOKING_BASE_URL}/booking หรือเปิด ROOM_BOOKING_ENABLED ให้ระบบจองคืนเอง`,
     ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
   }
 
@@ -430,7 +478,8 @@ export async function reconcileRoomBookings(opts: {
     await notifyChat(
       `🚪 **ห้องค้างในระบบกลาง ${out.staleStuck.length} รายการ**\n` +
       `คิวถ่ายยกเลิก/ย้ายไปแล้ว แต่ผมปลดห้องเองไม่ได้\n\n${lines}\n\n` +
-      `ปลดมือที่ https://service.thestandard.co/booking — หรือรอ IT เปิดสิทธิ์ยกเลิกให้ service key แล้วผมจะเก็บกวาดเองรอบถัดไป`,
+      // IT เปิดสิทธิ์ยกเลิกให้ service key แล้ว (25 ส.ค.) — ที่ค้างตรงนี้คือปลดไม่ได้จริงรอบนี้ ระบบลองใหม่เองรอบหน้า
+      `ปลดมือที่ ${ROOM_BOOKING_BASE_URL}/booking — หรือรอรอบถัดไป ระบบจะลองปลดเองอีกครั้ง`,
     ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
   }
 
@@ -442,7 +491,7 @@ export async function reconcileRoomBookings(opts: {
         `🚪 ${code} ยังไม่มีห้อง — ห้องที่ขอไม่ว่าง (ระบบกลางตอบว่าถูกจองแล้ว)\n` +
         `   ${b.locationName || ''} · ${when}\n` +
         `   ระบบลองจองใหม่เองทุก 6 ชม. · ถ้าต้องใช้ห้องนี้จริง คุยกับคนที่จองไว้ หรือเปลี่ยนห้อง/เวลาในใบจอง · ` +
-        `จองมือที่ https://service.thestandard.co/booking\n` +
+        `จองมือที่ ${ROOM_BOOKING_BASE_URL}/booking\n` +
         `   (เตือนซ้ำวันละครั้งจนกว่าจะได้ห้อง)`,
         ROOM_CONFLICT_REPEAT_MS)
       if (r.attempted && !r.delivered) console.error(`[room-reconcile] still-no-room reminder for ${code} reached no channel`)

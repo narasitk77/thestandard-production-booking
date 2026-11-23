@@ -20,6 +20,7 @@ import { ROLE_LABEL, ROLE_ORDER, groupByRole, type RosterMember } from '@/lib/te
 import { normalizeFreelancers, freelancerEmails, freelancerRoleLabel } from '@/lib/freelancers'
 import type { Booking } from './types'
 import { formatDateRange } from '@/lib/utils'
+import { LOCATIONS } from '@/lib/locations'
 import BookingRentals from '@/app/_components/BookingRentals'
 
 const showName = bookingDisplayName
@@ -332,8 +333,12 @@ export function BookingDrawer({ booking, onClose, onBack, canEdit, onSaved, meEm
 
               <div>
                 <div className="ops-section-title mb-2">Location</div>
-                <input type="text" value={form.locationName} placeholder="สถานที่ถ่ายทำ"
+                {/* datalist: ชื่อห้องในตึกที่ resolver รู้จัก — พิมพ์ชื่อเองไม่ตรง = ไม่จองห้อง (TSS-SCI-261209-01) */}
+                <input type="text" value={form.locationName} placeholder="สถานที่ถ่ายทำ" list="drawer-room-options"
                   onChange={e => setForm({ ...form, locationName: e.target.value })} className={inputCls} />
+                <datalist id="drawer-room-options">
+                  {LOCATIONS.filter(l => l.group !== 'EXTERNAL').map(l => <option key={l.id} value={l.fullName} />)}
+                </datalist>
                 <select value={form.shootType} onChange={e => setForm({ ...form, shootType: e.target.value })}
                   className={`mt-2 ${inputCls} bg-white`}>
                   {SHOOT_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}

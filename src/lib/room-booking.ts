@@ -4,7 +4,7 @@ import { LOCATIONS } from './locations'
 import { DEFAULT_SHOOT_HOURS, effectiveWrap, isValidHHMM } from './shoot-window'
 
 /**
- * เชื่อมกับระบบจองห้องกลาง `service.thestandard.co/booking` — **เฉพาะฝั่งอ่าน**
+ * เชื่อมกับระบบจองห้องกลาง `hub.thestandard.co/booking` (เดิม service.thestandard.co) — **เฉพาะฝั่งอ่าน**
  *
  * v1.195 (เฟส 2 ของ docs/room-booking-integration-plan.md) — ยังไม่จองจริง
  * เพราะ `POST /api/liff/booking` ต้องมี credential จาก IT. แต่ endpoint ฝั่งอ่าน
@@ -18,8 +18,10 @@ import { DEFAULT_SHOOT_HOURS, effectiveWrap, isValidHHMM } from './shoot-window'
  *   startAt=…T06:00:00.000Z&endAt=…    → {…"Digital Vaultwarden"} ✅
  */
 
+// พอร์ทัลย้ายไป hub ตั้งแต่ ~12 ต.ค. 2569 — service.thestandard.co ตอบ 200 text/html (หน้าประกาศย้าย)
+// ไม่ใช่ JSON · พรอดรอดเพราะ stack env ตั้ง hub ไว้ · ค่าเริ่มต้นต้องตรงกับ docker-compose.portainer.yml
 export const ROOM_BOOKING_BASE_URL =
-  process.env.ROOM_BOOKING_BASE_URL || 'https://service.thestandard.co'
+  process.env.ROOM_BOOKING_BASE_URL || 'https://hub.thestandard.co'
 
 /**
  * probook `location.id` → `roomId` ของระบบจองกลาง
@@ -183,11 +185,19 @@ export async function roomBusySlots(roomId: number, dateYMD: string): Promise<Ro
  * คืน `null` ทั้งตอน "ว่างจริง" และตอน "พารามิเตอร์ผิด" ซึ่งแยกกันไม่ออกจากฝั่งเรา
  * — ความกำกวมแบบนี้ในเส้นทางที่ตัดสินว่า "จองทับได้หรือไม่" คือความเสี่ยงที่ไม่คุ้ม
  */
-export async function findRoomConflict(t: RoomTarget): Promise<RoomConflict | null> {
+export async function findRoomConflict(
+  t: RoomTarget,
+  /**
+   * marker `[PB-<code>]` ของใบที่กำลังตรวจ — ช่องที่เป็นการจองของใบนี้เองไม่ใช่การชน
+   * (2026-11-23: /api/internal/room-conflicts รายงาน 7/7 ใบว่าชน — ทุกใบชนกับห้องที่โปรบุ๊คจองให้ตัวเอง)
+   */
+  selfMarker?: string | null,
+): Promise<RoomConflict | null> {
   const dates = utcRangeToBangkokDates(t.startAt, t.endAt)
   const seen = new Set<string>()
   for (const d of dates) {
     for (const slot of await roomBusySlots(t.roomId, d)) {
+      if (selfMarker && String(slot.title || '').includes(selfMarker)) continue
       const key = `${slot.startAt}|${slot.endAt}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -568,6 +578,8 @@ export interface RoomClash {
   isProbook: boolean
   bookedBy: string | null
   department: string | null
+  /** 2026-11-23 — ไว้จับคู่ "คนของงานนี้เอง" ในข้อความ CONFLICT เท่านั้น ไม่พิมพ์ออกไป */
+  email: string | null
 }
 
 /**
@@ -577,7 +589,8 @@ export interface RoomClash {
  */
 export function pickRoomClashes(
   rows: Array<{ live: boolean; roomId: number | null; startAt: string | null; endAt: string | null
-                bookingNo: string; isProbook: boolean; bookedBy: string | null; department: string | null }>,
+                bookingNo: string; isProbook: boolean; bookedBy: string | null; department: string | null
+                email?: string | null }>,
   t: RoomTarget,
 ): RoomClash[] {
   return rows.filter(r =>
@@ -585,8 +598,54 @@ export function pickRoomClashes(
     overlaps(t.startAt, t.endAt, r.startAt, r.endAt),
   ).map(r => ({
     bookingNo: r.bookingNo, startAt: r.startAt, endAt: r.endAt,
-    isProbook: r.isProbook, bookedBy: r.bookedBy, department: r.department,
+    isProbook: r.isProbook, bookedBy: r.bookedBy, department: r.department, email: r.email ?? null,
   }))
+}
+
+/**
+ * 2026-11-23 — คนของงานนี้ (อีเมลตรงโปรดิวเซอร์/คนเปิดใบ — เกณฑ์อีเมลเดียวกับ findManualHold) จองห้องเอง
+ * ครอบช่วงถ่ายไว้ช่วงไหน และ **ขาดช่วงไหน** · ใช้เขียนข้อความตอน CONFLICT อย่างเดียว ไม่ได้ตัดสินการจอง
+ *
+ * เคสจริง WLT-NGI-261116-01: โปรดิวเซอร์จองมือ War Room 08:00–11:00 งานถ่ายถึง 12:00 → findManualHold
+ * ไม่รับ (ครอบไม่หมด = CONFLICT ตามกฎ) แต่ข้อความแจ้งทีมบอกว่า "ห้องได้แล้ว ไม่ต้องทำอะไร" และไม่มีใครรู้ว่า
+ * 11:00–12:00 ยังไม่มีห้อง · null = ไม่มีรายการของคนของงานนี้ทับช่วงถ่ายเลย
+ *
+ * "ของคนของงานนี้" = **จองมือ** (ไม่ใช่ isProbook) — แถวที่โปรบุ๊คจองให้งานอื่นของโปรดิวเซอร์คนเดียวกันมีอีเมลเขา
+ * แต่ไม่ใช่ "จองเอง" และต่อเวลาให้งานนี้ไม่ได้ (reconcile จะดึงกลับเป็นเวลาของงานนั้น)
+ * `blocked` = ช่วงที่ขาดมีการจองอื่นทับอยู่ (คนอื่น หรือโปรบุ๊คจองให้งานอื่น) → "ต่อเวลาในพอร์ทัล" ทำไม่ได้
+ */
+export function ownHoldCoverage(
+  rows: Array<{ startAt: string | null; endAt: string | null; email?: string | null; isProbook?: boolean }>,
+  t: { startAt: string; endAt: string },
+  ownerEmails: Array<string | null | undefined>,
+): { held: [string, string][]; missing: [string, string][]; blocked: boolean } | null {
+  const owners = new Set(
+    ownerEmails.filter(Boolean).map(e => String(e).trim().toLowerCase()).filter(e => e.includes('@')),
+  )
+  const s = Date.parse(t.startAt), e = Date.parse(t.endAt)
+  if (!owners.size || !(s < e)) return null
+  const isOwn = (r: (typeof rows)[number]) => !r.isProbook && !!r.email && owners.has(r.email.trim().toLowerCase())
+  // ตัดให้อยู่ในช่วงถ่าย · เวลาอ่านไม่ออก (NaN) ตกไปเองที่ a < b
+  const iv = rows
+    .filter(r => isOwn(r) && !!r.startAt && !!r.endAt)
+    .map(r => [Math.max(s, Date.parse(r.startAt!)), Math.min(e, Date.parse(r.endAt!))] as [number, number])
+    .filter(([a, b]) => a < b)
+    .sort((a, b) => a[0] - b[0])
+  if (!iv.length) return null
+  const held: [number, number][] = []
+  for (const [a, b] of iv) {
+    const last = held[held.length - 1]
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
+    else held.push([a, b])
+  }
+  const missing: [number, number][] = []
+  let at = s
+  for (const [a, b] of held) { if (a > at) missing.push([at, a]); at = Math.max(at, b) }
+  if (at < e) missing.push([at, e])
+  const blocked = rows.some(r => !isOwn(r) && !!r.startAt && !!r.endAt
+    && missing.some(([a, b]) => Date.parse(r.startAt!) < b && a < Date.parse(r.endAt!)))
+  const iso = ([a, b]: [number, number]): [string, string] => [new Date(a).toISOString(), new Date(b).toISOString()]
+  return { held: held.map(iso), missing: missing.map(iso), blocked }
 }
 
 /**
@@ -640,31 +699,10 @@ export function findManualHold(
    */
   ownerTitles?: Array<string | null | undefined>,
 ): ManualHold | null {
-  const owners = new Set(
-    ownerEmails.filter(Boolean).map(e => String(e).trim().toLowerCase()).filter(e => e.includes('@')),
-  )
-  const normTitle = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase()
-  const titles = new Set(
-    (ownerTitles || []).filter(Boolean).flatMap(x => {
-      const n = normTitle(String(x))
-      // พอร์ทัลมักไม่มีคำนำหน้า outlet ("EVT · ") — รับทั้งแบบมีและไม่มี
-      return [n, n.replace(/^[a-z0-9]{2,4} · /, '')]
-    }).filter(n => n.length >= 8),
-  )
-  if (!owners.size && !titles.size) return null
   const s = Date.parse(t.startAt), e = Date.parse(t.endAt)
   if (!Number.isFinite(s) || !Number.isFinite(e) || !(s < e)) return null
 
-  const mine = rows.filter(r => {
-    if (!r.live || r.roomId !== t.roomId) return false
-    const byEmail = !!r.email && owners.has(r.email.trim().toLowerCase())
-    const byTitle = !r.isProbook && !!r.title && titles.has(normTitle(r.title))
-    if (!byEmail && !byTitle) return false
-    if (!r.startAt || !r.endAt) return false
-    if (selfMarker && (r.title || '').includes(selfMarker)) return false
-    const rs = Date.parse(r.startAt), re = Date.parse(r.endAt)
-    return Number.isFinite(rs) && Number.isFinite(re) && rs < re
-  })
+  const mine = ownRoomRows(rows, t.roomId, ownerEmails, selfMarker, ownerTitles)
   if (!mine.length) return null
 
   // รวมช่วงที่ต่อกัน (ติดขอบพอดีก็ถือว่าต่อเนื่อง — 13:00 จบ แล้ว 13:00 เริ่ม ไม่มีรู)
@@ -685,6 +723,43 @@ export function findManualHold(
     return span(r) > span(best) ? r : best
   })
   return { bookingNo: pick.bookingNo, startAt: pick.startAt, endAt: pick.endAt, bookedBy: pick.bookedBy }
+}
+
+/**
+ * แถวในระบบกลางที่ "เป็นของคนของงานนี้" ในห้องนั้น — อีเมลตรงโปรดิวเซอร์/คนเปิดใบ หรือ (ใบจองมือ) ชื่องานตรง
+ * ไม่รวมใบของงานนี้เอง (selfMarker) · เวลาอ่านไม่ออกตัดทิ้ง · กฎเดียวของ findManualHold แยกออกมาให้
+ * releaseRoomForBooking ใช้หาว่าการจองมือที่ถือไว้ให้งานที่ยกเลิกยังค้างอยู่จริงไหม (2026-11-23)
+ */
+export function ownRoomRows<R extends { live: boolean; roomId: number | null; startAt: string | null; endAt: string | null
+                                        title?: string; isProbook: boolean; email: string | null }>(
+  rows: R[],
+  roomId: number,
+  ownerEmails: Array<string | null | undefined>,
+  selfMarker?: string | null,
+  ownerTitles?: Array<string | null | undefined>,
+): R[] {
+  const owners = new Set(
+    ownerEmails.filter(Boolean).map(e => String(e).trim().toLowerCase()).filter(e => e.includes('@')),
+  )
+  const normTitle = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase()
+  const titles = new Set(
+    (ownerTitles || []).filter(Boolean).flatMap(x => {
+      const n = normTitle(String(x))
+      // พอร์ทัลมักไม่มีคำนำหน้า outlet ("EVT · ") — รับทั้งแบบมีและไม่มี
+      return [n, n.replace(/^[a-z0-9]{2,4} · /, '')]
+    }).filter(n => n.length >= 8),
+  )
+  if (!owners.size && !titles.size) return []
+  return rows.filter(r => {
+    if (!r.live || r.roomId !== roomId) return false
+    const byEmail = !!r.email && owners.has(r.email.trim().toLowerCase())
+    const byTitle = !r.isProbook && !!r.title && titles.has(normTitle(r.title))
+    if (!byEmail && !byTitle) return false
+    if (!r.startAt || !r.endAt) return false
+    if (selfMarker && (r.title || '').includes(selfMarker)) return false
+    const rs = Date.parse(r.startAt), re = Date.parse(r.endAt)
+    return Number.isFinite(rs) && Number.isFinite(re) && rs < re
+  })
 }
 
 /** หาใบที่โปรบุ๊คเคยจองไว้เองจาก marker ในชื่อ — แยกออกมาเพื่อใช้ผลอ่านเดือนซ้ำได้ */
