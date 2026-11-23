@@ -164,7 +164,7 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
     // TSS-SCI-261209-01 (5 พ.ย. 2569): พิมพ์ 'Studio 2 (TSD)' แล้วระบบไม่รู้จัก → คืนห้องเดิม ไม่จองใหม่
     // และหน้านี้เงียบ · ต้องบอกให้เห็นก่อนกดบันทึก
     <div className="ops-card px-3 py-2 text-xs text-slate-600 bg-slate-50 border-slate-200 border-l-4 border-l-slate-400">
-      ระบบไม่รู้จักสถานที่นี้เป็นห้องในตึก — จะไม่จอง/ไม่ตรวจห้องให้ ถ้าเป็นห้องในตึกให้เลือกจากรายการ
+      ระบบไม่รู้จักสถานที่นี้เป็นห้องในตึก — จะไม่จอง/ไม่ตรวจห้องให้ ถ้าเป็นห้องในตึกให้ใช้ชื่อห้องตามระบบ เช่น Studio 2 (TSD, 1/F)
     </div>
   ) : null
 
@@ -288,15 +288,15 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
           {saveError && <div className="ops-card px-3 py-2 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">{saveError}</div>}
           <div>
             <label className="text-xs text-gray-500 mb-1 block">สถานที่ / ลิงก์แผนที่ (Google Maps)</label>
-            {/* input + datalist (textarea ใช้ list ไม่ได้) — ห้องในตึกต้องเลือกชื่อจากรายการถึงจะจองห้องให้ */}
-            <input
-              className="ops-input"
-              list="probook-room-options"
-              placeholder="เลือกห้องในตึกจากรายการ หรือวางลิงก์ Google Maps ของสถานที่ใหม่"
+            {/* คง textarea ไว้ (ไม่ใช่ input+datalist): ค่าเดิมอาจมีขึ้นบรรทัดใหม่ (ลิงก์แผนที่ + ทางเข้า) ซึ่ง <input>
+                ตัดทิ้งเงียบ ๆ แล้วบันทึกทับเป็นบรรทัดเดียวติดกัน · placeholder ต้องเป็นชื่อที่ resolver รู้จักจริง */}
+            <textarea
+              className="ops-input resize-none"
+              rows={3}
+              placeholder="เช่น Studio 2 (TSD, 1/F) หรือวางลิงก์ Google Maps ของสถานที่ใหม่"
               value={form.locationName}
               onChange={e => setForm({ ...form, locationName: e.target.value })}
             />
-            {locationOptions}
           </div>
           {isAdvertorial && (
             <div>
