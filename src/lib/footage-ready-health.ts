@@ -95,10 +95,24 @@ export type PendingBooking = {
  */
 export type HeldNote = { detail: string; at: string; fileCount: number; totalBytes: number }
 
-export function readHeld(snapshot: unknown): HeldNote | null {
-  const h = (snapshot as { held?: Partial<HeldNote> } | null | undefined)?.held
+function asHeldNote(h: Partial<HeldNote> | null | undefined): HeldNote | null {
   if (!h || typeof h.detail !== 'string' || typeof h.at !== 'string' || typeof h.fileCount !== 'number' || typeof h.totalBytes !== 'number') return null
   return { detail: h.detail, at: h.at, fileCount: h.fileCount, totalBytes: h.totalBytes }
+}
+
+export function readHeld(snapshot: unknown): HeldNote | null {
+  return asHeldNote((snapshot as { held?: Partial<HeldNote> } | null | undefined)?.held)
+}
+
+/**
+ * maint 23 Nov 2026 — the fast path's own MEDIAPRO verdict (`readySnapshot.fast`, written one sweep after the footage
+ * settles) when it found files SHORT (`incomplete: true`) — not "no MEDIAPRO to compare" or another blocker. `held` is
+ * written only after the full 4 h settle, so until then the 📣 preview had nothing to warn with (LIF-ECO-261118-01:
+ * fast said "การ์ด Sony ไม่มี MEDIAPRO.XML" 3.5 h before held did).
+ */
+export function readFastHeld(snapshot: unknown): HeldNote | null {
+  const f = (snapshot as { fast?: Partial<HeldNote> & { incomplete?: unknown } } | null | undefined)?.fast
+  return f?.incomplete === true ? asHeldNote(f) : null
 }
 
 /** The hold still describes the footage only if count AND bytes are unchanged since (a re-copied clip changes bytes). */
@@ -112,9 +126,11 @@ export function heldStill(h: HeldNote | null | undefined, fileCount: number, tot
  * 20 files, 1,019 after editors added exports, MEDIAPRO still missing) — hiding it let 📣 go out with no warning.
  */
 export function previewHeld(snapshot: unknown, fileCount: number, totalBytes: number): (HeldNote & { stale?: true }) | null {
-  const h = readHeld(snapshot)
-  if (!h) return null
-  return heldStill(h, fileCount, totalBytes) ? h : { ...h, stale: true }
+  // maint 23 Nov 2026 — falls back to the fast path's "MEDIAPRO incomplete" verdict (readFastHeld); whichever still
+  // describes the footage wins, else the hold comes back flagged stale
+  const notes = [readHeld(snapshot), readFastHeld(snapshot)].filter((n): n is HeldNote => !!n)
+  if (!notes.length) return null
+  return notes.find(n => heldStill(n, fileCount, totalBytes)) ?? { ...notes[0], stale: true }
 }
 
 /** v1.290 — the warning both 📣 confirm dialogs put first ('' = no hold). The button runs no MEDIAPRO gate. */

@@ -106,7 +106,8 @@ test('maint: เมลไม่ถึงใครเลย → ไม่ปร�
   const r = await fr.runFootageReadyScan({ codes: [CODE] })
   assert.deepEqual(r.notified, [])
   assert.equal(r.errors.length, 1)
-  assert.equal(alerts.length, 0)
+  // not a "partial" alert (nobody was reached) — maint 23 Nov: but ops DO hear that nobody was (ready-mail-failed)
+  assert.deepEqual(alerts.map(a => a.key), [`ready-mail-failed:${CODE}`])
 })
 
 test('maint: รอบ ?codes= เดินทุกใบ → deferredCodes ว่าง (เดิมบอกว่าใบท้าย ๆ ถูกเลื่อนทั้งที่เดินแล้ว)', async () => {

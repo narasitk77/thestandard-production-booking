@@ -61,7 +61,7 @@ import { freshNasState, verifyNasMirror, codeOf, type NasManifest } from './nas-
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
-import { ADMIN_DIGEST, readHeld, sweptUntil } from './footage-ready-health'
+import { ADMIN_DIGEST, readHeld, readFastHeld, sweptUntil } from './footage-ready-health'
 import { mediaproGate, expectsCameraVideo, sameClip } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
 import { markCalendarFootageReady } from './google-calendar'
@@ -488,12 +488,16 @@ async function mediaproGateFor(b: CandidateRow, code: string): Promise<GateResul
   return mediaproGate(roots, { shootFrom: new Date(b.shootDate).toISOString().slice(0, 10) })
 }
 
-/** v1.287 — `readySnapshot.fast` (see readFastNo). A changed count rewrites the snapshot, which drops it. */
-async function noteFastNo(b: { id: string; readySnapshot: unknown }, code: string, detail: string, counts: { fileCount: number; totalBytes: number }, now: Date): Promise<void> {
+/**
+ * v1.287 — `readySnapshot.fast` (see readFastNo). A changed count rewrites the snapshot, which drops it.
+ * maint 23 Nov 2026 — `incomplete: true` when MEDIAPRO itself found files short (not "no MEDIAPRO to compare" or another
+ * blocker): the 📣 preview warns on it until the 4 h settle writes `held` (LIF-ECO-261118-01: 3.5 h with no warning).
+ */
+async function noteFastNo(b: { id: string; readySnapshot: unknown }, code: string, detail: string, counts: { fileCount: number; totalBytes: number }, now: Date, incomplete: boolean): Promise<void> {
   const base = b.readySnapshot && typeof b.readySnapshot === 'object' ? (b.readySnapshot as Record<string, unknown>) : {}
   await prisma.booking.update({
     where: { id: b.id },
-    data: { readySnapshot: { ...base, fast: { detail, ...counts, at: now.toISOString() } } as any },
+    data: { readySnapshot: { ...base, fast: { detail, ...counts, at: now.toISOString(), ...(incomplete ? { incomplete: true } : {}) } } as any },
   }).catch(e => console.error('[footage-ready] noteFastNo failed:', code, e?.message || e))
 }
 
@@ -774,6 +778,19 @@ async function nasParkedCheck(
   return v
 }
 
+/** Why a code named in ?codes= is not a candidate — the same rules as the sweep's query, in the order a person fixes them. */
+export function notEligibleWhy(r: {
+  status: string; deletedAt: Date | null; cancelRequestedAt: Date | null; readyNotifiedAt: Date | null; deliveredAt: Date | null
+} | undefined): string {
+  if (!r) return 'ไม่พบรหัสนี้'
+  if (r.deletedAt) return 'ถูกลบแล้ว'
+  if (r.status !== 'CONFIRMED' && r.status !== 'COMPLETED') return `สถานะ ${r.status}`
+  if (r.cancelRequestedAt) return 'ขอยกเลิกแล้ว'
+  if (r.readyNotifiedAt) return `แจ้งแล้ว ${new Date(r.readyNotifiedAt.getTime() + 7 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ')} น.`
+  if (r.deliveredAt) return 'ส่งงานแล้ว'
+  return 'ไม่ผ่านเงื่อนไขของรอบนี้'
+}
+
 async function runReadySweep(
   opts: { dryRun?: boolean; codes?: string[] },
 ): Promise<FootageReadyScanResult> {
@@ -819,6 +836,20 @@ async function runReadySweep(
     select: CANDIDATE_SELECT,
   }) as unknown as CandidateRow[]
   result.scanned = rows.length
+  // maint 23 Nov 2026 — a named code the query did not return used to vanish: already notified, ส่งงานแล้ว, cancelled,
+  // deleted and mistyped codes all answered like "nothing to do" (v1.290 makes run?codes= the operator's main tool).
+  // Say why for each one. Read-only, so the dry run answers the same.
+  if (forced.length > 0) {
+    const got = new Set(rows.map(r => r.bookingCode))
+    const missing = forced.filter(c => !got.has(c))
+    if (missing.length) {
+      const found = await prisma.booking.findMany({
+        where: { bookingCode: { in: missing } },
+        select: { bookingCode: true, status: true, deletedAt: true, cancelRequestedAt: true, readyNotifiedAt: true, deliveredAt: true },
+      })
+      for (const c of missing) result.skipped.push({ code: c, reason: 'not-eligible', detail: notEligibleWhy(found.find(r => r.bookingCode === c)) })
+    }
+  }
   if (rows.length === 0) return result
 
   // Gate (c): one groupBy covers every candidate — a PENDING/UPLOADING Upload
@@ -846,13 +877,22 @@ async function runReadySweep(
   })
   const ingestHeld = new Set(cardRows.filter(r => cardHoldsNotice([r])).map(r => r.bookingId))
   if (!dryRun) {
+    // maint 23 Nov 2026 — one alert per booking per sweep, naming EVERY card that went silent, keyed by that card set.
+    // The key used to be the booking alone while each card was flipped to ORPHANED first: two cameras on one dead
+    // laptop → the first card alerted, the second hit the 6 h throttle and, being ORPHANED now, was never picked again.
+    const silent = new Map<string, Array<{ r: (typeof cardRows)[number]; silentMin: number }>>()
     for (const r of cardRows.filter(r => isStaleCard(r, now))) {
       const code = r.booking?.bookingCode || r.bookingId
       const silentMin = Math.round((now.getTime() - r.updatedAt.getTime()) / 60_000)
       await prisma.upload.update({ where: { id: r.id }, data: { status: 'ORPHANED', failureReason: `ไม่มีสัญญาณจากเครื่องที่ส่ง ${silentMin} นาที` } })
         .catch(e => console.error('[footage-ready] orphan card failed:', r.id, e?.message || e))
-      await alertOps(`ingest-stale:${code}`, `⚠️ ส่งจากหน้างาน ${code} ${r.camera} เงียบ ${silentMin} นาที`,
-        `การ์ด ${r.fileName} โดย ${r.uploadedBy} ไม่ส่งสัญญาณมา ${silentMin} นาที (เครื่องหลับ/เน็ตหลุด/ปิดแอป?) → ORPHANED\n` +
+      silent.set(code, [...(silent.get(code) || []), { r, silentMin }])
+    }
+    for (const [code, cards] of silent) {
+      await alertOps(`ingest-stale:${code}:${cards.map(c => c.r.id).sort().join(',')}`,
+        `⚠️ ส่งจากหน้างาน ${code} ${cards.map(c => c.r.camera).join(', ')} เงียบ ${Math.max(...cards.map(c => c.silentMin))} นาที`,
+        cards.map(c => `การ์ด ${c.r.fileName} (${c.r.camera}) โดย ${c.r.uploadedBy} ไม่ส่งสัญญาณมา ${c.silentMin} นาที`).join('\n') +
+        ' (เครื่องหลับ/เน็ตหลุด/ปิดแอป?) → ORPHANED\n' +
         'footage พร้อม ของใบนี้ถูกถือไว้ · รันไคลเอนต์ซ้ำด้วยโค้ดเดิมจะส่งต่อได้ · ปล่อยด้วยมือ = แอดมินกด "ปลด" ที่การ์ดบนหน้าอัป (ไม่ลบไฟล์)')
     }
   }
@@ -985,13 +1025,18 @@ async function runReadySweep(
             result.fast.push({ code, ok: !why, detail: why || g!.text, cached: false })
             if (!why) { gate = g; readyPath = 'mediapro' }
             // only a comparison that RAN is remembered (same rule as noteHeld): "could not check" retries next sweep
-            else if (!dryRun && g?.check) await noteFastNo(b, code, why, counts, now)
+            // maint 23 Nov 2026 — incomplete = MEDIAPRO itself found files short (g && !g.ok), not another blocker
+            else if (!dryRun && g?.check) await noteFastNo(b, code, why, counts, now, !g.ok)
           }
         }
         if (!gate) {
           result.settling.push(code)
           if (!dryRun && decision.write) {
-            await prisma.booking.update({ where: { id: b.id }, data: { readySnapshot: decision.write } }).catch(() => {})
+            // maint 23 Nov 2026 — carry the MEDIAPRO hold over the new counts: rewriting the snapshot whole dropped it on
+            // any file-count change, so the 📣 preview lost its warning (previewHeld flags it stale instead), and
+            // noteHeld rewrites it on the next refusal / the gate's pass clears it
+            const keep = readHeld(b.readySnapshot)
+            await prisma.booking.update({ where: { id: b.id }, data: { readySnapshot: (keep ? { ...decision.write, held: keep } : decision.write) as any } }).catch(() => {})
           }
           continue
         }
@@ -1016,8 +1061,10 @@ async function runReadySweep(
         continue
       }
       // the gate passed: an earlier hold is no longer true (a camera wait or failed send can still age this one out)
-      if (!dryRun && readHeld(b.readySnapshot)) {
+      // maint 23 Nov 2026 — nor is a fast-path "MEDIAPRO incomplete" note (the 📣 preview reads both)
+      if (!dryRun && (readHeld(b.readySnapshot) || readFastHeld(b.readySnapshot))) {
         const { held: _gone, ...rest } = b.readySnapshot as Record<string, unknown>
+        if (readFastHeld(b.readySnapshot)) delete rest.fast
         await prisma.booking.update({ where: { id: b.id }, data: { readySnapshot: rest as any } })
           .catch(e => console.error('[footage-ready] clear held failed:', code, e?.message || e))
       }
@@ -1277,7 +1324,11 @@ THE STANDARD Production Booking`
   else error = 'email not configured'
   const emailed = mail.sent.length
   const digestOk = digest || !people.length ? await notifyEmailDigest(subject, text) : false
-  const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`✅ กล้องตามมาครบ: ${code} — ${show} (${cov.cams.join(', ') || 'ไฟล์ภาพครบ'}) → ${emailed}/${people.length} อีเมล`)
+  // maint 23 Nov 2026 — same rule as the first notice: every mail failed = ops alert, chat on its 6 h beat only
+  const chatDue = await chatDueAfterMail(code, 'Footage ครบแล้ว', people, emailed, error)
+  const { discord: discordOk, lark: larkOk, any: chatOk } = chatDue
+    ? await notifyChatDetailed(`✅ กล้องตามมาครบ: ${code} — ${show} (${cov.cams.join(', ') || 'ไฟล์ภาพครบ'}) → ${emailed}/${people.length} อีเมล`)
+    : NO_CHAT
   return {
     delivered: emailed > 0 || (!isEmailConfigured() && chatOk) || (people.length === 0 && (digestOk || chatOk)),
     // maint 2026-11-08 — only the addresses the provider accepted (see emailEach)
@@ -1318,6 +1369,23 @@ async function notifyPartialMail(code: string, what: string, failed: string[], e
   await alertOps(`ready-mail-partial:${code}`, `เมล ${what} ส่งไม่ถึงบางคน — ${code}`,
     `${code}: เมล "${what}" ส่งไม่ถึง ${failed.join(', ')} (${error || 'ส่งไม่สำเร็จ'})\n` +
     'คนอื่นในใบได้รับแล้ว ใบนี้จึงถูกบันทึกว่าแจ้งแล้ว และระบบจะไม่ส่งซ้ำเอง — ส่งต่อให้คนที่ตกหล่นด้วยมือ')
+}
+
+const NO_CHAT = { discord: false, lark: false, any: false }
+
+/**
+ * maint 23 Nov 2026 — mail is configured, the job has people, and EVERY mail failed (SMTP down, the 15–19 Oct password
+ * reset: 535 for four days). The booking stays unstamped and the next sweep tries again — right, and unchanged — but
+ * the team-chat line "→ 0/N อีเมล" used to go out every sweep (48 a day per booking) until the booking aged out, and
+ * ops never heard. Now ops get an alert, and the chat posts only when that alert was attempted: alertOps' 6 h throttle
+ * is the chat's beat too. Both send paths (first notice + camera follow-up) call this. true = the chat may post.
+ */
+async function chatDueAfterMail(code: string, what: string, people: string[], emailed: number, error: string | null): Promise<boolean> {
+  if (!isEmailConfigured() || !people.length || emailed > 0) return true
+  const a = await alertOps(`ready-mail-failed:${code}`, `เมล ${what} ส่งไม่ถึงใครเลย — ${code}`,
+    `${code}: เมล "${what}" ส่งไม่ถึงทั้ง ${people.length} คน (${error || 'ส่งไม่สำเร็จ'}) — SMTP ล่ม/รหัสผ่านถูกรีเซ็ต?\n` +
+    'ใบนี้ยังไม่ถูกบันทึกว่าแจ้งแล้ว ระบบลองส่งใหม่ทุกรอบจนกว่าจะส่งได้หรือหลุดหน้าต่างแจ้งอัตโนมัติ · เตือนนี้ (และบรรทัดในแชตทีม) ซ้ำไม่เกินทุก 6 ชม.')
+  return a.attempted
 }
 
 async function sendFootageReadyNotification(
@@ -1430,7 +1498,9 @@ THE STANDARD Production Booking`
 
   // Discord summary is best-effort on top of email; it also serves as the
   // fallback channel when email is unavailable.
-  const { discord: discordOk, lark: larkOk, any: chatOk } = await notifyChatDetailed(`${discordLine} → ${emailed}/${recipients.length} อีเมล`)
+  // maint 23 Nov 2026 — every mail failed: ops alert, and the chat only on that alert's 6 h beat (chatDueAfterMail)
+  const chatDue = await chatDueAfterMail(code, 'Footage พร้อม', recipients, emailed, error)
+  const { discord: discordOk, lark: larkOk, any: chatOk } = chatDue ? await notifyChatDetailed(`${discordLine} → ${emailed}/${recipients.length} อีเมล`) : NO_CHAT
 
   return {
     delivered: emailed > 0 || (!isEmailConfigured() && chatOk),
