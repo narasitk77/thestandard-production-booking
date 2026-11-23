@@ -151,3 +151,16 @@ test('แบนเนอร์ QU ทั้งสามหน้าใช้ nee
     assert.ok(!/\b(isValidQuRef|isQuPending)\b/.test(src), `${f} ยังมี predicate QU ตัวอื่น`)
   }
 })
+
+// รอบ 2 (23 พ.ย.) — AGENCY_REF_QU_RULE=0 ปลดแค่ API: ฟอร์มจองบังคับกฎเองเสมอ (step 4 ไปต่อไม่ได้)
+// env อ่านในเบราว์เซอร์ไม่ได้ จึงต้องส่งจาก server page ลงไปถึงตัวตรวจ step 4 ครบทุกทอด
+test('สวิตช์กฎ QU ส่งจาก /new ถึงตัวตรวจ step 4 ของฟอร์มจอง', () => {
+  const read = (f: string) => readFileSync(join(process.cwd(), f), 'utf8')
+  assert.match(read('src/app/new/page.tsx'), /<NewBookingClient quRule=\{quRuleEnabled\(\)\} \/>/)
+  assert.match(read('src/app/_components/NewBookingClient.tsx'), /<BookingWizard quRule=\{quRule\} \/>/)
+  const wiz = read('src/app/_components/booking/BookingWizard.tsx')
+  assert.match(wiz, /export default function BookingWizard\(\{ quRule = true \}/)
+  assert.match(wiz, /if \(quRule && isAdvertorialBooking\) \{\s*if \(agencyRef\.trim\(\) === ''\)/)
+  // ข้อความแดงใต้ช่องก็ต้องเงียบเมื่อปิดกฎ ไม่งั้นฟอร์มบอกว่าผิดแต่ให้ผ่าน
+  assert.match(wiz, /\{quRule && agencyRef\.trim\(\) !== '' && !isAcceptableQuRef\(agencyRef\)/)
+})

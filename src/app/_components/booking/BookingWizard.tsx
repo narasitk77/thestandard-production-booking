@@ -159,7 +159,9 @@ function Stepper({ current, completed, onJump }: {
 
 /* ---------- Main wizard ---------- */
 
-export default function BookingWizard() {
+// quRule = quRuleEnabled() ของ server (AGENCY_REF_QU_RULE) — env อ่านในเบราว์เซอร์ไม่ได้ จึงรับเป็น prop จาก /new
+// เดิมฟอร์มบังคับกฎ QU เสมอ สวิตช์ =0 จึงปลดแค่ API แต่ฟอร์มยังขวาง step 4
+export default function BookingWizard({ quRule = true }: { quRule?: boolean }) {
   const router = useRouter()
 
   // ---- form state (same shape as v1.27 page.tsx) ----
@@ -728,7 +730,7 @@ export default function BookingWizard() {
     } else if (s === 4) {
       // v1.188 — งาน AD ต้องมี Agency Ref ทุกบ้าน (ตัวตัดสินจริงอยู่ฝั่ง server
       // แต่บอกตั้งแต่ในฟอร์มดีกว่าปล่อยให้กด submit แล้วโดนตีกลับ)
-      if (isAdvertorialBooking) {
+      if (quRule && isAdvertorialBooking) {
         if (agencyRef.trim() === '') {
           errs.agencyRef = `กรุณากรอก Agency Ref — หากยังไม่ทราบเลข ใส่ ${QU_PENDING}`
         } else if (!isAcceptableQuRef(agencyRef)) {
@@ -1805,7 +1807,7 @@ export default function BookingWizard() {
                       {/* v1.161 — เตือนตั้งแต่พิมพ์ (ตัวตัดสินจริงอยู่ฝั่ง server)
                           v1.183 — ใช้ predicate ตัวเดียวกับ server (qu-ref.ts) จะได้ไม่
                           มีวันที่ฟอร์มบอกผ่านแต่ server ตีกลับ */}
-                      {agencyRef.trim() !== '' && !isAcceptableQuRef(agencyRef) && (
+                      {quRule && agencyRef.trim() !== '' && !isAcceptableQuRef(agencyRef) && (
                         <p className="text-[11px] text-red-600 mt-1">
                           รูปแบบต้องเป็น QU ตามด้วยตัวเลข เช่น QU-4289 (ไม่ใช่เลข EP/แคมเปญ) — หากยังไม่ทราบเลข ใส่ {QU_PENDING}
                         </p>
