@@ -183,10 +183,12 @@ export function findIssues(
   }
   // maint 23 Nov 2026 — every copy byte-identical (same md5) = one file uploaded twice, nothing lost or broken: ℹ️, not ⚠️
   // (WLT-MNW-261012-01's box read "ต้องตามต่อ" for md5-identical pairs). No md5 on a side = still a ⚠️.
+  // An EMPTY file proves nothing: every 0-byte file has md5 d41d8cd9…, and SONYCARD.IND is 0 bytes on every Sony card —
+  // two of them in one folder may be two cards poured together (v1.280), so they keep the hedged ⚠️ below.
   const identical: string[] = []
   for (const dupes of byFolderAndName.values()) {
     if (dupes.length < 2) continue
-    if (dupes.every(d => !!d.md5 && d.md5 === dupes[0].md5)) { identical.push(`${where(dupes[0])} ×${dupes.length}`); continue }
+    if ((dupes[0].size ?? 0) > 0 && dupes.every(d => !!d.md5 && d.md5 === dupes[0].md5)) { identical.push(`${where(dupes[0])} ×${dupes.length}`); continue }
     const sizes = dupes.map(d => gb(d.size)).join(' vs ')
     const cardIndex = CARD_INDEX_RE.test(dupes[0].name) || /^(SONYCARD\.IND|DATABASE\.BIN)$/i.test(dupes[0].name)
     // SONYCARD.IND is 0 bytes on every card, so its sizes never tell two cards apart
