@@ -63,6 +63,8 @@ mock.module('../room-booking', {
     listRoomBookings: async () => [],
     findMarkerBooking: () => null,
     findManualHold: () => null,
+    ownHoldCoverage: () => null,
+    ROOM_BOOKING_BASE_URL: 'https://hub.thestandard.co',
     roomBookingMarker: (c: string) => `[PB-${c}]`,
     createRoomBooking: async () => ({ kind: 'conflict', message: 'ห้องถูกจองแล้ว' }),
     findExistingRoomBooking: async () => null,

@@ -570,6 +570,8 @@ export interface RoomClash {
   isProbook: boolean
   bookedBy: string | null
   department: string | null
+  /** 2026-11-23 — ไว้จับคู่ "คนของงานนี้เอง" ในข้อความ CONFLICT เท่านั้น ไม่พิมพ์ออกไป */
+  email: string | null
 }
 
 /**
@@ -579,7 +581,8 @@ export interface RoomClash {
  */
 export function pickRoomClashes(
   rows: Array<{ live: boolean; roomId: number | null; startAt: string | null; endAt: string | null
-                bookingNo: string; isProbook: boolean; bookedBy: string | null; department: string | null }>,
+                bookingNo: string; isProbook: boolean; bookedBy: string | null; department: string | null
+                email?: string | null }>,
   t: RoomTarget,
 ): RoomClash[] {
   return rows.filter(r =>
@@ -587,8 +590,47 @@ export function pickRoomClashes(
     overlaps(t.startAt, t.endAt, r.startAt, r.endAt),
   ).map(r => ({
     bookingNo: r.bookingNo, startAt: r.startAt, endAt: r.endAt,
-    isProbook: r.isProbook, bookedBy: r.bookedBy, department: r.department,
+    isProbook: r.isProbook, bookedBy: r.bookedBy, department: r.department, email: r.email ?? null,
   }))
+}
+
+/**
+ * 2026-11-23 — คนของงานนี้ (อีเมลตรงโปรดิวเซอร์/คนเปิดใบ — เกณฑ์อีเมลเดียวกับ findManualHold) จองห้องเอง
+ * ครอบช่วงถ่ายไว้ช่วงไหน และ **ขาดช่วงไหน** · ใช้เขียนข้อความตอน CONFLICT อย่างเดียว ไม่ได้ตัดสินการจอง
+ *
+ * เคสจริง WLT-NGI-261116-01: โปรดิวเซอร์จองมือ War Room 08:00–11:00 งานถ่ายถึง 12:00 → findManualHold
+ * ไม่รับ (ครอบไม่หมด = CONFLICT ตามกฎ) แต่ข้อความแจ้งทีมบอกว่า "ห้องได้แล้ว ไม่ต้องทำอะไร" และไม่มีใครรู้ว่า
+ * 11:00–12:00 ยังไม่มีห้อง · null = ไม่มีรายการของคนของงานนี้ทับช่วงถ่ายเลย
+ */
+export function ownHoldCoverage(
+  rows: Array<{ startAt: string | null; endAt: string | null; email?: string | null }>,
+  t: { startAt: string; endAt: string },
+  ownerEmails: Array<string | null | undefined>,
+): { held: [string, string][]; missing: [string, string][] } | null {
+  const owners = new Set(
+    ownerEmails.filter(Boolean).map(e => String(e).trim().toLowerCase()).filter(e => e.includes('@')),
+  )
+  const s = Date.parse(t.startAt), e = Date.parse(t.endAt)
+  if (!owners.size || !(s < e)) return null
+  // ตัดให้อยู่ในช่วงถ่าย · เวลาอ่านไม่ออก (NaN) ตกไปเองที่ a < b
+  const iv = rows
+    .filter(r => !!r.email && owners.has(r.email.trim().toLowerCase()) && !!r.startAt && !!r.endAt)
+    .map(r => [Math.max(s, Date.parse(r.startAt!)), Math.min(e, Date.parse(r.endAt!))] as [number, number])
+    .filter(([a, b]) => a < b)
+    .sort((a, b) => a[0] - b[0])
+  if (!iv.length) return null
+  const held: [number, number][] = []
+  for (const [a, b] of iv) {
+    const last = held[held.length - 1]
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
+    else held.push([a, b])
+  }
+  const missing: [number, number][] = []
+  let at = s
+  for (const [a, b] of held) { if (a > at) missing.push([at, a]); at = Math.max(at, b) }
+  if (at < e) missing.push([at, e])
+  const iso = ([a, b]: [number, number]): [string, string] => [new Date(a).toISOString(), new Date(b).toISOString()]
+  return { held: held.map(iso), missing: missing.map(iso) }
 }
 
 /**
