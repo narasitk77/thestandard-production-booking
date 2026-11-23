@@ -25,7 +25,7 @@ import { getDriveLink, rememberDriveLinks } from '@/lib/drive-links'
 import { noteResolve } from '@/lib/id-first-metrics'
 // maint 2026-11-08 — a stored id falls back to the name walk only when Drive says it is GONE ('unknown' — a 403
 // rateLimitExceeded is not retried — used to read as dead via isFolderAlive and walk names into a twin box/staging).
-import { storedFolder } from '@/lib/video-merge'
+import { storedFolder, mergeBookingsWhere, mergeCodeSkipReason } from '@/lib/video-merge'
 import { tryLockMerge, unlockMerge, soundMergeKey } from '@/lib/merge-lock'
 import { EPISODE_ORDER } from './episode-order'
 
@@ -109,9 +109,9 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
   // Bound to recent shoots: the self-heal (re-copy after a box re-overwrite) only
   // matters while a shoot is actively being uploaded, so old jobs needn't be
   // re-scanned every hour (keeps per-run Drive calls bounded as the roster grows).
-  const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000) // 45 days
+  // maint 23 Nov 2026 — the same picker as video-merge (whole shoot range; ?code= = that booking, no window).
   const bookings = await prisma.booking.findMany({
-    where: { status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, bookingCode: { not: null }, shootDate: { gte: since } },
+    where: mergeBookingsWhere(opts.onlyCode),
     select: {
       id: true, driveFolders: true,
       bookingCode: true, projectId: true, projectName: true, category: true, crewRequired: true,
@@ -120,6 +120,11 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
     },
   })
+  // a ?code= run says why it merged nothing (it used to answer bookings:0, skipped:false)
+  if (opts.onlyCode && !bookings.length) return { skipped: true, reason: await mergeCodeSkipReason(opts.onlyCode), ...base }
+  if (opts.onlyCode && !bookings.some(b => bookingNeedsSound(b.crewRequired))) {
+    return { skipped: true, reason: `${bookings[0].bookingCode} ไม่มีทีมเสียงในใบ — sound-merge ไม่รวมใบนี้`, ...base }
+  }
 
   for (const b of bookings) {
     if (!b.bookingCode || !bookingNeedsSound(b.crewRequired)) continue

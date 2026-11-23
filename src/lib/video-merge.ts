@@ -15,7 +15,7 @@
  *   landing folder for manual review rather than creating a duplicate.
  * - v1.112 — AGN merges into the per-booking layer INSIDE its shared project box
  *   ("<job> (<code>)"), created on demand; no more misplacement, no more skip.
- * - Bounded to recent shoots (45 days) to keep per-run Drive calls bounded.
+ * - Bounded to recent shoots (MERGE_WINDOW_DAYS, over the whole shoot range) to keep per-run Drive calls bounded.
  * - v1.127 — FAST PATH: a landing subfolder whose box twin is absent (or is an
  *   empty prep skeleton, which gets trashed and swapped out) is relocated as a
  *   WHOLE folder — one files.update for the entire subtree instead of one per
@@ -26,6 +26,7 @@
  *   shell (only _SHOOT stubs / empty folders left) is trashed (recoverable).
  */
 import { prisma } from './db'
+import type { Prisma } from '@prisma/client'
 import {
   findChildFolder, listChildFolders, listFilesInFolder, moveFileToFolder,
   findEpisodeFolderUrls, ensureFolderPath, hasDriveCredentials,
@@ -420,6 +421,35 @@ export async function storedFolder(link: string | null | undefined): Promise<str
   return link && (await folderLiveness(link)) !== 'dead' ? link : null
 }
 
+/** How far back the hourly video + sound merges look (per-run Drive calls stay bounded). */
+export const MERGE_WINDOW_DAYS = 45
+
+/**
+ * maint 23 Nov 2026 — the ONE booking picker of runVideoMerge and runSoundMerge.
+ * - The window covers the whole shoot range (shootDate OR shootEndDate ≥ since — the footage-ready / footage-integrity
+ *   rule): PM-PMG-260916-01 (16 Sep–6 Oct) had 1,988 files land on 2 Nov, past 45 days from its FIRST day, and no
+ *   merge ever looked at it.
+ * - ?code= looks that booking up by its code with NO date window. It used to filter inside the windowed list, so an
+ *   older booking answered `bookings: 0` with skipped:false — "nothing to merge" — while 43 GB sat in landing (class 2).
+ */
+export function mergeBookingsWhere(onlyCode?: string, now = Date.now()): Prisma.BookingWhereInput {
+  const eligible: Prisma.BookingWhereInput = { status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null }
+  if (onlyCode) return { ...eligible, bookingCode: { equals: onlyCode.trim(), mode: 'insensitive' } }
+  const since = new Date(now - MERGE_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+  return { ...eligible, bookingCode: { not: null }, OR: [{ shootDate: { gte: since } }, { shootEndDate: { gte: since } }] }
+}
+
+/** Why a ?code= run found nothing it may merge — said, never an empty success. Read-only (dry run = real run). */
+export async function mergeCodeSkipReason(code: string): Promise<string> {
+  const b = await prisma.booking.findFirst({
+    where: { bookingCode: { equals: code.trim(), mode: 'insensitive' } },
+    select: { bookingCode: true, status: true, deletedAt: true },
+  })
+  if (!b) return `ไม่พบรหัส ${code} — ไม่ได้รวมอะไร`
+  if (b.deletedAt) return `${b.bookingCode} ถูกลบแล้ว — ไม่รวมไฟล์`
+  return `${b.bookingCode} สถานะ ${b.status} — รวมไฟล์เฉพาะใบ CONFIRMED/COMPLETED`
+}
+
 export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<VideoMergeResult> {
   const base = { dryRun: !!opts.dryRun, bookings: 0, landed: 0, moved: 0, movedFolders: 0, errors: 0, cardHolds: [] as string[], cardHoldsChatDue: false, results: [] as VideoMergeResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
@@ -437,9 +467,8 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
     return { skipped: true, reason: `Production Team landing inaccessible (Drive says: ${live})`, ...base }
   }
 
-  const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000) // 45 days
   const bookings = await prisma.booking.findMany({
-    where: { status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, bookingCode: { not: null }, shootDate: { gte: since } },
+    where: mergeBookingsWhere(opts.onlyCode),
     select: {
       id: true, driveFolders: true,
       bookingCode: true, projectId: true, projectName: true, category: true,
@@ -448,6 +477,7 @@ export async function runVideoMerge(opts: { dryRun?: boolean; onlyCode?: string 
       episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
     },
   })
+  if (opts.onlyCode && !bookings.length) return { skipped: true, reason: await mergeCodeSkipReason(opts.onlyCode), ...base }
 
   for (const b of bookings) {
     if (!b.bookingCode) continue

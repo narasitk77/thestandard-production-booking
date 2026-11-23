@@ -120,9 +120,16 @@ deliberate — but it means a single leftover file pins a folder forever. The us
 leaves a landing file in place when the box already holds a twin with the same
 name AND size (`mirrorMove` → `stats.dup++`, "already in box — leave in landing").
 The folder is then non-empty forever and pressing 🎬 merge again is a no-op.
-To tell the two apart: `GET /api/internal/video-merge/run?dryRun=1&code=<ID>` —
-`moved=0` with `dup>0` means the landing copy is redundant and a human may trash
-it; `moved>0` means there really is unmerged footage, so merge first.
+`dup>0` does NOT mean a human may trash the landing copy: `dup` is decided on
+name+size only, and TSS-WYS-260824-01's 585 "dups" included the only good copy of
+a RAW (bug-classes.md §3). Only an md5 verdict may say "safe to trash" — the noon
+prune posts one per folder that still holds files (`verifyLandingDuplicates`,
+"ผลเทียบ checksum กับกล่อง VIDEO", up to 6 folders a run).
+`GET /api/internal/video-merge/run?dryRun=1&code=<ID>` answers the other question,
+"is there unmerged footage": `moved>0` = merge first. It looks the booking up by
+code with no date window; a code it will not merge (not found, deleted, not
+CONFIRMED/COMPLETED) answers `skipped:true` with the reason (maint 23 Nov 2026 —
+before that, any booking older than the 45-day window answered `bookings:0`).
 Since v1.220 the prune reports these by NAME to Discord/Lark via
 `notifyChat(…, 'footage')` instead of leaving them as a silent count.
 - **Logic**: `src/lib/landing-lifecycle.ts` → `manageLandingFolders()`.

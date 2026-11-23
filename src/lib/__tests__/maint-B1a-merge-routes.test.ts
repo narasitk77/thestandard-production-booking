@@ -107,6 +107,21 @@ test('video-merge: heartbeat only for the worker\'s whole, real, not-skipped run
   assert.deepEqual(ticks, ['video-merge'])
 })
 
+test('maint 23 Nov: a ?code= run that skips (code missing/not mergeable) is an answer, not a "run failed" worker line', async () => {
+  vmResult = okVideo({ skipped: true, reason: 'ไม่พบรหัส NWS-X-261199-01 — ไม่ได้รวมอะไร' })
+  smResult = { skipped: true, reason: 'ไม่พบรหัส NWS-X-261199-01 — ไม่ได้รวมอะไร', bookings: 0, staged: 0, merged: 0, errors: 0, results: [] }
+  const errors = quiet()
+  const warns = mock.method(console, 'warn', () => {})
+  try {
+    const body = await (await video(vw('?code=NWS-X-261199-01'))).json()
+    assert.equal(body.skipped, true)
+    await sound(worker('sound-merge/run?code=NWS-X-261199-01', 'x-sound-merge-secret', 'sm-secret'))
+    assert.equal(errors.mock.calls.some(c => /run failed/.test(String(c.arguments[0]))), false)
+    assert.equal(warns.mock.calls.filter(c => /\?code=NWS-X-261199-01 skipped — ไม่พบรหัส/.test(String(c.arguments[0]))).length, 2)
+    assert.deepEqual(ticks, [])
+  } finally { errors.mock.restore(); warns.mock.restore() }
+})
+
 test('video-merge: a second real run while one is live → 409; once it ends the next one runs', async () => {
   let release!: () => void
   vmGate = new Promise<void>(r => { release = r })
