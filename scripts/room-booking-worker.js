@@ -62,7 +62,9 @@ async function runOnce() {
       ((j.staleStuck || []).length ? ` | ค้าง: ${j.staleStuck.map(s => [s.code, s.bookingNo].filter(Boolean).join('/')).join(',')}` : '') +
       // ใบ "ห้องไม่ว่าง" รอลองใหม่ 6 ชม. — ไม่อยู่ใน "ค้าง" แล้ว ต้องมีบรรทัดของตัวเอง ไม่งั้นหายจาก log
       ` รอห้อง=${(j.conflictWaiting || []).length}` +
-      ((j.conflictWaiting || []).length ? ` (${j.conflictWaiting.join(',')})` : ''),
+      ((j.conflictWaiting || []).length ? ` (${j.conflictWaiting.join(',')})` : '') +
+      // ชนเพดาน max = ใบท้ายคิวยังไม่ได้ตรวจรอบนี้ — ต้องเห็นตัวเลข ไม่งั้นท้ายคิวหายเงียบ
+      (j.deferred ? ` เลื่อนรอบหน้า=${j.deferred} (ชน max=${max})` : ''),
     )
   } catch (err) {
     console.error('[room-booking] run failed:', err?.message || err)
