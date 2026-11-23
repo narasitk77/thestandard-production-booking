@@ -124,6 +124,24 @@ test('normalize เก็บตัวยึดตามที่พิมพ์ 
   assert.equal(normalizeQuRef(' qu-4289 '), 'QU-4289')
 })
 
+// รอบ 2 (23 พ.ย.) — ใบเสนอราคาเดียวกันถูกเก็บเป็น QU4862 (AGN-261116-01, -261124-01) และ QU-4862
+// (AGN-261117-01) · ค่าใหม่ต้องลงรูปเดียว
+test('normalize เติมขีดหลัง QU ทุกส่วนของรายการ — QU4862 กับ QU-4862 เป็นค่าเดียวกัน', () => {
+  assert.equal(normalizeQuRef('QU4862'), 'QU-4862')
+  assert.equal(normalizeQuRef(' qu 4609 '), 'QU-4609')
+  assert.equal(normalizeQuRef('QU4345, qu4406'), 'QU-4345,QU-4406')
+  assert.equal(normalizeQuRef('QU-4426-V1'), 'QU-4426-V1')
+  assert.equal(normalizeQuRef('QU1234TBC'), 'QU-1234TBC')
+  // ไม่ใช่ QU+ตัวเลข = ไม่แตะ
+  for (const v of ['1234', 'QUOTE-1', 'LIFE2601', 'TBC']) assert.equal(normalizeQuRef(v), v)
+  // ทางบันทึกจริง: ใส่ไม่มีขีดแล้วได้ค่ามีขีด · ค่าเก่าที่ตกกฎยังเทียบ "ไม่เปลี่ยน" ได้เหมือนเดิม
+  assert.deepEqual(agencyRefForEdit('QU4862', null, true), { value: 'QU-4862' })
+  // ผลการตัดสินไม่เปลี่ยน: รูปไม่มีขีดยังเป็นเลขจริง / ตัวยึดยังเป็นตัวยึด
+  assert.equal(isValidQuRef('QU4862'), true)
+  assert.equal(isQuPending('QU1234'), true)
+  assert.equal(isValidQuRef('QU1234'), false)
+})
+
 test('ข้อความตีกลับต้องบอกทางออก (ใส่ 1234) ไม่ใช่แค่บอกว่าผิด', () => {
   const msg = quRefRejectMessage('LIFE2601')
   assert.ok(msg.includes('1234'), msg)

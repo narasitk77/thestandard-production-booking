@@ -21,9 +21,14 @@ export function quRuleEnabled(): boolean {
   return process.env.AGENCY_REF_QU_RULE?.trim() !== '0'
 }
 
-/** ตัดช่องว่าง + uppercase — "qu 4289" → "QU4289", " QU-4289 " → "QU-4289" */
+/**
+ * ตัดช่องว่าง + uppercase + เติมขีดหลัง QU — "qu 4289" → "QU-4289", " QU-4289 " → "QU-4289"
+ * เติมขีดเพราะใบเสนอราคาใบเดียวถูกเก็บเป็นทั้ง QU4862 และ QU-4862 (7 ใบบนพรอด 23 พ.ย.)
+ * ทำทีละส่วนของรายการคั่นจุลภาค · ไม่แตะค่าที่ไม่ได้ขึ้นต้นด้วย QU ตามด้วยตัวเลข ("1234" คงเดิม)
+ * ค่าเก่าใน DB ไม่ถูกเขียนทับ — มีผลกับค่าที่บันทึกใหม่ (จองใหม่ / แก้ Agency Ref) เท่านั้น
+ */
 export function normalizeQuRef(raw: string | null | undefined): string {
-  return (raw || '').trim().toUpperCase().replace(/\s+/g, '')
+  return (raw || '').trim().toUpperCase().replace(/\s+/g, '').replace(/(^|,)QU(?=\d)/g, '$1QU-')
 }
 
 /**
