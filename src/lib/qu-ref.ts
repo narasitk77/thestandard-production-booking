@@ -27,9 +27,16 @@ export function normalizeQuRef(raw: string | null | undefined): string {
 
 const QU_RE = /^QU-?\d+[A-Z0-9/-]*$/
 
-/** อยู่ในรูปแบบเลข QU (ยังไม่ตัดสินว่าเป็นเลขจริงหรือตัวยึด) */
+/**
+ * อยู่ในรูปแบบเลข QU (ยังไม่ตัดสินว่าเป็นเลขจริงหรือตัวยึด)
+ *
+ * รายการคั่นจุลภาคที่ทุกส่วนเป็นเลข QU ก็นับ — งานเดียวมีใบเสนอราคาสองใบได้จริง
+ * ("QU-4345, QU-4406", "QU-4308-V1, QU-4308-V2" บนพรอด) · เดิมตกกฏตรงจุลภาค
+ * ทั้งที่ needsRealQuRef ถือว่าเป็นเลขจริง: หน้าใบจองขึ้นแบนเนอร์ "ตัวยึด" และ
+ * แอดมินกดบันทึกอะไรในใบนั้นก็โดน 400 (6 ใบ COMPLETED)
+ */
 function matchesQuFormat(n: string): boolean {
-  return n !== '' && QU_RE.test(n)
+  return n !== '' && n.split(',').every(part => QU_RE.test(part))
 }
 
 /** เลขใบเสนอราคาจริง — ตัวยึด "ยังไม่มีเลข QU" ไม่นับ (ดู isQuPending) */
@@ -84,6 +91,25 @@ export function isQuPending(raw: string | null | undefined): boolean {
 /** ผ่านการตรวจ = เป็นเลข QU จริง หรือเป็นตัวยึด "ยังไม่มีเลข QU" */
 export function isAcceptableQuRef(raw: string | null | undefined): boolean {
   return isValidQuRef(raw) || isQuPending(raw)
+}
+
+/**
+ * ค่า Agency Ref ที่จะเก็บเมื่อมีคนแก้ใบที่มีอยู่ (PATCH ของแอดมิน + producer-edit — กฎเดียว)
+ *
+ * ตรวจกฎ QU **เฉพาะเมื่อค่าเปลี่ยนจริง** (เทียบหลัง normalize): หน้า /admin/[id] ส่ง
+ * agencyRef กลับมาทุกครั้งที่กดบันทึก ค่าเก่าที่ตกกฎ ("รอ AE แจ้งค่ะ" ฯลฯ) จึงทำให้
+ * แก้อะไรอื่นในใบนั้นไม่ได้เลย (400) จนกว่าจะเปลี่ยน Agency Ref เอง · ค่าไม่เปลี่ยน
+ * = เก็บค่าเดิมตามที่อยู่ใน DB ไม่แตะ
+ */
+export function agencyRefForEdit(
+  raw: string | null | undefined,
+  stored: string | null | undefined,
+  ruleApplies: boolean,
+): { value: string | null } | { error: string } {
+  if (!raw || !ruleApplies) return { value: raw || null }
+  if (normalizeQuRef(raw) === normalizeQuRef(stored)) return { value: stored ?? null }
+  if (!isAcceptableQuRef(raw)) return { error: quRefRejectMessage(raw) }
+  return { value: normalizeQuRef(raw) }
 }
 
 /** ข้อความเตือนตอนใส่ค่าผิด — ใช้ถ้อยคำเดียวกันทุก endpoint */

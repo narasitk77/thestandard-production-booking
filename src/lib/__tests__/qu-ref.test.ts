@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  isValidQuRef, isQuPending, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage, QU_PENDING,
+  isValidQuRef, isQuPending, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage, QU_PENDING, agencyRefForEdit,
 } from '../qu-ref'
 
 test('ตัวยึดที่ประกาศคือ QU-1234TBC (v1.188) — ผ่านการตรวจ แต่ไม่ใช่เลข QU จริง', () => {
@@ -77,6 +77,39 @@ test('ทุกรูปแบบ QU ที่ใช้จริงในระ�
     assert.equal(isAcceptableQuRef(ref), true, ref)
     assert.equal(isQuPending(ref), false, ref)
   }
+})
+
+test('หลายเลข QU คั่นจุลภาคในใบเดียว = เลขจริง (ค่าบนพรอด) — predicate ทั้งสามต้องตรงกัน', async () => {
+  const { needsRealQuRef } = await import('../qu-reminder')
+  for (const ref of ['QU-4308-V1, QU-4308-V2', 'QU-4308-V3, QU-4308-V4', 'QU-4345, QU-4406', 'QU-3186-V18/ QU-3186-V22']) {
+    assert.equal(isValidQuRef(ref), true, ref)
+    assert.equal(isAcceptableQuRef(ref), true, ref)
+    assert.equal(needsRealQuRef(ref), false, ref)
+  }
+  // ทุกส่วนต้องเป็นเลข QU — ส่วนที่ว่าง/ไม่ใช่ QU ทำให้ทั้งค่าไม่ผ่าน
+  for (const bad of ['QU-4345,', 'QU-4345, PP-26-036', ', QU-4345', 'QU-4345,,QU-4406']) {
+    assert.equal(isValidQuRef(bad), false, bad)
+    assert.equal(isAcceptableQuRef(bad), false, bad)
+  }
+  // มีตัวยึดปน = ยังไม่ใช่เลขจริง (ผ่านการตรวจได้ในฐานะตัวยึด)
+  assert.equal(isValidQuRef('QU-4345, QU-1234TBC'), false)
+  assert.equal(isAcceptableQuRef('QU-4345, QU-1234TBC'), true)
+})
+
+test('แก้ใบที่มีอยู่: ตรวจกฎ QU เฉพาะเมื่อค่าเปลี่ยน — ค่าเก่าที่ตกกฎไม่ขวางการบันทึกเรื่องอื่น', () => {
+  // 6 ใบ COMPLETED บนพรอดที่แอดมินบันทึกอะไรไม่ได้เลย (หน้า /admin/[id] ส่ง agencyRef ซ้ำทุกครั้ง)
+  for (const legacy of ['รอ AE แจ้งค่ะ', 'รอ AE แจ้งอีกทีค่า', 'ซัง', 'แพร']) {
+    assert.deepEqual(agencyRefForEdit(legacy, legacy, true), { value: legacy }, legacy)
+  }
+  // เทียบหลัง normalize: ส่งค่าเดิมมาในรูปที่ต่างแค่ช่องว่าง/ตัวพิมพ์ = ไม่เปลี่ยน → เก็บของเดิมไม่แตะ
+  assert.deepEqual(agencyRefForEdit('QU-4345,QU-4406', 'QU-4345, QU-4406', true), { value: 'QU-4345, QU-4406' })
+  // เปลี่ยนจริง → ตรวจเหมือนเดิม
+  assert.ok('error' in agencyRefForEdit('LIFE2601', 'รอ AE แจ้งค่ะ', true))
+  assert.deepEqual(agencyRefForEdit(' qu-4500 ', 'รอ AE แจ้งค่ะ', true), { value: 'QU-4500' })
+  assert.deepEqual(agencyRefForEdit('QU-1234TBC', null, true), { value: 'QU-1234TBC' })
+  // ลบค่า / กฎไม่ใช้กับใบนี้ (ไม่ใช่ ADVERTORIAL หรือ kill switch) = เก็บตามที่ส่งมา
+  assert.deepEqual(agencyRefForEdit('', 'QU-4289', true), { value: null })
+  assert.deepEqual(agencyRefForEdit('LIFE2601', null, false), { value: 'LIFE2601' })
 })
 
 test('normalize เก็บตัวยึดตามที่พิมพ์ — ค้นหา "1234" ใน Agency Ref แล้วต้องเจอ', () => {

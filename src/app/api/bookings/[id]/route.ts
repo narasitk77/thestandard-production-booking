@@ -8,7 +8,7 @@ import { canViewBooking } from '@/lib/booking-access'
 import { resolveBookingCrew } from '@/lib/crew-names'
 import { removeCancelledBookingEvent, pushCalendarDetails } from '@/lib/calendar-reconcile'
 import { updateBookingRow, joinEpisodeTitles } from '@/lib/google-sheets'
-import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
+import { quRuleEnabled, agencyRefForEdit } from '@/lib/qu-ref'
 import { syncBookingOT, clearBookingOT } from '@/lib/ot-sync'
 import { assertStatusTransition } from '@/lib/booking-status'
 import { isShootOver } from '@/lib/booking-complete'
@@ -158,15 +158,14 @@ export async function PATCH(
     // รูปแบบ QU เท่านั้น (สอดคล้อง create); ค่าว่าง = ลบได้ตามเดิม
     // v1.183 — ตัวยึด "1234" (ยังไม่มีเลข QU) ผ่านได้เหมือนฝั่ง create ไม่งั้น
     // แอดมินจะแก้ใบที่ค้างตัวยึดอยู่ไม่ได้เลย
-    let agencyRefValidated: string | null = agencyRef || null
     // v1.188 — ทุกบ้าน ไม่ใช่แค่ AGN
-    if (agencyRef !== undefined && agencyRef && quRuleEnabled()
-        && existing.category === 'ADVERTORIAL') {
-      if (!isAcceptableQuRef(agencyRef)) {
-        return NextResponse.json({ error: quRefRejectMessage(agencyRef) }, { status: 400 })
-      }
-      agencyRefValidated = normalizeQuRef(agencyRef)
+    // ตรวจเฉพาะเมื่อค่าเปลี่ยน — หน้า /admin/[id] ส่ง agencyRef กลับมาทุกครั้ง (กฎอยู่ที่ agencyRefForEdit)
+    const agencyRefCheck = agencyRefForEdit(agencyRef, existing.agencyRef,
+      quRuleEnabled() && existing.category === 'ADVERTORIAL')
+    if ('error' in agencyRefCheck) {
+      return NextResponse.json({ error: agencyRefCheck.error }, { status: 400 })
     }
+    const agencyRefValidated = agencyRefCheck.value
 
     // v1.51 — a soft-deleted booking is frozen: restore it first (undelete)
     if (existing.deletedAt) {

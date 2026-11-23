@@ -16,7 +16,7 @@
  * truth for authorization.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
+import { quRuleEnabled, agencyRefForEdit } from '@/lib/qu-ref'
 import { prisma } from '@/lib/db'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { resolveLocationId } from '@/lib/location-resolve'
@@ -112,15 +112,13 @@ export async function PATCH(
 
     // v1.161 — กฏ QU (เหมือน create/PATCH): งาน Agency (Advertorial) แก้ Agency ref
     // ได้เฉพาะรูปแบบ QU. v1.183 — ตัวยึด "1234" (ยังไม่มีเลข QU) ผ่านได้ด้วย
-    let agencyRefValidated: string | null = agencyRef || null
-    // v1.188 — ทุกบ้าน ไม่ใช่แค่ AGN
-    if (agencyRef !== undefined && agencyRef && quRuleEnabled()
-        && existing.category === 'ADVERTORIAL') {
-      if (!isAcceptableQuRef(agencyRef)) {
-        return NextResponse.json({ error: quRefRejectMessage(agencyRef) }, { status: 400 })
-      }
-      agencyRefValidated = normalizeQuRef(agencyRef)
+    // v1.188 — ทุกบ้าน ไม่ใช่แค่ AGN · ตรวจเฉพาะเมื่อค่าเปลี่ยน (กฎอยู่ที่ agencyRefForEdit)
+    const agencyRefCheck = agencyRefForEdit(agencyRef, existing.agencyRef,
+      quRuleEnabled() && existing.category === 'ADVERTORIAL')
+    if ('error' in agencyRefCheck) {
+      return NextResponse.json({ error: agencyRefCheck.error }, { status: 400 })
     }
+    const agencyRefValidated = agencyRefCheck.value
 
     // v1.146 review fix — same HH:MM guard as createBookingFromPayload.
     if (callTime && !isValidHHMM(callTime)) {
