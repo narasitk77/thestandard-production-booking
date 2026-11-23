@@ -175,7 +175,21 @@ async function getJson(path: string, timeoutMs = 15_000): Promise<any> {
 /** ช่วงที่ห้องถูกจองแล้วในวันนั้น (เวลาเป็น UTC ISO) */
 export async function roomBusySlots(roomId: number, dateYMD: string): Promise<RoomConflict[]> {
   const data = await getJson(`/api/liff/room-slots?roomId=${roomId}&date=${encodeURIComponent(dateYMD)}`)
-  return Array.isArray(data) ? data : []
+  // 2026-11-23 — 200 ที่ไม่ใช่ลิสต์ ≠ "วันนี้ว่าง" (bug class 2): throw ให้ผู้เรียกรายงานว่า "ตรวจไม่ได้"
+  if (!Array.isArray(data)) throw new Error('room-slots: รูปคำตอบไม่ถูกต้อง (ไม่ใช่ลิสต์)')
+  return data
+}
+
+/**
+ * แถวการจองทั้งเดือนจาก `bookings-calendar` — **ต้องมีลิสต์ `bookings` จริง** (2026-11-23)
+ * เดิม `Array.isArray(data?.bookings) ? data.bookings : []` = JSON 200 ที่ผิดรูปกลายเป็น "เดือนนี้ว่าง"
+ * → reconciler ตีทุกใบที่มีห้องในเดือนนั้นว่า "หายไปจากระบบกลาง" แล้วล้างเลขทิ้งในรอบเดียว (bug class 2)
+ * throw แทน — ผู้เรียกทุกตัวถือ throw เป็น "อ่านไม่ได้ = ไม่แตะห้อง" อยู่แล้ว
+ */
+async function calendarRows(year: number, month: number): Promise<any[]> {
+  const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
+  if (!Array.isArray(data?.bookings)) throw new Error(`bookings-calendar ${year}-${month}: รูปคำตอบไม่ถูกต้อง (ไม่มีลิสต์ bookings)`)
+  return data.bookings
 }
 
 /**
@@ -406,8 +420,7 @@ export async function findExistingRoomBooking(
   year: number,
   month: number,
 ): Promise<{ id: number | null; bookingNo: string; title: string } | null> {
-  const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
-  const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
+  const rows = await calendarRows(year, month)
   const marker = roomBookingMarker(bookingCode)
   const hit = rows.find(r => String(r?.title || '').includes(marker))
   if (!hit) return null
@@ -437,8 +450,7 @@ export async function listRoomBookings(year: number, month: number): Promise<{
   /** v1.227 — อีเมลคนจอง ใช้ตัดสินว่า "คนของงานนี้จองห้องเองไปแล้ว" */
   email: string | null
 }[]> {
-  const data = await getJson(`/api/liff/bookings-calendar?year=${year}&month=${month}`)
-  const rows: any[] = Array.isArray(data?.bookings) ? data.bookings : []
+  const rows = await calendarRows(year, month)
   return rows.map(r => {
     const id = Number(r?.id)
     const roomId = Number(r?.roomId)
@@ -505,7 +517,12 @@ export async function cancelRoomBooking(
     })
     const body = await res.json().catch(() => ({}))
     const message = String(body?.error || body?.message || '').trim()
-    if (res.ok) return { kind: 'ok' }
+    // 2026-11-23 — 200 เฉย ๆ ไม่พอ: สเปค IT ตอบ `{id, bookingNo, status:"cancelled"}` · 200 ที่เป็น HTML/JSON ผิดรูป
+    // เดิมนับเป็น "ยกเลิกแล้ว" → ล้างเลขห้องของเราทิ้งทั้งที่ห้องยังถูกยึดฝั่งเขา (bug class 2) → ไม่รู้ผล = unknown
+    if (res.ok) {
+      const confirmed = String(body?.status || '').toLowerCase() === 'cancelled' || !!body?.bookingNo || body?.id != null
+      return confirmed ? { kind: 'ok' } : { kind: 'unknown', message: `ตอบ ${res.status} แต่ไม่ยืนยันการยกเลิก` }
+    }
     if (res.status === 401 || res.status === 403) {
       return { kind: 'forbidden', message: message || `HTTP ${res.status} — คีย์อาจใช้กับ cancel ไม่ได้` }
     }

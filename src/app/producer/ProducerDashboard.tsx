@@ -252,7 +252,7 @@ export default function ProducerDashboard({ producerEmail }: { producerEmail: st
                     <span className="font-mono font-medium text-gray-800">{b.bookingCode || b.id}</span>
                     <span className="inline-flex items-center gap-1.5">
                       <AdBadge category={b.category} />
-                      <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} />
+                      <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} shootType={(b as any).shootType} />
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[b.status] || ''}`}>
                         {statusLabel(b.status)}
                       </span>

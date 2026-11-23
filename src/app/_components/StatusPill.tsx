@@ -83,12 +83,13 @@ export function AdBadge({ category, className = '' }: { category?: string | null
  *
  * แสดงเฉพาะสถานะที่ "มีอะไรต้องทำ" — จองสำเร็จไม่ต้องรบกวน
  */
-export function RoomBusyBadge({ status, error, className = '' }: {
+export function RoomBusyBadge({ status, error, shootType, className = '' }: {
   status?: string | null
   error?: string | null
+  shootType?: string | null
   className?: string
 }) {
-  const b = roomBadge(status, error)
+  const b = roomBadge(status, error, shootType)
   if (!b) return null
   const tone =
     b.tone === 'busy' ? 'border-rose-300 bg-rose-50 text-rose-700'
