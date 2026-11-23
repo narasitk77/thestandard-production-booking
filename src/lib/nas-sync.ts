@@ -276,7 +276,7 @@ const bkk = (iso: string) => new Date(iso).toLocaleString('th-TH', { timeZone: '
  * mid-upload): the loop in ingestOnce walks only folders in this manifest, so its lastPending stayed >0 for good and
  * every reader of it (footage-ready gate d, follow-up, fast-watch, field upload) held the booking forever — 11 codes
  * on 20 Nov 2026, some since July. Gone DRAIN_SETTLE_MS → the NAS gate opens and ops hear it; footage-ready still
- * checks Drive + MEDIAPRO itself. NOT a drain: nobody knows the files arrived — no ✅ mail, no 'nas.folder_drained'
+ * checks Drive + MEDIAPRO itself for bookings inside its auto window (older ones: run?codes=). NOT a drain: nobody knows the files arrived — no ✅ mail, no 'nas.folder_drained'
  * (fast-watch reads that as "new files arrived"), a 'nas.folder_vanished' row instead.
  * Holds (gate stays shut): unreadable (manifest.skipped) · empty scan · the sampled files now sit in another NAS folder
  * (renamed without the code) · more than half of last scan's coded folders missing at once (half-mounted view).
@@ -333,7 +333,10 @@ async function releaseVanished(statuses: any, present: Set<string>, manifest: Na
   if (!released.length) return
   // everyMs 0: every batch is news (a fixed key with the 6-h throttle would swallow a second batch)
   await alertOps('nas-vanished', `โฟลเดอร์หายจาก NAS ทั้งที่ยังค้างไฟล์ — ปลดด่าน NAS ${released.length} งาน`,
-    `โฟลเดอร์หายจาก NAS ทั้งที่ยังค้าง ${total} ไฟล์ — ปลดด่าน NAS แล้ว footage-ready จะตรวจ Drive+MEDIAPRO เอง\n${released.join('\n')}\n` +
+    // maint 23 Nov 2026 — not "footage-ready will check": it checks only bookings still inside its auto window (the 11
+    // codes v1.290 released had all aged out of it), so say where the rest are looked at
+    `โฟลเดอร์หายจาก NAS ทั้งที่ยังค้าง ${total} ไฟล์ — ปลดด่าน NAS แล้ว · footage-ready ตรวจ Drive+MEDIAPRO เองเฉพาะใบที่ยังอยู่ในหน้าต่างแจ้งอัตโนมัติ ` +
+    `(วันถ่ายวันสุดท้าย + FOOTAGE_READY_LOOKBACK_DAYS วัน) · ใบที่เก่ากว่านั้นดูรายงาน footage-ready/stats แล้วตรวจด้วย footage-ready/run?dryRun=1&codes=<code>\n${released.join('\n')}\n` +
     'ไม่ได้แปลว่าไฟล์ขึ้น Drive ครบ (จึงไม่มีเมล ✅) — ใบที่ยังขาด ด่าน MEDIAPRO/เวลารอของ footage-ready ยังกันไว้ · ถ้าโฟลเดอร์ถูกย้ายผิด แก้ชื่อให้มีรหัสงาน', 0)
 }
 

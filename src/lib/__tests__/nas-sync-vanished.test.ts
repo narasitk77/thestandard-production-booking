@@ -81,6 +81,10 @@ test('หายครั้งแรก = จำเวลา+ไฟล์ ไม
   for (const c of [T, U, OLD]) assert.ok(v[0].text.includes(c))
   assert.ok(v[0].text.includes('110 ไฟล์'))
   assert.equal(v[0].everyMs, 0, 'never throttled: a second batch is news too')
+  // maint 23 Nov — v1.290 promised "footage-ready จะตรวจ Drive+MEDIAPRO เอง" for all 11 released codes, all of them already
+  // past the auto window: the text must say it checks only inside the window, and how older ones are checked
+  assert.doesNotMatch(v[0].text, /footage-ready จะตรวจ Drive\+MEDIAPRO เอง/)
+  assert.match(v[0].text, /เฉพาะใบที่ยังอยู่ในหน้าต่างแจ้งอัตโนมัติ.*footage-ready\/run\?dryRun=1&codes=<code>/)
   assert.equal(drainedMail().length, 0, 'not a drain — nobody knows the files arrived')
   assert.equal(chats.length, 0)
 
