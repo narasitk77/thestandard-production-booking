@@ -104,6 +104,8 @@ mock.module('../nas-sync', {
   namedExports: {
     latestNasState: async () => ({ manifest: nasAt ? { at: nasAt, folders: [] } : null, statuses: nasStatuses }),
     nasManifestAge: (at: string | null) => { const m = at ? (Date.now() - Date.parse(at)) / MIN : NaN; return { ageMinutes: m, stale: !(m <= 60) } },
+    // maint 23 Nov 2026 — footage-ready reads the NAS through freshNasState (fresh manifest only, else none)
+    freshNasState: async () => (nasAt && (Date.now() - Date.parse(nasAt)) / MIN <= 60 ? { manifest: { at: nasAt, folders: [] }, statuses: nasStatuses } : { manifest: null, statuses: {} }),
   },
 })
 mock.module('../footage-folders', { namedExports: { getCachedFootagePayload: async () => PAYLOAD, computeFootagePayload: async () => PAYLOAD } })
@@ -295,7 +297,9 @@ test('review: คลิป Sony ตั้งชื่อเอง (ไม่ใ�
 test('review: การ์ดใบเดียวกันถูกลงทั้ง CAM-A และ CAM-B (จองสองกล้อง) = นับกล้องไม่ได้ → กฎเดิม · สำเนาจาก sync ("CAM-A (1)") ไม่ถูกกัน', async () => {
   bookings = [mkBooking({ cameraCount: 2 })]
   const a = sonyCard('CAM-A', ['A001C001_261110XF'])
-  const copy = (cam: string) => sonyCard(cam, ['A001C001_261110XF']).map(f => ({ ...f, id: f.name === 'MEDIAPRO.XML' ? 'mp-CAM-A' : f.id }))
+  // a copy is a different Drive file with the same content — its own id (maint 23 Nov: the gate counts a file id once
+  // across roots, so a fixture reusing the original's id would read as the SAME file, not a copy)
+  const copy = (cam: string) => sonyCard(cam, ['A001C001_261110XF'])
   files = [...a, ...copy('CAM-B')]
   const r = await fr.runFootageReadyScan({ dryRun: true })
   assert.deepEqual(r.notified, [])

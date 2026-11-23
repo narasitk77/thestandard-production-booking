@@ -14,20 +14,21 @@
 import { prisma } from '@/lib/db'
 import {
   findChildFolder, listChildFolders, copyFileToFolder, listFilesRecursive, findEpisodeFolderUrls,
-  ensureFolderPath, hasDriveCredentials, SOUND_STAGING_DIR, listSoundStagingBookingFolders,
+  ensureFolderPath, hasDriveCredentials, SOUND_STAGING_DIR, listSoundStagingBookingFolders, type DriveFile,
 } from '@/lib/google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode, bookingNeedsSound,
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
-import { getDriveLink, rememberDriveLinks } from '@/lib/drive-links'
+// maint 2026-11-08 — storedFolder: a stored id falls back to the name walk only when Drive says it is GONE ('unknown' —
+// a 403 rateLimitExceeded is not retried — used to read as dead via isFolderAlive and walk names into a twin box/staging).
+import { getDriveLink, rememberDriveLinks, storedFolder } from '@/lib/drive-links'
 import { noteResolve } from '@/lib/id-first-metrics'
-// maint 2026-11-08 — a stored id falls back to the name walk only when Drive says it is GONE ('unknown' — a 403
-// rateLimitExceeded is not retried — used to read as dead via isFolderAlive and walk names into a twin box/staging).
-import { storedFolder } from '@/lib/video-merge'
+import { mergeBookingsWhere, mergeCodeSkipReason } from '@/lib/video-merge'
 import { tryLockMerge, unlockMerge, soundMergeKey } from '@/lib/merge-lock'
 import { EPISODE_ORDER } from './episode-order'
+import { boxHasContent } from '@/lib/footage-completeness'
 
 export interface SoundMergeResult {
   skipped: boolean
@@ -93,6 +94,74 @@ export async function resolveAudioTarget(
   return { audioId, existingIds }
 }
 
+/** a staging-ROOT file whose name is already in the box with other content is copied into AUDIO/<this> */
+export const ROOT_CLASH_DIR = 'STAGING-ROOT'
+
+/**
+ * maint 23 Nov 2026 — what to copy from staging, for BOTH paths (runSoundMerge + mergeBookingSound). Every staging
+ * subfolder used to be poured into one AUDIO folder:
+ *  - the same CONTENT twice in staging (POP-7TG-260826-01: REC-001/REC-002.WAV, identical md5) became two copies in the
+ *    box → copied once now. md5 ONLY — never name|size: WLT-EXI-260701-01's graded WAV at the staging root and the raw
+ *    WAV in RAW/Audio Files share name AND size but not content; a name|size dedupe would drop one of them silently.
+ *  - one NAME for different content (that same pair; also DAY01–03 of a multi-day job) landed side by side in one folder
+ *    and the editor could not tell which was which → such names keep their staging sub-path under AUDIO.
+ * Already in the box = boxHasContent (md5 anywhere in every AUDIO location; name|size only when a side has no md5). It
+ * used to be name|size alone, so when that WLT-EXI pair reached staging in two different runs the second take matched
+ * the first by name|size and was never copied, with no log line. A take whose NAME is already in the box with other
+ * content keeps its staging sub-path (a staging-root file: ROOT_CLASH_DIR) so it never sits beside its namesake.
+ * Nothing is ever moved or deleted.
+ */
+export function soundCopyPlan(
+  stagingFiles: DriveFile[],
+  boxFiles: DriveFile[],
+): Array<{ f: DriveFile; path: string[] }> {
+  const seenMd5 = new Set<string>()
+  const distinct: DriveFile[] = []
+  for (const f of stagingFiles) {
+    if (f.md5 && seenMd5.has(f.md5)) continue // the same content already planned
+    if (f.md5) seenMd5.add(f.md5)
+    distinct.push(f)
+  }
+  const count = new Map<string, number>()
+  for (const f of distinct) count.set(f.name, (count.get(f.name) || 0) + 1)
+  const inBox = boxHasContent(boxFiles)
+  // ponytail: name-only clash check — a later take at the SAME sub-path as its namesake in the box still lands beside it
+  const boxNames = new Set(boxFiles.map(b => b.name.toUpperCase()))
+  return distinct
+    .filter(f => !inBox(f))
+    .map(f => ({
+      f,
+      path: boxNames.has(f.name.toUpperCase()) ? (f.folderPath.length ? f.folderPath : [ROOT_CLASH_DIR])
+        : (count.get(f.name) || 0) > 1 ? f.folderPath : [],
+    }))
+}
+
+/** Copy the planned staging files into the box AUDIO (dry run: plan only). One copy rule for both paths. */
+async function copyStagedAudio(
+  code: string,
+  stagingFiles: DriveFile[],
+  target: { audioId: string | null; existingIds: string[] },
+  dryRun: boolean,
+): Promise<{ planned: number; copied: number; err: number }> {
+  const boxFiles: DriveFile[] = []
+  for (const id of target.existingIds) boxFiles.push(...await listFilesRecursive(id, { maxFiles: 2000 }))
+  const plan = soundCopyPlan(stagingFiles, boxFiles)
+  if (dryRun || !plan.length) return { planned: plan.length, copied: 0, err: 0 }
+  const audioId = target.audioId!
+  const dirs = new Map<string, string>()
+  let copied = 0, err = 0
+  for (const { f, path } of plan) {
+    try {
+      const key = path.join('/')
+      let dest = key ? dirs.get(key) : audioId
+      if (!dest) { dest = await ensureFolderPath(audioId, path); dirs.set(key, dest) }
+      await copyFileToFolder(f.id, dest, f.name)
+      copied++
+    } catch (e: any) { err++; console.error('[sound-merge] copy failed:', code, f.name, e?.message || e) }
+  }
+  return { planned: plan.length, copied, err }
+}
+
 export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string } = {}): Promise<SoundMergeResult> {
   const base = { dryRun: !!opts.dryRun, bookings: 0, staged: 0, merged: 0, errors: 0, results: [] as SoundMergeResult['results'] }
   const root = process.env.DRIVE_FOOTAGE_ROOT?.trim()
@@ -109,9 +178,9 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
   // Bound to recent shoots: the self-heal (re-copy after a box re-overwrite) only
   // matters while a shoot is actively being uploaded, so old jobs needn't be
   // re-scanned every hour (keeps per-run Drive calls bounded as the roster grows).
-  const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000) // 45 days
+  // maint 23 Nov 2026 — the same picker as video-merge (whole shoot range; ?code= = that booking, no window).
   const bookings = await prisma.booking.findMany({
-    where: { status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, bookingCode: { not: null }, shootDate: { gte: since } },
+    where: mergeBookingsWhere(opts.onlyCode),
     select: {
       id: true, driveFolders: true,
       bookingCode: true, projectId: true, projectName: true, category: true, crewRequired: true,
@@ -120,6 +189,11 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       episodes: { orderBy: EPISODE_ORDER, select: { episodeId: true, sequence: true, title: true, program: { select: { name: true } } } },
     },
   })
+  // a ?code= run says why it merged nothing (it used to answer bookings:0, skipped:false)
+  if (opts.onlyCode && !bookings.length) return { skipped: true, reason: await mergeCodeSkipReason(opts.onlyCode), ...base }
+  if (opts.onlyCode && !bookings.some(b => bookingNeedsSound(b.crewRequired))) {
+    return { skipped: true, reason: `${bookings[0].bookingCode} ไม่มีทีมเสียงในใบ — sound-merge ไม่รวมใบนี้`, ...base }
+  }
 
   for (const b of bookings) {
     if (!b.bookingCode || !bookingNeedsSound(b.crewRequired)) continue
@@ -189,21 +263,9 @@ export async function runSoundMerge(opts: { dryRun?: boolean; onlyCode?: string 
       // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);
       // dedup spans every existing AUDIO location so nothing is re-copied.
       const target = await resolveAudioTarget(boxTargetId, { create: !opts.dryRun })
-      const have = new Set<string>()
-      for (const id of target.existingIds) {
-        for (const f of await listFilesRecursive(id, { maxFiles: 2000 })) have.add(`${f.name}|${f.size ?? ''}`)
-      }
-      const toCopy = stagingFiles.filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
-
-      if (opts.dryRun) { base.merged += toCopy.length; base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied: toCopy.length }); continue }
-      if (toCopy.length === 0) { base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied: 0 }); continue }
-
-      const audioId = target.audioId!
-      let copied = 0
-      for (const f of toCopy) {
-        try { await copyFileToFolder(f.id, audioId, f.name); copied++ }
-        catch (e: any) { base.errors++; console.error('[sound-merge] copy failed:', b.bookingCode, f.name, e?.message || e) }
-      }
+      const c = await copyStagedAudio(code, stagingFiles, target, !!opts.dryRun)
+      const copied = opts.dryRun ? c.planned : c.copied // dry run: would-copy
+      base.errors += c.err
       base.merged += copied
       base.results.push({ bookingCode: b.bookingCode, staged: stagingFiles.length, copied })
     } catch (e: any) {
@@ -302,20 +364,7 @@ export async function mergeBookingSound(b: SoundMergeBooking, opts: { dryRun?: b
   // v1.126 — target the crew-visible AUDIO slot (EP/AUDIO when present);
   // dedup spans every existing AUDIO location so nothing is re-copied.
   const target = await resolveAudioTarget(boxTargetId, { create: !dryRun })
-  const have = new Set<string>()
-  for (const id of target.existingIds) {
-    for (const f of await listFilesRecursive(id, { maxFiles: 2000 })) have.add(`${f.name}|${f.size ?? ''}`)
-  }
-  const toCopy = stagingFiles.filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
+  const c = await copyStagedAudio(code, stagingFiles, target, dryRun)
   const boxUrl = boxTargetId ? `https://drive.google.com/drive/folders/${boxTargetId}` : null
-  if (dryRun) return { staged: stagingFiles.length, copied: toCopy.length, err: 0, boxFolderUrl: boxUrl }
-  if (toCopy.length === 0) return { staged: stagingFiles.length, copied: 0, err: 0, boxFolderUrl: boxUrl }
-
-  const audioId = target.audioId!
-  let copied = 0, err = 0
-  for (const f of toCopy) {
-    try { await copyFileToFolder(f.id, audioId, f.name); copied++ }
-    catch (e: any) { err++; console.error('[sound-merge] copy failed:', code, f.name, e?.message || e) }
-  }
-  return { staged: stagingFiles.length, copied, err, boxFolderUrl: boxUrl }
+  return { staged: stagingFiles.length, copied: dryRun ? c.planned : c.copied, err: c.err, boxFolderUrl: boxUrl }
 }

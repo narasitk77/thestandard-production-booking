@@ -172,6 +172,19 @@ test('mediaproGate: ครบ → ok · ขาด → ไม่ ok พร้อ�
   assert.equal((await mp.mediaproGate([])).ok, false)
 })
 
+test('maint 23 Nov: gate over the box + a code-named EP folder inside it (TSS-TSG-261110-01) — one card, counted once', async () => {
+  const inBox = ['TSS-TSG-261110-01 · TBC', 'CAM-A', 'XDROOT']
+  const mpFile = f(inBox, 'MEDIAPRO.XML', 500)
+  xmls[mpFile.id] = xml(material('A001C001_261110AA'))
+  trees.box = [...card(inBox, 'A001C001_261110AA'), mpFile]
+  // the same Drive files walked from the EP folder (findFoldersByCode also returns it): same ids, paths start one level down
+  trees.ep = trees.box.map((x: any) => ({ ...x, folderPath: x.folderPath.slice(1) }))
+  const r = await mp.mediaproGate(['box', 'ep'])
+  assert.equal(r.ok, true)
+  assert.match(r.text, /ครบตาม MEDIAPRO 1 การ์ด · 4 ไฟล์/, `pre-fix: 2 การ์ด — ${r.text}`)
+  assert.equal(r.files?.length, 5)
+})
+
 test('รีวิว: การ์ดเดียวที่ถูกแยกคลิปไปหลาย EP (AGN-260911-01 · A004 R001 ใน EP.2, R002 ใน EP.3 · MEDIAPRO ชุดเดียวกันทั้งสอง EP) → ครบ · ลบ R002 → ขาดไฟล์นั้น', () => {
   const ep2 = ['EP.2', 'CAM-A'], ep3 = ['EP.3', 'CAM-A']
   const m = mp.parseMediapro(xml(material('A004R001_260911TJ'), material('A004R002_260911AA')))

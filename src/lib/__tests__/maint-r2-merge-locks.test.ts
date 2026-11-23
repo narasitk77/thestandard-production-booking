@@ -3,7 +3,7 @@
  *
  * - sound-merge chose between a stored staging/box id and the NAME walk with isFolderAlive, which reads 'unknown'
  *   (a 403 rateLimitExceeded, not retried) as dead → the walk picked a "(1)" twin staging folder / found no box.
- *   It now uses video-merge's storedFolder: only a folder Drive says is GONE falls back.
+ *   It now uses storedFolder (drive-links.ts since maint 23 Nov): only a folder Drive says is GONE falls back.
  * - sound-merge and the per-booking button freed their merge locks WITHOUT the token: a run that outlived its lock
  *   (hung Drive call) freed the lock of the run that had taken it over → two merges on one booking.
  * - the button JOINED an unfinished job forever: a job hung on Drive kept the button on "กำลังย้าย" even after its lock
@@ -29,6 +29,8 @@ mock.module('../drive-links', {
   namedExports: {
     getDriveLink: (df: any, k: string) => df?.[k] ?? null, // FakeDrive ids are too short for the real id check
     rememberDriveLinks: async () => {},
+    // the real drive-links rule (only a folder Drive says is GONE falls back) — exercised for real in folder-integrity-stored.test.ts
+    storedFolder: async (link: string | null) => (link && (await drive.folderLiveness(link)) !== 'dead' ? link : null),
   },
 })
 mock.module('../google-drive', {

@@ -335,10 +335,14 @@ export async function mediaproGate(folderIds: string[], opts: MediaproCheckOptio
   try {
     if (!folderIds.length) return { ok: false, text: 'ไม่มีโฟลเดอร์ให้ตรวจ MEDIAPRO', check: null }
     const files: DriveFile[] = []
+    const seen = new Set<string>()
     for (const id of folderIds) {
       const list = await listFilesRecursive(id, { maxFiles: 20000 })
       if (list.length >= 20000) return { ok: false, text: 'ไฟล์เกิน 20000 — ตรวจ MEDIAPRO ไม่ครบ', check: null }
-      files.push(...list)
+      // maint 23 Nov 2026 — one Drive file once: an EP folder named with the booking code ("CODE · TBC") is inside the
+      // box AND a root of its own (findFoldersByCode), so its card was walked twice — "2 การ์ด" for one (TSS-TSG-261110-01).
+      // The first root (the box) keeps its path.
+      for (const f of list) if (!seen.has(f.id)) { seen.add(f.id); files.push(f) }
     }
     // A dead/empty folder walks to [] — that is "could not check", never "no Sony card, fine".
     if (!files.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) return { ok: false, text: 'โฟลเดอร์ที่ตรวจไม่มีไฟล์ (ว่างหรืออยู่ในถังขยะ) — ตรวจ MEDIAPRO ไม่ได้', check: null }

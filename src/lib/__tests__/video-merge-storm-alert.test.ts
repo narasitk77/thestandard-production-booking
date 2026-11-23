@@ -83,6 +83,23 @@ test('อ่านชุดเดิมไม่ได้ → ถือเป็
   assert.equal(sent[1].everyMs, 6 * HOUR)
 })
 
+test('maint 23 Nov: the name list is LOGGED only while the set is news — POP-PIV-261007-02\'s same 123 names were logged 208× in 9 days', async () => {
+  const warns = mock.method(console, 'warn', () => {})
+  try {
+    const logged = () => warns.mock.calls.filter(c => /sync-conflict name\(s\) left in landing/.test(String(c.arguments[0]))).length
+    const set = names(123)
+    await vm.reportConflicts('POP-PIV-261007-02', set)
+    assert.equal(logged(), 1)
+    for (const h of [1, 2, 3, 26]) { at(h); await vm.reportConflicts('POP-PIV-261007-02', [...set].reverse()) }
+    assert.equal(logged(), 1, 'pre-fix: 5 — the same set every hourly run')
+    at(27); await vm.reportConflicts('POP-PIV-261007-02', names(124))
+    assert.equal(logged(), 2, 'a changed set is news again')
+    readFails = true
+    at(28); await vm.reportConflicts('POP-PIV-261007-02', names(124))
+    assert.equal(logged(), 3, 'cannot read what was reported = log it (louder beats silent)')
+  } finally { warns.mock.restore() }
+})
+
 test('ไม่มีซาก = ไม่ทำอะไร · ลายนิ้วมือไม่ขึ้นกับลำดับ แต่ขึ้นกับชื่อ', async () => {
   await vm.reportConflicts('X-3', [])
   assert.equal(sent.length, 0)

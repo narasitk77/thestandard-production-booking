@@ -97,6 +97,22 @@ export function pendingOriginalClips(files: FootageFileLike[]): Array<{ clip: st
 const CAMERA = /^([A-Z]\d{3}[A-Z]\d{3}_[0-9A-Z]{6,}|C\d{4})$/i
 const WAV = /\.WAV$/i
 
+type ContentLike = { name: string; size: number | null; md5: string | null }
+/**
+ * Is this file's CONTENT already in the box? The same md5 anywhere in the box = yes; name+size only when one side has
+ * no md5. Name+size is not identity (bug-classes §3, TSS-WYS-260824-01) — whenever both sides carry an md5, md5 decides.
+ * One rule for strandedFiles (trashed drops) and sound-merge's copy plan (maint 23 Nov 2026).
+ */
+export function boxHasContent(boxFiles: ContentLike[]): (f: ContentLike) => boolean {
+  const md5s = new Set(boxFiles.map(b => b.md5).filter(Boolean))
+  const byNameSize = new Map<string, Array<string | null>>()
+  for (const b of boxFiles) {
+    const k = `${b.name.toUpperCase()}|${b.size}`
+    byNameSize.set(k, [...(byNameSize.get(k) || []), b.md5])
+  }
+  return f => (!!f.md5 && md5s.has(f.md5)) || (byNameSize.get(`${f.name.toUpperCase()}|${f.size}`) || []).some(m => !m || !f.md5)
+}
+
 /** ไฟล์ในโฟลเดอร์ `_แยกไว้ · …` ที่ root ของกล่อง = คนตั้งใจแยกออก (เช่นตัวอัปไม่จบของ A004R001) — ไม่นับทุกด่าน */
 export function isQuarantined(f: FootageFileLike): boolean {
   return /^_แยกไว้/.test(f.folderPath?.[0]?.trim() || '')

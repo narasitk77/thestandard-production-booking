@@ -40,7 +40,7 @@ import { snapshotIdFirst, formatIdFirstDigest } from './id-first-metrics'
 import {
   hasDriveCredentials, findEpisodeFolderUrls, listChildFolders, getFileName, renameDriveItem,
   ensureFolderPath, ensureShootCameraFolders, ensureFlatShootFolders, findChildFolderByCode,
-  findFoldersByCode, isFolderAlive, classifyFootageTreeFolder, listFilesRecursive, getDriveParentFolderId,
+  findFoldersByCode, classifyFootageTreeFolder, listFilesRecursive, getDriveParentFolderId,
 } from './google-drive'
 import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, folderNameMatchesCode,
@@ -49,7 +49,7 @@ import {
 } from './outlet-folders'
 import { canonicalCameraName } from './camera-folder-normalize'
 import { bookingShowName } from './display'
-import { getDriveLink, rememberDriveLinks } from './drive-links'
+import { getDriveLink, rememberDriveLinks, storedFolder } from './drive-links'
 import { EPISODE_ORDER } from './episode-order'
 
 const PRODUCTION_TEAM_ROOT = process.env.DRIVE_PRODUCTION_TEAM_ROOT?.trim() || '0AGendsFHFQYKUk9PVA'
@@ -297,8 +297,10 @@ export async function runFolderIntegrity(opts: {
       // this booking's whole landing subtree into the shared project box and
       // interleave several bookings' footage. So when the subfolder is expected
       // but wasn't reached, we refuse the whole booking and report it.
-      const boxLink = getDriveLink(b.driveFolders, 'box')
-      let boxId: string | null = boxLink && await isFolderAlive(boxLink) ? boxLink : null
+      // maint 23 Nov 2026 — storedFolder, not isFolderAlive: a stored box Drive cannot answer for ('unknown', e.g. a 403
+      // rateLimitExceeded) used to read as dead → name walk → rememberDriveLinks overwrote the id, or a fresh box was
+      // created below. Only a box Drive says is GONE falls back now; 'unknown' fails loudly later (getFileName etc.).
+      let boxId: string | null = await storedFolder(getDriveLink(b.driveFolders, 'box'))
       let resolvedViaSubfolder = !!boxId
       if (!boxId) {
         const resolved = await findEpisodeFolderUrls({
@@ -500,10 +502,9 @@ export async function runFolderIntegrity(opts: {
         const wantLanding = landingBookingFolderName({
           bookingCode: code, projectName: b.projectName, program: b.program, episodes: b.episodes,
         })
-        const landingLink = getDriveLink(b.driveFolders, 'landing')
-        const landingId = landingLink && await isFolderAlive(landingLink)
-          ? landingLink
-          : await findChildFolderByCode(PRODUCTION_TEAM_ROOT, code)
+        // same rule as the box: 'unknown' keeps the stored landing (no name search, no re-created drop folder)
+        const landingId = (await storedFolder(getDriveLink(b.driveFolders, 'landing')))
+          ?? await findChildFolderByCode(PRODUCTION_TEAM_ROOT, code)
 
         if (landingId) {
           // Landing folders are REPORT-ONLY for names: this drive is mirrored to

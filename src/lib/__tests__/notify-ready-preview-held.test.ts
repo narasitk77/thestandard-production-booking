@@ -72,6 +72,15 @@ test('preview: hold still matches the footage → returned as before, not stale'
   assert.deepEqual((await preview()).held, { ...HELD, fileCount: 1019, totalBytes: 9e11 })
 })
 
+test('maint 23 Nov: no held yet, but the fast path found MEDIAPRO files short → the preview warns (LIF-ECO-261118-01: 3.5 h silent)', async () => {
+  const fast = { detail: 'การ์ด Sony ไม่มี MEDIAPRO.XML 1 การ์ด', at: '2026-11-18T10:21:59.000Z', fileCount: 1019, totalBytes: 9e11 }
+  booking.readySnapshot = { fileCount: 1019, totalBytes: 9e11, at: '2026-11-18T09:52:00.000Z', fast: { ...fast, incomplete: true } }
+  assert.deepEqual((await preview()).held, fast)
+  // a fast "no" that is not a MEDIAPRO shortfall (nothing to compare) is not a warning
+  booking.readySnapshot = { fileCount: 1019, totalBytes: 9e11, at: '2026-11-18T09:52:00.000Z', fast: { ...fast, detail: 'ไม่มี MEDIAPRO ให้เทียบ' } }
+  assert.equal((await preview()).held, null)
+})
+
 test('preview: never held → held:null (shape unchanged)', async () => {
   const body = await preview()
   assert.equal(body.held, null)

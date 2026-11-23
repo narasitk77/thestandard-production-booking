@@ -99,7 +99,9 @@ export async function GET(request: NextRequest) {
     // seeing (changes / warnings / errors) so a clean night is silent — the
     // worker path (isWorker) opts into this; `report=1` forces it either way.
     const worthEmailing = changes > 0 || result.warnings.length > 0 || result.errors > 0
-    if ((allowed.isWorker && worthEmailing) || forceReport) {
+    // maint 23 Nov 2026 — the automatic digest is the real run's only: a worker-secret dry run (a preview) used to mail
+    // it too (bug class 5). report=1 still forces it; formatReconcileReport marks a dry run "(DRY-RUN)" in the subject.
+    if ((allowed.isWorker && !dryRun && worthEmailing) || forceReport) {
       try {
         const { subject, text } = formatReconcileReport(result)
         await sendEmail({

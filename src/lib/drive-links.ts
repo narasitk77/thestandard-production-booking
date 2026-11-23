@@ -19,6 +19,7 @@
  *   photo   — the Photographer Shared Drive album folder
  */
 import { prisma } from './db'
+import { folderLiveness } from './google-drive'
 
 export type DriveLinkKey = 'box' | 'landing' | 'staging' | 'photo'
 
@@ -35,6 +36,19 @@ export function getDriveLink(driveFolders: unknown, key: DriveLinkKey): string |
   if (!driveFolders || typeof driveFolders !== 'object' || Array.isArray(driveFolders)) return null
   const v = (driveFolders as Record<string, unknown>)[key]
   return isDriveId(v) ? v : null
+}
+
+/**
+ * The stored landing/box/staging id, or null to fall back to the name walk. Only a folder Drive says is GONE falls
+ * back: 'unknown' (a 403 rateLimitExceeded is not retried by withDriveRetry) used to read as dead via isFolderAlive and
+ * sent the caller down the name walk — which can create a fresh box/AGN booking layer or pick a twin, MOVE footage there
+ * and overwrite the stored id (rememberDriveLinks), splitting one shoot across two folders. Trusting a possibly-stale
+ * id fails loudly instead (google-drive.ts folderLiveness contract).
+ * maint 23 Nov 2026 — moved here from video-merge so every id-first resolver (video/sound-merge, folder-integrity)
+ * shares the one rule.
+ */
+export async function storedFolder(link: string | null | undefined): Promise<string | null> {
+  return link && (await folderLiveness(link)) !== 'dead' ? link : null
 }
 
 /** Merge a patch of links into the stored json (drops non-id values). Pure —

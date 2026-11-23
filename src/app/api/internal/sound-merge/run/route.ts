@@ -53,7 +53,11 @@ export async function GET(request: NextRequest) {
     const result = await runSoundMerge({ dryRun, onlyCode })
     // maint 2026-11-08 — heartbeat = the scheduled sweep ran and could do its job: not a skipped run (no
     // _SOUND-STAGING / env unset = nothing merged), not a ?code= one-off, not an admin click (shoot-markers rule).
-    if (!dryRun && result.skipped) console.error(`[sound-merge] run failed: skipped — ${result.reason}`)
+    // maint 23 Nov 2026 — ?code= of a booking it will not merge = skipped:true + why (an answer, not a worker failure)
+    if (!dryRun && result.skipped) {
+      if (onlyCode) console.warn(`[sound-merge] ?code=${onlyCode} skipped — ${result.reason}`)
+      else console.error(`[sound-merge] run failed: skipped — ${result.reason}`)
+    }
     if (allowed.isWorker && !dryRun && !onlyCode && !result.skipped) await recordHeartbeat('sound-merge')
     return NextResponse.json(result)
   } catch (e: any) {

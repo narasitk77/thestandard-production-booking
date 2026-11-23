@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 let bookings: any[] = []
 const writes: string[] = []
 const delivered = new Set<string>() // booking codes whose footage is already in a VIDEO-tree folder
+const probeOpts: any[] = []         // what the 'any file?' probe asked listFilesRecursive for
 
 mock.module('../db', { namedExports: { prisma: { booking: { findMany: async () => bookings } } } })
 mock.module('../google-drive', {
@@ -18,7 +19,7 @@ mock.module('../google-drive', {
     hasDriveCredentials: () => true,
     findFoldersByCode: async (code: string) => [{ id: `box-of-${code}` }],
     isFootageTreeFolder: async () => true,
-    listFilesRecursive: async (id: string) => delivered.has(id.replace('box-of-', '')) ? [{ name: 'A001C001.MXF' }] : [{ name: '_SHOOT.txt' }],
+    listFilesRecursive: async (id: string, o: any) => { probeOpts.push(o); return delivered.has(id.replace('box-of-', '')) ? [{ name: 'A001C001.MXF' }] : [{ name: '_SHOOT.txt' }] },
     listFilesInFolder: async () => [{ name: '_SHOOT.txt' }],
     ensureShootCameraFolders: async () => { writes.push('cameras'); return { bookingFolderId: 'box' } },
     ensurePhotoAlbumFolder: async () => { writes.push('photo'); return { bookingFolderId: 'photo' } },
@@ -40,7 +41,7 @@ before(async () => {
   process.env.DRIVE_FOOTAGE_ROOT = 'root'
   prep = await import('../prep-folders')
 })
-beforeEach(() => { writes.length = 0; delivered.clear() })
+beforeEach(() => { writes.length = 0; delivered.clear(); probeOpts.length = 0 })
 
 const row = (code: string, over: any = {}) => ({
   id: code, bookingCode: code, cameraCount: 2, micCount: 0, projectId: null, projectName: 'Job', category: null,
@@ -65,4 +66,10 @@ test('dryRun reports exactly what the real run does: delivered → skip, sound �
   assert.deepEqual(view(real), view(dry))
   assert.equal(dry.prepared, real.prepared)
   assert.ok(writes.includes('staging') && writes.includes('marker'), 'the real run still writes (staging, delivered-marker repair)')
+})
+
+test('maint 23 Nov: the "footage already delivered?" probe is quiet — hitting maxFiles=4 is its answer, not a log warning', async () => {
+  bookings = [row('NWS-KYM-261108-04')]
+  await prep.prepTodayShootFolders({ dryRun: true })
+  assert.deepEqual(probeOpts, [{ maxFiles: 4, quiet: true }], 'pre-fix: { maxFiles: 4 } → "hit maxFiles=4 … increase via worker config" ~15×/day')
 })

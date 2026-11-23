@@ -61,7 +61,7 @@ mock.module('../ops-alert', {
     alertOps: async (key: string, subject: string, text: string) => { alerts.push({ key, subject, text }); return { attempted: true, delivered: true, discord: true, lark: false, email: true } },
   },
 })
-mock.module('../nas-sync', { namedExports: { latestNasState: async () => ({ manifest: null, statuses: {} }), nasManifestAge: () => ({ ageMinutes: null, stale: true }) } })
+mock.module('../nas-sync', { namedExports: { latestNasState: async () => ({ manifest: null, statuses: {} }), nasManifestAge: () => ({ ageMinutes: null, stale: true }), freshNasState: async () => ({ manifest: null, statuses: {} }) } })
 const PAYLOAD = { found: 1, fileCount: 1, folders: [{ label: 'EP01 · CAM-A', url: 'u', fileCount: 1, totalBytes: 1000 }], bookingFolderUrl: 'u', soundStagingUrl: null }
 mock.module('../footage-folders', { namedExports: { getCachedFootagePayload: async () => PAYLOAD, computeFootagePayload: async () => PAYLOAD } })
 mock.module('../google-drive', {
@@ -106,7 +106,8 @@ test('maint: เมลไม่ถึงใครเลย → ไม่ปร�
   const r = await fr.runFootageReadyScan({ codes: [CODE] })
   assert.deepEqual(r.notified, [])
   assert.equal(r.errors.length, 1)
-  assert.equal(alerts.length, 0)
+  // not a "partial" alert (nobody was reached) — maint 23 Nov: but ops DO hear that nobody was (ready-mail-failed)
+  assert.deepEqual(alerts.map(a => a.key), [`ready-mail-failed:${CODE}`])
 })
 
 test('maint: รอบ ?codes= เดินทุกใบ → deferredCodes ว่าง (เดิมบอกว่าใบท้าย ๆ ถูกเลื่อนทั้งที่เดินแล้ว)', async () => {

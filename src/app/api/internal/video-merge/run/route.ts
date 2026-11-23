@@ -62,7 +62,12 @@ export async function GET(request: NextRequest) {
     // maint 2026-11-08 — the dead-man heartbeat = "the scheduled sweep ran and could do its job". A skipped run
     // (env unset / landing unreadable) merged nothing, a ?code= run walked one booking, and an admin click must
     // not stand in for a dead worker (the shoot-markers rule) — none of them tick it.
-    if (!dryRun && result.skipped) console.error(`[video-merge] run failed: skipped — ${result.reason}`)
+    // maint 23 Nov 2026 — a ?code= run now answers skipped:true + why for a code it will not merge (missing, deleted,
+    // not CONFIRMED/COMPLETED): an operator's answer, not a worker failure for Hermes' "run failed" watch
+    if (!dryRun && result.skipped) {
+      if (onlyCode) console.warn(`[video-merge] ?code=${onlyCode} skipped — ${result.reason}`)
+      else console.error(`[video-merge] run failed: skipped — ${result.reason}`)
+    }
     if (allowed.isWorker && !dryRun && !onlyCode && !result.skipped) await recordHeartbeat('video-merge').catch(() => {})
     // v1.280 — a run that only HELD cards (moved nothing) must not stay quiet — but a hold persists until a
     // human moves the card, so post it only when the team has not been given this held SET (cardHoldsChatDue);
