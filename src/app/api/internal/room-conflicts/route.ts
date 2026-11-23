@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import { internalSecretAllowed } from '@/lib/internal-auth'
 import { prisma } from '@/lib/db'
-import { roomTargetForBooking, findRoomConflict, roomIdForLocation } from '@/lib/room-booking'
+import { roomTargetForBooking, findRoomConflict, roomBookingMarker } from '@/lib/room-booking'
+import { roomEligibleWhere } from '@/lib/room-booking-reconcile'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -11,7 +12,11 @@ export const maxDuration = 300
  * GET /api/internal/room-conflicts[?days=30]
  *
  * v1.195 (เฟส 2) — อ่านอย่างเดียว ไม่เขียนอะไรทั้งสิ้น: เอาคิวถ่ายที่จะถึงของโปรบุ๊ค
- * ไปเทียบกับตารางห้องในระบบกลาง `service.thestandard.co` แล้วบอกว่าห้องชนไหม
+ * ไปเทียบกับตารางห้องในระบบกลาง `hub.thestandard.co` แล้วบอกว่าห้องชนไหม
+ *
+ * 2026-11-23 — เขียนสมัยก่อนโปรบุ๊คจองห้องเอง: หลังเริ่มจอง ทุกใบ "ชน" กับห้องที่โปรบุ๊คจองให้ตัวเอง
+ * (7/7 = false positive 100%) · ตอนนี้ข้ามช่องที่มี marker ของใบนั้น และใช้กฎ "ใบไหนควรถือห้อง"
+ * ชุดเดียวกับตัวจองจริง (roomEligibleWhere — เดิมเขียนเองแค่ REQUESTED/CONFIRMED ไม่มี ASSIGNED)
  *
  * มีไว้สองอย่าง: (1) ให้เห็นว่าห้องชนกันจริงบ่อยแค่ไหนก่อนตัดสินใจทำเฟส 3
  * (2) พิสูจน์ว่าโซ่ทั้งเส้น (locationId → roomId → เวลา UTC → API เขา) ถูกต้อง
@@ -38,8 +43,8 @@ export async function GET(request: NextRequest) {
   const bookings = await prisma.booking.findMany({
     where: {
       deletedAt: null,
-      status: { in: ['REQUESTED', 'CONFIRMED'] },
       shootDate: { gte: from, lt: to },
+      ...roomEligibleWhere(),
     },
     select: {
       id: true, bookingCode: true, locationId: true, locationName: true,
@@ -64,7 +69,7 @@ export async function GET(request: NextRequest) {
     })
     if ('skip' in r) { skipped[r.skip] = (skipped[r.skip] || 0) + 1; continue }
     try {
-      const hit = await findRoomConflict(r.target)
+      const hit = await findRoomConflict(r.target, roomBookingMarker(b.bookingCode || b.id))
       const row = {
         code: b.bookingCode, room: b.locationName, roomId: r.target.roomId,
         startAt: r.target.startAt, endAt: r.target.endAt,

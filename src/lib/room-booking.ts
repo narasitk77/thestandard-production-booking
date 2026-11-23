@@ -185,11 +185,19 @@ export async function roomBusySlots(roomId: number, dateYMD: string): Promise<Ro
  * คืน `null` ทั้งตอน "ว่างจริง" และตอน "พารามิเตอร์ผิด" ซึ่งแยกกันไม่ออกจากฝั่งเรา
  * — ความกำกวมแบบนี้ในเส้นทางที่ตัดสินว่า "จองทับได้หรือไม่" คือความเสี่ยงที่ไม่คุ้ม
  */
-export async function findRoomConflict(t: RoomTarget): Promise<RoomConflict | null> {
+export async function findRoomConflict(
+  t: RoomTarget,
+  /**
+   * marker `[PB-<code>]` ของใบที่กำลังตรวจ — ช่องที่เป็นการจองของใบนี้เองไม่ใช่การชน
+   * (2026-11-23: /api/internal/room-conflicts รายงาน 7/7 ใบว่าชน — ทุกใบชนกับห้องที่โปรบุ๊คจองให้ตัวเอง)
+   */
+  selfMarker?: string | null,
+): Promise<RoomConflict | null> {
   const dates = utcRangeToBangkokDates(t.startAt, t.endAt)
   const seen = new Set<string>()
   for (const d of dates) {
     for (const slot of await roomBusySlots(t.roomId, d)) {
+      if (selfMarker && String(slot.title || '').includes(selfMarker)) continue
       const key = `${slot.startAt}|${slot.endAt}`
       if (seen.has(key)) continue
       seen.add(key)
