@@ -18,7 +18,7 @@ import assert from 'node:assert/strict'
 const findMany = mock.fn(async () => [] as any[])
 mock.module('../db', { namedExports: { prisma: { booking: { findMany } } } })
 
-let listRows: any[] | Error = []
+let listRows: any[] | Error | ((y: number, m: number) => any[]) = []
 let monthsAsked: string[] = []
 mock.module('../room-booking', {
   namedExports: {
@@ -26,7 +26,7 @@ mock.module('../room-booking', {
     listRoomBookings: async (y: number, m: number) => {
       monthsAsked.push(`${y}-${m}`)
       if (listRows instanceof Error) throw listRows
-      return listRows
+      return typeof listRows === 'function' ? listRows(y, m) : listRows
     },
   },
 })
@@ -223,4 +223,40 @@ test('อ่านเดือนใดเดือนหนึ่งไม่�
   }) as any
   assert.equal(r.externalChecked, false)
   assert.ok(r.externalError)
+})
+
+test('2026-11-23 — ถ่ายต้นเดือน: การจองของแผนกอื่นที่เริ่มเดือนก่อนต้องเห็น (BK-0321 B-1 30 พ.ย.–9 ธ.ค. อยู่ในฟีด พ.ย. เท่านั้น)', async () => {
+  // ฟีดเดือนหนึ่งมีเฉพาะรายการที่เริ่มในเดือนนั้น
+  listRows = (y: number, m: number) => (y === 2026 && m === 11 ? [{
+    roomId: 15, isProbook: false, startAt: '2026-11-30T03:00:00.000Z', endAt: '2026-12-09T13:00:00.000Z',
+    title: 'ประชุมใหญ่', email: 'x@thestandard.co', department: 'HR',
+  }] : [])
+  const r = await checkRoomAvailability({ ...BASE, shootDate: '2026-12-03' }) as any
+  assert.equal(r.state, 'busy', 'เดิมถามแค่ ธ.ค. แล้วตอบ "ตรวจครบ ไม่เจอใคร"')
+  assert.equal(r.externalChecked, true)
+  assert.deepEqual([...monthsAsked].sort(), ['2026-11', '2026-12'])
+  // ม.ค. → ธ.ค. ของปีก่อน · กลางเดือนยังยิงเดือนเดียว (โควตาร่วมทั้งบริษัท)
+  __clearRoomAvailabilityCache(); monthsAsked = []
+  await checkRoomAvailability({ ...BASE, shootDate: '2027-01-05' })
+  assert.deepEqual([...monthsAsked].sort(), ['2026-12', '2027-1'])
+  __clearRoomAvailabilityCache(); monthsAsked = []
+  await checkRoomAvailability({ ...BASE, shootDate: '2026-12-11' })
+  assert.deepEqual(monthsAsked, ['2026-12'])
+})
+
+test('2026-11-23 — ใบที่กรอกเป็นหลายวันเทียบกับใบวันเดียวกลางช่วงด้วยเวลาจริง ไม่ใช่ HH:MM', async () => {
+  // 1–5 ธ.ค. 09:00–18:00 = กินห้องต่อเนื่อง 1 ธ.ค. 09:00 → 5 ธ.ค. 18:00 (เหมือนการจองห้องจริง)
+  const input = { ...BASE, shootDate: '2026-12-01', shootEndDate: '2026-12-05', callTime: '09:00', estimatedWrap: '18:00' }
+  findMany.mock.mockImplementation(async () => [booking({
+    bookingCode: 'MID-01', shootDate: new Date('2026-12-03T00:00:00Z'), callTime: '07:00', estimatedWrap: '08:00',
+  })])
+  const r = await checkRoomAvailability(input) as any
+  assert.equal(r.state, 'busy', 'เดิม 09–18 กับ 07–08 "ไม่ทับ" ทั้งที่ 3 ธ.ค. 07:00 อยู่กลางช่วงที่จองไว้')
+  assert.equal(r.conflicts[0].code, 'MID-01')
+  assert.match(r.conflicts[0].time, /^03\/12 07:00–08:00/)
+  // ก่อน call วันแรก / หลัง wrap วันสุดท้าย = ไม่ทับจริง
+  for (const [d, c, w] of [['2026-12-01', '07:00', '08:00'], ['2026-12-05', '19:00', '21:00']]) {
+    findMany.mock.mockImplementation(async () => [booking({ shootDate: new Date(`${d}T00:00:00Z`), callTime: c, estimatedWrap: w })])
+    assert.equal(((await checkRoomAvailability(input)) as any).state, 'no-conflict-known', `${d} ${c}–${w}`)
+  }
 })

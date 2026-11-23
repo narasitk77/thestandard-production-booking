@@ -170,18 +170,29 @@ export async function checkRoomAvailability(input: RoomAvailabilityInput): Promi
     take: 50,
   })
 
+  // ช่วงของใบที่กรอกเป็นเวลาจริง (เหมือนการจองห้องจริง: วันแรก call → วันสุดท้าย wrap)
+  const mineStart = Date.parse(`${input.shootDate}T${callTime}:00+07:00`)
+  const mineEnd = Date.parse(`${input.shootEndDate || input.shootDate}T${wrap.end}:00+07:00`)
+  const inputMultiDay = !sameDay
+
   const conflicts: RoomConflictRow[] = []
   for (const r of rows) {
     const theirs = effectiveWrap(r.callTime, isValidHHMM(r.estimatedWrap || '') ? r.estimatedWrap : null)
     // งานหลายวัน: วันที่ไม่ใช่วันแรก/วันสุดท้ายถือว่ากินทั้งวัน (เหมือน resource-load)
     const multiDay = !!r.shootEndDate && r.shootEndDate.getTime() > r.shootDate.getTime()
+    // 2026-11-23 — ใบที่กรอกเป็นหลายวัน: เทียบ HH:MM กับใบวันเดียวกลางช่วงผิด (1–5 ธ.ค. 09:00–18:00 กินห้อง 3 ธ.ค. 07:00
+    // ด้วย แต่ 09–18 กับ 07–08 "ไม่ทับ") → เทียบเป็นเวลาจริงของวันนั้น
+    const theirDay = r.shootDate.toISOString().slice(0, 10)
     const hit = multiDay
       ? true
-      : timeWindowsOverlap(callTime, wrap.end, r.callTime, theirs.end)
+      : inputMultiDay
+        ? mineStart < Date.parse(`${theirDay}T${theirs.end}:00+07:00`) && Date.parse(`${theirDay}T${r.callTime}:00+07:00`) < mineEnd
+        : timeWindowsOverlap(callTime, wrap.end, r.callTime, theirs.end)
     if (!hit) continue
     conflicts.push({
       source: 'probook',
-      time: multiDay ? 'ทั้งวัน (งานหลายวัน)' : `${r.callTime}–${theirs.end}${theirs.estimated ? ' (ประมาณ)' : ''}`,
+      time: multiDay ? 'ทั้งวัน (งานหลายวัน)'
+        : `${inputMultiDay ? `${theirDay.slice(8)}/${theirDay.slice(5, 7)} ` : ''}${r.callTime}–${theirs.end}${theirs.estimated ? ' (ประมาณ)' : ''}`,
       label: [r.outlet?.code, bookingDisplayName(r)].filter(Boolean).join(' · ') || 'งานถ่าย',
       code: r.bookingCode || undefined,
       estimated: theirs.estimated,
@@ -202,6 +213,11 @@ export async function checkRoomAvailability(input: RoomAvailabilityInput): Promi
       const [yy, mm] = d.split('-').map(Number)
       if (Number.isFinite(yy) && Number.isFinite(mm)) months.add(`${yy}-${mm}`)
     }
+    // 2026-11-23 — ฟีดเดือนหนึ่งมีเฉพาะการจองที่**เริ่ม**ในเดือนนั้น: BK-0321 (B-1, 30 พ.ย.–9 ธ.ค.) อยู่ใน พ.ย. อย่างเดียว
+    // → ถาม 1–9 ธ.ค. แล้วตอบ "ตรวจครบ ไม่เจอใคร" · ระบบกลางจำกัดช่วงจอง 10 วัน ⇒ ถ่ายวันที่ 1–10 ต้องดูเดือนก่อนด้วย
+    // (วันอื่นยังยิงเดือนเดียว — โควตา 20 req/5 นาทีใช้ร่วมทั้งบริษัท)
+    const [y0, m0, d0] = input.shootDate.split('-').map(Number)
+    if (d0 <= 10) months.add(m0 === 1 ? `${y0 - 1}-12` : `${y0}-${m0 - 1}`)
     const entries = await Promise.all([...months].map(k => {
       const [yy, mm] = k.split('-').map(Number)
       return externalMonth(yy, mm)
@@ -214,8 +230,6 @@ export async function checkRoomAvailability(input: RoomAvailabilityInput): Promi
       externalChecked = true
       const dayStart = Date.parse(`${input.shootDate}T00:00:00+07:00`)
       const dayEnd = Date.parse(`${input.shootEndDate || input.shootDate}T23:59:59+07:00`)
-      const mineStart = Date.parse(`${input.shootDate}T${callTime}:00+07:00`)
-      const mineEnd = Date.parse(`${input.shootEndDate || input.shootDate}T${wrap.end}:00+07:00`)
       for (const r of ext.rows) {
         if (r.roomId !== roomId) continue
         if (r.isProbook) continue          // เงาของเราเอง — นับไปแล้วชั้นที่ 1
