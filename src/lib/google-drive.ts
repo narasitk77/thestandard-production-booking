@@ -224,6 +224,11 @@ export async function listFilesRecursive(
      * The root folder itself is always walked.
      */
     skipFolder?: (name: string) => boolean
+    /**
+     * maint 23 Nov 2026 — a probe that only asks "is there any file?" (maxFiles: 4) hits the cap by design: no
+     * "increase via worker config" warning for it (prep-folders logged it ~137 times in 9 days, burying real errors).
+     */
+    quiet?: boolean
   } = {},
 ): Promise<DriveFile[]> {
   const maxFiles = opts.maxFiles ?? 5000
@@ -306,7 +311,7 @@ export async function listFilesRecursive(
     await Promise.all(batch.map(walkOne))
   }
 
-  if (out.length >= maxFiles) {
+  if (out.length >= maxFiles && !opts.quiet) {
     console.warn(`[google-drive] listFilesRecursive hit maxFiles=${maxFiles} for root=${rootFolderId} — increase via worker config if expected.`)
   }
   return out

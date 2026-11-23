@@ -133,7 +133,7 @@ export async function prepTodayShootFolders(opts: { dryRun?: boolean } = {}): Pr
           // to satisfy this check and PERMANENTLY skip creating the video box
           // for a booking whose approve-time pre-create had failed.
           if (!(await isFootageTreeFolder(c.id))) continue
-          const some = await listFilesRecursive(c.id, { maxFiles: 4 })
+          const some = await listFilesRecursive(c.id, { maxFiles: 4, quiet: true }) // a probe: hitting 4 is the answer, not a warning
           if (some.some(f => !/^_SHOOT\b.*\.txt$/i.test(f.name))) { hasFiles = true; break }
         }
         if (hasFiles) {

@@ -327,13 +327,16 @@ export function conflictSetKey(names: string[]): string {
 export async function reportConflicts(code: string, conflicts: string[]): Promise<void> {
   if (!conflicts.length) return
   const shown = conflicts.slice(0, 8).join('\n  ')
-  console.warn(`[video-merge] ${code}: ${conflicts.length} sync-conflict name(s) left in landing — not merged:\n  ${shown}`)
   const set = conflictSetKey(conflicts)
   const setKey = `sync-storm-set:${code}`
   let reported: string | null = null
   try { reported = (await prisma.systemHeartbeat.findUnique({ where: { key: setKey } }))?.note ?? null }
   catch (e: any) { console.warn(`[video-merge] ${code}: อ่านชุดที่เตือนไปแล้วไม่ได้ — ถือว่าชุดใหม่:`, e?.message || e) } // louder beats silent
   const same = reported === set
+  // maint 23 Nov 2026 — the name list goes to the log only while the set is news (not yet reported): POP-PIV-261007-02's
+  // same 123 names were logged 208 times in 9 days and buried the few real errors. The run's results[].conflicts and
+  // the weekly ops repeat still carry an unchanged set.
+  if (!same) console.warn(`[video-merge] ${code}: ${conflicts.length} sync-conflict name(s) left in landing — not merged:\n  ${shown}`)
   const r = await alertOps(`sync-storm:${code}`, `⚠️ โฟลเดอร์ชื่อซ้ำ "(1)" ใน landing — ${code}`,
     `video-merge ไม่ย้าย ${conflicts.length} รายการของ ${code} เพราะชื่อมีท้าย "(1)" จากซิงก์ชนกัน ` +
     `(Cloud Sync ของ NAS กับ Drive for desktop อัปโฟลเดอร์เดียวกันพร้อมกัน) — ต้องเหลือตัวอัปตัวเดียวแล้วเก็บซากก่อน ของถึงจะเข้ากล่อง\n  ${shown}${conflicts.length > 8 ? `\n  … อีก ${conflicts.length - 8}` : ''}` +
