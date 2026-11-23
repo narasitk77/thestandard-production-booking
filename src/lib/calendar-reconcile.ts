@@ -13,6 +13,7 @@ import { updateBookingRow } from './google-sheets'
 import { bookingCalendarAttendees } from './calendar-attendees'
 import { alertOps } from './ops-alert'
 import { EPISODE_ORDER } from './episode-order'
+import { repairMissingSheetRows, type SheetRepairResult } from './sheet-row-repair'
 
 const CANCELLED_EVENT_DELETE_FAILED =
   'งานถูกยกเลิก/ลบแล้ว แต่ลบ event ในปฏิทินไม่สำเร็จ — event ยังอยู่ในปฏิทินของทุกคน · reconciler ลองลบใหม่ทุก 10 นาที'
@@ -252,6 +253,8 @@ export type ReconcileResult = {
   truncated?: boolean
   /** ใบที่ยกเลิก/ลบแล้วแต่ยังถือ event อยู่ (ลบไม่สำเร็จตอนยกเลิก) — ดู sweepCancelledEvents */
   cancelledEvents?: { found: number; deleted: number; failed: number }
+  /** Bookings-tab rows a failed create-time append left missing — see sheet-row-repair.ts */
+  sheetRows?: SheetRepairResult
 }
 
 const DEFAULT_LIMIT = 200   // v1.233 — 65 ใบเข้าเงื่อนไขวันนี้ cap 50 = 15 ใบท้ายไม่เคยถูกแตะ
@@ -997,6 +1000,14 @@ export async function reconcileCalendarGuests(options: {
   }
 
   await sweepCancelledEvents(result, options)
+  // Rides this tick for its cadence (10 min, in the web process that owns the append queue) — it is
+  // not a calendar job, so its own failure never fails the calendar pass. Failures alert inside it;
+  // a throw (DB down) gets a line Hermes' BAD_RE catches.
+  result.sheetRows = await repairMissingSheetRows({ dryRun: options.dryRun, actorEmail: options.actorEmail })
+    .catch((e: any) => {
+      console.error('[calendar-reconcile] route error: sheet-row repair threw:', e?.message || e)
+      return undefined
+    })
   return result
 }
 

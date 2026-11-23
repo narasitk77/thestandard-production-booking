@@ -61,6 +61,8 @@ mock.module('../db', {
 mock.module('../audit', { namedExports: { logAudit: async (a: any) => { audits.push(a) } } })
 mock.module('../ops-alert', { namedExports: { alertOps: async (...a: any[]) => { alerts.push(a); return { attempted: true, delivered: true } } } })
 mock.module('../google-sheets', { namedExports: { updateBookingRow: async () => 'updated' } })
+// the Bookings-tab row repair rides the same tick — covered in sheet-row-repair.test.ts
+mock.module('../sheet-row-repair', { namedExports: { repairMissingSheetRows: async () => ({ candidates: 0 }) } })
 const WANT = { startTime: '2026-11-20T13:00:00+07:00', endTime: '2026-11-20T18:00:00+07:00' }
 mock.module('../google-calendar', {
   namedExports: {

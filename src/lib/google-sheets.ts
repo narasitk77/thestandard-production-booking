@@ -195,6 +195,15 @@ function hasCredentials(): boolean {
   return Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
 }
 
+/**
+ * Sheet writes are meant to work in this process: credentials set and not switched off by the
+ * staging opt-in. Then a null from appendBookingRow is a FAILED append (quota, creds, timeout), not
+ * "sheets are off" — the create path and the row repair (sheet-row-repair.ts) alert on it only then.
+ */
+export function sheetsWriteConfigured(): boolean {
+  return hasCredentials() && !stagingBlocksSheets()
+}
+
 function colLetter(n: number): string {
   // supports n > 26 just in case
   let s = ''
