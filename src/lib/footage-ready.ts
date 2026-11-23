@@ -57,7 +57,7 @@ import { notifyChatDetailed, notifyEmailDigest } from './notify'
 import { getCachedFootagePayload, computeFootagePayload, type FootagePayload, type BookingForFootagePayload } from './footage-folders'
 import { isPhotoAlbumBooking, bookingNeedsSound } from './outlet-folders'
 import { isShootOver, shootEndsAt, type ShootWindow } from './shoot-window'
-import { latestNasState, nasManifestAge, verifyNasMirror, codeOf, type NasManifest } from './nas-sync'
+import { freshNasState, verifyNasMirror, codeOf, type NasManifest } from './nas-sync'
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
@@ -640,15 +640,11 @@ async function watchFastNotices(result: FootageReadyScanResult): Promise<void> {
     const since = notices.reduce((m, n) => (n.at < m ? n.at : m), now)
     const codes = [...new Set(notices.map(n => n.bookingCode).filter((c): c is string => !!c))]
     // in flight NOW (fresh manifest only) — a failed read is said out loud, the other channels still run
-    let nasStatuses: Record<string, any> = {}
-    let nasManifest: NasManifest | null = null
     const settleMs = envInt('FOOTAGE_READY_SETTLE_MS', 2 * 60 * 60_000)
-    try {
-      const st = await latestNasState()
-      if (st.manifest && !nasManifestAge(st.manifest.at, now).stale) { nasStatuses = st.statuses || {}; nasManifest = st.manifest }
-    } catch (e: any) {
-      result.errors.push({ code: 'fast-watch', error: `อ่านสถานะ NAS ไม่ได้ — ช่องนี้ไม่ได้ตรวจรอบนี้: ${e?.message || e}` })
-    }
+    const st = await freshNasState(now)
+    if (st.error) result.errors.push({ code: 'fast-watch', error: `อ่านสถานะ NAS ไม่ได้ — ช่องนี้ไม่ได้ตรวจรอบนี้: ${st.error}` })
+    const nasStatuses: Record<string, any> = st.statuses
+    const nasManifest: NasManifest | null = st.manifest
     // durable records (review r2): a NAS batch that queued AND drained between two sweeps · a field card STARTED after
     // the notice (its CARD_ row may have been created as a ticket long before) · browser uploads (row created at start)
     const [events, uploads] = await Promise.all([
@@ -865,11 +861,14 @@ async function runReadySweep(
   // v1.262.1 — only while the NAS picture is fresh: a dead Mac agent leaves its last "still sending"
   // forever, which held a booking's notice silently (review of v1.262). Stale = gate off; the operator
   // hears about the silent scanner from the relay instead.
-  const nasState = await latestNasState().catch(() => ({ manifest: null, statuses: {} as Record<string, any> }))
-  const nasStatuses = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? (nasState.statuses || {}) : {}
+  // maint 23 Nov 2026 — a failed READ is not a stale manifest (freshNasState): it used to be swallowed into "no
+  // manifest" = gate off for every booking, silently. Now it is an error and every candidate waits one sweep.
+  const nasState = await freshNasState(now)
+  if (nasState.error) result.errors.push({ code: 'nas-state', error: `อ่านสถานะ NAS ไม่ได้ — ถือทุกใบไว้รอบนี้ (ด่าน d): ${nasState.error}` })
+  const nasStatuses = nasState.statuses
   // v1.287 — the fast path leans on gate (d): it needs a NAS scan taken AFTER the first look at these counts (a card
   // landing on the NAS since then would show as pending). Agent silent → gate (d) is off → the long settle only.
-  const nasSeenAt = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? Date.parse(nasState.manifest.at) : NaN
+  const nasSeenAt = nasState.manifest ? Date.parse(nasState.manifest.at) : NaN
 
   const eligible: CandidateRow[] = []
   const parked: CandidateRow[] = [] // v1.290 — held by gate (d) alone, NAS folder silent a whole settle: compared with Drive below
@@ -894,6 +893,9 @@ async function runReadySweep(
     }
     if (uploading.has(b.id)) {
       result.skipped.push({ code, reason: 'uploads-in-flight' }); continue
+    }
+    if (nasState.error) {
+      result.skipped.push({ code, reason: 'nas-still-sending', detail: 'อ่านสถานะ NAS ไม่ได้ — รอบหน้า' }); continue
     }
     const nas = nasStatuses[code]
     if (nas && (nas.lastPending || 0) > 0) {
@@ -1145,8 +1147,14 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
     const todo = owed
       .filter(x => !followed.some(f => f.entityId === x.n.entityId && f.at >= x.n.at))
       .sort((a, b) => (followUpCheckedAt.get(a.n.entityId!) || 0) - (followUpCheckedAt.get(b.n.entityId!) || 0))
-    const nasState = await latestNasState().catch(() => ({ manifest: null, statuses: {} as Record<string, any> }))
-    const nasStatuses = nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale ? (nasState.statuses || {}) : {}
+    // maint 23 Nov 2026 — same as the sweep's gate (d): an unreadable NAS state waits (loud), never reads as "gate off"
+    const nasState = await freshNasState(now)
+    if (nasState.error) {
+      result.errors.push({ code: 'nas-state', error: `follow-up: อ่านสถานะ NAS ไม่ได้ — ฉบับตามกล้องรอรอบหน้า: ${nasState.error}` })
+      for (const { n: w } of todo.slice(0, FOLLOWUP_MAX_PER_RUN)) result.followUpWaiting.push({ code: w.bookingCode || w.entityId!, detail: 'อ่านสถานะ NAS ไม่ได้ — รอบหน้า' })
+      return
+    }
+    const nasStatuses = nasState.statuses
     for (const { n: w, first } of todo.slice(0, FOLLOWUP_MAX_PER_RUN)) {
       const code = w.bookingCode || w.entityId!
       followUpCheckedAt.set(w.entityId!, now.getTime())
@@ -1194,7 +1202,7 @@ async function followUpCameraGaps(result: FootageReadyScanResult): Promise<void>
         // notice · min: the kill switch (VERIFIED >= SETTLE) must give back the old wait, never a longer one
         // review r2 — like the first notice: the NAS must have reported AFTER the newest file arrived
         const newest = newestFileAt((gate.files || []).filter(isFootageFile))
-        const nasAfter = !!nasState.manifest && !nasManifestAge(nasState.manifest.at, now).stale && Date.parse(nasState.manifest.at) > newest
+        const nasAfter = !!nasState.manifest && Date.parse(nasState.manifest.at) > newest // freshNasState: fresh manifests only
         // parked = never the short wait (same as the first notice): the watch would read those files as "more footage"
         const short = !nasParked && nasAfter && !fastPathBlocker(gate, b)
         const quiet = short ? Math.min(verifiedSettleMs, settleMs) : settleMs

@@ -104,6 +104,8 @@ mock.module('../nas-sync', {
   namedExports: {
     latestNasState: async () => ({ manifest: nasAt ? { at: nasAt, folders: [] } : null, statuses: nasStatuses }),
     nasManifestAge: (at: string | null) => { const m = at ? (Date.now() - Date.parse(at)) / MIN : NaN; return { ageMinutes: m, stale: !(m <= 60) } },
+    // maint 23 Nov 2026 — footage-ready reads the NAS through freshNasState (fresh manifest only, else none)
+    freshNasState: async () => (nasAt && (Date.now() - Date.parse(nasAt)) / MIN <= 60 ? { manifest: { at: nasAt, folders: [] }, statuses: nasStatuses } : { manifest: null, statuses: {} }),
   },
 })
 mock.module('../footage-folders', { namedExports: { getCachedFootagePayload: async () => PAYLOAD, computeFootagePayload: async () => PAYLOAD } })

@@ -49,7 +49,7 @@ mock.module('../notify', {
     notifyEmailDigest: async () => true,
   },
 })
-mock.module('../nas-sync', { namedExports: { latestNasState: async () => ({ manifest: null, statuses: {} }), nasManifestAge: () => ({ ageMinutes: null, stale: true }) } })
+mock.module('../nas-sync', { namedExports: { latestNasState: async () => ({ manifest: null, statuses: {} }), nasManifestAge: () => ({ ageMinutes: null, stale: true }), freshNasState: async () => ({ manifest: null, statuses: {} }) } })
 mock.module('../footage-folders', { namedExports: { getCachedFootagePayload: async () => ({ folders: [], fileCount: 0 }), computeFootagePayload: async () => ({ folders: [], fileCount: 0 }) } })
 mock.module('../google-drive', {
   namedExports: {

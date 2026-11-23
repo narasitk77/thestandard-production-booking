@@ -247,8 +247,8 @@ export function footageReadyAlerts(h: HealthInput): string[] {
   }
   if (h.pending.agedOut.length > 0) {
     // v1.290 — not "press 📣": the button checks only that files exist (no MEDIAPRO, no NAS)
-    // NAS unreadable: some of these may be stuck at gate (d) unseen, and the sweep reads a failed NAS read as
-    // "no manifest" = gate off, so a real run?codes= would not stop there either — never offer it first
+    // NAS unreadable: some of these may be stuck at gate (d) unseen. Since maint 23 Nov 2026 the sweep holds every
+    // candidate on a failed NAS read (freshNasState) instead of reading it as "gate off" — still, a dry run first
     const how = h.nasError
       ? `· ⚠️ อ่านสถานะ NAS ไม่ได้ (${h.nasError.slice(0, 80)}) — ไม่รู้ว่าใบไหนค้างด่าน NAS: ` +
         `รอจนอ่านสถานะ NAS ได้ แล้วตรวจก่อนด้วย footage-ready/run?dryRun=1&codes=<code> · อย่าเพิ่งรัน run?codes= จริงหรือกด 📣`
@@ -274,7 +274,7 @@ export function footageReadyAlerts(h: HealthInput): string[] {
       h.pending.agedOutHeld.map(x => `${x.code} — ${x.detail.slice(0, 140)} (ตรวจ ${x.at.slice(0, 10)}` +
         (x.stale ? ` · ไฟล์เปลี่ยนหลังตรวจ เหตุผลนี้อาจเก่า → ตรวจซ้ำ footage-ready/run?dryRun=1&codes=${x.code})` : ')')).join(' · ') +
       (h.nasError
-        // same reason as agedOut above: a failed NAS read turns gate (d) off in the sweep — never offer a real run first
+        // same reason as agedOut above: the NAS state is unknown — a dry run first, never a real run
         ? ` · ⚠️ อ่านสถานะ NAS ไม่ได้ — ถ้าไฟล์มาครบแล้ว รอจนอ่านสถานะ NAS ได้ แล้วตรวจก่อนด้วย footage-ready/run?dryRun=1&codes=<code>`
         : ` · ถ้าไฟล์มาครบแล้ว: footage-ready/run?codes=<code> ตรวจซ้ำ (ครบ = ส่งเอง)`) +
       pastNote(h.pending.agedOutHeld.map(x => x.code)),

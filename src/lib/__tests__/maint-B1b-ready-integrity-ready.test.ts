@@ -61,7 +61,7 @@ mock.module('../ops-alert', {
     alertOps: async (key: string, subject: string, text: string) => { alerts.push({ key, subject, text }); return { attempted: true, delivered: true, discord: true, lark: false, email: true } },
   },
 })
-mock.module('../nas-sync', { namedExports: { latestNasState: async () => ({ manifest: null, statuses: {} }), nasManifestAge: () => ({ ageMinutes: null, stale: true }) } })
+mock.module('../nas-sync', { namedExports: { latestNasState: async () => ({ manifest: null, statuses: {} }), nasManifestAge: () => ({ ageMinutes: null, stale: true }), freshNasState: async () => ({ manifest: null, statuses: {} }) } })
 const PAYLOAD = { found: 1, fileCount: 1, folders: [{ label: 'EP01 · CAM-A', url: 'u', fileCount: 1, totalBytes: 1000 }], bookingFolderUrl: 'u', soundStagingUrl: null }
 mock.module('../footage-folders', { namedExports: { getCachedFootagePayload: async () => PAYLOAD, computeFootagePayload: async () => PAYLOAD } })
 mock.module('../google-drive', {

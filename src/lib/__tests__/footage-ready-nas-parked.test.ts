@@ -71,6 +71,7 @@ let updates: any[] = []
 let written: any[] = []
 let mailed: string[] = []
 let alerts: Array<{ key: string; subject: string; text: string; everyMs?: number }> = []
+let nasReadFails = false
 
 mock.module('../db', {
   namedExports: {
@@ -91,7 +92,12 @@ mock.module('../db', {
       },
       upload: { groupBy: async () => [], count: async () => 0, findMany: async () => [] },
       user: { findMany: async () => [] },
-      nasSyncState: { findUnique: async () => (manifest ? { key: 'latest', manifest, status: { folders: statuses } } : null) },
+      nasSyncState: {
+        findUnique: async () => {
+          if (nasReadFails) throw new Error('Connection terminated unexpectedly') // maint 23 Nov — a failed NAS-state read
+          return manifest ? { key: 'latest', manifest, status: { folders: statuses } } : null
+        },
+      },
     },
   },
 })
@@ -126,7 +132,7 @@ function reset() {
   landings = [{ id: 'LANDING', name: NAS_NAME }]
   trees = { BOX: [], LANDING: ON_DRIVE() }
   driveDown = false; driveCalls = 0; updates = []; written = []; mailed = []; alerts = []
-  xmls = {}; followBooking = null; audits = []
+  xmls = {}; followBooking = null; audits = []; nasReadFails = false
 }
 beforeEach(reset)
 
@@ -391,4 +397,44 @@ test('review r2: ฉบับตามกล้อง — NAS ยังเขี
   const down = await fr.runFootageReadyScan()
   assert.match(down.followUpWaiting[0]?.detail || '', /เทียบไฟล์ค้างบน NAS กับ Drive ไม่ได้/)
   assert.ok(down.errors.some(e => e.code === CODE && /nas-parked/.test(e.error)))
+})
+
+// ── maint 23 Nov 2026 — an unreadable NAS state holds, loudly ────────────────
+
+test('maint 23 Nov: NAS state cannot be READ = every candidate waits this sweep + result.errors nas-state (it used to turn gate (d) off silently)', async () => {
+  nasReadFails = true
+  for (const dryRun of [true, false]) {
+    const r = await fr.runFootageReadyScan({ dryRun })
+    assert.deepEqual(r.notified, [], `pre-fix: notified — the failed read read as "no manifest" = gate off (dryRun=${dryRun})`)
+    assert.deepEqual(held(r), { code: CODE, reason: 'nas-still-sending', detail: 'อ่านสถานะ NAS ไม่ได้ — รอบหน้า' })
+    assert.ok(r.errors.some(e => e.code === 'nas-state' && /อ่านสถานะ NAS ไม่ได้.*Connection terminated/.test(e.error)), JSON.stringify(r.errors))
+    assert.equal(r.walked, 0)
+  }
+  assert.deepEqual(mailed, [])
+  // a forced run?codes= stops there too
+  const forced = await fr.runFootageReadyScan({ codes: [CODE] })
+  assert.deepEqual(forced.notified, [])
+  assert.equal(held(forced)?.detail, 'อ่านสถานะ NAS ไม่ได้ — รอบหน้า')
+  // a STALE manifest is unchanged: gate off (the relay tells ops the scanner is silent)
+  reset(); manifest.at = ago(3 * HOUR)
+  const stale = await fr.runFootageReadyScan()
+  assert.deepEqual(stale.notified, [CODE])
+  assert.equal(stale.errors.some(e => e.code === 'nas-state'), false)
+})
+
+test('maint 23 Nov: camera follow-up — NAS state cannot be read = waits (said why) + errors, nothing sent', async () => {
+  bookings = []
+  followBooking = mkBooking({ id: 'fu9', cameraCount: 2 })
+  audits = [{ action: 'booking.auto_notified_ready', entityId: 'fu9', bookingCode: CODE, at: new Date(Date.now() - DAY),
+    changes: { readyPath: 'settle', cameraGap: 'มีไฟล์ภาพ 1/2 กล้อง (CAM-A)', cameraCams: ['CAM-A'] } }]
+  trees.LANDING = [...sonyCard('CAM-A', ['A001C001_261117XF'], 5 * HOUR), ...sonyCard('CAM-B', ['B001C001_261117XF'], 5 * HOUR)]
+  statuses = {} // nothing pending: pre-fix the follow-up went ahead
+  nasReadFails = true
+  const r = await fr.runFootageReadyScan()
+  assert.deepEqual(r.followedUp, [], 'pre-fix: sent')
+  assert.deepEqual(r.followUpWaiting, [{ code: CODE, detail: 'อ่านสถานะ NAS ไม่ได้ — รอบหน้า' }])
+  assert.ok(r.errors.some(e => e.code === 'nas-state' && /follow-up/.test(e.error)))
+  assert.deepEqual(mailed, [])
+  nasReadFails = false
+  assert.deepEqual((await fr.runFootageReadyScan()).followedUp, [CODE], 'control: readable = sent')
 })

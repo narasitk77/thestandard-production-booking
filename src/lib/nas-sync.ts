@@ -435,6 +435,21 @@ export async function latestNasState(): Promise<{ manifest: NasManifest | null; 
   return { manifest: (row?.manifest as unknown as NasManifest) || null, statuses: ((row?.status as any) || {}).folders || {} }
 }
 
+/**
+ * maint 23 Nov 2026 — the NAS picture footage-ready's gate (d) may use, one helper for the sweep, the camera follow-up
+ * and the fast-notice watch: a FRESH manifest and its statuses, or neither. A stale manifest (agent silent) = none =
+ * gate off, as since v1.262.1 (the relay tells the operator about the silent scanner). A failed READ is not a stale
+ * manifest: it comes back as `error`, never swallowed — the sweep and the follow-up used to
+ * `.catch(() => ({ manifest: null, statuses: {} }))` it, which turned gate (d) off for every booking with nothing
+ * logged and nothing in result.errors. Callers hold on `error`.
+ */
+export async function freshNasState(now = new Date()): Promise<{ manifest: NasManifest | null; statuses: Record<string, any>; error?: string }> {
+  let st: Awaited<ReturnType<typeof latestNasState>>
+  try { st = await latestNasState() } catch (e: any) { return { manifest: null, statuses: {}, error: e?.message || String(e) } }
+  if (!st.manifest || nasManifestAge(st.manifest.at, now).stale) return { manifest: null, statuses: {} }
+  return { manifest: st.manifest, statuses: st.statuses || {} }
+}
+
 // ── v1.113.2 — EXACT per-file mirror verification ───────────────────────────
 // "ตรวจว่าไฟล์เหมือนกัน 100%": for every folder in the NAS manifest, list the
 // matching Production Team LANDING folder on Drive and diff by (basename, size).
