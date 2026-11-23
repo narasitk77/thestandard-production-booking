@@ -82,3 +82,27 @@ test('the hourly run uses the same plan; files already in the box AUDIO (name+si
   assert.equal(r.merged, 2)
   assert.deepEqual(copies.map(c => [c.id, c.to]).sort(), [['graded', 'AUD'], ['raw', 'AUD/RAW/Audio Files']])
 })
+
+test('the WLT-EXI pair reaching staging in TWO runs: the later take is copied (md5 decides), beside nothing of its name', async () => {
+  // run 1 copied the raw take flat; run 2 sees the graded take at the staging root — same name AND size, other md5
+  box = [wav('raw-copy', [], 'ZOOM0001.WAV', 313_263_978, 'b0b4ab63')]
+  staging = [wav('graded', [], 'ZOOM0001.WAV', 313_263_978, '08ef650b'), wav('raw', ['RAW', 'Audio Files'], 'ZOOM0001.WAV', 313_263_978, 'b0b4ab63')]
+  const dry = await sm.mergeBookingSound(BOOKING, { dryRun: true })
+  assert.equal(dry.copied, 1, 'the dry run plans the same copy')
+  const r = await sm.mergeBookingSound(BOOKING)
+  assert.equal(r.copied, 1, 'pre-fix: 0 — name|size matched the raw copy and the graded take was dropped with no log line')
+  assert.deepEqual(copies.map(c => [c.id, c.to]), [['graded', `AUD/${sm.ROOT_CLASH_DIR}`]], 'not AUDIO itself, where its namesake sits')
+
+  // the other order: graded first (flat), raw later → its own staging sub-path
+  copies.length = 0
+  box = [wav('graded-copy', [], 'ZOOM0001.WAV', 313_263_978, '08ef650b')]
+  staging = [wav('raw', ['RAW', 'Audio Files'], 'ZOOM0001.WAV', 313_263_978, 'b0b4ab63')]
+  await sm.mergeBookingSound(BOOKING)
+  assert.deepEqual(copies.map(c => [c.id, c.to]), [['raw', 'AUD/RAW/Audio Files']])
+
+  // content already in the box under another name (an editor renamed it) is not copied again
+  copies.length = 0
+  box = [wav('renamed', [], 'Interview A.WAV', 313_263_978, 'b0b4ab63')]
+  staging = [wav('raw', ['RAW', 'Audio Files'], 'ZOOM0001.WAV', 313_263_978, 'b0b4ab63')]
+  assert.equal((await sm.mergeBookingSound(BOOKING)).copied, 0)
+})

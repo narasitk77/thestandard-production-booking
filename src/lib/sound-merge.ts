@@ -28,6 +28,7 @@ import { noteResolve } from '@/lib/id-first-metrics'
 import { mergeBookingsWhere, mergeCodeSkipReason } from '@/lib/video-merge'
 import { tryLockMerge, unlockMerge, soundMergeKey } from '@/lib/merge-lock'
 import { EPISODE_ORDER } from './episode-order'
+import { boxHasContent } from '@/lib/footage-completeness'
 
 export interface SoundMergeResult {
   skipped: boolean
@@ -93,6 +94,9 @@ export async function resolveAudioTarget(
   return { audioId, existingIds }
 }
 
+/** a staging-ROOT file whose name is already in the box with other content is copied into AUDIO/<this> */
+export const ROOT_CLASH_DIR = 'STAGING-ROOT'
+
 /**
  * maint 23 Nov 2026 — what to copy from staging, for BOTH paths (runSoundMerge + mergeBookingSound). Every staging
  * subfolder used to be poured into one AUDIO folder:
@@ -101,11 +105,15 @@ export async function resolveAudioTarget(
  *    WAV in RAW/Audio Files share name AND size but not content; a name|size dedupe would drop one of them silently.
  *  - one NAME for different content (that same pair; also DAY01–03 of a multi-day job) landed side by side in one folder
  *    and the editor could not tell which was which → such names keep their staging sub-path under AUDIO.
- * The box dedup is unchanged (name|size against every AUDIO location, recursive). Nothing is ever deleted.
+ * Already in the box = boxHasContent (md5 anywhere in every AUDIO location; name|size only when a side has no md5). It
+ * used to be name|size alone, so when that WLT-EXI pair reached staging in two different runs the second take matched
+ * the first by name|size and was never copied, with no log line. A take whose NAME is already in the box with other
+ * content keeps its staging sub-path (a staging-root file: ROOT_CLASH_DIR) so it never sits beside its namesake.
+ * Nothing is ever moved or deleted.
  */
 export function soundCopyPlan(
   stagingFiles: DriveFile[],
-  have: Set<string>,
+  boxFiles: DriveFile[],
 ): Array<{ f: DriveFile; path: string[] }> {
   const seenMd5 = new Set<string>()
   const distinct: DriveFile[] = []
@@ -116,9 +124,16 @@ export function soundCopyPlan(
   }
   const count = new Map<string, number>()
   for (const f of distinct) count.set(f.name, (count.get(f.name) || 0) + 1)
+  const inBox = boxHasContent(boxFiles)
+  // ponytail: name-only clash check — a later take at the SAME sub-path as its namesake in the box still lands beside it
+  const boxNames = new Set(boxFiles.map(b => b.name.toUpperCase()))
   return distinct
-    .filter(f => !have.has(`${f.name}|${f.size ?? ''}`))
-    .map(f => ({ f, path: (count.get(f.name) || 0) > 1 ? f.folderPath : [] }))
+    .filter(f => !inBox(f))
+    .map(f => ({
+      f,
+      path: boxNames.has(f.name.toUpperCase()) ? (f.folderPath.length ? f.folderPath : [ROOT_CLASH_DIR])
+        : (count.get(f.name) || 0) > 1 ? f.folderPath : [],
+    }))
 }
 
 /** Copy the planned staging files into the box AUDIO (dry run: plan only). One copy rule for both paths. */
@@ -128,11 +143,9 @@ async function copyStagedAudio(
   target: { audioId: string | null; existingIds: string[] },
   dryRun: boolean,
 ): Promise<{ planned: number; copied: number; err: number }> {
-  const have = new Set<string>()
-  for (const id of target.existingIds) {
-    for (const f of await listFilesRecursive(id, { maxFiles: 2000 })) have.add(`${f.name}|${f.size ?? ''}`)
-  }
-  const plan = soundCopyPlan(stagingFiles, have)
+  const boxFiles: DriveFile[] = []
+  for (const id of target.existingIds) boxFiles.push(...await listFilesRecursive(id, { maxFiles: 2000 }))
+  const plan = soundCopyPlan(stagingFiles, boxFiles)
   if (dryRun || !plan.length) return { planned: plan.length, copied: 0, err: 0 }
   const audioId = target.audioId!
   const dirs = new Map<string, string>()

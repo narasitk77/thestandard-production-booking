@@ -48,7 +48,7 @@ import {
   type DriveFile, type TrashTreeFile,
 } from './google-drive'
 import {
-  pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, hasUniqueClipName, type MediaPoolItem,
+  pendingOriginalClips, missingSidecars, sonyClipPart, isQuarantined, compareMediaPool, clipKey, baseName, hasUniqueClipName, boxHasContent, type MediaPoolItem,
 } from './footage-completeness'
 import { parseDrpMediaPool } from './drp-mediapool'
 import { loadMediaproCards, mediaproCheck, mediaproStaleText, expectsCameraVideo, type MediaproCheck } from './mediapro'
@@ -334,16 +334,10 @@ export interface StrandedSummary { files: number; bytes: number; purgeAfter: str
  * name+size matched and the contents did not — md5 wins whenever both have one).
  */
 export function strandedFiles(trashFiles: TrashTreeFile[], boxFiles: DriveFile[]): TrashTreeFile[] {
-  const boxMd5 = new Set(boxFiles.map(f => f.md5).filter(Boolean) as string[])
-  const byNameSize = new Map<string, DriveFile[]>()
-  for (const f of boxFiles) {
-    const k = `${f.name.toUpperCase()}|${f.size}`
-    byNameSize.set(k, [...(byNameSize.get(k) || []), f])
-  }
+  const inBox = boxHasContent(boxFiles)
   return trashFiles.filter(f => {
     if (!f.size || OS_JUNK.test(f.name) || f.name.startsWith('._') || isShootMarkerFile(f.name)) return false
-    if (f.md5 && boxMd5.has(f.md5)) return false
-    return !(byNameSize.get(`${f.name.toUpperCase()}|${f.size}`) || []).some(b => !b.md5 || !f.md5)
+    return !inBox(f)
   })
 }
 
