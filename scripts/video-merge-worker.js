@@ -143,7 +143,11 @@ async function runMerge(why) {
     if (json.skipped) console.error(`[video-merge] run failed: skipped — ${json.reason}`)
     else {
       const held = json.cardHolds || []
-      console.log(`[video-merge] bookings=${json.bookings} files=${json.moved} folders=${json.movedFolders} dupLeft=${(json.landed ?? 0) - (json.moved ?? 0)} errors=${json.errors} cardHolds=${held.length}`)
+      // maint 23 Nov 2026 — dup = files left in landing because the box has a name+size twin, summed from results[];
+      // conflicts = sync-storm "(1)" names left. The old dupLeft (landed − moved) also counted conflicts, errors and
+      // held-card files under the "dup" label.
+      const sum = (k) => (json.results || []).reduce((n, r) => n + (r[k] || 0), 0)
+      console.log(`[video-merge] bookings=${json.bookings} files=${json.moved} folders=${json.movedFolders} dup=${sum('dup')} conflicts=${sum('conflicts')} errors=${json.errors} cardHolds=${held.length}`)
       // v1.280 — a held card waits for a human: say what to do, not just a count
       if (held.length) console.warn(`[video-merge] ${held.length} card(s) held in landing — MEDIAPRO shares no clip with the box card, so a second card was poured onto an existing one: move the WHOLE card (XDROOT/M4ROOT with its SONY/PRIVATE siblings) into its own new folder (e.g. D2-<yymmdd> or Card 2); never delete an index file: ${held.slice(0, 5).join(' | ')}`)
     }
