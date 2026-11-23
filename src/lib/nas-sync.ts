@@ -72,13 +72,17 @@ export async function countDriveFilesByCode(code: string): Promise<{ files: numb
   const candidates = await findFoldersByCode(code)
   let files = 0, bytes = 0
   const seen = new Set<string>()
+  // maint 23 Nov 2026 — by FILE id too: an EP folder named with the code sits inside the box and is a candidate of its
+  // own, so its files were counted twice (the drain mail said 16 files / 34.7 GB for 8 / 17.4 GB)
+  const seenFiles = new Set<string>()
   for (const c of candidates) {
     if (seen.has(c.id)) continue
     seen.add(c.id)
     if ((c.parents || []).some(p => stagingContainers.has(p))) continue
     const raw = await listFilesRecursive(c.id, { maxFiles: 6000 })
     for (const f of raw) {
-      if (IGNORE_RE.test(f.name)) continue
+      if (IGNORE_RE.test(f.name) || seenFiles.has(f.id)) continue
+      seenFiles.add(f.id)
       files++
       bytes += f.size ?? 0
     }
@@ -489,9 +493,12 @@ export async function verifyNasMirror(manifest: NasManifest): Promise<{ folders:
 
     // Presence multiset = landing tree + every code-matched folder anywhere.
     const have = new Map<string, number>() // "name|size" -> count
+    const walked = new Set<string>() // maint 23 Nov 2026 — Drive file ids: a code-named EP folder inside the box is walked twice
     const addTree = async (rootId: string) => {
       const files = await listFilesRecursive(rootId, { maxFiles: 8000 })
       for (const f of files) {
+        if (walked.has(f.id)) continue
+        walked.add(f.id)
         const k = `${f.name}|${f.size ?? ''}`
         have.set(k, (have.get(k) || 0) + 1)
       }

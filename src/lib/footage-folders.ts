@@ -96,16 +96,24 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
 
   const folderMap = new Map<string, FootageFolder>()
   const label = (...parts: string[]) => parts.filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / ')
-  const add = (f: DriveFile, lbl: string) => {
+  // maint 23 Nov 2026 — one Drive file counts once. An EP folder named with the booking code ("CODE · TBC") is inside the
+  // box AND a findFoldersByCode root: walked from the box its files roll up to the EP row, walked from itself to its
+  // CAM-A row — so the same files became two rows (TSS-TSG-261110-01: fileCount 26 for 8 + 8 + …). The box is walked
+  // first, so its rows keep the box labels; a root whose files were all counted already makes no row.
+  const counted = new Set<string>()
+  const add = (f: DriveFile, lbl: string): boolean => {
+    if (counted.has(f.id)) return false
     // Roll up to the TOP-level folder under the scan root (the camera / OB group)
     // so a deep camera-card tree collapses to one row; null topId = file sitting
     // directly in the scan root → fall back to its immediate parent.
     const fid = f.topFolderId ?? f.parents[0]
-    if (!fid) return
+    if (!fid) return false
+    counted.add(f.id)
     const cur = folderMap.get(fid) ?? { label: lbl || '(box)', url: `https://drive.google.com/drive/folders/${fid}`, fileCount: 0, totalBytes: 0 }
     cur.fileCount++
     cur.totalBytes += f.size ?? 0
     folderMap.set(fid, cur)
+    return true
   }
 
   if (isAgency && resolved.viaBookingSubfolder && resolved.bookingFolderId) {
@@ -164,10 +172,10 @@ export async function resolveFootageFolders(booking: BookingForFootage): Promise
       })))
       for (const { c, files } of walked) {
         if (files.length === 0) continue
-        // Dedup vs the deterministic pass by top-folder id (add() keys on it) —
-        // nested/duplicate candidates can't double-count a folder row.
-        files.forEach(f => add(f, label(c.name, f.folderPath[0] ?? '')))
-        if (!extraBoxUrl) extraBoxUrl = `https://drive.google.com/drive/folders/${c.id}`
+        // Dedup vs the deterministic pass by FILE id (add() skips a file already counted) — a candidate nested in the
+        // box (a code-named EP folder) or listed twice adds nothing new.
+        const added = files.map(f => add(f, label(c.name, f.folderPath[0] ?? ''))).some(Boolean)
+        if (added && !extraBoxUrl) extraBoxUrl = `https://drive.google.com/drive/folders/${c.id}`
       }
     } catch (e: any) {
       console.warn('[footage] global code scan failed (non-fatal):', e?.message || e)
