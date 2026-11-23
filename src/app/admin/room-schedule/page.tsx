@@ -21,6 +21,7 @@ interface Row {
   category?: string | null
   callTime: string
   estimatedWrap?: string | null
+  locationId?: string | null
   locationName?: string | null
   projectName?: string | null
   outlet: { code: string; name: string }
@@ -81,9 +82,9 @@ export default function RoomSchedulePage() {
     return () => { dead = true }
   }, [date])
 
-  // Group bookings by room, matched on locationName === Location.fullName —
-  // exactly what the wizard writes for a physical room (BookingWizard.tsx
-  // resolvedLocationName). Off-site/remote bookings (locationName unset, or
+  // Group bookings by room, matched on locationId, then (old rows) on
+  // locationName === Location.fullName — what the wizard writes for a physical
+  // room (BookingWizard.tsx resolvedLocationName). Off-site/remote bookings (locationName unset, or
   // free text for EXTERNAL) never match a room and land in `unmatched`
   // instead of silently vanishing — a capacity-planning view that hides
   // some bookings without saying so is worse than one with an "other" pile.
@@ -92,7 +93,9 @@ export default function RoomSchedulePage() {
     for (const room of ROOMS) m.set(room.id, [])
     const leftover: Row[] = []
     for (const b of rows) {
-      const room = ROOMS.find(r => r.fullName === b.locationName)
+      // 2026-11-23 — locationId ก่อน (ค่าที่จองห้องจริงใช้ · v1.195) ชื่อเต็มเป็นทางสำรองของใบเก่า: ชื่อเท่านั้น =
+      // NWS-TSN 26 ใบ (locationName 'สตูดิโอ 1') ไปกอง "ไม่ตรงกับห้อง" และแถว Studio 1 ช่วง 16–18 ดูว่าง
+      const room = ROOMS.find(r => r.id === b.locationId) ?? ROOMS.find(r => r.fullName === b.locationName)
       if (room) m.get(room.id)!.push(b)
       else if ((b.locationName || '').trim()) leftover.push(b)
     }
