@@ -43,6 +43,21 @@ test('two files sharing one name in one folder is reported with both sizes', () 
   assert.equal(issues[0].fileIds.length, 2)
 })
 
+test('maint 23 Nov: same name in one folder with IDENTICAL md5 = one file uploaded twice → ℹ️ note, not a ⚠️ issue (WLT-MNW-261012-01)', () => {
+  const notes: string[] = []
+  const twin = (id: string, name: string, md5: string | null, parents = ['p']) => ({ ...f({ id, name, parents }), md5 })
+  const issues = findIssues('WLT-MNW-261012-01', [
+    twin('a', 'A.MXF', 'aaa'), twin('b', 'A.MXF', 'aaa'),                     // identical → info
+    twin('c', 'MEDIAPRO.XML', 'mmm', ['xd']), twin('d', 'MEDIAPRO.XML', 'mmm', ['xd']), // an index uploaded twice → info too
+    twin('e', 'B.MXF', 'bbb'), twin('g', 'B.MXF', 'ccc'),                     // different content → still ⚠️
+    twin('h', 'C.MXF', 'ddd'), twin('i', 'C.MXF', null),                      // one side without md5 → cannot tell → still ⚠️
+  ], { notes })
+  assert.deepEqual(issues.map(i => [i.kind, i.fileIds.join('+')]), [['duplicate-name', 'e+g'], ['duplicate-name', 'h+i']], 'pre-fix: 4 issues')
+  assert.equal(notes.length, 1)
+  assert.match(notes[0], /เนื้อไฟล์ตรงกันทุกไบต์ \(md5\) 2 ชุด — อัปซ้ำ/)
+  assert.match(notes[0], /EP01\/CAM-A\/Clip\/A\.MXF ×2/)
+})
+
 test('v1.280: two card-index files in one folder — the detail forbids deleting either and never states the cause as fact', () => {
   const xd = ['EP01', 'CAM-A', 'XDROOT']
   const issues = findIssues('AGN-261104-01', [

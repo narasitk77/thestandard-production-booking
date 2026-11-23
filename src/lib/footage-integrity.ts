@@ -151,7 +151,8 @@ export function findIssues(
   bookingCode: string,
   files: DriveFile[],
   /** maint 2026-11-08 — false = the booking expects no camera video (expectsCameraVideo): a sound-only job's AUDIO is the whole job */
-  opts: { expectVideo?: boolean } = {},
+  /** maint 23 Nov 2026 — notes: ℹ️ lines for the Doc (things worth saying that are not a ⚠️) */
+  opts: { expectVideo?: boolean; notes?: string[] } = {},
 ): FootageIssue[] {
   const issues: FootageIssue[] = []
   // v1.253 — files a person set aside in `_แยกไว้ · …` (e.g. the truncated A004R001) are out of every check.
@@ -180,8 +181,12 @@ export function findIssues(
     if (list) list.push(f)
     else byFolderAndName.set(key, [f])
   }
+  // maint 23 Nov 2026 — every copy byte-identical (same md5) = one file uploaded twice, nothing lost or broken: ℹ️, not ⚠️
+  // (WLT-MNW-261012-01's box read "ต้องตามต่อ" for md5-identical pairs). No md5 on a side = still a ⚠️.
+  const identical: string[] = []
   for (const dupes of byFolderAndName.values()) {
     if (dupes.length < 2) continue
+    if (dupes.every(d => !!d.md5 && d.md5 === dupes[0].md5)) { identical.push(`${where(dupes[0])} ×${dupes.length}`); continue }
     const sizes = dupes.map(d => gb(d.size)).join(' vs ')
     const cardIndex = CARD_INDEX_RE.test(dupes[0].name) || /^(SONYCARD\.IND|DATABASE\.BIN)$/i.test(dupes[0].name)
     // SONYCARD.IND is 0 bytes on every card, so its sizes never tell two cards apart
@@ -195,6 +200,11 @@ export function findIssues(
           : `ไฟล์ index ชื่อเดียวกัน ${dupes.length} ตัว — อาจเป็นการ์ดคนละใบหรืออัปซ้ำ ห้ามลบจนกว่าจะเทียบ md5`} · ${where(dupes[0])} (${dupes.length} ไฟล์: ${dupes.map(d => d.size == null ? '?' : `${d.size} B`).join(' vs ')})`
         : `${where(dupes[0])} — มี ${dupes.length} ไฟล์ชื่อเดียวกันในโฟลเดอร์เดียวกัน (${sizes})`,
     })
+  }
+  if (identical.length) {
+    identical.sort() // Drive lists in no fixed order and notes feed the Doc hash
+    opts.notes?.push(`ไฟล์ชื่อซ้ำในโฟลเดอร์เดียวกันที่เนื้อไฟล์ตรงกันทุกไบต์ (md5) ${identical.length} ชุด — อัปซ้ำ ไม่ใช่ไฟล์เสีย · ` +
+      `${identical.slice(0, 3).join(', ')}${identical.length > 3 ? ` …+${identical.length - 3}` : ''}`)
   }
 
   // ── 2b. v1.253 — one FX6 original in two folders at different sizes ─────────
@@ -878,7 +888,7 @@ async function checkBox(o: {
   let mediaPool: MediaPoolLine | null = null
   const notes: string[] = []
   if (readable) {
-    issues.push(...findIssues(o.code, files, { expectVideo: expectsCameraVideo(o.booking) }))
+    issues.push(...findIssues(o.code, files, { expectVideo: expectsCameraVideo(o.booking), notes }))
     try {
       // v1.260 — shootFrom: clips an unformatted card still lists from an earlier shoot are reported, not counted missing
       const mc = mediaproCheck(files, await loadMediaproCards(files), { shootFrom: o.shootDate })
