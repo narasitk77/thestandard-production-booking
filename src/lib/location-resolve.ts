@@ -51,6 +51,9 @@ const NEVER_MATCH = [
   'rca',
 ]
 
+/** วงเล็บท้ายข้อความที่มีคำว่า TSD เช่น ' (TSD)' ' (TSD, 1/F)' */
+const TSD_SUFFIX = /\s*\((?=[^)]*tsd)[^)]*\)\s*$/i
+
 function norm(raw: string): string {
   return raw
     .replace(/ /g, ' ')
@@ -85,7 +88,14 @@ export function resolveLocationId(raw: string | null | undefined): string | null
   // อยู่แล้วจึงคืน null เองโดยธรรมชาติ
   const head = original.split(/\s+—\s+/)[0].trim()
 
-  for (const cand of [original, head]) {
+  // ไม่ตรงทั้งข้อความ → ตัดวงเล็บท้ายที่มีคำว่า TSD แล้วลองซ้ำ (ลองทีหลังเสมอ)
+  // เคสจริง TSS-SCI-261209-01 (5 พ.ย. 2569): ฟอร์มแก้ใบเป็นช่องพิมพ์อิสระ คนแก้ 'Studio 1 (TSD)'
+  // (fullName จริง) เป็น 'Studio 2 (TSD)' ซึ่งไม่ตรงอะไรเลย → locationId null → คืนห้องเดิม ไม่จองใหม่
+  // ไม่เตือน ไม่มีป้าย · ตัดเฉพาะวงเล็บที่มี TSD — 'Studio 2 (ลาดพร้าว)' ต้องยังเป็น null
+  const bare = [original, head]
+  const stripped = bare.map(c => c.replace(TSD_SUFFIX, '').trim()).filter(c => !bare.includes(c))
+
+  for (const cand of [...bare, ...stripped]) {
     if (!cand) continue
     // ชิ้นที่เป็นลิงก์ = ไม่ใช่ชื่อห้อง (ห้องในตึกไม่ต้องมีแผนที่)
     if (/https?:\/\//i.test(cand)) continue

@@ -18,6 +18,7 @@ import { SPECIAL_EQUIPMENT_OPTIONS } from '@/lib/data'
 import { isQuPending, QU_PENDING, QU_FIELD_HINT } from '@/lib/qu-ref'
 import { hasConsoleAccess } from '@/lib/roles'
 import { producerEditMode, isBookingOwner } from '@/lib/producer-edit-access'
+import { LOCATIONS } from '@/lib/locations'
 
 const SHOOT_TYPES = ['STUDIO', 'ON_LOCATION', 'REMOTE_ONLINE', 'EVENT']
 
@@ -159,7 +160,20 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
       ยังไม่มีใครจองห้องนี้ช่วง {roomStatus.window} ณ เวลาที่ตรวจ
       {roomStatus.externalError ? ' · แต่ตรวจของแผนกอื่นไม่ได้รอบนี้' : ''}
     </div>
+  ) : roomStatus.state === 'not-a-room' && !/https?:\/\//i.test(form.locationName) ? (
+    // TSS-SCI-261209-01 (5 พ.ย. 2569): พิมพ์ 'Studio 2 (TSD)' แล้วระบบไม่รู้จัก → คืนห้องเดิม ไม่จองใหม่
+    // และหน้านี้เงียบ · ต้องบอกให้เห็นก่อนกดบันทึก
+    <div className="ops-card px-3 py-2 text-xs text-slate-600 bg-slate-50 border-slate-200 border-l-4 border-l-slate-400">
+      ระบบไม่รู้จักสถานที่นี้เป็นห้องในตึก — จะไม่จอง/ไม่ตรวจห้องให้ ถ้าเป็นห้องในตึกให้เลือกจากรายการ
+    </div>
   ) : null
+
+  // ห้องในตึกตามชื่อที่ resolver รู้จัก — ช่องสถานที่ยังพิมพ์อิสระได้ (ลิงก์แผนที่ / นอกตึก)
+  const locationOptions = (
+    <datalist id="probook-room-options">
+      {LOCATIONS.filter(l => l.group !== 'EXTERNAL').map(l => <option key={l.id} value={l.fullName} />)}
+    </datalist>
+  )
 
   const toggleSpecial = (item: string) =>
     setForm(f => ({ ...f, specialEquipment: f.specialEquipment.includes(item) ? f.specialEquipment.filter(x => x !== item) : [...f.specialEquipment, item] }))
@@ -274,13 +288,15 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
           {saveError && <div className="ops-card px-3 py-2 text-sm text-red-700 bg-red-50 border-red-200 border-l-4 border-l-red-500">{saveError}</div>}
           <div>
             <label className="text-xs text-gray-500 mb-1 block">สถานที่ / ลิงก์แผนที่ (Google Maps)</label>
-            <textarea
-              className="ops-input resize-none"
-              rows={3}
-              placeholder="เช่น สตูดิโอ 2 ชั้น 5 หรือวางลิงก์ Google Maps ของสถานที่ใหม่"
+            {/* input + datalist (textarea ใช้ list ไม่ได้) — ห้องในตึกต้องเลือกชื่อจากรายการถึงจะจองห้องให้ */}
+            <input
+              className="ops-input"
+              list="probook-room-options"
+              placeholder="เลือกห้องในตึกจากรายการ หรือวางลิงก์ Google Maps ของสถานที่ใหม่"
               value={form.locationName}
               onChange={e => setForm({ ...form, locationName: e.target.value })}
             />
+            {locationOptions}
           </div>
           {isAdvertorial && (
             <div>
@@ -361,7 +377,8 @@ export default function ProducerEditPage({ params }: { params: { id: string } })
           </div>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">สถานที่</label>
-            <input className="ops-input" value={form.locationName} onChange={e => setForm({ ...form, locationName: e.target.value })} />
+            <input className="ops-input" list="probook-room-options" value={form.locationName} onChange={e => setForm({ ...form, locationName: e.target.value })} />
+            {locationOptions}
           </div>
         </div>
 
