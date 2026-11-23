@@ -1,7 +1,7 @@
 import { test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHmac } from 'crypto'
-import { notifyLark, notifyChatDetailed } from '../notify'
+import { notifyLark, notifyChatDetailed, notifyDiscord } from '../notify'
 
 // v1.209 — Lark custom-bot webhook.
 //
@@ -11,20 +11,21 @@ import { notifyLark, notifyChatDetailed } from '../notify'
 // received — the same class of bug as the footage digest that claimed 85/85
 // deliveries while the operator's inbox stayed empty (v1.186).
 
-type Call = { url: string; body: any }
+type Call = { url: string; body: any; signal: unknown }
 
 // The restore is registered with t.after() rather than called at the end of the
 // body ON PURPOSE: a failing assert throws past a trailing restore() and leaves
 // globalThis.fetch patched for every later test in the file, turning one real
 // failure into a cascade of fake ones.
-function stubFetch(t: TestContext, handler: (url: string, body: any) => { status: number; text: string }) {
+// `n` = 1-based number of this fetch call; a handler that throws = a transport failure.
+function stubFetch(t: TestContext, handler: (url: string, body: any, n: number) => { status: number; text: string; headers?: Record<string, string> }) {
   const calls: Call[] = []
   const prev = globalThis.fetch
   ;(globalThis as any).fetch = async (url: any, init: any) => {
     const body = JSON.parse(String(init?.body ?? '{}'))
-    calls.push({ url: String(url), body })
-    const { status, text } = handler(String(url), body)
-    return { ok: status >= 200 && status < 300, status, text: async () => text } as any
+    calls.push({ url: String(url), body, signal: init?.signal })
+    const { status, text, headers } = handler(String(url), body, calls.length)
+    return { ok: status >= 200 && status < 300, status, headers: new Headers(headers), text: async () => text } as any
   }
   t.after(() => { globalThis.fetch = prev })
   return { calls }
@@ -131,7 +132,9 @@ test('notifyChatDetailed reports each channel separately', async (t) => {
     const r = await notifyChatDetailed('🎬 ไฟล์มาแล้ว', 'footage')
     assert.deepEqual(r, { discord: false, lark: true, any: true })
   })
-  assert.equal(f.calls.length, 2, 'both channels were attempted')
+  // both channels were attempted · since 2026-11-23 a 5xx gets one retry (postWebhook), so Discord is POSTed twice
+  assert.equal(f.calls.filter(c => c.url.includes('discord')).length, 2, 'Discord: 500, retried once, 500 again')
+  assert.equal(f.calls.filter(c => !c.url.includes('discord')).length, 1, 'Lark took it first time — no retry')
 })
 
 test('both channels down → any=false, so email fallbacks still fire', async (t) => {
@@ -170,4 +173,89 @@ test("prod defaults: an 'ops' message is Lark-only, so a single boolean misattri
     assert.notEqual(r.any, r.discord)
   })
   assert.equal(f.calls.length, 1, 'only Lark was actually POSTed to')
+})
+
+// 2026-11-23 — postWebhook: the one POST both chat channels share. Prod 14 + 15 Nov: `[notify] discord failed:
+// fetch failed` once → the noon stale-landing report never reached the team room (it has no second round). Every
+// attempt now has a 15 s deadline, and a network error / timeout / 5xx / 429 gets ONE retry; a 4xx does not.
+// The wait is driven by mocked setTimeout, so "not before 2 s" is asserted without sleeping.
+const DISCORD = 'https://discord.com/api/webhooks/x/y'
+const settle = () => new Promise(r => setImmediate(r))
+
+test('webhook: no answer within the deadline → one retry ~2 s later, and the retry counts as delivered', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const deadline = t.mock.method(AbortSignal, 'timeout')
+  const f = stubFetch(t, (_u, _b, n) => {
+    if (n === 1) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    return { status: 204, text: '' }
+  })
+  await withEnv({ DISCORD_WEBHOOK_URL: DISCORD }, async () => {
+    const p = notifyDiscord('🎬 ไฟล์มาแล้ว')
+    await settle()
+    t.mock.timers.tick(1_999)
+    await settle()
+    assert.equal(f.calls.length, 1, 'does not retry before ~2 s')
+    t.mock.timers.tick(1)
+    assert.equal(await p, true)
+  })
+  assert.equal(f.calls.length, 2)
+  assert.deepEqual(deadline.mock.calls.map(c => c.arguments[0]), [15_000, 15_000], 'every attempt has a 15 s deadline')
+  assert.ok(f.calls.every(c => c.signal instanceof AbortSignal), 'and the deadline is actually passed to fetch')
+})
+
+test('webhook: a 4xx is not retried — it would say the same thing again', async (t) => {
+  // real timers: a wrong retry shows up as a second call after 2 s, not as a hang
+  const f = stubFetch(t, () => ({ status: 400, text: '{"message":"Cannot send an empty message"}' }))
+  await withEnv({ DISCORD_WEBHOOK_URL: DISCORD }, async () => {
+    assert.equal(await notifyDiscord('x'), false)
+  })
+  assert.equal(f.calls.length, 1)
+})
+
+test('webhook: fails twice (5xx, then the network) → false, exactly two attempts, never throws', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = stubFetch(t, (_u, _b, n) => {
+    if (n === 1) return { status: 503, text: 'upstream connect error' }
+    throw new TypeError('fetch failed')
+  })
+  await withEnv({ DISCORD_WEBHOOK_URL: DISCORD }, async () => {
+    const p = notifyDiscord('🎬 ไฟล์มาแล้ว')
+    await settle()
+    t.mock.timers.tick(2_000)
+    assert.equal(await p, false)
+  })
+  assert.equal(f.calls.length, 2)
+})
+
+test('webhook: 429 waits Retry-After before its retry, capped at 10 s', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const after = ['5', '3600']
+  const f = stubFetch(t, (_u, _b, n) => n % 2
+    ? { status: 429, text: 'rate limited', headers: { 'retry-after': after[(n - 1) / 2] } }
+    : { status: 204, text: '' })
+  await withEnv({ DISCORD_WEBHOOK_URL: DISCORD }, async () => {
+    for (const [i, waitMs] of [5_000, 10_000].entries()) {
+      const p = notifyDiscord('🎬')
+      await settle()
+      t.mock.timers.tick(waitMs - 1)
+      await settle()
+      assert.equal(f.calls.length, 2 * i + 1, `Retry-After ${after[i]} → still waiting at ${waitMs - 1} ms`)
+      t.mock.timers.tick(1)
+      assert.equal(await p, true)
+      assert.equal(f.calls.length, 2 * i + 2)
+    }
+  })
+})
+
+test('webhook: Lark shares the retry (502 → retry → code 0 = delivered)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = stubFetch(t, (_u, _b, n) => n === 1 ? { status: 502, text: 'bad gateway' } : { status: 200, text: '{"code":0}' })
+  await withEnv({ LARK_WEBHOOK_URL: HOOK }, async () => {
+    const p = notifyLark('🎬 ไฟล์มาแล้ว')
+    await settle()
+    t.mock.timers.tick(2_000)
+    assert.equal(await p, true)
+  })
+  assert.equal(f.calls.length, 2)
+  assert.deepEqual(f.calls[1].body, f.calls[0].body, 'the retry sends the same message')
 })

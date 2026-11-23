@@ -88,9 +88,46 @@ const LARK_MAX_BYTES = 18_000
 const utf16 = (s: string) => s.length
 const utf8 = (s: string) => Buffer.byteLength(s, 'utf8')
 
+const WEBHOOK_TIMEOUT_MS = 15_000
+const WEBHOOK_RETRY_MS = 2_000
+const WEBHOOK_RETRY_AFTER_MAX_MS = 10_000
+
+/**
+ * 2026-11-23 — the one webhook POST that notifyDiscord + notifyLark share: a 15 s deadline and ONE retry.
+ *
+ * Both used to fetch once with no signal: a dropped packet waited out undici's 300 s and the message was gone
+ * (prod log 14 + 15 Nov `[notify] discord failed: fetch failed` → the noon stale-landing report never reached the
+ * team room, and that report has no second round). Retries only what a second try can fix — network error /
+ * timeout / 5xx / 429 (429 waits Retry-After, capped) — never a 4xx, which will say the same thing again.
+ * Resolves with the final Response (any status) and rejects only if the transport failed both times, so each
+ * caller's own res.ok / body checks still decide what counts as delivered.
+ * ponytail: a timeout after Discord already took the POST can post twice — rare, and better than lost.
+ */
+async function postWebhook(channel: string, url: string, body: unknown): Promise<Response> {
+  const post = () => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+  })
+  let wait = WEBHOOK_RETRY_MS
+  try {
+    const res = await post()
+    if (res.status !== 429 && res.status < 500) return res
+    const ra = res.headers.get('retry-after')
+    const secs = ra?.trim() ? Number(ra) : NaN  // seconds · absent or an HTTP date → NaN → the default wait
+    if (secs >= 0) wait = Math.min(secs * 1000, WEBHOOK_RETRY_AFTER_MAX_MS)
+    console.warn(`[notify] ${channel} ${res.status} — retrying once in ${wait} ms: ${(await res.text().catch(() => '')).slice(0, 200)}`)
+  } catch (err: any) {
+    console.warn(`[notify] ${channel} failed (${err?.name === 'TimeoutError' ? `no answer in ${WEBHOOK_TIMEOUT_MS} ms` : err?.message || err}) — retrying once in ${wait} ms`)
+  }
+  await new Promise(r => setTimeout(r, wait))
+  return post()
+}
+
 /**
  * POST a message to the configured Discord webhook. Returns false (not throw)
- * when unset, filtered out by scope, or failed.
+ * when unset, filtered out by scope, or failed (after postWebhook's one retry).
  *
  * Callers that treat the return value as "the human was told" (footage-ready
  * uses it as an email fallback) must pass 'footage', which is never filtered.
@@ -99,11 +136,7 @@ export async function notifyDiscord(content: string, category: NotifyCategory = 
   const url = discordTarget(category)
   if (!url) return false
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: clipForChannel(content, DISCORD_MAX, utf16) }),
-    })
+    const res = await postWebhook('discord', url, { content: clipForChannel(content, DISCORD_MAX, utf16) })
     if (!res.ok) {
       console.error(`[notify] discord ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`)
       return false
@@ -150,7 +183,8 @@ function larkSignature(timestampSec: number, secret: string): string {
 
 /**
  * POST a message to the configured Lark custom-bot webhook. Returns false
- * (never throws) when unset, filtered out by scope, or rejected.
+ * (never throws) when unset, filtered out by scope, or rejected (after
+ * postWebhook's one retry — a 200-with-error `code` is NOT retried).
  */
 export async function notifyLark(content: string, category: NotifyCategory = 'footage'): Promise<boolean> {
   if (!larkAllows(category)) return false
@@ -171,11 +205,7 @@ export async function notifyLark(content: string, category: NotifyCategory = 'fo
   }
 
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await postWebhook('lark', url, body)
     const raw = await res.text().catch(() => '')
     if (!res.ok) {
       console.error(`[notify] lark ${res.status}: ${raw.slice(0, 300)}`)
@@ -267,11 +297,20 @@ export async function notifyEmailDigest(subject: string, text: string): Promise<
  * message per address so recipients aren't exposed to each other in a flat To:.
  */
 export async function notifyEmail(to: string | string[], subject: string, text: string): Promise<boolean> {
+  return (await notifyEmailEach(to, subject, text)).sent.length > 0
+}
+
+/**
+ * notifyEmail, but says WHO: `sent` = addresses the provider accepted, `failed` = every address that did not get
+ * it — all of them when no email provider is configured, so a caller that records `failed` never writes an empty
+ * list for a mail that never left (class 1). Empty input → both empty. Never throws.
+ */
+export async function notifyEmailEach(to: string | string[], subject: string, text: string): Promise<{ sent: string[]; failed: string[] }> {
   const list = (Array.isArray(to) ? to : [to]).map(s => s.trim()).filter(Boolean)
-  if (!list.length) return false
+  if (!list.length) return { sent: [], failed: [] }
   if (!isEmailConfigured()) {
     console.warn('[notify] email skipped — no non-interactive email provider configured (SMTP/Resend/SendGrid).')
-    return false
+    return { sent: [], failed: list }
   }
   const results = await Promise.allSettled(list.map(addr => sendEmail({ to: [addr], subject, text })))
   // sendEmail THROWS on terminal failure (it never resolves a failure value),
@@ -282,7 +321,10 @@ export async function notifyEmail(to: string | string[], subject: string, text: 
       console.error('[notify] email to', list[i], 'failed:', (r.reason as any)?.message || r.reason)
     }
   })
-  return results.some(r => r.status === 'fulfilled')
+  return {
+    sent: list.filter((_, i) => results[i].status === 'fulfilled'),
+    failed: list.filter((_, i) => results[i].status === 'rejected'),
+  }
 }
 
 /**
