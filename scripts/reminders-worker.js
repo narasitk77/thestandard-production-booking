@@ -52,6 +52,21 @@ function msUntilNextRun(now = new Date(), hourBkk = targetHourBkk) {
   return next.getTime() - now.getTime()
 }
 
+// v1.187 — งานเตือนเลข QU ต้องมีร่องรอยใน log ไม่งั้นล้มแล้วไม่มีใครรู้
+// รอบ 2 (23 พ.ย.) — นับใบที่ "ไม่มีใครถูกตาม" ด้วย (ไม่มีอีเมล Producer / Producer ออกแล้ว):
+// เดิม log บอกแค่ pending/emailed/failed จึงดูเหมือนปกติทั้งที่ POD-8MH-260814-01 ไม่มีคนตามตั้งแต่ 10 ต.ค.
+function quLogPart(q) {
+  const len = (a) => (Array.isArray(a) ? a.length : undefined)
+  return (
+    " | qu: pending=" + (q && q.pending) +
+    " emailed=" + (q && q.emailed) +
+    " failed=" + (q && q.failed) +
+    " noProducerEmail=" + len(q && q.noProducerEmail) +
+    " producerInactive=" + len(q && q.producerInactive) +
+    (q && q.error ? " ERROR=" + q.error : "")
+  )
+}
+
 let running = false
 
 async function runOnce() {
@@ -73,11 +88,7 @@ async function runOnce() {
         " open=" + json.openCount + " discord=" + (json.dispatched && json.dispatched.discord) +
         " lark=" + (json.dispatched && json.dispatched.lark) +
         " email=" + (json.dispatched && json.dispatched.email) +
-        // v1.187 — งานเตือนเลข QU ต้องมีร่องรอยใน log ไม่งั้นล้มแล้วไม่มีใครรู้
-        " | qu: pending=" + (json.quReminder && json.quReminder.pending) +
-        " emailed=" + (json.quReminder && json.quReminder.emailed) +
-        " failed=" + (json.quReminder && json.quReminder.failed) +
-        (json.quReminder && json.quReminder.error ? " ERROR=" + json.quReminder.error : ""),
+        quLogPart(json.quReminder),
     )
   } catch (err) {
     console.error('[reminders] run failed:', err?.message || err)
@@ -86,7 +97,7 @@ async function runOnce() {
   }
 }
 
-module.exports = { msUntilNextRun }
+module.exports = { msUntilNextRun, quLogPart }
 
 let timer
 function shutdown(signal) {
