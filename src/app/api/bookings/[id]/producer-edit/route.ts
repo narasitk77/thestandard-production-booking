@@ -33,6 +33,7 @@ import { pushCalendarDetails } from '@/lib/calendar-reconcile'
 import { resyncRoomForBooking, roomScheduleChanges } from '@/lib/room-booking-sync'
 import { refreshShootMarker } from '@/lib/shoot-marker'
 import { hasDriveCredentials } from '@/lib/google-drive'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function PATCH(
   request: NextRequest,
@@ -158,7 +159,13 @@ export async function PATCH(
           ...(agencyRef !== undefined && { agencyRef: agencyRefValidated }),
           ...(notes !== undefined && { notes: notes || null }),
         },
-        include: { episodes: true, outlet: true, program: true },
+        // same episode shape as the admin PATCH / reconciler: the event title and the
+        // _SHOOT marker's show folder read episodes[0] and episodes[].program
+        include: {
+          outlet: true,
+          program: true,
+          episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
+        },
       })
     })
 

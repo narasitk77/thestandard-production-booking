@@ -5,6 +5,8 @@
 //  - the calendar event + _SHOOT marker after a producer fills in the QU (events kept
 //    'QU-1234TBC'), without mailing guests for a QU-only change, and touching only the
 //    description (a full patch moved a hand-moved event back to the DB times)
+//  - producer-edit loads episodes in the same order/shape as the admin PATCH, so the
+//    event title and the marker's show folder are built from the same data
 //  - a legacy Agency Ref that fails the QU rule no longer blocks an unrelated admin save
 import { test, mock, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,6 +18,7 @@ let sheetResult = 'updated'
 let audits: any[] = []
 let calendar: Array<{ id: string; opts: any }> = []
 let markers: string[] = []
+let txUpdates: any[] = []
 
 const merged = (a: any) => ({ ...booking, ...a.data })
 mock.module('../db', {
@@ -24,7 +27,7 @@ mock.module('../db', {
       booking: { findUnique: async () => booking && { ...booking }, update: async (a: any) => merged(a) },
       $transaction: async (fn: any) => fn({
         episode: { update: async () => ({}) },
-        booking: { update: async (a: any) => merged(a), updateMany: async () => ({ count: 1 }) },
+        booking: { update: async (a: any) => { txUpdates.push(a); return merged(a) }, updateMany: async () => ({ count: 1 }) },
       }),
     },
   },
@@ -73,7 +76,7 @@ beforeEach(() => {
     createdByEmail: 'pro@x.co', producerEmail: 'pro@x.co', producer: 'Pro', shootDate: new Date('2026-11-24T00:00:00Z'),
     outlet: { code: 'AGN', name: 'Agency' }, program: { code: 'AGN', name: 'Agency' }, episodes: [],
   }
-  sheet = []; sheetResult = 'updated'; audits = []; calendar = []; markers = []
+  sheet = []; sheetResult = 'updated'; audits = []; calendar = []; markers = []; txUpdates = []
 })
 
 test('admin PATCH: a call-time edit writes Call/Wrap/Location to the sheet row', async () => {
@@ -149,4 +152,13 @@ test('producer-edit on a REQUESTED booking: a time edit reaches the sheet; the Q
   await producerEdit(req({ agencyRef: 'QU-4500' }), params)
   await tick()
   assert.deepEqual(calendar, [], 'REQUESTED: no event or marker yet (prod behaviour kept)')
+})
+
+test('producer-edit reloads episodes ordered + with their program, like the admin PATCH (title / marker folder)', async () => {
+  const { EPISODE_ORDER } = await import('../episode-order')
+  booking.status = 'COMPLETED'
+  session = { email: 'pro@x.co', role: 'USER' }
+  await producerEdit(req({ agencyRef: 'QU-3416' }), params)
+  assert.equal(txUpdates.length, 1)
+  assert.deepEqual(txUpdates[0].include.episodes, { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } })
 })
