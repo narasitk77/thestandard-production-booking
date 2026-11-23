@@ -18,6 +18,19 @@ const CANCELLED_EVENT_DELETE_FAILED =
   'งานถูกยกเลิก/ลบแล้ว แต่ลบ event ในปฏิทินไม่สำเร็จ — event ยังอยู่ในปฏิทินของทุกคน · reconciler ลองลบใหม่ทุก 10 นาที'
 const DETAILS_PATCH_FAILED =
   'แก้ใบจองแล้วแต่ patch เวลา/ชื่อ/สถานที่ ของ event ในปฏิทินไม่สำเร็จ — ปฏิทินยังเป็นค่าเดิม · reconciler ลองใหม่ทุก 10 นาที'
+const DESCRIPTION_PATCH_FAILED =
+  'แก้เลข QU แล้วแต่ patch รายละเอียด event ในปฏิทินไม่สำเร็จ — event ยังเป็นค่าเดิม · reconciler ลองใหม่ทุก 10 นาที (ไม่ส่งเมลหาแขก)'
+
+/**
+ * Each edit-failure marker → how the reconciler re-pushes it. The retry must be the
+ * push that failed, no wider: a failed QU push (description only, silent) retried as
+ * a full 'all' patch would mail every guest and snap a hand-moved event back to the
+ * booking's times — both things the QU push itself is built not to do.
+ */
+const EDIT_RETRY = new Map<string, { sendUpdates: 'all' | 'none'; descriptionOnly?: boolean }>([
+  [DETAILS_PATCH_FAILED, { sendUpdates: 'all' }],
+  [DESCRIPTION_PATCH_FAILED, { sendUpdates: 'none', descriptionOnly: true }],
+])
 
 /**
  * Delete the event of a booking that was just cancelled / soft-deleted, and
@@ -75,6 +88,10 @@ export async function removeCancelledBookingEvent(bookingId: string, eventId: st
  * showed success, calendarSyncStatus stayed OK, and the event kept the OLD time
  * for good. Now it marks FAILED (red chip + Re-sync on the admin card) and
  * processBooking re-pushes the details on the next tick. Never throws.
+ *
+ * A description-only push (the QU) gets its own marker, retried description-only
+ * and silent (EDIT_RETRY). It never replaces a pending full-details marker: that
+ * retry rewrites the description too, and is the only one that carries a time edit.
  */
 export async function pushCalendarDetails(
   eventId: string,
@@ -83,10 +100,20 @@ export async function pushCalendarDetails(
 ): Promise<boolean> {
   const ok = await updateCalendarEventDetails(eventId, booking, opts).catch(() => false)
   if (!ok) {
-    console.error(`[calendar] details patch failed for ${booking.bookingCode || booking.id} (event ${eventId}) — marked FAILED`)
+    const descriptionOnly = !!opts?.descriptionOnly
+    console.error(`[calendar] ${descriptionOnly ? 'description' : 'details'} patch failed for ${booking.bookingCode || booking.id} (event ${eventId}) — marked FAILED`)
     await prisma.booking.updateMany({
-      where: { id: booking.id, calendarEventId: eventId },
-      data: { calendarSyncStatus: 'FAILED', calendarSyncError: DETAILS_PATCH_FAILED, calendarLastSyncedAt: new Date() },
+      where: {
+        id: booking.id,
+        calendarEventId: eventId,
+        // `not` alone would skip NULL rows (SQL <>), hence the explicit null arm
+        ...(descriptionOnly && { OR: [{ calendarSyncError: null }, { calendarSyncError: { not: DETAILS_PATCH_FAILED } }] }),
+      },
+      data: {
+        calendarSyncStatus: 'FAILED',
+        calendarSyncError: descriptionOnly ? DESCRIPTION_PATCH_FAILED : DETAILS_PATCH_FAILED,
+        calendarLastSyncedAt: new Date(),
+      },
     }).catch(e => console.error('[calendar] save FAILED (details) error:', e?.message || e))
   }
   return ok
@@ -121,10 +148,11 @@ async function markDetailsRetryFailed(
   booking: { id: string; bookingCode: string | null; calendarEventId?: string | null },
   assignedEmails: string[],
   options: ProcessOptions,
+  marker: string,
 ) {
   await prisma.booking.update({
     where: { id: booking.id },
-    data: { calendarSyncStatus: 'FAILED', calendarSyncError: DETAILS_PATCH_FAILED, calendarLastSyncedAt: new Date() },
+    data: { calendarSyncStatus: 'FAILED', calendarSyncError: marker, calendarLastSyncedAt: new Date() },
   }).catch(e => console.error('[calendar-reconcile] save FAILED (details retry) error:', e?.message || e))
   try {
     const last = await prisma.auditLog.findFirst({
@@ -143,7 +171,7 @@ async function markDetailsRetryFailed(
     entityType: 'Booking',
     entityId: booking.id,
     bookingCode: booking.bookingCode,
-    changes: { eventId: booking.calendarEventId ?? null, assignedEmails, error: DETAILS_PATCH_FAILED, reason: 'details-retry-failed' },
+    changes: { eventId: booking.calendarEventId ?? null, assignedEmails, error: marker, reason: 'details-retry-failed' },
   }).catch(e => console.error('[calendar-reconcile] details-retry audit write failed:', e?.message || e))
 }
 
@@ -272,7 +300,7 @@ type BookingForReconcile = {
   director2Email?: string | null
   director3Email?: string | null
   calendarSyncStatus?: string | null
-  /** DETAILS_PATCH_FAILED here = an edit's details patch never reached Google → retried with sendUpdates 'all' */
+  /** an EDIT_RETRY marker here = an edit's details patch never reached Google → re-pushed as EDIT_RETRY says */
   calendarSyncError?: string | null
   /** a row saved in the last few minutes may have its edit patch in flight — not drift yet */
   updatedAt?: Date | string | null
@@ -427,6 +455,9 @@ async function processBooking(
   }
   /** an edit's failed details patch was retried this tick and failed again */
   let detailsRetryFailed = false
+  /** the edit-failure marker on this row (DETAILS / DESCRIPTION_PATCH_FAILED), if any */
+  const editMarker = booking.calendarSyncStatus === 'FAILED' && EDIT_RETRY.has(booking.calendarSyncError ?? '')
+    ? booking.calendarSyncError! : null
 
   try {
     // v1.233 — เดิมเช็ค assignedEmails (ครูอย่างเดียว) ทั้งที่บรรทัดบนเพิ่งประกอบ
@@ -618,9 +649,11 @@ async function processBooking(
     // (a) RETRY a failed edit — ONLY a row pushCalendarDetails marked FAILED with
     //     DETAILS_PATCH_FAILED: the edit (new call time etc.) never reached Google,
     //     so the crew were never told → sendUpdates 'all', the email the edit path
-    //     meant to send. A failed retry does NOT stop the tick: guests are still
-    //     compared/patched below (a persistent Google 4xx must not lock the booking
-    //     out of crew sync), then the row goes back to FAILED with the SAME marker
+    //     meant to send. DESCRIPTION_PATCH_FAILED (a QU push) is re-pushed the way
+    //     it was sent: description only, no mail (EDIT_RETRY). A failed retry does
+    //     NOT stop the tick: guests are still compared/patched below (a persistent
+    //     Google 4xx must not lock the booking out of crew sync), then the row goes
+    //     back to FAILED with the SAME marker
     //     so the next tick retries — one audit row per failing streak
     //     (markDetailsRetryFailed). Rows FAILED for other reasons (attendee patch,
     //     create) are NOT re-pushed here.
@@ -632,9 +665,10 @@ async function processBooking(
     //     Title is not compared — formats changed over versions.
     const wantTimes = computeEventTimes(booking)
     let detailsPatched = false
-    if (booking.calendarSyncStatus === 'FAILED' && booking.calendarSyncError === DETAILS_PATCH_FAILED) {
+    if (editMarker) {
+      const retry = EDIT_RETRY.get(editMarker)!
       if (!options.dryRun) {
-        const ok = await updateCalendarEventDetails(booking.calendarEventId, booking, { sendUpdates: 'all' })
+        const ok = await updateCalendarEventDetails(booking.calendarEventId, booking, retry)
           .catch((e: any) => { console.error(`[calendar-reconcile] details retry threw for ${booking.bookingCode || booking.id}:`, e?.message || e); return false })
         if (!ok) {
           detailsRetryFailed = true
@@ -649,9 +683,11 @@ async function processBooking(
             changes: {
               eventId: booking.calendarEventId,
               reason: 'retry-after-failed-edit',
-              sendUpdates: 'all',
-              from: { start: calendarEvent.start ?? null, end: calendarEvent.end ?? null },
-              to: { start: wantTimes.startTime, end: wantTimes.endTime },
+              sendUpdates: retry.sendUpdates,
+              ...(retry.descriptionOnly ? { descriptionOnly: true } : {
+                from: { start: calendarEvent.start ?? null, end: calendarEvent.end ?? null },
+                to: { start: wantTimes.startTime, end: wantTimes.endTime },
+              }),
             },
           })
         }
@@ -678,9 +714,9 @@ async function processBooking(
     // nothing retried it. Lost CAS = the row changed; the next tick re-checks.
     const finish = async () => {
       if (detailsRetryFailed) {
-        await markDetailsRetryFailed(booking, assignedEmails, options)
+        await markDetailsRetryFailed(booking, assignedEmails, options, editMarker!)
         item.action = 'failed'
-        item.error = DETAILS_PATCH_FAILED
+        item.error = editMarker!
         return
       }
       const saved = await prisma.booking.updateMany({
@@ -834,7 +870,7 @@ async function processBooking(
           // the details marker is what makes the next tick re-push the edit —
           // a later step's error (guests/recreate, retried every tick anyway)
           // must not overwrite it; the real error is in the audit row
-          calendarSyncError: (detailsRetryFailed ? DETAILS_PATCH_FAILED : errMsg).slice(0, 500),
+          calendarSyncError: (detailsRetryFailed ? editMarker! : errMsg).slice(0, 500),
           calendarLastSyncedAt: new Date(),
         },
       }).catch(err => console.error('save FAILED status error:', err?.message))

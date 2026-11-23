@@ -3,7 +3,8 @@
 //    from the admin PATCH and from producer-edit — a miss is logged + audited, not swallowed
 //    (38 of 411 rows since 1 Oct kept the create-time values)
 //  - the calendar event + _SHOOT marker after a producer fills in the QU (events kept
-//    'QU-1234TBC'), without mailing guests for a QU-only change
+//    'QU-1234TBC'), without mailing guests for a QU-only change, and touching only the
+//    description (a full patch moved a hand-moved event back to the DB times)
 //  - a legacy Agency Ref that fails the QU rule no longer blocks an unrelated admin save
 import { test, mock, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
@@ -124,7 +125,7 @@ test('producer-edit on a COMPLETED booking: filling the QU re-pushes the event s
   const res = await producerEdit(req({ agencyRef: 'QU-3416' }), params)
   assert.equal(res.status, 200)
   await tick()
-  assert.deepEqual(calendar, [{ id: 'ev1', opts: { sendUpdates: 'none' } }])
+  assert.deepEqual(calendar, [{ id: 'ev1', opts: { sendUpdates: 'none', descriptionOnly: true } }])
   assert.deepEqual(markers, ['b1'])
   assert.equal(schedWrites().length, 0, 'no time/place change → no Call/Wrap/Location write')
 })

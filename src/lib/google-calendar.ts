@@ -790,27 +790,32 @@ export async function updateCalendarEventDetails(
   // time/title SHOULD notify crew). The ID-regeneration flow passes 'none': a
   // Production-ID/description rewrite isn't a schedule change, so it must not
   // spam every attendee — critical when a bulk migration patches many events.
-  opts: { sendUpdates?: 'all' | 'none' } = {},
+  // `descriptionOnly` sends the description and nothing else: a change that only
+  // shows there (the QU — "Agency Ref:") must not rewrite the title/place/times,
+  // which would snap back a coordinator's hand-move of the event in Google Calendar.
+  opts: { sendUpdates?: 'all' | 'none'; descriptionOnly?: boolean } = {},
 ): Promise<boolean> {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
     return false
   }
   try {
     const calendar = google.calendar({ version: 'v3', auth: getAuth() })
-    const { startTime, endTime } = computeEventTimes(booking)
+    const description = buildEventDescription(booking, (booking.assignedEmails || []).filter(Boolean))
+    const times = opts.descriptionOnly ? null : computeEventTimes(booking)
+    const requestBody = !times ? { description } : {
+      summary: buildEventTitle(booking),
+      description,
+      location: booking.locationName || '—',
+      start: { dateTime: times.startTime, timeZone: 'Asia/Bangkok' },
+      end: { dateTime: times.endTime, timeZone: 'Asia/Bangkok' },
+    }
 
     await calendar.events.patch({
       calendarId: CALENDAR_ID,
       eventId,
       // No attendee change here, so notify guests only of the time/detail shift.
       sendUpdates: opts.sendUpdates ?? 'all',
-      requestBody: {
-        summary: buildEventTitle(booking),
-        description: buildEventDescription(booking, (booking.assignedEmails || []).filter(Boolean)),
-        location: booking.locationName || '—',
-        start: { dateTime: startTime, timeZone: 'Asia/Bangkok' },
-        end: { dateTime: endTime, timeZone: 'Asia/Bangkok' },
-      },
+      requestBody,
     })
     return true
   } catch (e: any) {

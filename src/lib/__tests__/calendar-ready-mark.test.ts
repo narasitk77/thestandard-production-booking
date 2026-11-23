@@ -109,3 +109,16 @@ test('markCalendarFootageReady: มีครบแล้ว = already (ไม่
   await assert.rejects(gc.markCalendarFootageReady('ev1', AT, BOX), /Backend Error/)
   assert.equal(patches.length, 0)
 })
+
+test('updateCalendarEventDetails descriptionOnly: ส่งแค่คำอธิบาย (เลข QU) · ไม่แตะชื่อ/สถานที่/เวลา ที่ coordinator ลากเอง · ค่าเริ่มต้นยังส่งครบ', async () => {
+  const b = { ...booking, shootDate: '2026-11-24', callTime: '09:00', estimatedWrap: '12:00', locationName: 'Studio 1', agencyRef: 'QU-4900' }
+  assert.equal(await gc.updateCalendarEventDetails('ev1', b, { sendUpdates: 'none', descriptionOnly: true }), true)
+  assert.equal(patches.length, 1)
+  assert.equal(patches[0].sendUpdates, 'none')
+  assert.deepEqual(Object.keys(patches[0].requestBody), ['description'])
+  assert.match(patches[0].requestBody.description, /Agency Ref: QU-4900/)
+  // the admin edit path (no opts) is unchanged: full patch, guests told
+  assert.equal(await gc.updateCalendarEventDetails('ev1', b), true)
+  assert.equal(patches[1].sendUpdates, 'all')
+  assert.deepEqual(Object.keys(patches[1].requestBody).sort(), ['description', 'end', 'location', 'start', 'summary'])
+})

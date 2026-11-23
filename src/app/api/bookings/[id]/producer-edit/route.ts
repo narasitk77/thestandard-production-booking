@@ -181,18 +181,20 @@ export async function PATCH(
     // The QU too: the event description and the marker both carry "Agency Ref:", and
     // producer-edit is where QUs are mostly entered — events kept 'QU-1234TBC' after the real
     // number came in (WLT-OTH-261113-04, POD-8MH-261012-01). The reconciler never compares
-    // descriptions, so nothing healed them. A QU-only change is not a schedule change → no
-    // guest mail (sendUpdates 'none'); the location push keeps its default. CONFIRMED /
-    // COMPLETED only, like the location push: a REQUESTED booking has no event or marker yet.
-    // In those two modes only locationName and agencyRef can change, so "location not
-    // pushed" means "only the QU changed".
+    // descriptions, so nothing healed them. A QU-only change patches the description alone
+    // (the only place "Agency Ref:" shows) with no guest mail: a full patch would snap a
+    // hand-moved event back to the DB times without telling anyone. The location push
+    // keeps its default (full, guests told). CONFIRMED / COMPLETED only, like the location
+    // push: a REQUESTED booking has no event or marker yet. In those two modes only
+    // locationName and agencyRef can change, so "location not pushed" = "only the QU changed".
     const locationPushed = locationOnly && !!fieldChanges.locationName
     const quPushed = (locationOnly || agencyRefOnly) && !!fieldChanges.agencyRef
     if (locationPushed || quPushed) {
       if (booking.calendarEventId) {
-        // never throws; a failed patch marks the row FAILED (red chip) and the
-        // reconciler retries it with sendUpdates 'all' — it used to vanish into a log line
-        void pushCalendarDetails(booking.calendarEventId, booking, locationPushed ? undefined : { sendUpdates: 'none' })
+        // never throws; a failed patch marks the row FAILED (red chip) and the reconciler
+        // retries it the same way it was sent — it used to vanish into a log line
+        void pushCalendarDetails(booking.calendarEventId, booking,
+          locationPushed ? undefined : { sendUpdates: 'none', descriptionOnly: true })
       }
       if (hasDriveCredentials()) {
         refreshShootMarker(booking).catch(e =>
