@@ -46,6 +46,8 @@ mock.module('../drive-links', {
   namedExports: {
     getDriveLink: (df: any, k: string) => df?.[k] ?? null, // FakeDrive ids are too short for the real id check
     rememberDriveLinks: async () => {},
+    // the real drive-links rule (only a folder Drive says is GONE falls back) — exercised for real in folder-integrity-stored.test.ts
+    storedFolder: async (link: string | null) => (link && (await drive.folderLiveness(link)) !== 'dead' ? link : null),
   },
 })
 mock.module('../google-drive', {

@@ -21,11 +21,11 @@ import {
 } from '@/lib/outlet-folders'
 import { bookingShowName } from '@/lib/display'
 // v1.114 — id-first: trust stored folder IDs before any name matching.
-import { getDriveLink, rememberDriveLinks } from '@/lib/drive-links'
+// maint 2026-11-08 — storedFolder: a stored id falls back to the name walk only when Drive says it is GONE ('unknown' —
+// a 403 rateLimitExceeded is not retried — used to read as dead via isFolderAlive and walk names into a twin box/staging).
+import { getDriveLink, rememberDriveLinks, storedFolder } from '@/lib/drive-links'
 import { noteResolve } from '@/lib/id-first-metrics'
-// maint 2026-11-08 — a stored id falls back to the name walk only when Drive says it is GONE ('unknown' — a 403
-// rateLimitExceeded is not retried — used to read as dead via isFolderAlive and walk names into a twin box/staging).
-import { storedFolder, mergeBookingsWhere, mergeCodeSkipReason } from '@/lib/video-merge'
+import { mergeBookingsWhere, mergeCodeSkipReason } from '@/lib/video-merge'
 import { tryLockMerge, unlockMerge, soundMergeKey } from '@/lib/merge-lock'
 import { EPISODE_ORDER } from './episode-order'
 

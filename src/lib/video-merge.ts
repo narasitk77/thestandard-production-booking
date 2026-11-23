@@ -36,8 +36,8 @@ import {
   outletDriveFolderName, shootFolderLayers, buildEpisodeFolderName, episodeLeadUsesId, buildBookingFolderName, legacyBookingFolderName, folderNameMatchesCode,
 } from './outlet-folders'
 import { bookingShowName } from './display'
-// v1.114 — id-first: trust stored folder IDs before any name matching.
-import { getDriveLink, rememberDriveLinks } from './drive-links'
+// v1.114 — id-first: trust stored folder IDs before any name matching. storedFolder: only a GONE id falls back.
+import { getDriveLink, rememberDriveLinks, storedFolder } from './drive-links'
 import { noteResolve } from './id-first-metrics'
 import { folderLiveness } from './google-drive'
 import { alertOps, OPS_ALERT_EVERY_MS } from './ops-alert'
@@ -408,17 +408,6 @@ export async function rememberCardHoldsPosted(holds: string[]): Promise<void> {
     await prisma.systemHeartbeat.upsert({ where: { key: CARD_HOLD_CHAT_SET_KEY }, create: { key: CARD_HOLD_CHAT_SET_KEY, at, note: set }, update: { at, note: set } })
     await prisma.systemHeartbeat.upsert({ where: { key: cardHoldChatStampKey(set) }, create: { key: cardHoldChatStampKey(set), at, note: null }, update: { at } })
   } catch (e: any) { console.warn('[video-merge] บันทึกชุดการ์ดค้างที่โพสต์แล้วไม่ได้ (รอบหน้าจะโพสต์แชตซ้ำ):', e?.message || e) }
-}
-
-/**
- * The stored landing/box id, or null to fall back to the name walk. Only a folder Drive says is GONE falls back:
- * 'unknown' (a 403 rateLimitExceeded is not retried by withDriveRetry) used to read as dead via isFolderAlive and
- * sent the merge down the name walk — which can create a fresh AGN booking layer or pick a twin box, MOVE the
- * footage there and overwrite the stored id (rememberDriveLinks), splitting one shoot across two folders.
- * Trusting a possibly-stale id fails loudly instead (google-drive.ts folderLiveness contract). sound-merge uses it too.
- */
-export async function storedFolder(link: string | null | undefined): Promise<string | null> {
-  return link && (await folderLiveness(link)) !== 'dead' ? link : null
 }
 
 /** How far back the hourly video + sound merges look (per-run Drive calls stay bounded). */
