@@ -164,8 +164,10 @@ test('บางไฟล์ไม่มีบน Drive = ถือไว้ (nas
   assert.equal(alerts[0].key, `nas-parked-missing:${CODE}`)
   assert.match(alerts[0].text, /CAM-A\/GX010002\.MP4/)
   assert.ok((alerts[0].everyMs || 0) >= 7 * DAY, 'ครั้งเดียวต่อใบ (throttle ยาว)')
-  // review r2 — no promise of a release forever: re-checked only inside the window (shoot day + lookback 3), then ?codes=
-  const until = new Date(shootDay.getTime() + 3 * DAY + 7 * HOUR).toISOString().slice(0, 16).replace('T', ' ')
+  // review r2 — no promise of a release forever: re-checked only inside the window, then ?codes=
+  // maint 23 Nov — the window the sweep REALLY uses (sweptUntil): day D is swept through D+lookback inclusive (lookback 3)
+  // → until (D+4) 00:00Z = 07:00 BKK. It said (D+3) 07:00, a day before re-checks actually stop.
+  const until = new Date(shootDay.getTime() + 4 * DAY + 7 * HOUR).toISOString().slice(0, 16).replace('T', ' ')
   assert.ok(alerts[0].text.includes(`ถึง ${until} น. เท่านั้น`), alerts[0].text)
   assert.ok(alerts[0].text.includes(`footage-ready/run?codes=${CODE}`), alerts[0].text)
   assert.doesNotMatch(alerts[0].text, /ขึ้นครบเมื่อไรปล่อยเอง/)

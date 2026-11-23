@@ -61,7 +61,7 @@ import { freshNasState, verifyNasMirror, codeOf, type NasManifest } from './nas-
 import { PHOTO_ALBUM_EPISODE_CODE } from './outlet-folders'
 import { formatBytes } from './footage-report'
 import { bookingDisplayName } from './display'
-import { ADMIN_DIGEST, readHeld } from './footage-ready-health'
+import { ADMIN_DIGEST, readHeld, sweptUntil } from './footage-ready-health'
 import { mediaproGate, expectsCameraVideo, sameClip } from './mediapro'
 import { folderLiveness, findFoldersByCode } from './google-drive'
 import { markCalendarFootageReady } from './google-calendar'
@@ -925,8 +925,9 @@ async function runReadySweep(
     if (!dryRun) nasParkedTriedAt.set(b.id, now.getTime())
     const v = await nasParkedCheck(nasState.manifest, code, settleMs, result, {
       key: `nas-parked-missing:${code}`, what: 'แจ้ง "footage พร้อม" ของใบนี้',
-      // the window the sweep reads: shootDate/shootEndDate ≥ now − lookback (@db.Date = 00:00Z)
-      until: new Date(new Date(b.shootEndDate || b.shootDate).getTime() + lookbackDays * DAY),
+      // maint 23 Nov 2026 — the instant the sweep really lets go (sweptUntil: Prisma truncates the @db.Date bound, so
+      // day D is swept through D+lookback inclusive). D+lookback 00:00Z told ops re-checks stop a day before they do.
+      until: new Date(sweptUntil(b.shootEndDate || b.shootDate, lookbackDays)),
       after: `ขึ้นครบเมื่อไรสั่ง footage-ready/run?codes=${code} เอง (ตรวจทุกด่านเหมือนเดิม)`,
     })
     result.nasParked.push({ code, ok: v.ok, detail: v.detail })
