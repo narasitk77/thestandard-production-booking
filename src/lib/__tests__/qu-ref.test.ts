@@ -2,6 +2,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   isValidQuRef, isQuPending, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage, QU_PENDING, agencyRefForEdit,
 } from '../qu-ref'
@@ -126,4 +128,26 @@ test('ข้อความตีกลับต้องบอกทางอ�
   const msg = quRefRejectMessage('LIFE2601')
   assert.ok(msg.includes('1234'), msg)
   assert.ok(msg.includes('LIFE2601'), msg)
+})
+
+// รอบ 2 (23 พ.ย.) — "ใบนี้ยังไม่มีเลข QU จริง" เคยมีสามคำตอบ: /my-bookings + /dashboard/[id] ใช้ !isValidQuRef,
+// /admin/[id] ใช้ isQuPending, บอทเตือนใช้ needsRealQuRef · ตอนนี้มีตัวเดียวใน qu-ref.ts
+test('needsRealQuRef อยู่ที่ qu-ref ตัวเดียว — qu-reminder export ตัวเดียวกัน ไม่ใช่สำเนา', async () => {
+  const ref = await import('../qu-ref')
+  const rem = await import('../qu-reminder')
+  assert.equal(rem.needsRealQuRef, ref.needsRealQuRef)
+  // เคสที่หน้าแอดมินเคยตอบต่าง: ข้อความไม่มีเลข / ว่าง = ยังไม่มีเลข (isQuPending ตอบ false ทั้งคู่)
+  for (const v of ['รอ AE แจ้งค่ะ', '', null]) {
+    assert.equal(isQuPending(v), false, String(v))
+    assert.equal(ref.needsRealQuRef(v), true, String(v))
+  }
+})
+
+test('แบนเนอร์ QU ทั้งสามหน้าใช้ needsRealQuRef ไม่ใช่ predicate ตัวอื่น', () => {
+  for (const f of ['src/app/my-bookings/page.tsx', 'src/app/dashboard/[id]/page.tsx', 'src/app/admin/[id]/page.tsx']) {
+    const src = readFileSync(join(process.cwd(), f), 'utf8')
+    assert.match(src, /import \{ needsRealQuRef \} from '@\/lib\/qu-ref'/, f)
+    assert.match(src, /needsRealQuRef\(\s*(b|booking)\.agencyRef\s*\)/, f)
+    assert.ok(!/\b(isValidQuRef|isQuPending)\b/.test(src), `${f} ยังมี predicate QU ตัวอื่น`)
+  }
 })

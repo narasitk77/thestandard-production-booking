@@ -13,7 +13,8 @@
  * bundle ไปด้วย. agency-ref.ts re-export ทุกตัวจากที่นี่ ของเดิมจึงไม่พัง.
  *
  * Kill switch: AGENCY_REF_QU_RULE=0 ปิดกฏได้ทันทีจาก stack env (ไม่ต้อง deploy)
- * เผื่อกฏไปขวางงานจองหน้างานแบบไม่คาดคิด
+ * เผื่อกฏไปขวางงานจองหน้างานแบบไม่คาดคิด · env อ่านได้ฝั่ง server เท่านั้น ฟอร์มจอง
+ * (/new → NewBookingClient → BookingWizard) จึงรับค่านี้เป็น prop จาก server page
  */
 
 export function quRuleEnabled(): boolean {
@@ -23,6 +24,23 @@ export function quRuleEnabled(): boolean {
 /** ตัดช่องว่าง + uppercase — "qu 4289" → "QU4289", " QU-4289 " → "QU-4289" */
 export function normalizeQuRef(raw: string | null | undefined): string {
   return (raw || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+/**
+ * ยังไม่มีเลข QU ที่ใช้ได้: เว้นว่าง ตัวยึด (1234 / QU-xxxxTBC) หรือข้อความที่ไม่มีตัวเลข
+ * ตัวตัดสินเดียวของ "ใบนี้ยังไม่มีเลข QU จริง" — บอทเตือน (qu-reminder) และแบนเนอร์ใน
+ * /my-bookings, /dashboard/[id], /admin/[id] ต้องใช้ตัวนี้ตัวเดียว (เดิมสามหน้าใช้สามตัว:
+ * !isValidQuRef / isQuPending / needsRealQuRef แล้วตอบไม่ตรงกัน)
+ */
+export function needsRealQuRef(agencyRef: string | null | undefined): boolean {
+  const v = (agencyRef || '').trim()
+  if (v === '') return true
+  // v1.241 — ข้อความที่ไม่มีตัวเลขเลยคือคำสัญญา ไม่ใช่เลข: พรอดมี "รอ AE แจ้งค่ะ" ×5,
+  // "รอ AE แจ้งอีกทีค่า", "รอ PM", "รอเออี" (8 ใบ ADVERTORIAL ถ่ายจบแล้วทั้งหมด) ที่ผ่าน
+  // ตัวตรวจนี้มาได้เพราะไม่ใช่ค่าว่าง/1234/TBC จึงไม่เคยถูกเตือนสักครั้ง
+  // เลขจริงทุกรูปแบบในระบบ (QU-4641/1, QU-4308-V3, "QU-4345, QU-4406") มีตัวเลขเสมอ
+  if (!/\d/.test(v)) return true
+  return isQuPending(v)
 }
 
 const QU_RE = /^QU-?\d+[A-Z0-9/-]*$/

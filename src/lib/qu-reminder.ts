@@ -9,21 +9,10 @@
  * ตรรกะทั้งหมดในไฟล์นี้เป็นฟังก์ชันบริสุทธิ์ (ไม่แตะ prisma/เมล) เพื่อให้เทสจังหวะ
  * การเตือนได้โดยไม่ต้องมี DB — จังหวะคือส่วนที่พลาดแล้วกลายเป็นสแปมหรือเงียบหาย
  */
-import { isQuPending } from './qu-ref'
+// ย้ายไปอยู่ qu-ref.ts (ตัวตัดสินเดียวที่หน้าเว็บใช้ด้วย) — export ต่อให้ผู้เรียกเดิม
+export { needsRealQuRef } from './qu-ref'
 
 const DAY = 86_400_000
-
-/** ยังไม่มีเลข QU ที่ใช้ได้: เว้นว่าง หรือเป็นตัวยึด (1234 / QU-xxxxTBC) */
-export function needsRealQuRef(agencyRef: string | null | undefined): boolean {
-  const v = (agencyRef || '').trim()
-  if (v === '') return true
-  // v1.241 — ข้อความที่ไม่มีตัวเลขเลยคือคำสัญญา ไม่ใช่เลข: พรอดมี "รอ AE แจ้งค่ะ" ×5,
-  // "รอ AE แจ้งอีกทีค่า", "รอ PM", "รอเออี" (8 ใบ ADVERTORIAL ถ่ายจบแล้วทั้งหมด) ที่ผ่าน
-  // ตัวตรวจนี้มาได้เพราะไม่ใช่ค่าว่าง/1234/TBC จึงไม่เคยถูกเตือนสักครั้ง
-  // เลขจริงทุกรูปแบบในระบบ (QU-4641/1, QU-4308-V3, "QU-4345, QU-4406") มีตัวเลขเสมอ
-  if (!/\d/.test(v)) return true
-  return isQuPending(v)
-}
 
 /** วันถ่ายใกล้เข้ามา = เร่งจังหวะเตือน (ค่าเริ่มต้น 3 วัน) */
 export function quReminderUrgentDays(): number {

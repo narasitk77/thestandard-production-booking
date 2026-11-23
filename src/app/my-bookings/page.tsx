@@ -10,7 +10,7 @@ import { todayBangkokStr } from '@/lib/bangkok-day'
 import { fetchBookingList, addDaysStr, bookingCoversDay, bookingOverlapsRange, bookingDays, bookingDayKeys, mondayOf } from '@/lib/booking-list'
 import { formatDisplayDate } from '@/lib/utils'
 import StatusPill, { categoryCardClass, AdBadge, RoomBusyBadge } from '@/app/_components/StatusPill'
-import { isValidQuRef } from '@/lib/qu-ref'
+import { needsRealQuRef } from '@/lib/qu-ref'
 import { producerEditMode, isBookingOwner } from '@/lib/producer-edit-access'
 import CrewLine from '@/app/_components/CrewLine'
 import FootageBadge from '@/app/_components/FootageBadge'
@@ -293,8 +293,8 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
   const isAd = b.category === 'ADVERTORIAL'
   const mode = producerEditMode({ status: b.status, category: b.category, authorized: isOwner })
   const canEdit = mode !== 'none'
-  // งาน AD ที่ยังไม่มีเลข QU จริง (ว่าง หรือยังเป็นตัวยึด QU-1234TBC)
-  const quMissing = isAd && !isValidQuRef(b.agencyRef || '')
+  // งาน AD ที่ยังไม่มีเลข QU จริง (ว่าง ตัวยึด QU-1234TBC หรือข้อความไม่มีเลข) — ตัวตัดสินเดียวกับบอทเตือน
+  const quMissing = isAd && needsRealQuRef(b.agencyRef)
   const editIsLocationOnly = mode === 'location'
   const editIsQuOnly = mode === 'agencyRef'
   // ป้ายต้องบอก "สิ่งที่ทำได้จริง" ไม่ใช่ "สิ่งที่อยากให้ทำ" — งาน Requested แก้ได้
