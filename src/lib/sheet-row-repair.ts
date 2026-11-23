@@ -8,6 +8,11 @@
 // Rules:
 // - only bookings older than SHEET_REPAIR_GRACE_MS: a fresh one may still sit in the append queue
 //   (same grace as backfill-bookings-sheet pass 1)
+// - and only while no append is queued or running in this process (appendQueueIdle): a routine of a
+//   few hundred bookings keeps the queue busy well past 5 minutes, and col A read before a queued
+//   create-path append lands says "no row" for a booking that is about to get one
+// - after our own append, a CAS miss means the booking got its row meanwhile = we just wrote a
+//   duplicate. That lands in failed[] (alert) with the row to delete — never reported as appended OK.
 // - col A is read FIRST. A code already there (the append landed but its index was never saved, or it
 //   timed out after Google wrote it) is claimed, never appended again — a duplicate row is worse than a
 //   missing one. Col A unreadable = append nothing (can't tell "no row" from "couldn't see") + alert.
@@ -18,7 +23,7 @@
 // with the backfill route if that ever happens.
 import { google } from 'googleapis'
 import { prisma } from './db'
-import { appendBookingRow, getSheetsReadAuth, sheetsWriteConfigured } from './google-sheets'
+import { appendBookingRow, appendQueueIdle, getSheetsReadAuth, sheetsWriteConfigured } from './google-sheets'
 import { getProducerDashboardSheetId, getBookingsTabName } from './google-config'
 import { logAudit } from './audit'
 import { alertOps } from './ops-alert'
@@ -37,8 +42,9 @@ export interface SheetRepairResult {
   /** already in col A → sheetRowIndex set to that row (dry run: would set) */
   claim: Array<{ code: string; rowIndex: number }>
   failed: Array<{ code: string; error: string }>
-  /** sheets are off in this process (no credentials / staging) — nothing to repair against */
-  skipped?: 'sheets-off' | 'already-running'
+  /** sheets are off in this process (no credentials / staging) — nothing to repair against ·
+   *  append-queue-busy: an append is still queued/running, col A can't be trusted yet — next tick */
+  skipped?: 'sheets-off' | 'already-running' | 'append-queue-busy'
 }
 
 let running = false
@@ -67,6 +73,7 @@ export async function repairMissingSheetRows(opts: { dryRun?: boolean; actorEmai
     out.candidates = todo.length
     if (todo.length === 0) return out
     if (!sheetsWriteConfigured()) return { ...out, skipped: 'sheets-off' }
+    if (!appendQueueIdle()) return { ...out, skipped: 'append-queue-busy' }
 
     let colA: Map<string, number>
     try {
@@ -99,17 +106,25 @@ export async function repairMissingSheetRows(opts: { dryRun?: boolean; actorEmai
         continue
       }
       entry.rowIndex = rowIndex
+      // the row IS in the sheet now; an unsaved index is claimed from col A next run, so log, don't alert
+      const saved = await prisma.booking.updateMany({ where: { id: b.id, sheetRowIndex: null }, data: { sheetRowIndex: rowIndex } })
+        .catch((e: any) => {
+          console.error(`[sheet-row-repair] ${code}: appended row ${rowIndex} but saving sheetRowIndex failed — claimed next run:`, e?.message || e)
+          return null
+        })
+      // count 0 = the booking already holds a row (its create-path append landed after col A was read)
+      const duplicate = saved?.count === 0
+      if (duplicate) {
+        out.failed.push({ code, error: `แถว ${rowIndex} ที่เพิ่ง append เป็นแถวซ้ำ — ใบนี้มีแถวในชีทอยู่แล้ว · ลบแถว ${rowIndex} (คอลัมน์ A = ${code}) เอง ระบบไม่ลบให้` })
+      }
       await logAudit({
         actorEmail: opts.actorEmail ?? 'sheet-row-repair',
         action: 'sheet.row_appended',
         entityType: 'Booking',
         entityId: b.id,
         bookingCode: b.bookingCode,
-        changes: { rowIndex, via: 'sheet-row-repair' },
+        changes: { rowIndex, via: 'sheet-row-repair', ...(duplicate ? { duplicate: true } : {}) },
       })
-      // the row IS in the sheet now; an unsaved index is claimed from col A next run, so log, don't alert
-      await prisma.booking.updateMany({ where: { id: b.id, sheetRowIndex: null }, data: { sheetRowIndex: rowIndex } })
-        .catch((e: any) => console.error(`[sheet-row-repair] ${code}: appended row ${rowIndex} but saving sheetRowIndex failed — claimed next run:`, e?.message || e))
     }
 
     const claimed = out.claim.filter(c => !out.failed.some(f => f.code === c.code))
@@ -152,9 +167,9 @@ async function readColumnA(): Promise<Map<string, number>> {
 async function alert(r: SheetRepairResult) {
   const lines = r.failed.slice(0, 15).map(f => `${f.code}: ${f.error}`)
   if (r.failed.length > 15) lines.push(`…และอีก ${r.failed.length - 15} ใบ`)
-  await alertOps('sheet-row-repair', `⚠️ แถวชีต Bookings ยังขาด ${r.failed.length} ใบ — Production Booking`,
-    `ใบจองอยู่ใน DB แต่ไม่มีแถวในแท็บ Bookings (PMDC/Airtable ไม่เห็นงานพวกนี้) และรอบซ่อมเติมไม่สำเร็จ:\n  ${lines.join('\n  ')}\n` +
+  await alertOps('sheet-row-repair', `⚠️ ซ่อมแถวชีต Bookings ไม่สำเร็จ ${r.failed.length} ใบ — Production Booking`,
+    `ใบจองที่ไม่มีแถวในแท็บ Bookings (PMDC/Airtable ไม่เห็นงานพวกนี้) — รอบซ่อมเติมไม่สำเร็จ หรือเติมแล้วได้แถวซ้ำ:\n  ${lines.join('\n  ')}\n` +
     (r.more ? `(ยังมีใบที่รอคิวซ่อมอีก — รอบละ ${SHEET_REPAIR_LIMIT} ใบ)\n` : '') +
-    `ระบบลองใหม่เองทุก 10 นาที (calendar-reconcile) · ถ้ายังค้าง ดู log "appendBookingRow error" ` +
-    `แล้วซ่อมด้วย POST /api/admin/backfill-bookings-sheet (dry-run ก่อน)`)
+    `แถวที่ยังขาด: ระบบลองใหม่เองทุก 10 นาที (calendar-reconcile) · ถ้ายังค้าง ดู log "appendBookingRow error" ` +
+    `แล้วซ่อมด้วย POST /api/admin/backfill-bookings-sheet (dry-run ก่อน) · แถวซ้ำ: ลบแถวที่บอกด้วยมือ`)
 }

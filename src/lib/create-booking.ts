@@ -567,6 +567,6 @@ async function sheetAppendFailed(code: string): Promise<void> {
   await alertOps('sheet-append', `⚠️ ใบจองไม่ลงชีต Bookings — ${code}`,
     `สร้างใบ ${code} แล้ว แต่ append แถวในแท็บ Bookings ไม่สำเร็จ (โควตา/creds/หมดเวลา — ดู log "appendBookingRow error") ` +
     `— PMDC/Airtable ยังไม่เห็นงานนี้\n` +
-    `ระบบเติมแถวให้เองในรอบ calendar-reconcile ถัดไป (ใบที่สร้างเกิน 5 นาที · ทุก 10 นาที) ถ้าเติมไม่ได้จะเตือน "แถวชีต Bookings ยังขาด" อีกที\n` +
+    `ระบบเติมแถวให้เองในรอบ calendar-reconcile ถัดไป (ใบที่สร้างเกิน 5 นาที · ทุก 10 นาที) ถ้าเติมไม่ได้จะเตือน "ซ่อมแถวชีต Bookings ไม่สำเร็จ" อีกที\n` +
     `(เตือนนี้ไม่เกินหนึ่งครั้งต่อ 6 ชม. — ใบอื่นที่ล้มในช่วงเดียวกันไม่ถูกเตือนซ้ำ แต่ถูกซ่อมด้วยรอบเดียวกัน)`)
 }

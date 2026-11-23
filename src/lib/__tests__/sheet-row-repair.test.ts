@@ -15,6 +15,8 @@ let colAReads = 0
 let appendResult: (b: any) => number | null = () => 42
 let appended: string[] = []
 let configured = true
+let queueIdle = true
+let casCount = 1
 let audits: any[] = []
 let alerts: any[][] = []
 
@@ -23,7 +25,7 @@ mock.module('../db', {
     prisma: {
       booking: {
         findMany: async (a: any) => { findManyArgs.push(a); return candidates },
-        updateMany: async (a: any) => { updateManys.push(a); return { count: 1 } },
+        updateMany: async (a: any) => { updateManys.push(a); return { count: casCount } },
         update: async (a: any) => { updates.push(a); return {} },
       },
     },
@@ -34,6 +36,7 @@ mock.module('../google-sheets', {
     appendBookingRow: async (b: any) => { appended.push(b.bookingCode); return appendResult(b) },
     getSheetsReadAuth: () => ({}),
     sheetsWriteConfigured: () => configured,
+    appendQueueIdle: () => queueIdle,
   },
 })
 mock.module('googleapis', {
@@ -61,7 +64,7 @@ before(async () => {
 })
 beforeEach(() => {
   candidates = []; findManyArgs = []; updateManys = []; updates = []; colA = []; colAReads = 0
-  appendResult = () => 42; appended = []; configured = true; audits = []; alerts = []
+  appendResult = () => 42; appended = []; configured = true; queueIdle = true; casCount = 1; audits = []; alerts = []
 })
 
 const bk = (code: string) => ({
@@ -149,6 +152,33 @@ test('sheets off in this process (dev / staging) → skipped, Sheets not touched
   const r = await repair.repairMissingSheetRows()
   assert.equal(r.skipped, 'sheets-off')
   assert.equal(colAReads + appended.length + alerts.length, 0)
+})
+
+// adversarial review 23 Nov — a routine of a few hundred bookings keeps the in-process append queue busy
+// past the 5-minute grace; col A read then misses a create-path append that is still queued
+test('append queue busy → skipped before col A is read: no append, no alert (real run and dry run alike)', async () => {
+  candidates = [bk('A-01')]
+  queueIdle = false
+  for (const dryRun of [false, true]) {
+    const r = await repair.repairMissingSheetRows({ dryRun })
+    assert.equal(r.skipped, 'append-queue-busy')
+    assert.deepEqual(r.append, [])
+  }
+  assert.equal(colAReads + appended.length + updateManys.length + alerts.length, 0)
+})
+
+test('our append lands but the booking already got its row (CAS count 0) → failed[] names the duplicate, ops alerted', async () => {
+  candidates = [bk('NWS-TSN-261117-01')]
+  appendResult = () => 812
+  casCount = 0
+  const r = await quiet(() => repair.repairMissingSheetRows())
+  assert.deepEqual(r.failed.map(f => f.code), ['NWS-TSN-261117-01'])
+  assert.match(r.failed[0].error, /ซ้ำ/)
+  assert.match(r.failed[0].error, /812/)
+  assert.equal(alerts.length, 1)
+  assert.match(alerts[0][2], /812/)
+  const a = audits.find(x => x.action === 'sheet.row_appended')
+  assert.equal(a.changes.duplicate, true)
 })
 
 test('more candidates than the cap → more:true and the alert says so', async () => {

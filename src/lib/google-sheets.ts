@@ -439,8 +439,20 @@ const appendQueue = makeSerialQueue(APPEND_MIN_GAP_MS, {
  */
 let tabEnsured = false
 
+/**
+ * appendBookingRow calls not yet settled in this process (queued or running).
+ * sheet-row-repair reads col A only when this is 0: a create-path append still queued behind a big
+ * routine can be older than the repair's 5-minute grace, and col A read before it lands says "no
+ * row" — the repair would append a duplicate.
+ */
+let appendsInFlight = 0
+export function appendQueueIdle(): boolean {
+  return appendsInFlight === 0
+}
+
 export async function appendBookingRow(booking: BookingRow): Promise<number | null> {
   if (!hasCredentials()) return null
+  appendsInFlight++
   try {
     const spreadsheetId = getSheetId()
     const sheets = google.sheets({ version: 'v4', auth: getAuth() })
@@ -524,6 +536,8 @@ export async function appendBookingRow(booking: BookingRow): Promise<number | nu
   } catch (e) {
     console.error('appendBookingRow error:', e)
     return null
+  } finally {
+    appendsInFlight--
   }
 }
 
