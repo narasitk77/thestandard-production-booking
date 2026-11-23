@@ -92,7 +92,11 @@ export async function syncMixJobCalendar(jobId: string): Promise<MixCalendarResu
       }
     }
 
-    await prisma.mixJob.update({ where: { id: job.id }, data: { calendarEventId: eventId, calendarSyncError: null } })
+    // nothing changed (the hourly re-patch of a healthy event) = no write: it bumped updatedAt every hour,
+    // so "last changed" on a mix job meant nothing (MIX-004, Sep–Nov 2026)
+    if (eventId !== job.calendarEventId || job.calendarSyncError !== null) {
+      await prisma.mixJob.update({ where: { id: job.id }, data: { calendarEventId: eventId, calendarSyncError: null } })
+    }
     return { action: plan, ok: true, eventId }
   } catch (e: any) {
     const error = String(e?.message || e).slice(0, 500)
