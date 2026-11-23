@@ -16,7 +16,7 @@
  * truth for authorization.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { quRuleEnabled, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage } from '@/lib/agency-ref'
+import { quRuleEnabled, agencyRefForEdit } from '@/lib/qu-ref'
 import { prisma } from '@/lib/db'
 import { updateBookingRow } from '@/lib/google-sheets'
 import { resolveLocationId } from '@/lib/location-resolve'
@@ -33,6 +33,7 @@ import { pushCalendarDetails } from '@/lib/calendar-reconcile'
 import { resyncRoomForBooking, roomScheduleChanges } from '@/lib/room-booking-sync'
 import { refreshShootMarker } from '@/lib/shoot-marker'
 import { hasDriveCredentials } from '@/lib/google-drive'
+import { EPISODE_ORDER } from '@/lib/episode-order'
 
 export async function PATCH(
   request: NextRequest,
@@ -112,15 +113,13 @@ export async function PATCH(
 
     // v1.161 — กฏ QU (เหมือน create/PATCH): งาน Agency (Advertorial) แก้ Agency ref
     // ได้เฉพาะรูปแบบ QU. v1.183 — ตัวยึด "1234" (ยังไม่มีเลข QU) ผ่านได้ด้วย
-    let agencyRefValidated: string | null = agencyRef || null
-    // v1.188 — ทุกบ้าน ไม่ใช่แค่ AGN
-    if (agencyRef !== undefined && agencyRef && quRuleEnabled()
-        && existing.category === 'ADVERTORIAL') {
-      if (!isAcceptableQuRef(agencyRef)) {
-        return NextResponse.json({ error: quRefRejectMessage(agencyRef) }, { status: 400 })
-      }
-      agencyRefValidated = normalizeQuRef(agencyRef)
+    // v1.188 — ทุกบ้าน ไม่ใช่แค่ AGN · ตรวจเฉพาะเมื่อค่าเปลี่ยน (กฎอยู่ที่ agencyRefForEdit)
+    const agencyRefCheck = agencyRefForEdit(agencyRef, existing.agencyRef,
+      quRuleEnabled() && existing.category === 'ADVERTORIAL')
+    if ('error' in agencyRefCheck) {
+      return NextResponse.json({ error: agencyRefCheck.error }, { status: 400 })
     }
+    const agencyRefValidated = agencyRefCheck.value
 
     // v1.146 review fix — same HH:MM guard as createBookingFromPayload.
     if (callTime && !isValidHHMM(callTime)) {
@@ -160,7 +159,13 @@ export async function PATCH(
           ...(agencyRef !== undefined && { agencyRef: agencyRefValidated }),
           ...(notes !== undefined && { notes: notes || null }),
         },
-        include: { episodes: true, outlet: true, program: true },
+        // same episode shape as the admin PATCH / reconciler: the event title and the
+        // _SHOOT marker's show folder read episodes[0] and episodes[].program
+        include: {
+          outlet: true,
+          program: true,
+          episodes: { orderBy: EPISODE_ORDER, include: { program: { select: { code: true, name: true } } } },
+        },
       })
     })
 
@@ -179,11 +184,24 @@ export async function PATCH(
     // surfaces the crew actually reads: the Google Calendar event and the
     // Drive `_SHOOT.txt` marker. Same fire-and-forget recipe as the admin
     // PATCH (a sync blip must never fail the save; nightly jobs backstop).
-    if (locationOnly && fieldChanges.locationName) {
+    //
+    // The QU too: the event description and the marker both carry "Agency Ref:", and
+    // producer-edit is where QUs are mostly entered — events kept 'QU-1234TBC' after the real
+    // number came in (WLT-OTH-261113-04, POD-8MH-261012-01). The reconciler never compares
+    // descriptions, so nothing healed them. A QU-only change patches the description alone
+    // (the only place "Agency Ref:" shows) with no guest mail: a full patch would snap a
+    // hand-moved event back to the DB times without telling anyone. The location push
+    // keeps its default (full, guests told). CONFIRMED / COMPLETED only, like the location
+    // push: a REQUESTED booking has no event or marker yet. In those two modes only
+    // locationName and agencyRef can change, so "location not pushed" = "only the QU changed".
+    const locationPushed = locationOnly && !!fieldChanges.locationName
+    const quPushed = (locationOnly || agencyRefOnly) && !!fieldChanges.agencyRef
+    if (locationPushed || quPushed) {
       if (booking.calendarEventId) {
-        // never throws; a failed patch marks the row FAILED (red chip) and the
-        // reconciler retries it with sendUpdates 'all' — it used to vanish into a log line
-        void pushCalendarDetails(booking.calendarEventId, booking)
+        // never throws; a failed patch marks the row FAILED (red chip) and the reconciler
+        // retries it the same way it was sent — it used to vanish into a log line
+        void pushCalendarDetails(booking.calendarEventId, booking,
+          locationPushed ? undefined : { sendUpdates: 'none', descriptionOnly: true })
       }
       if (hasDriveCredentials()) {
         refreshShootMarker(booking).catch(e =>
@@ -212,6 +230,21 @@ export async function PATCH(
       updateBookingRow(booking.bookingCode || '', {
         agencyRef: booking.agencyRef || '',
       }).catch(e => console.error('[producer-edit] updateBookingRow (agencyRef) error:', e?.message || e))
+    }
+
+    // Call Time / Wrap Time / Location (cols H/I/K) — same rule as the admin PATCH: the
+    // row PMDC reads used to keep the create-time values after an edit. A miss is loud.
+    if (fieldChanges.callTime || fieldChanges.estimatedWrap || fieldChanges.locationName) {
+      const code = booking.bookingCode || booking.id
+      const schedCells = { callTime: booking.callTime, wrapTime: booking.estimatedWrap || '', location: booking.locationName || '' }
+      void updateBookingRow(code, schedCells).then(r => {
+        if (r === 'updated') return
+        console.error(`[producer-edit] sheet call/wrap/location write ${r} for ${code} — the Bookings row keeps the old values`)
+        logAudit({
+          actorEmail: session.email, action: 'booking.sheet_sync_failed', entityType: 'Booking',
+          entityId: booking.id, bookingCode: booking.bookingCode, changes: { result: r, fields: schedCells },
+        })
+      })
     }
 
     if (hasChanges) {

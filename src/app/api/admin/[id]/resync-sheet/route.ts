@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/admin/[id]/resync-sheet
  *
- * Rewrite a booking's Producer Dashboard row (Shoot Date / Shoot End Date / Status)
+ * Rewrite a booking's Producer Dashboard row (Shoot Date / Shoot End Date / Status,
+ * Call Time / Wrap Time / Location)
  * from the DB — for repairing a row that drifted (e.g. a date fixed in the DB but
  * still stale in the sheet). Since v1.148.0 every outlet's bookings get sheet
  * rows; a booking with no row (pre-v1.148 outlet booking not yet backfilled)
@@ -24,7 +25,7 @@ export async function POST(
 
     const booking = await prisma.booking.findUnique({
       where: { id: params.id },
-      select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true },
+      select: { bookingCode: true, shootDate: true, shootEndDate: true, status: true, callTime: true, estimatedWrap: true, locationName: true },
     })
     if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     if (!booking.bookingCode) return NextResponse.json({ error: 'Booking has no code' }, { status: 400 })
@@ -34,6 +35,10 @@ export async function POST(
       shootDate: fmt(booking.shootDate),
       shootEndDate: fmt(booking.shootEndDate),
       status: booking.status,
+      // same cells as appendBookingRow / the edit paths — repairs rows left stale by time/place edits
+      callTime: booking.callTime,
+      wrapTime: booking.estimatedWrap || '',
+      location: booking.locationName || '',
     })
 
     return NextResponse.json({ ok: result === 'updated', result, bookingCode: booking.bookingCode, shootDate: fmt(booking.shootDate) })

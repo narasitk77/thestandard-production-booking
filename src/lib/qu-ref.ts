@@ -27,9 +27,16 @@ export function normalizeQuRef(raw: string | null | undefined): string {
 
 const QU_RE = /^QU-?\d+[A-Z0-9/-]*$/
 
-/** อยู่ในรูปแบบเลข QU (ยังไม่ตัดสินว่าเป็นเลขจริงหรือตัวยึด) */
+/**
+ * อยู่ในรูปแบบเลข QU (ยังไม่ตัดสินว่าเป็นเลขจริงหรือตัวยึด)
+ *
+ * รายการคั่นจุลภาคที่ทุกส่วนเป็นเลข QU ก็นับ — งานเดียวมีใบเสนอราคาสองใบได้จริง
+ * ("QU-4345, QU-4406", "QU-4308-V1, QU-4308-V2" บนพรอด) · เดิมตกกฏตรงจุลภาค
+ * ทั้งที่ needsRealQuRef ถือว่าเป็นเลขจริง: หน้าใบจองขึ้นแบนเนอร์ "ตัวยึด" และ
+ * แอดมินกดบันทึกอะไรในใบนั้นก็โดน 400 (6 ใบ COMPLETED)
+ */
 function matchesQuFormat(n: string): boolean {
-  return n !== '' && QU_RE.test(n)
+  return n !== '' && n.split(',').every(part => QU_RE.test(part))
 }
 
 /** เลขใบเสนอราคาจริง — ตัวยึด "ยังไม่มีเลข QU" ไม่นับ (ดู isQuPending) */
@@ -84,6 +91,26 @@ export function isQuPending(raw: string | null | undefined): boolean {
 /** ผ่านการตรวจ = เป็นเลข QU จริง หรือเป็นตัวยึด "ยังไม่มีเลข QU" */
 export function isAcceptableQuRef(raw: string | null | undefined): boolean {
   return isValidQuRef(raw) || isQuPending(raw)
+}
+
+/**
+ * ค่า Agency Ref ที่จะเก็บเมื่อมีคนแก้ใบที่มีอยู่ (PATCH ของแอดมิน + producer-edit — กฎเดียว)
+ *
+ * ค่าที่ผ่านกฎ = เก็บแบบ normalize เสมอ (เหมือนเดิม — แก้ "\tQU-4169-V6" เป็นค่าสะอาด
+ * ต้องได้ผลจริง ไม่ใช่ตอบ 200 แล้ว DB ยังเป็นค่าเก่า) · ค่าที่ตกกฎจะผ่านได้ **เฉพาะเมื่อ
+ * ไม่ได้เปลี่ยน** (เทียบหลัง normalize) แล้วเก็บค่าเดิมไว้ไม่แตะ: หน้า /admin/[id] ส่ง
+ * agencyRef กลับมาทุกครั้งที่กดบันทึก ค่าเก่าที่ตกกฎ ("รอ AE แจ้งค่ะ" ฯลฯ) จึงเคยทำให้
+ * แก้อะไรอื่นในใบนั้นไม่ได้เลย (400) จนกว่าจะเปลี่ยน Agency Ref เอง
+ */
+export function agencyRefForEdit(
+  raw: string | null | undefined,
+  stored: string | null | undefined,
+  ruleApplies: boolean,
+): { value: string | null } | { error: string } {
+  if (!raw || !ruleApplies) return { value: raw || null }
+  if (isAcceptableQuRef(raw)) return { value: normalizeQuRef(raw) }
+  if (normalizeQuRef(raw) === normalizeQuRef(stored)) return { value: stored ?? null }
+  return { error: quRefRejectMessage(raw) }
 }
 
 /** ข้อความเตือนตอนใส่ค่าผิด — ใช้ถ้อยคำเดียวกันทุก endpoint */

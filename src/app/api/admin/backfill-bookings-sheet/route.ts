@@ -3,8 +3,10 @@ import { google } from 'googleapis'
 import { requireAdmin } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import { prisma } from '@/lib/db'
-import { appendBookingRow, updateBookingRow, getSheetsReadAuth, getSheetsWriteAuth, joinEpisodeTitles } from '@/lib/google-sheets'
-import { getDriveLink } from '@/lib/drive-links'
+import {
+  appendBookingRow, updateBookingRow, getSheetsReadAuth, getSheetsWriteAuth,
+  planFillBlankCells, bookingsColLetter, FILL_BLANK_LAST_COL, type FillBlankField,
+} from '@/lib/google-sheets'
 import { getProducerDashboardSheetId, getBookingsTabName, isUsingSandboxSheet } from '@/lib/google-config'
 
 export const dynamic = 'force-dynamic'
@@ -29,9 +31,12 @@ export const maxDuration = 300
  *     while the DB knows the id (events created by the calendar reconciler or
  *     the assign auto-recover before v1.148 backfilled them) get patched.
  *  4. EXTRAS PATCH — the delivery-evidence/metadata cells (cols AE–AI:
- *     Delivered At/By, Cancel Reason, Episode Titles, Drive Box ID) that are
- *     blank while the DB has a value get filled — brings pre-existing rows in
- *     line with the widened export. Fill-blank-only, same shape as pass 3.
+ *     Delivered At/By, Cancel Reason, Episode Titles, Drive Box ID) and the
+ *     gear & logistics cells (cols AJ–AR: Equipment/Rental note, Camera/Mic/Van
+ *     count, Special Equipment, Agency Ref, Block Shot, Itinerary — added in
+ *     v1.203, so rows created before it had them blank) that are blank while the
+ *     DB has a value get filled. Fill-blank-only, same shape as pass 3. The plan
+ *     (planFillBlankCells) lists every cell and value; apply writes exactly that.
  *     NOTE: the query below excludes CANCELLED bookings (pass-1 scope), so
  *     Cancel Reason backfills only requested-but-kept rows.
  *
@@ -104,14 +109,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Read the tab once: col A (Production ID) + col W (Calendar Event ID)
-    //    + cols AE–AI (delivery evidence/metadata, for the pass-4 fill-blank)
+    //    + cols AE–AR (pass-4 fill-blank; the end column comes from COL)
     const sheets = google.sheets({ version: 'v4', auth: getSheetsReadAuth() })
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: getProducerDashboardSheetId(),
-      range: `${getBookingsTabName()}!A2:AI`,
+      range: `${getBookingsTabName()}!A2:${FILL_BLANK_LAST_COL}`,
     })
     const sheetRows = res.data.values || []
-    const byCode = new Map<string, { rowIndex: number; eventId: string; extras: string[] }>()
+    const byCode = new Map<string, { rowIndex: number; eventId: string; row: unknown[] }>()
     // v1.237 — เดิมเก็บแถวแรกแล้วเงียบ · การเลือกแถวแรกถูกอยู่แล้ว แต่ "มี Production ID
     // ซ้ำสองแถวในชีท" เป็นเรื่องที่คนต้องรู้ ไม่ใช่กลืนหาย (มักเกิดจากการยิงเราต์นี้ซ้ำ
     // หลัง 504 — ซึ่ง backfillRunning กันไว้แล้ว แต่ของเก่าที่ค้างอยู่ยังต้องเห็น)
@@ -127,9 +132,7 @@ export async function POST(request: NextRequest) {
         byCode.set(code, {
           rowIndex: i + 2,
           eventId: String(row[22] || '').trim(),
-          // cols AE–AI = 0-based 30–34 (Delivered At, Delivered By,
-          // Cancel Reason, Episode Titles, Drive Box ID)
-          extras: [30, 31, 32, 33, 34].map(c => String(row[c] || '').trim()),
+          row, // pass 4 reads its cells through planFillBlankCells (positions from COL)
         })
       }
     })
@@ -150,7 +153,8 @@ export async function POST(request: NextRequest) {
       append: [] as Array<{ code: string; outlet: string; status: string; appended?: boolean }>,
       claim: [] as Array<{ code: string; rowIndex: number; was?: number | null; claimed?: boolean }>,
       patchEventId: [] as Array<{ code: string; eventId: string; patched?: boolean }>,
-      patchExtras: [] as Array<{ code: string; fields: string[]; patched?: boolean }>,
+      // values = exactly what apply writes (field → cell value), so the dry run can be checked cell by cell
+      patchExtras: [] as Array<{ code: string; fields: string[]; values: Partial<Record<FillBlankField, string>>; patched?: boolean }>,
       // v1.161.1 — คิวของ pass-4 apply (ยิงเป็น batch หลังจบ loop)
       skippedAgnOnly: 0,
       /** ใบที่เพิ่งสร้างและอาจยังรอคิว append อยู่ — ข้ามไว้กันแถวซ้ำ */
@@ -159,7 +163,7 @@ export async function POST(request: NextRequest) {
       duplicateCodes: {} as Record<string, number[]>,
       errors: [] as string[],
     }
-    const pendingExtras: Array<{ entry: (typeof plan.patchExtras)[number]; rowIndex: number; extraFields: Record<string, string> }> = []
+    const pendingExtras: Array<{ entry: (typeof plan.patchExtras)[number]; rowIndex: number }> = []
 
     for (const booking of bookings) {
       const code = (booking.bookingCode || booking.id).trim()
@@ -233,44 +237,31 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Pass 4 — fill the blank AE–AI cells from the DB (fill-blank only, so a
-      // value someone hand-fixed in the sheet is never overwritten). Datetime
-      // format matches the deliver route's live patch (th-TH gregory, BKK).
-      const [cellDeliveredAt, cellDeliveredBy, cellCancelReason, cellEpisodeTitles, cellDriveBoxId] = inSheet.extras
-      const episodeTitlesJoined = joinEpisodeTitles(booking.episodes)
-      const driveBoxId = getDriveLink(booking.driveFolders, 'box')
-      const extraFields: Parameters<typeof updateBookingRow>[1] = {
-        ...(booking.deliveredAt && !cellDeliveredAt
-          ? { deliveredAt: new Date(booking.deliveredAt).toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }) }
-          : {}),
-        ...(booking.deliveredBy && !cellDeliveredBy ? { deliveredBy: booking.deliveredBy } : {}),
-        ...(booking.cancelReason && !cellCancelReason ? { cancelReason: booking.cancelReason } : {}),
-        ...(episodeTitlesJoined && !cellEpisodeTitles ? { episodeTitles: episodeTitlesJoined } : {}),
-        ...(driveBoxId && !cellDriveBoxId ? { driveBoxId } : {}),
-      }
+      // Pass 4 — fill the blank AE–AR cells from the DB (fill-blank only, so a
+      // value someone hand-fixed in the sheet is never overwritten). Formatting
+      // matches the live write paths — see planFillBlankCells.
+      const extraFields = planFillBlankCells(booking, inSheet.row)
       if (Object.keys(extraFields).length > 0) {
-        const entry = { code, fields: Object.keys(extraFields) } as (typeof plan.patchExtras)[number]
+        const entry = { code, fields: Object.keys(extraFields), values: extraFields } as (typeof plan.patchExtras)[number]
         plan.patchExtras.push(entry)
         // v1.161.1 — สะสมไว้ยิงเป็น batch เดียว (เดิมเรียก updateBookingRow รายแถว
         // = read+write ต่อแถว ~470 API calls สำหรับ 235 แถว → ชน Sheets quota
         // 60 write/นาที → GaxiosError ทุกแถว ไม่มีอะไรถูกเขียนเลย. rowIndex รู้
-        // อยู่แล้วจากการอ่าน A2:AI ข้างบน จึงไม่ต้อง read ซ้ำ)
-        if (apply) pendingExtras.push({ entry, rowIndex: inSheet.rowIndex, extraFields })
+        // อยู่แล้วจากการอ่านแท็บข้างบน จึงไม่ต้อง read ซ้ำ)
+        if (apply) pendingExtras.push({ entry, rowIndex: inSheet.rowIndex })
       }
     }
 
     // Pass 4 (apply) — ยิงทุก cell เป็น values.batchUpdate เป็นก้อน ๆ ละ ~100
     // ranges (≈20 แถว) พร้อมหน่วงเบา ๆ กัน quota: 235 แถว ≈ 12 calls แทน 470
     if (apply && pendingExtras.length > 0) {
-      const COL_LETTER: Record<string, string> = { deliveredAt: 'AE', deliveredBy: 'AF', cancelReason: 'AG', episodeTitles: 'AH', driveBoxId: 'AI' }
       const tab = getBookingsTabName()
       const sheetsW = google.sheets({ version: 'v4', auth: getSheetsWriteAuth() })
       const allRanges: Array<{ range: string; values: string[][]; entry: (typeof plan.patchExtras)[number] }> = []
       for (const pe of pendingExtras) {
-        for (const [k, v] of Object.entries(pe.extraFields)) {
-          const col = COL_LETTER[k]
-          if (!col || v === undefined) continue
-          allRanges.push({ range: `${tab}!${col}${pe.rowIndex}`, values: [[String(v)]], entry: pe.entry })
+        // exactly the planned cells — the same values the dry run reported
+        for (const [k, v] of Object.entries(pe.entry.values) as Array<[FillBlankField, string]>) {
+          allRanges.push({ range: `${tab}!${bookingsColLetter(k)}${pe.rowIndex}`, values: [[v]], entry: pe.entry })
         }
       }
       const CHUNK = 100
@@ -281,8 +272,10 @@ export async function POST(request: NextRequest) {
             spreadsheetId: getProducerDashboardSheetId(),
             requestBody: { valueInputOption: 'RAW', data: chunk.map(c => ({ range: c.range, values: c.values })) },
           })
-          for (const c of chunk) c.entry.patched = true
+          // a row split across two batches is patched only if both landed
+          for (const c of chunk) if (c.entry.patched !== false) c.entry.patched = true
         } catch (e: any) {
+          for (const c of chunk) c.entry.patched = false
           plan.errors.push(`patchExtras batch ${i / CHUNK + 1}: ${e?.message || e}`)
         }
         if (i + CHUNK < allRanges.length) await new Promise(r => setTimeout(r, 1200))

@@ -9,6 +9,8 @@
 //     concurrent pushCalendarDetails survives
 //  4. the time-drift alert is keyed by the drifting set (changed set = news,
 //     same set = daily repeat)
+//  5. a failed description-only (QU) push is retried description-only and silent —
+//     not as a full 'all' patch that mails every guest and moves the event back
 import { test, mock, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -19,12 +21,16 @@ let alerts: any[] = []
 let deleteOk = true
 let detailsOk = true
 let attendeeCalls: any[] = []
+let detailsCalls: any[] = []
 let event: any
 let onEventRead: (() => void) | null = null
 
-const matches = (where: any) => Object.entries(where).every(([k, v]) => {
+const matches = (where: any): boolean => Object.entries(where).every(([k, v]: [string, any]) => {
+  if (k === 'OR') return v.some(matches)
   const cur = row[k]
   if (v instanceof Date) return cur instanceof Date && cur.getTime() === v.getTime()
+  // Prisma `not` never matches NULL (SQL <>)
+  if (v && typeof v === 'object' && 'not' in v) return cur != null && cur !== v.not
   return cur === v
 })
 const write = (data: any) => { Object.assign(row, data, { updatedAt: new Date(row.updatedAt.getTime() + 1000) }) }
@@ -63,7 +69,7 @@ mock.module('../google-calendar', {
     deleteCalendarEvent: async () => deleteOk,
     getCalendarEventAttendees: async () => { onEventRead?.(); return event },
     updateCalendarEventAttendees: async (id: string, emails: string[]) => { attendeeCalls.push({ id, emails }); return true },
-    updateCalendarEventDetails: async () => detailsOk,
+    updateCalendarEventDetails: async (_id: string, _b: any, opts: any) => { detailsCalls.push(opts); return detailsOk },
   },
 })
 
@@ -90,7 +96,7 @@ beforeEach(() => {
     outlet: { code: 'TSS', name: 'The Secret Sauce' }, program: { code: 'TSS', name: 'TSS' }, episodes: [],
   }
   event = { exists: true, attendees: ['crew@x.co', 'pro@x.co'], htmlLink: null, start: WANT.startTime, end: WANT.endTime }
-  audits = []; alerts = []; attendeeCalls = []; deleteOk = true; detailsOk = true; onEventRead = null
+  audits = []; alerts = []; attendeeCalls = []; detailsCalls = []; deleteOk = true; detailsOk = true; onEventRead = null
 })
 
 // ── 1. removeCancelledBookingEvent ─────────────────────────────────────────
@@ -207,4 +213,47 @@ test('driftSetKey ignores order', () => {
   const d = (code: string, s: string) => ({ bookingId: code, bookingCode: code, timeDrift: { event: { start: s, end: 'e' }, booking: { start: 'b', end: 'e' } } })
   assert.equal(mod.driftSetKey([d('A', '1'), d('B', '2')]), mod.driftSetKey([d('B', '2'), d('A', '1')]))
   assert.notEqual(mod.driftSetKey([d('A', '1')]), mod.driftSetKey([d('A', '1'), d('B', '2')]))
+})
+
+// ── 5. a failed QU push is retried the way it was sent ─────────────────────
+const QU_PUSH = { sendUpdates: 'none', descriptionOnly: true } as const
+
+test('QU push fails: own marker → the retry is description-only + silent (no guest mail, no time rewrite)', async () => {
+  detailsOk = false
+  assert.equal(await mod.pushCalendarDetails('ev1', row, QU_PUSH), false)
+  assert.equal(row.calendarSyncStatus, 'FAILED')
+  const QU_MARKER = row.calendarSyncError
+  assert.notEqual(QU_MARKER, MARKER, 'a full-details marker would be retried with sendUpdates all')
+  event.start = '2026-11-20T14:00:00+07:00' // a coordinator moved the event by hand
+  detailsOk = true
+  detailsCalls = []
+  const r = await mod.reconcileSingleBooking('b1')
+  assert.deepEqual(detailsCalls, [QU_PUSH])
+  assert.equal(r!.action, 'patched')
+  assert.equal(row.calendarSyncStatus, 'OK')
+  const a = audits.find(x => x.action === 'calendar.reconcile_details_patched')
+  assert.equal(a.changes.sendUpdates, 'none')
+})
+
+test('QU retry fails again: the row keeps the QU marker (next tick retries silently), never the full one', async () => {
+  detailsOk = false
+  await mod.pushCalendarDetails('ev1', row, QU_PUSH)
+  const QU_MARKER = row.calendarSyncError
+  const r = await mod.reconcileSingleBooking('b1')
+  assert.equal(r!.action, 'failed')
+  assert.equal(row.calendarSyncError, QU_MARKER)
+  detailsCalls = []
+  await mod.reconcileSingleBooking('b1')
+  assert.deepEqual(detailsCalls, [QU_PUSH])
+})
+
+test('a failed QU push does not replace a pending full-details marker (that retry carries the time edit)', async () => {
+  row.calendarSyncStatus = 'FAILED'; row.calendarSyncError = MARKER
+  detailsOk = false
+  await mod.pushCalendarDetails('ev1', row, QU_PUSH)
+  assert.equal(row.calendarSyncError, MARKER)
+  detailsOk = true
+  detailsCalls = []
+  await mod.reconcileSingleBooking('b1')
+  assert.deepEqual(detailsCalls, [{ sendUpdates: 'all' }])
 })

@@ -82,6 +82,11 @@ const COL = {
   program: 5,
   shootDate: 6,
   shootEndDate: 7,
+  // Call Time (H) / Wrap Time (I) / Location (K) — an edit of the time or place left the
+  // row on the create-time values (38 of 411 rows since 1 Oct) while PMDC reads this tab daily.
+  callTime: 8,
+  wrapTime: 9,
+  location: 11,
   episodeIds: 17,
   assignedEmails: 21,
   status: 22,
@@ -317,6 +322,73 @@ export function joinEpisodeTitles(
 }
 
 /**
+ * Backfill pass 4 — the cells (cols AE–AR) the backfill may fill on an existing row.
+ * AJ–AR were added in v1.203 and are written only on create or on an edit, so every row
+ * created before 26 Aug kept them blank (Agency Ref empty on 97 rows with a QU in the DB,
+ * Camera Count on ~300). Column positions come from COL, never a second map.
+ */
+const FILL_BLANK_FIELDS = [
+  'deliveredAt', 'deliveredBy', 'cancelReason', 'episodeTitles', 'driveBoxId',
+  'equipmentNote', 'rentalGearNote', 'cameraCount', 'micCount', 'vanCount',
+  'specialEquipment', 'agencyRef', 'blockShot', 'itinerary',
+] as const
+export type FillBlankField = typeof FILL_BLANK_FIELDS[number]
+
+/** Last column the fill-blank pass must read (AR) — read range `A2:<this>`. */
+export const FILL_BLANK_LAST_COL = colLetter(Math.max(...FILL_BLANK_FIELDS.map(f => COL[f])))
+
+/** Column letter of a Bookings-tab field, from COL. */
+export function bookingsColLetter(field: keyof typeof COL): string {
+  return colLetter(COL[field])
+}
+
+/**
+ * Fill-blank plan for one row: DB values that are non-empty while the sheet cell is blank
+ * (a value someone hand-fixed in the sheet is never overwritten). `row` is the values.get
+ * array for the row, col A at index 0. Formatting = the live write paths: Delivered At as
+ * the deliver route (th-TH gregory, BKK); AJ–AR as the admin PATCH gear block (a null count
+ * stays blank, 0 is a real answer). Pure — the dry run and apply both use this result.
+ */
+export function planFillBlankCells(b: {
+  deliveredAt?: Date | string | null
+  deliveredBy?: string | null
+  cancelReason?: string | null
+  episodes: Array<{ title?: string | null; sequence?: number | null }>
+  driveFolders?: unknown
+  equipmentNote?: string | null
+  rentalGearNote?: string | null
+  cameraCount?: number | null
+  micCount?: number | null
+  vanCount?: number | null
+  specialEquipment?: string[] | null
+  agencyRef?: string | null
+  isBlockShot?: boolean | null
+  itinerary?: string | null
+}, row: unknown[]): Partial<Record<FillBlankField, string>> {
+  const want: Record<FillBlankField, string> = {
+    deliveredAt: b.deliveredAt ? new Date(b.deliveredAt).toLocaleString('th-TH-u-ca-gregory', { timeZone: 'Asia/Bangkok' }) : '',
+    deliveredBy: b.deliveredBy || '',
+    cancelReason: b.cancelReason || '',
+    episodeTitles: joinEpisodeTitles(b.episodes),
+    driveBoxId: getDriveLink(b.driveFolders, 'box') || '',
+    equipmentNote: b.equipmentNote || '',
+    rentalGearNote: b.rentalGearNote || '',
+    cameraCount: b.cameraCount == null ? '' : String(b.cameraCount),
+    micCount: b.micCount == null ? '' : String(b.micCount),
+    vanCount: b.vanCount == null ? '' : String(b.vanCount),
+    specialEquipment: (b.specialEquipment || []).join(', '),
+    agencyRef: b.agencyRef || '',
+    blockShot: b.isBlockShot ? 'Yes' : '',
+    itinerary: b.itinerary || '',
+  }
+  const out: Partial<Record<FillBlankField, string>> = {}
+  for (const f of FILL_BLANK_FIELDS) {
+    if (want[f] && !String(row[COL[f] - 1] ?? '').trim()) out[f] = want[f]
+  }
+  return out
+}
+
+/**
  * v1.237 — ต่อคิว append ให้เหลือทีละใบ และเว้นจังหวะขั้นต่ำระหว่างใบ
  *
  * WHY. `values.append` ที่ยิง**พร้อมกัน**คืน `updates.updatedRange` ที่ไม่ตรงกับ
@@ -486,6 +558,10 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
   /** v1.109 — rewrite col F/G (Shoot Date / Shoot End Date), "YYYY-MM-DD". */
   shootDate: string
   shootEndDate: string
+  /** Cols H/I/K — Call Time "HH:MM", Wrap Time "HH:MM" or '', Location as stored (locationName). */
+  callTime: string
+  wrapTime: string
+  location: string
   assignedEmails: string
   status: string
   calendarEventId: string

@@ -51,3 +51,53 @@ test('blank/garbage cells and a no-op rewrite are safe', () => {
   assert.equal(appendPreviousId(' , ,A-1 ,', 'B-2', 'C-3'), 'A-1, B-2')
   assert.equal(appendPreviousId('A-1', 'B-2', 'B-2'), 'A-1')
 })
+
+// Backfill pass 4 — AJ–AR were written only on create/edit since v1.203, so rows created
+// before it kept them blank (Agency Ref empty on 97 rows with a QU in the DB). The plan is
+// fill-blank only, formatted like the live write paths, with positions from COL.
+import { planFillBlankCells, bookingsColLetter, FILL_BLANK_LAST_COL } from '../google-sheets'
+
+const fullBooking = {
+  deliveredAt: null, deliveredBy: null, cancelReason: null, episodes: [], driveFolders: null,
+  equipmentNote: 'Sony FX6 x2', rentalGearNote: null, cameraCount: 2, micCount: 0, vanCount: null,
+  specialEquipment: ['Gimbal', 'Slider'], agencyRef: 'QU-4480', isBlockShot: true, itinerary: 'BKK → CNX',
+}
+
+test('gear cells AJ–AR: blank cells get the DB value; null stays blank, 0 is a real answer', () => {
+  const row = Array(45).fill('')
+  row[0] = 'AGN-260713-01'
+  assert.deepEqual(planFillBlankCells(fullBooking, row), {
+    equipmentNote: 'Sony FX6 x2', cameraCount: '2', micCount: '0',
+    specialEquipment: 'Gimbal, Slider', agencyRef: 'QU-4480', blockShot: 'Yes', itinerary: 'BKK → CNX',
+  })
+})
+
+test('a cell that already holds a value is never overwritten; a short row (trailing blanks trimmed) counts as blank', () => {
+  const row = Array(45).fill('')
+  row[41] = 'QU-4480 (hand-fixed)' // col AP
+  row[37] = '3'                    // col AL
+  const plan = planFillBlankCells(fullBooking, row)
+  assert.equal('agencyRef' in plan, false)
+  assert.equal('cameraCount' in plan, false)
+  // values.get drops trailing empty cells: a row read as col A only
+  assert.equal(planFillBlankCells(fullBooking, ['AGN-260713-01']).agencyRef, 'QU-4480')
+})
+
+test('columns come from COL: Agency Ref = AP, Camera Count = AL, H/I/K for call/wrap/location, read range ends at AR', () => {
+  assert.equal(bookingsColLetter('agencyRef'), 'AP')
+  assert.equal(bookingsColLetter('cameraCount'), 'AL')
+  assert.equal(bookingsColLetter('deliveredAt'), 'AE')
+  assert.equal(bookingsColLetter('callTime'), 'H')
+  assert.equal(bookingsColLetter('wrapTime'), 'I')
+  assert.equal(bookingsColLetter('location'), 'K')
+  assert.equal(FILL_BLANK_LAST_COL, 'AR')
+})
+
+test('AE–AI keep their old fill-blank behaviour (delivery evidence, titles, box id)', () => {
+  const b = {
+    ...fullBooking, equipmentNote: null, cameraCount: null, micCount: null, specialEquipment: [], agencyRef: null, isBlockShot: false, itinerary: null,
+    deliveredBy: 'crew@x.co', cancelReason: 'ลูกค้าเลื่อน',
+    episodes: [{ title: 'สอง', sequence: 2 }, { title: 'หนึ่ง', sequence: 1 }],
+  }
+  assert.deepEqual(planFillBlankCells(b, []), { deliveredBy: 'crew@x.co', cancelReason: 'ลูกค้าเลื่อน', episodeTitles: 'หนึ่ง | สอง' })
+})
