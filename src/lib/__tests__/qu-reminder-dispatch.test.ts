@@ -14,7 +14,11 @@ const mailed: string[] = []
 mock.module('../db', {
   namedExports: {
     prisma: {
-      booking: { findMany: async () => rows, updateMany: async () => ({ count: 1 }) },
+      // คืนเฉพาะคอลัมน์ที่ select เหมือน prisma จริง — ฟิลด์ที่ลืม select ต้องหายจริงในเทส
+      booking: {
+        findMany: async ({ select }: any) => rows.map(r => Object.fromEntries(Object.keys(select).map(k => [k, r[k]]))),
+        updateMany: async () => ({ count: 1 }),
+      },
       user: { findMany: async () => inactive.map(email => ({ email })) },
     },
   },
@@ -83,4 +87,22 @@ test('dry run never alerts', async () => {
   inactive = ['phantawat.s@thestandard.co']
   await mod.runQuReminderSweep({ dryRun: true })
   assert.equal(alerts.length, 0)
+})
+
+// รอบ 2 (23 พ.ย.) — งานหลายวันที่ถ่ายอยู่ยังเร่ง: ต้อง select shootEndDate มาด้วย ไม่งั้น quUrgency
+// เห็นแค่วันแรก (ผ่านไปแล้ว = ปกติ = รอ 7 วัน) ทั้งที่คอมเมนต์สัญญาว่านับถึงวันสุดท้าย
+test('multi-day job still shooting today, reminded yesterday → mailed again today (shootEndDate is read)', async () => {
+  const DAY = 86_400_000
+  const todayBkk = Math.floor((Date.now() + 7 * 3_600_000) / DAY) * DAY // @db.Date ของวันนี้ (กรุงเทพ)
+  rows = [{
+    ...booking('NWS-MLT-261118-01', 'pro@thestandard.co'),
+    agencyRef: 'QU-1234TBC',
+    shootDate: new Date(todayBkk - 2 * DAY),
+    shootEndDate: new Date(todayBkk),
+    quRemindedAt: new Date(Date.now() - DAY),
+  }]
+  const r = await mod.runQuReminderSweep()
+  assert.equal(r.producersDue, 1)
+  assert.equal(r.emailed, 1)
+  assert.deepEqual(mailed, ['pro@thestandard.co'])
 })

@@ -13,6 +13,17 @@
 export { needsRealQuRef } from './qu-ref'
 
 const DAY = 86_400_000
+const BKK_OFFSET = 7 * 3_600_000
+
+/**
+ * วันที่ตามปฏิทินกรุงเทพ (เลขวันนับจาก epoch) — จังหวะเตือนนับเป็น "วัน" ไม่ใช่ ms
+ * เดิมเทียบ ms: รอบ 09:00 ประทับ quRemindedAt ด้วย now ของตัวเอง วันถัดไป now มาก่อน/หลัง
+ * ประทับเดิมไม่กี่วินาที → ใบเร่ง "ทุกวัน" ได้เมลวันเว้นวัน (WLT-MNW-261120-01: 18 พ.ย.
+ * 02:00:13Z แล้วไม่มีอีกเลย) · shootDate เป็น @db.Date (00:00Z) บวก 7 ชม. ยังเป็นวันเดิม
+ */
+function bkkDay(d: Date | string): number {
+  return Math.floor((new Date(d).getTime() + BKK_OFFSET) / DAY)
+}
 
 /** วันถ่ายใกล้เข้ามา = เร่งจังหวะเตือน (ค่าเริ่มต้น 3 วัน) */
 export function quReminderUrgentDays(): number {
@@ -28,13 +39,21 @@ export function quReminderNormalIntervalDays(): number {
 export type QuUrgency = 'urgent' | 'normal'
 
 /**
- * ใกล้ถ่ายไหม — นับจากวันถ่าย (หรือวันสุดท้ายของงานหลายวัน) เทียบกับตอนนี้
- * งานที่ถ่ายผ่านไปแล้วไม่ใช่ "เร่ง": เลขยังต้องได้ แต่ไม่มีเส้นตายกองถ่ายแล้ว
+ * ใกล้ถ่ายไหม — นับเป็นวันปฏิทินกรุงเทพ: เร่งตั้งแต่ urgentDays วันก่อนวันถ่ายวันแรก
+ * จนถึงวันถ่ายวันสุดท้าย (รวมวันถ่ายเอง) · งานที่ถ่ายจบไปแล้วไม่ใช่ "เร่ง": เลขยังต้องได้
+ * แต่ไม่มีเส้นตายกองถ่ายแล้ว
+ * เดิมเทียบ ms กับ shootDate อย่างเดียว: รอบ 02:00Z ของวันถ่าย (00:00Z) ติดลบแล้ว = วันถ่ายไม่เคยเร่ง
+ * และงานหลายวันหลุดจากเร่งตั้งแต่วันแรก
  */
-export function quUrgency(shootDate: Date | string, now: Date, urgentDays = quReminderUrgentDays()): QuUrgency {
-  const d = new Date(shootDate).getTime()
-  const diffDays = (d - now.getTime()) / DAY
-  return diffDays >= 0 && diffDays <= urgentDays ? 'urgent' : 'normal'
+export function quUrgency(
+  shoot: { shootDate: Date | string; shootEndDate?: Date | string | null },
+  now: Date,
+  urgentDays = quReminderUrgentDays(),
+): QuUrgency {
+  const today = bkkDay(now)
+  const untilStart = bkkDay(shoot.shootDate) - today
+  const untilEnd = bkkDay(shoot.shootEndDate ?? shoot.shootDate) - today
+  return untilStart <= urgentDays && untilEnd >= 0 ? 'urgent' : 'normal'
 }
 
 /**
@@ -43,6 +62,7 @@ export function quUrgency(shootDate: Date | string, now: Date, urgentDays = quRe
  * - ไม่เคยเตือน → เตือนเลย
  * - ใกล้ถ่าย (urgent) → ทุกวัน
  * - นอกนั้น → ทุก 7 วัน
+ * นับเป็นวันปฏิทินกรุงเทพ (bkkDay) ไม่ใช่ ms ที่ผ่านไป — "ทุกวัน" = วันละครั้ง ไม่ใช่ครบ 24 ชม.
  *
  * WHY ไม่เตือนทุกวันทุกใบ: เลข QU มาจากฝ่ายจัดซื้อ/ลูกค้า ไม่ได้อยู่ในมือ Producer
  * เตือนทุกวันตั้งแต่วันแรกคือสแปมที่คนจะเลิกอ่าน แล้วพอถึงใบที่เร่งจริงก็ไม่มีใครสนใจ
@@ -58,7 +78,7 @@ export function quReminderDue(
   const intervalDays = urgency === 'urgent'
     ? (opts.urgentIntervalDays ?? 1)
     : (opts.normalIntervalDays ?? quReminderNormalIntervalDays())
-  return now.getTime() - new Date(lastRemindedAt).getTime() >= intervalDays * DAY
+  return bkkDay(now) - bkkDay(lastRemindedAt) >= intervalDays
 }
 
 export interface QuPendingBooking {
@@ -67,6 +87,8 @@ export interface QuPendingBooking {
   bookingCode: string | null
   agencyRef: string | null
   shootDate: Date | string
+  /** งานหลายวัน: วันถ่ายวันสุดท้าย (null = วันเดียว) — ใช้ตัดสินว่ายังเร่งอยู่ไหม */
+  shootEndDate?: Date | string | null
   status: string
   producer: string | null
   producerEmail: string | null
@@ -106,7 +128,7 @@ export function splitInactiveProducers<T>(
  * ลงในฉบับเดียว (ไม่งั้นคนเดียวได้หลายฉบับกระจายคนละวัน)
  */
 export function producerDue(rows: QuPendingBooking[], now: Date): boolean {
-  return rows.some(r => quReminderDue(r.quRemindedAt, quUrgency(r.shootDate, now), now))
+  return rows.some(r => quReminderDue(r.quRemindedAt, quUrgency(r, now), now))
 }
 
 function fmtDate(d: Date | string): string {
@@ -119,7 +141,7 @@ export function buildQuReminderEmail(
   now: Date,
   appUrl: string,
 ): { subject: string; text: string } {
-  const urgent = rows.filter(r => quUrgency(r.shootDate, now) === 'urgent')
+  const urgent = rows.filter(r => quUrgency(r, now) === 'urgent')
   const subject = urgent.length > 0
     ? `⚠️ ขอเลข QU ด่วน — มีงานถ่ายใน ${quReminderUrgentDays()} วัน (${rows.length} งาน)`
     : `ขอเลข QU (Product Code) — ${rows.length} งานที่ยังไม่มีเลขจริง`
@@ -130,7 +152,7 @@ export function buildQuReminderEmail(
     .map(r => {
       const cur = (r.agencyRef || '').trim()
       const state = cur === '' ? 'ยังไม่ได้ใส่' : `ตอนนี้ใส่ "${cur}" ซึ่งเป็นตัวยึด ไม่ใช่เลขจริง`
-      const flag = quUrgency(r.shootDate, now) === 'urgent' ? ' ⚠️ ใกล้ถ่าย' : ''
+      const flag = quUrgency(r, now) === 'urgent' ? ' ⚠️ ใกล้ถ่าย' : ''
       const name = r.projectName ? ` · ${r.projectName}` : ''
       // v1.193 — ลิงก์ตรงไปหน้าแก้ของใบนั้นเลย: เดิมส่งไป /my-bookings เฉย ๆ แล้ว
       // ให้ผู้รับไปหาปุ่มเอง ซึ่งงาน COMPLETED ไม่มีปุ่มด้วยซ้ำ (บั๊ก v1.188)
