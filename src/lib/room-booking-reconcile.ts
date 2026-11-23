@@ -7,7 +7,7 @@ import { alertOps } from './ops-alert'
 import {
   findExistingRoomBooking, cancelRoomBooking, roomIdForLocation,
   roomTargetForBooking, roomBookingEnabled, roomBookingAllowed, listRoomBookings,
-  findManualHold, bangkokToUtcIso, roomBookingMarker,
+  findManualHold, bangkokToUtcIso, roomBookingMarker, ROOM_BOOKING_BASE_URL,
 } from './room-booking'
 import { syncRoomBooking, buildPayloadForBooking, ROOM_BOOKING_SELECT } from './room-booking-sync'
 
@@ -421,7 +421,7 @@ export async function reconcileRoomBookings(opts: {
       `🚪 **ห้องหายไปจากระบบกลาง ${out.vanished.length} รายการ**\n` +
       `probook คิดว่าจองไว้ แต่ไม่พบในระบบแล้ว (น่าจะมีคนยกเลิกฝั่งนั้น)\n\n` +
       out.vanished.map(c => `• ${c}`).join('\n') +
-      `\n\nกองพวกนี้กำลังจะไม่มีห้อง — จองใหม่ที่ https://service.thestandard.co/booking หรือเปิด ROOM_BOOKING_ENABLED ให้ระบบจองคืนเอง`,
+      `\n\nกองพวกนี้กำลังจะไม่มีห้อง — จองใหม่ที่ ${ROOM_BOOKING_BASE_URL}/booking หรือเปิด ROOM_BOOKING_ENABLED ให้ระบบจองคืนเอง`,
     ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
   }
 
@@ -430,7 +430,8 @@ export async function reconcileRoomBookings(opts: {
     await notifyChat(
       `🚪 **ห้องค้างในระบบกลาง ${out.staleStuck.length} รายการ**\n` +
       `คิวถ่ายยกเลิก/ย้ายไปแล้ว แต่ผมปลดห้องเองไม่ได้\n\n${lines}\n\n` +
-      `ปลดมือที่ https://service.thestandard.co/booking — หรือรอ IT เปิดสิทธิ์ยกเลิกให้ service key แล้วผมจะเก็บกวาดเองรอบถัดไป`,
+      // IT เปิดสิทธิ์ยกเลิกให้ service key แล้ว (25 ส.ค.) — ที่ค้างตรงนี้คือปลดไม่ได้จริงรอบนี้ ระบบลองใหม่เองรอบหน้า
+      `ปลดมือที่ ${ROOM_BOOKING_BASE_URL}/booking — หรือรอรอบถัดไป ระบบจะลองปลดเองอีกครั้ง`,
     ).catch(e => console.error('[room-reconcile] chat alert failed:', e?.message || e))
   }
 
@@ -442,7 +443,7 @@ export async function reconcileRoomBookings(opts: {
         `🚪 ${code} ยังไม่มีห้อง — ห้องที่ขอไม่ว่าง (ระบบกลางตอบว่าถูกจองแล้ว)\n` +
         `   ${b.locationName || ''} · ${when}\n` +
         `   ระบบลองจองใหม่เองทุก 6 ชม. · ถ้าต้องใช้ห้องนี้จริง คุยกับคนที่จองไว้ หรือเปลี่ยนห้อง/เวลาในใบจอง · ` +
-        `จองมือที่ https://service.thestandard.co/booking\n` +
+        `จองมือที่ ${ROOM_BOOKING_BASE_URL}/booking\n` +
         `   (เตือนซ้ำวันละครั้งจนกว่าจะได้ห้อง)`,
         ROOM_CONFLICT_REPEAT_MS)
       if (r.attempted && !r.delivered) console.error(`[room-reconcile] still-no-room reminder for ${code} reached no channel`)

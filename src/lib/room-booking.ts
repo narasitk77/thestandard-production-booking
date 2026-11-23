@@ -4,7 +4,7 @@ import { LOCATIONS } from './locations'
 import { DEFAULT_SHOOT_HOURS, effectiveWrap, isValidHHMM } from './shoot-window'
 
 /**
- * เชื่อมกับระบบจองห้องกลาง `service.thestandard.co/booking` — **เฉพาะฝั่งอ่าน**
+ * เชื่อมกับระบบจองห้องกลาง `hub.thestandard.co/booking` (เดิม service.thestandard.co) — **เฉพาะฝั่งอ่าน**
  *
  * v1.195 (เฟส 2 ของ docs/room-booking-integration-plan.md) — ยังไม่จองจริง
  * เพราะ `POST /api/liff/booking` ต้องมี credential จาก IT. แต่ endpoint ฝั่งอ่าน
@@ -18,8 +18,10 @@ import { DEFAULT_SHOOT_HOURS, effectiveWrap, isValidHHMM } from './shoot-window'
  *   startAt=…T06:00:00.000Z&endAt=…    → {…"Digital Vaultwarden"} ✅
  */
 
+// พอร์ทัลย้ายไป hub ตั้งแต่ ~12 ต.ค. 2569 — service.thestandard.co ตอบ 200 text/html (หน้าประกาศย้าย)
+// ไม่ใช่ JSON · พรอดรอดเพราะ stack env ตั้ง hub ไว้ · ค่าเริ่มต้นต้องตรงกับ docker-compose.portainer.yml
 export const ROOM_BOOKING_BASE_URL =
-  process.env.ROOM_BOOKING_BASE_URL || 'https://service.thestandard.co'
+  process.env.ROOM_BOOKING_BASE_URL || 'https://hub.thestandard.co'
 
 /**
  * probook `location.id` → `roomId` ของระบบจองกลาง

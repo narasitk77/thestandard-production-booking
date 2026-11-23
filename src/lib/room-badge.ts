@@ -69,8 +69,8 @@ export function roomBadge(status?: string | null, error?: string | null): RoomBa
         tone: 'manual',
         label: 'ต้องจองห้องเอง',
         title: reason === 'no-room-mapping'
-          ? 'ห้องนี้ไม่มีในระบบจองส่วนกลาง — ต้องจองเองที่ service.thestandard.co'
-          : 'ระบบยังไม่จองห้องนี้ให้อัตโนมัติ — ต้องจองเองที่ service.thestandard.co',
+          ? 'ห้องนี้ไม่มีในระบบจองส่วนกลาง — ต้องจองเองที่ hub.thestandard.co'
+          : 'ระบบยังไม่จองห้องนี้ให้อัตโนมัติ — ต้องจองเองที่ hub.thestandard.co',
       }
     }
   }

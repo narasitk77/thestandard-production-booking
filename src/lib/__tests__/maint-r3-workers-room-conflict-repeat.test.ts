@@ -62,6 +62,9 @@ test('every booking still without a room gets ONE correctly worded reminder, thr
     assert.match(a.text, /ยังไม่มีห้อง — ห้องที่ขอไม่ว่าง/)
     assert.match(a.text, /Studio 1/)
     assert.doesNotMatch(a.text, /ยกเลิก\/ย้ายไปแล้ว|null/, 'not the old wrong "stuck room" wording')
+    // the portal moved to hub (~12 Oct 2026); the link comes from ROOM_BOOKING_BASE_URL, not a hard-coded old domain
+    assert.match(a.text, /https:\/\/hub\.thestandard\.co\/booking/)
+    assert.doesNotMatch(a.text, /service\.thestandard\.co/)
   }
   assert.equal(mod.ROOM_CONFLICT_REPEAT_MS, 24 * 3_600_000)
   assert.deepEqual(posted, [], 'no hourly crew-room post (that was the wrong-text nag)')
