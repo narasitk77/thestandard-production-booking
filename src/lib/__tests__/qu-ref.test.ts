@@ -101,8 +101,13 @@ test('แก้ใบที่มีอยู่: ตรวจกฎ QU เฉ�
   for (const legacy of ['รอ AE แจ้งค่ะ', 'รอ AE แจ้งอีกทีค่า', 'ซัง', 'แพร']) {
     assert.deepEqual(agencyRefForEdit(legacy, legacy, true), { value: legacy }, legacy)
   }
-  // เทียบหลัง normalize: ส่งค่าเดิมมาในรูปที่ต่างแค่ช่องว่าง/ตัวพิมพ์ = ไม่เปลี่ยน → เก็บของเดิมไม่แตะ
-  assert.deepEqual(agencyRefForEdit('QU-4345,QU-4406', 'QU-4345, QU-4406', true), { value: 'QU-4345, QU-4406' })
+  // ค่าเก่าที่ตกกฎ ส่งกลับมาต่างแค่ช่องว่าง = ไม่เปลี่ยน → เก็บของเดิมไม่แตะ
+  assert.deepEqual(agencyRefForEdit(' รอ AE แจ้งค่ะ', 'รอ AE แจ้งค่ะ', true), { value: 'รอ AE แจ้งค่ะ' })
+  // ค่าที่ผ่านกฎเก็บแบบ normalize เสมอ — แก้ช่องว่าง/TAB/ตัวพิมพ์ต้องถึง DB จริง ไม่ใช่ 200 แล้วค่าเก่าค้าง
+  // (TSS-OTH-260721-01 เก็บ TAB นำหน้าไว้)
+  assert.deepEqual(agencyRefForEdit('QU-4169-V6', '\tQU-4169-V6', true), { value: 'QU-4169-V6' })
+  assert.deepEqual(agencyRefForEdit('QU-4405', 'qu-4405', true), { value: 'QU-4405' })
+  assert.deepEqual(agencyRefForEdit('QU-4345, QU-4406', 'QU-4345, QU-4406', true), { value: 'QU-4345,QU-4406' })
   // เปลี่ยนจริง → ตรวจเหมือนเดิม
   assert.ok('error' in agencyRefForEdit('LIFE2601', 'รอ AE แจ้งค่ะ', true))
   assert.deepEqual(agencyRefForEdit(' qu-4500 ', 'รอ AE แจ้งค่ะ', true), { value: 'QU-4500' })
