@@ -12,7 +12,8 @@
 import { prisma } from './db'
 import { sendEmail, isEmailConfigured } from './email'
 import { logAudit } from './audit'
-import { notifyChat } from './notify'
+import { alertOps } from './ops-alert'
+import { createHash } from 'crypto'
 import {
   needsRealQuRef, groupByProducer, producerDue, buildQuReminderEmail, splitInactiveProducers,
   type QuPendingBooking,
@@ -29,6 +30,12 @@ export interface QuReminderResult {
   skipped: boolean           // ปิดสวิตช์ / เมลไม่พร้อม
   /** dry-run เท่านั้น: ใครจะได้รับอะไรบ้าง — พรีวิวก่อนส่งจริง */
   preview?: Array<{ to: string; subject: string; bookingCodes: (string | null)[] }>
+}
+
+/** ชุดใบที่ตามไม่ได้ชุดเดิม เตือนซ้ำสัปดาห์ละครั้ง (ชุดเปลี่ยน = key ใหม่ = เตือนทันที) */
+export const QU_UNREACHABLE_EVERY_MS = 7 * 24 * 3_600_000
+function quSetKey(codes: string[]): string {
+  return createHash('sha1').update([...codes].sort().join('\n')).digest('hex').slice(0, 16)
 }
 
 export function quReminderEnabled(): boolean {
@@ -83,6 +90,7 @@ export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promi
   let producersDue = 0
   let emailed = 0
   let failed = 0
+  const failedCodes: string[] = []
   const preview: NonNullable<QuReminderResult['preview']> = []
 
   // Array.from: tsconfig target ของโปรเจกต์นี้ต่ำกว่า es2015 จึงวน Map ตรง ๆ ไม่ได้
@@ -113,6 +121,7 @@ export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promi
       })
     } else {
       failed++
+      failedCodes.push(...list.map((r: QuPendingBooking) => r.bookingCode || '(ไม่มีรหัส)'))
     }
 
     logAudit({
@@ -130,14 +139,24 @@ export async function runQuReminderSweep(opts: { dryRun?: boolean } = {}): Promi
     })
   }
 
-  if (!opts.dryRun && (emailed > 0 || failed > 0)) {
-    await notifyChat(
-      `📮 เตือนเลข QU: ส่งถึง Producer ${emailed} คน` +
-      (failed ? ` · ส่งไม่ผ่าน ${failed}` : '') +
-      ` · ค้างทั้งหมด ${rows.length} ใบ` +
-      (noProducerEmail.length ? ` · ไม่มีอีเมล ${noProducerEmail.length} ใบ (${noProducerEmail.join(', ')})` : '') +
-      (producerInactive.length ? ` · Producer ออกจากทีมแล้ว ${producerInactive.length} คน — ต้องมีคนตามแทน: ${producerInactive.map(x => `${x.producerEmail.split('@')[0]} (${x.bookingCodes.join(', ')})`).join(' · ')}` : ''),
-      'ops',
+  // ใบที่ไม่มีใครถูกตาม (Producer ออกแล้ว / ไม่มีอีเมล / เมลส่งไม่ผ่าน) ต้องถึงคน
+  // เดิมส่ง notifyChat(…,'ops') ซึ่งบนพรอดไม่ถึงใคร (Discord ทิ้ง 'ops', Lark ว่าง) และไม่มีแถว
+  // ops.alert ให้ relay — POD-8MH-260814-01 (Producer ออกแล้ว) ไม่มีใครตามตั้งแต่ 10 ต.ค.
+  // alertOps = ช่องเดียวที่ถึงจริง · key = ชุดรหัสใบ: ชุดเดิมเตือนซ้ำสัปดาห์ละครั้ง ชุดเปลี่ยน = เตือนทันที
+  // (บรรทัด "ส่งถึง Producer N คน" รายวันตัดทิ้ง — เป็นแค่ข่าวว่าปกติ ไม่มีอะไรให้คนทำ)
+  const unreachable = Array.from(new Set([
+    ...noProducerEmail, ...producerInactive.flatMap(x => x.bookingCodes.map(c => c || '(ไม่มีรหัส)')), ...failedCodes,
+  ]))
+  if (!opts.dryRun && unreachable.length > 0) {
+    await alertOps(
+      `qu-unreachable:${quSetKey(unreachable)}`,
+      `📮 เลข QU: ${unreachable.length} ใบไม่มีใครถูกตาม — ต้องมีคนตามแทน`,
+      `📮 เตือนเลข QU: ${unreachable.length} ใบไม่มีใครถูกตาม — ต้องมีคนตามแทน` +
+      (producerInactive.length ? `\n· Producer ออกจากทีมแล้ว ${producerInactive.length} คน: ${producerInactive.map(x => `${x.producerEmail.split('@')[0]} (${x.bookingCodes.join(', ')})`).join(' · ')}` : '') +
+      (noProducerEmail.length ? `\n· ไม่มีอีเมล Producer ${noProducerEmail.length} ใบ: ${noProducerEmail.join(', ')}` : '') +
+      (failedCodes.length ? `\n· เมลส่งไม่ผ่าน ${failed} คน (${failedCodes.join(', ')}) — รอบหน้าลองใหม่` : '') +
+      `\n(รอบนี้ส่งถึง Producer ${emailed} คน · ค้างทั้งหมด ${rows.length} ใบ)`,
+      QU_UNREACHABLE_EVERY_MS,
     )
   }
 
