@@ -77,3 +77,18 @@ test('เหตุผลมีช่องว่างเกิน ก็ยั�
 test('สถานะแปลกปลอมไม่ทำให้พัง', () => {
   assert.equal(roomBadge('WHATEVER', 'x'), null)
 })
+
+test('2026-11-23 — งานสตูดิโอที่ข้อมูลไม่พอจองห้อง → ป้ายเทา "ห้องยังไม่ได้จอง" พร้อมเหตุผล (TSS-SCI-261209-01)', () => {
+  // แก้สถานที่เป็นชื่อพิมพ์เอง → ห้องเดิมถูกคืน → SKIPPED no-location และการ์ดเงียบสนิท
+  const b = roomBadge('SKIPPED', 'skip: no-location', 'STUDIO')!
+  assert.equal(b.tone, 'pending')
+  assert.match(b.label, /ห้องยังไม่ได้จอง/)
+  assert.match(b.title, /ชื่อสถานที่ ไม่ตรงกับห้องในระบบ/)
+  assert.match(roomBadge('SKIPPED', 'skip: bad-times', 'STUDIO')!.title, /เวลาถ่าย/)
+  assert.match(roomBadge('SKIPPED', 'skip: no-times', 'STUDIO')!.title, /เวลาเรียกกอง/)
+  // งานนอกสถานที่ไม่มีห้องเป็นเรื่องปกติ — ยังไม่ขึ้นป้าย (กฎข้อบนยังจริง)
+  for (const t of ['ON_LOCATION', 'EVENT', 'REMOTE_ONLINE', null, undefined]) {
+    assert.equal(roomBadge('SKIPPED', 'skip: no-location', t), null, `${t} ไม่ควรขึ้นป้าย`)
+  }
+  assert.equal(roomBadge('SKIPPED', 'skip: external', 'STUDIO'), null)
+})

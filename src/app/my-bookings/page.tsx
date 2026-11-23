@@ -335,7 +335,7 @@ function BookingRow({ b, canUpload, meEmail }: { b: Booking; canUpload: boolean;
         <div className="flex flex-col items-end gap-1">
           <StatusPill status={b.status} />
           <AdBadge category={b.category} />
-          <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} />
+          <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} shootType={(b as any).shootType} />
           <FootageBadge files={b.footageFiles} sent={b.footageSent} />
         </div>
       </Link>

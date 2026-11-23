@@ -28,6 +28,19 @@ export interface RoomBadge {
 const MANUAL_SKIPS = new Set(['room-not-enabled', 'no-room-mapping'])
 
 /**
+ * 2026-11-23 — เหตุผลข้ามที่แปลว่า "ข้อมูลใบจองไม่พอจะจองห้อง" (= expectedTarget 'unknown' ของ reconciler)
+ * งานสตูดิโอที่ตกตรงนี้ = ไม่มีห้อง และไม่มีอะไรจองให้จนกว่าคนจะแก้ใบ — กฎเดียวของป้าย / reconciler / resync
+ */
+export const UNRESOLVED_SKIPS: ReadonlySet<string> = new Set(['no-location', 'no-times', 'bad-times'])
+
+/** เหตุผลข้อบนเป็นภาษาคน — ใช้ทั้งป้ายและข้อความเตือน ops */
+export function unresolvedRoomText(reason: string, locationName?: string | null): string {
+  if (reason === 'no-location') return `ชื่อสถานที่${locationName ? ` "${locationName}"` : ''} ไม่ตรงกับห้องในระบบ`
+  if (reason === 'no-times') return 'ยังไม่มีเวลาเรียกกอง'
+  return 'เวลาถ่ายประกอบเป็นช่วงที่ใช้ไม่ได้ (เลิกก่อนเริ่ม / ยาวเกิน 10 วัน)'
+}
+
+/**
  * เหตุผลข้ามที่ **ไม่ต้องขึ้นป้าย** — ไม่ใช่สถานการณ์เรื่องห้อง
  * (งานนอกตึก / ยังไม่เลือกสถานที่ / ยังไม่กรอกเวลา / ปิดฟีเจอร์)
  */
@@ -36,7 +49,12 @@ function skipReasonOf(error?: string | null): string | null {
   return m ? m[1].trim() : null
 }
 
-export function roomBadge(status?: string | null, error?: string | null): RoomBadge | null {
+export function roomBadge(
+  status?: string | null,
+  error?: string | null,
+  /** 2026-11-23 — งานสตูดิโอที่ข้อมูลไม่พอจองห้องต้องมีป้าย (งานนอกสถานที่ไม่มีห้องเป็นเรื่องปกติ) */
+  shootType?: string | null,
+): RoomBadge | null {
   if (status === 'CONFLICT') {
     return {
       tone: 'busy',
@@ -71,6 +89,14 @@ export function roomBadge(status?: string | null, error?: string | null): RoomBa
         title: reason === 'no-room-mapping'
           ? 'ห้องนี้ไม่มีในระบบจองส่วนกลาง — ต้องจองเองที่ hub.thestandard.co'
           : 'ระบบยังไม่จองห้องนี้ให้อัตโนมัติ — ต้องจองเองที่ hub.thestandard.co',
+      }
+    }
+    // 2026-11-23 — TSS-SCI-261209-01: แก้สถานที่เป็นชื่อพิมพ์เอง → ห้องเดิมถูกคืน ใบไม่มีห้อง และการ์ดไม่มีป้ายอะไรเลย
+    if (reason && UNRESOLVED_SKIPS.has(reason) && shootType === 'STUDIO') {
+      return {
+        tone: 'pending',
+        label: 'ห้องยังไม่ได้จอง',
+        title: `${unresolvedRoomText(reason)} — ระบบจองห้องให้ไม่ได้ แก้ใบจองให้เลือกห้องจากรายการ / กรอกเวลาให้ครบ`,
       }
     }
   }

@@ -504,7 +504,7 @@ export default function AdminPage() {
                 <div className="flex-1 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <AdBadge category={b.category} />
-                    <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} />
+                    <RoomBusyBadge status={(b as any).roomBookingStatus} error={(b as any).roomBookingError} shootType={(b as any).shootType} />
                     {showingDeleted && (
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-800 text-white">
                         DELETED
