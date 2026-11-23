@@ -2,6 +2,8 @@
 //  - Bookings sheet cols H/I/K (Call Time / Wrap Time / Location) after a time or place edit,
 //    from the admin PATCH and from producer-edit — a miss is logged + audited, not swallowed
 //    (38 of 411 rows since 1 Oct kept the create-time values)
+//  - the calendar event + _SHOOT marker after a producer fills in the QU (events kept
+//    'QU-1234TBC'), without mailing guests for a QU-only change
 //  - a legacy Agency Ref that fails the QU rule no longer blocks an unrelated admin save
 import { test, mock, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
@@ -116,18 +118,34 @@ test('admin PATCH: a legacy Agency Ref resent unchanged does not block the save 
   assert.equal(bad.status, 400)
 })
 
-test('producer-edit on a CONFIRMED booking: a location change reaches the sheet', async () => {
+test('producer-edit on a COMPLETED booking: filling the QU re-pushes the event silently + refreshes the marker', async () => {
+  booking.status = 'COMPLETED'
+  session = { email: 'pro@x.co', role: 'USER' }
+  const res = await producerEdit(req({ agencyRef: 'QU-3416' }), params)
+  assert.equal(res.status, 200)
+  await tick()
+  assert.deepEqual(calendar, [{ id: 'ev1', opts: { sendUpdates: 'none' } }])
+  assert.deepEqual(markers, ['b1'])
+  assert.equal(schedWrites().length, 0, 'no time/place change → no Call/Wrap/Location write')
+})
+
+test('producer-edit on a CONFIRMED booking: a location change keeps the default (guests told) and reaches the sheet', async () => {
   session = { email: 'pro@x.co', role: 'USER' }
   const res = await producerEdit(req({ locationName: 'Studio 2 (TSD)' }), params)
   assert.equal(res.status, 200)
   await tick()
+  assert.deepEqual(calendar, [{ id: 'ev1', opts: undefined }])
   assert.deepEqual(schedWrites(), [{ code: 'AGN-261124-01', fields: { callTime: '08:30', wrapTime: '12:00', location: 'Studio 2 (TSD)' } }])
 })
 
-test('producer-edit on a REQUESTED booking: a time edit reaches the sheet', async () => {
+test('producer-edit on a REQUESTED booking: a time edit reaches the sheet; the QU alone does not push a calendar event', async () => {
   booking.status = 'REQUESTED'
   session = { email: 'pro@x.co', role: 'USER' }
   await producerEdit(req({ callTime: '09:00' }), params)
   await tick()
   assert.deepEqual(schedWrites().map(s => s.fields.callTime), ['09:00'])
+  calendar = []
+  await producerEdit(req({ agencyRef: 'QU-4500' }), params)
+  await tick()
+  assert.deepEqual(calendar, [], 'REQUESTED: no event or marker yet (prod behaviour kept)')
 })

@@ -177,11 +177,22 @@ export async function PATCH(
     // surfaces the crew actually reads: the Google Calendar event and the
     // Drive `_SHOOT.txt` marker. Same fire-and-forget recipe as the admin
     // PATCH (a sync blip must never fail the save; nightly jobs backstop).
-    if (locationOnly && fieldChanges.locationName) {
+    //
+    // The QU too: the event description and the marker both carry "Agency Ref:", and
+    // producer-edit is where QUs are mostly entered — events kept 'QU-1234TBC' after the real
+    // number came in (WLT-OTH-261113-04, POD-8MH-261012-01). The reconciler never compares
+    // descriptions, so nothing healed them. A QU-only change is not a schedule change → no
+    // guest mail (sendUpdates 'none'); the location push keeps its default. CONFIRMED /
+    // COMPLETED only, like the location push: a REQUESTED booking has no event or marker yet.
+    // In those two modes only locationName and agencyRef can change, so "location not
+    // pushed" means "only the QU changed".
+    const locationPushed = locationOnly && !!fieldChanges.locationName
+    const quPushed = (locationOnly || agencyRefOnly) && !!fieldChanges.agencyRef
+    if (locationPushed || quPushed) {
       if (booking.calendarEventId) {
         // never throws; a failed patch marks the row FAILED (red chip) and the
         // reconciler retries it with sendUpdates 'all' — it used to vanish into a log line
-        void pushCalendarDetails(booking.calendarEventId, booking)
+        void pushCalendarDetails(booking.calendarEventId, booking, locationPushed ? undefined : { sendUpdates: 'none' })
       }
       if (hasDriveCredentials()) {
         refreshShootMarker(booking).catch(e =>
