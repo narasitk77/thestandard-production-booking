@@ -3,7 +3,8 @@
 // Rows come in shootDate asc (fixed order) and `writes >= max` stopped the loop. A booking already stamped
 // 'skip: manual-hold' still did writes++ and a syncRoomBooking (one hub GET) every hour, and UNKNOWN /
 // INVALID retried every hour too — so ≥max of them at the head of the queue meant later bookings were
-// never booked, while the log looked normal (prod ROOM_BOOKING_RECONCILE_MAX=5).
+// never booked, while the log looked normal (prod ROOM_BOOKING_RECONCILE_MAX=5). INVALID now waits 6 h like
+// CONFLICT; UNKNOWN still retries hourly (it may already hold a room) but goes to the back of the queue.
 // Also here: Lounge (no-room-mapping) gets its "book it yourself" stamp, and the stale-room notice no
 // longer points at the old portal or says "wait for IT".
 import { test, mock, before, beforeEach, after } from 'node:test'
@@ -30,6 +31,7 @@ const synced: string[] = []
 const updates: { id: string; data: any }[] = []
 const posted: string[] = []
 let hubGets = 0
+let hubDown = false
 
 mock.module('../db', {
   namedExports: {
@@ -61,6 +63,7 @@ const realFetch = globalThis.fetch
 globalThis.fetch = (async (url: any) => {
   if (String(url).includes('/api/liff/bookings-calendar')) {
     hubGets++
+    if (hubDown) return new Response('rate limited', { status: 429 })
     return new Response(JSON.stringify({
       bookings: [{
         id: 900, bookingNo: 'BK-0404', title: 'อัดรายการเอง', roomId: 15, status: 'confirmed',
@@ -73,7 +76,7 @@ globalThis.fetch = (async (url: any) => {
 
 let mod: typeof import('../room-booking-reconcile')
 before(async () => { mod = await import('../room-booking-reconcile') })
-beforeEach(() => { synced.length = 0; updates.length = 0; posted.length = 0; hubGets = 0 })
+beforeEach(() => { synced.length = 0; updates.length = 0; posted.length = 0; hubGets = 0; hubDown = false })
 
 async function run(opts: { dryRun?: boolean; max?: number } = {}) {
   const saved = { en: process.env.ROOM_BOOKING_ENABLED, rooms: process.env.ROOM_BOOKING_ROOMS, key: process.env.ROOM_BOOKING_SERVICE_KEY }
@@ -108,24 +111,56 @@ test('a stamped manual-hold whose hold is gone is booked again (falls through to
   assert.deepEqual(synced, ['h9'])
 })
 
-test('UNKNOWN / INVALID wait like CONFLICT (6 h), still reported in failed; past the window they retry', async () => {
+test('INVALID waits 6 h (still reported); UNKNOWN retries every run but after fresh bookings', async () => {
+  // UNKNOWN = "outcome not known, re-read next run" — a POST that timed out may already hold a room, so it must
+  // be adopted within the hour (cancelled meanwhile = no number to release = room stuck). It must not wait 6 h,
+  // and it must not take the cap ahead of a fresh booking either.
   const hourAgo = new Date(Date.now() - 3_600_000)
-  const sevenHoursAgo = new Date(Date.now() - 7 * 3_600_000)
   rows = [
     row({ id: 'u1', bookingCode: 'UNK-01', roomBookingStatus: 'UNKNOWN', roomBookingError: 'timeout', roomBookingAt: hourAgo }),
     row({ id: 'i1', bookingCode: 'INV-01', roomBookingStatus: 'INVALID', roomBookingError: 'HTTP 401', roomBookingAt: hourAgo }),
-    row({ id: 'u2', bookingCode: 'UNK-02', roomBookingStatus: 'UNKNOWN', roomBookingError: 'timeout', roomBookingAt: sevenHoursAgo }),
+    row({ id: 'n1', bookingCode: 'NORMAL-01' }),
   ]
   const r = await run({ max: 1 })
-  assert.deepEqual(synced, ['u2'], 'the two inside the window neither hit the hub nor use the cap')
-  assert.deepEqual(r.failed.map(f => [f.code, f.status]), [['UNK-01', 'UNKNOWN'], ['INV-01', 'INVALID']])
-  assert.match(r.failed[0].message!, /รอลองใหม่.*timeout/)
+  assert.deepEqual(synced, ['n1'], 'the fresh booking gets the cap, not the UNKNOWN ahead of it')
+  assert.equal(r.deferred, 1, 'the UNKNOWN at the tail is counted, not dropped silently')
+  assert.deepEqual(r.failed.map(f => [f.code, f.status]), [['INV-01', 'INVALID']])
+  assert.match(r.failed[0].message!, /รอลองใหม่.*HTTP 401/)
+
+  synced.length = 0
+  const r2 = await run({ max: 2 })
+  assert.deepEqual(synced, ['n1', 'u1'], 'UNKNOWN from an hour ago is retried now, not in 6 h')
+  assert.equal(r2.deferred, 0)
 
   // the preview says the same thing (dry-run must match real)
   synced.length = 0
-  const d = await run({ dryRun: true, max: 1 })
-  assert.deepEqual(d.failed.map(f => f.code), ['UNK-01', 'INV-01'])
-  assert.deepEqual(d.booked.map(b => b.code), ['UNK-02'])
+  const d = await run({ dryRun: true, max: 2 })
+  assert.deepEqual(d.failed.map(f => f.code), ['INV-01'])
+  assert.deepEqual(d.booked.map(b => b.code), ['NORMAL-01', 'UNK-01'])
+  assert.deepEqual(synced, [])
+})
+
+test('INVALID past the 6 h window retries', async () => {
+  rows = [row({ id: 'i2', bookingCode: 'INV-02', roomBookingStatus: 'INVALID', roomBookingError: 'HTTP 401', roomBookingAt: new Date(Date.now() - 7 * 3_600_000) })]
+  await run()
+  assert.deepEqual(synced, ['i2'])
+})
+
+test('a stamped manual-hold is left alone when the hub month cannot be read (not re-stamped UNKNOWN)', async () => {
+  // can't read = can't decide: falling through to syncRoomBooking would most likely fail the same read and stamp
+  // UNKNOWN over a hold that is really there → false "room not booked" badge
+  hubDown = true
+  rows = [heldRow(1), row({ id: 'n1', bookingCode: 'NORMAL-01' })]
+  const r = await run()
+  assert.deepEqual(synced, ['n1'], 'the held booking does not go to syncRoomBooking; the normal one still does')
+  assert.deepEqual(updates, [])
+  assert.deepEqual(r.failed.map(f => [f.code, f.status]), [['HOLD-01', 'UNKNOWN']])
+  assert.match(r.failed[0].message!, /อ่านระบบกลางไม่ได้/)
+
+  synced.length = 0
+  const d = await run({ dryRun: true })
+  assert.deepEqual(d.failed.map(f => f.code), ['HOLD-01'], 'preview matches the real run')
+  assert.deepEqual(d.booked.map(b => b.code), ['NORMAL-01'])
 })
 
 test('hitting max reports how many bookings were not reached', async () => {

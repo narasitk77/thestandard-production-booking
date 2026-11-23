@@ -72,7 +72,7 @@ export interface RoomReconcileResult {
   booked: { code: string; bookingNo: string }[]
   failed: { code: string; status: string; message?: string }[]
   /**
-   * 2026-11-23 — ใบที่ยังไม่ได้ตรวจเพราะชนเพดาน `max` ของรอบนี้ (0 = ตรวจครบ) · ลำดับ shootDate asc คงที่
+   * 2026-11-23 — ใบที่ยังไม่ได้ตรวจเพราะชนเพดาน `max` ของรอบนี้ (0 = ตรวจครบ) · ลำดับ shootDate asc คงที่ (UNKNOWN ต่อท้าย)
    * ใบท้ายคิวจึงต้องมีตัวเลขให้เห็น ไม่ใช่หายเงียบ (bug class 4)
    */
   deferred: number
@@ -174,10 +174,17 @@ export async function reconcileRoomBookings(opts: {
     },
     orderBy: { shootDate: 'asc' },
   })
+  // 2026-11-23 — UNKNOWN ยังลองใหม่ทุกรอบ (ไม่รู้ผล = รอบหน้าต้องอ่านกลับ — POST ที่ timeout อาจจองติดไปแล้ว ต้องรับเลข
+  // ให้เร็ว ไม่งั้นยกเลิกใบระหว่างนั้น releaseRoomForBooking ไม่มีเลขให้คืน ห้องค้างเงียบ) แต่**ต่อท้ายคิว**:
+  // ใบใหม่ได้เพดาน `max` ก่อน ไม่ถูก UNKNOWN หัวคิวกินโควตาทุกชั่วโมง · sort คงลำดับ shootDate เดิมในกลุ่ม
+  const retryLast = (r: { roomBookingNo: string | null; roomBookingStatus: string | null }) =>
+    Number(!r.roomBookingNo && r.roomBookingStatus === 'UNKNOWN')
+  rows.sort((a, b) => retryLast(a) - retryLast(b))
 
+  const monthKey = (d: Date) => `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`
   /** คนของงานนี้จองห้องเองไว้แล้วไหม — คืนชื่อคนจอง ถ้าใช่ (ใช้ข้อมูลเดือนที่อ่านมาแล้ว) */
   async function manualHeld(bk: any, p: any): Promise<string | null> {
-    const key = `${bk.shootDate.getUTCFullYear()}-${bk.shootDate.getUTCMonth() + 1}`
+    const key = monthKey(bk.shootDate)
     if (!monthRows.has(key)) await liveIndex(bk.shootDate)
     const rows = monthRows.get(key)
     if (!rows) return null
@@ -412,20 +419,29 @@ export async function reconcileRoomBookings(opts: {
     if (!b.roomBookingNo && want.kind === 'target' && roomBookingEnabled() && roomBookingAllowed(want.target.roomId)) {
       const built = buildPayloadForBooking(b)
       if ('skip' in built || 'error' in built) continue
-      // 2026-11-23 — UNKNOWN/INVALID เว้นวรรคแบบเดียวกับ CONFLICT: เดิมลองใหม่ทุกชั่วโมงและนับเข้า `max`
-      // ⇒ ≥max ใบแบบนี้หัวคิว (เรียง shootDate คงที่) = ใบหลัง ๆ ไม่มีวันถูกจอง โดย log ดูปกติ (bug class 4)
+      // 2026-11-23 — INVALID (ข้อมูล/คีย์ของเราผิด — ลองซ้ำไม่ช่วยจนกว่าจะแก้) เว้นวรรคแบบเดียวกับ CONFLICT: เดิมลองใหม่
+      // ทุกชั่วโมงและนับเข้า `max` ⇒ ≥max ใบแบบนี้หัวคิว (เรียง shootDate คงที่) = ใบหลัง ๆ ไม่มีวันถูกจอง (bug class 4)
       // ระหว่างรอยังรายงานใน failed ทุกรอบ — ไม่หายเงียบ · อยู่ก่อน dry-run เพื่อให้ preview ตรงของจริง
-      if ((b.roomBookingStatus === 'UNKNOWN' || b.roomBookingStatus === 'INVALID') && b.roomBookingAt
+      // UNKNOWN ไม่เว้น (ดู retryLast ข้างบน — ต่อท้ายคิวแทน)
+      if (b.roomBookingStatus === 'INVALID' && b.roomBookingAt
           && Date.now() - new Date(b.roomBookingAt).getTime() < CONFLICT_RETRY_MS) {
         out.failed.push({ code, status: b.roomBookingStatus, message: `รอลองใหม่ (เว้น 6 ชม.): ${b.roomBookingError || '-'}` })
         continue
       }
+      // **preview ต้องไม่โกหก** — ของจริง `syncRoomBooking` จะเช็คก่อนว่าคนของงานนี้
+      // จองห้องเองไว้แล้วหรือยัง แล้วข้าม ถ้า dry-run ตัดจบตรงนี้เฉย ๆ มันจะรายงาน
+      // ว่า "จะจอง" ทั้งที่ของจริงไม่จอง — คนอ่าน preview เพื่อ**ตัดสินใจ** ฉะนั้น
+      // preview ที่ต่างจากของจริงคือ preview ที่ไม่ควรมี (บทเรียน v1.202.3)
+      // 2026-11-23 — เส้นจริงถามเฉพาะใบที่ stamp manual-hold ไว้แล้ว (ใบอื่น syncRoomBooking อ่านเดือนเอง)
+      const stampedHold = b.roomBookingStatus === 'SKIPPED' && b.roomBookingError === 'skip: manual-hold'
+      const held = dryRun || stampedHold ? await manualHeld(b, built.payload) : null
+      // stamp manual-hold ไว้แล้ว แต่รอบนี้อ่านเดือนจากระบบกลางไม่ได้ = ตัดสินไม่ได้ → ไม่แตะ (ป้ายเดิมคือความจริงล่าสุด)
+      // ไม่ไหลไป syncRoomBooking ซึ่งน่าจะอ่านไม่ได้เหมือนกันแล้ว stamp ทับเป็น UNKNOWN = ป้าย "ห้องยังไม่ได้จอง" หลอก
+      if (stampedHold && !held && !monthRows.has(monthKey(b.shootDate))) {
+        out.failed.push({ code, status: 'UNKNOWN', message: 'อ่านระบบกลางไม่ได้ — คงสถานะจองมือเดิม ไม่แตะ' })
+        continue
+      }
       if (dryRun) {
-        // **preview ต้องไม่โกหก** — ของจริง `syncRoomBooking` จะเช็คก่อนว่าคนของงานนี้
-        // จองห้องเองไว้แล้วหรือยัง แล้วข้าม ถ้า dry-run ตัดจบตรงนี้เฉย ๆ มันจะรายงาน
-        // ว่า "จะจอง" ทั้งที่ของจริงไม่จอง — คนอ่าน preview เพื่อ**ตัดสินใจ** ฉะนั้น
-        // preview ที่ต่างจากของจริงคือ preview ที่ไม่ควรมี (บทเรียน v1.202.3)
-        const held = await manualHeld(b, built.payload)
         out.booked.push(held
           ? { code, bookingNo: `(ข้าม — ${held} จองห้องเองไว้แล้ว)` }
           : { code, bookingNo: '(จะจอง)' })
@@ -434,8 +450,7 @@ export async function reconcileRoomBookings(opts: {
       // 2026-11-23 — stamp manual-hold ไว้แล้วและยังถือมืออยู่จริง: ไม่นับเพดาน ไม่เรียก syncRoomBooking
       // เดิม writes++ ทุกชั่วโมง + GET เดือนต่อใบ ⇒ ≥max ใบแบบนี้หัวคิว = ใบหลังไม่มีวันถูกจอง
       // manualHeld ใช้เดือนที่อ่านแคชไว้ในรอบ · ถือมือหายไปแล้ว (null) → ไหลไปจองตามปกติ
-      if (b.roomBookingStatus === 'SKIPPED' && b.roomBookingError === 'skip: manual-hold'
-          && await manualHeld(b, built.payload)) continue
+      if (stampedHold && held) continue
       writes++
       // ผ่าน syncRoomBooking เท่านั้น — มันอ่านกลับก่อนยิงเสมอ (กันจองซ้ำ)
       const r = await syncRoomBooking(b.id)
