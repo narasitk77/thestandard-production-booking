@@ -178,6 +178,10 @@ Cmd: psql -U <user> -d <db> -A -F'|' -P pager=off -c "<SQL>"
 - ลบ = `files.update({ requestBody:{ trashed:true }})` เท่านั้น **ไม่ใช่ `files.delete`**
 - Drive MCP connector ของบัญชีส่วนตัวใช้แทนไม่ได้: มันลบไม่ได้ และไม่คืน `md5Checksum`
 
+**log ของแอป** — อ่านผ่าน Portainer logs API เท่านั้น: `GET /api/endpoints/2/docker/containers/production-booking-app/logs?stdout=1&stderr=1&timestamps=1&since=<unix>`
+- **ห้าม `tail /proc/1/fd/1` (หรือ `cat`) ในคอนเทนเนอร์** — stdout ของ PID 1 เป็น pipe ตัวที่ Docker อ่านเก็บ log ใครเปิดอ่านอีกตัวคือแย่งบรรทัดไปจาก Docker · ตัวอ่านที่ค้างไว้ตั้งแต่ 13 พ.ย. 2569 กินบรรทัดไปราวครึ่งหนึ่งของ stdout จนถึง 23 พ.ย. (log ที่ Portainer/Hermes เห็นหายไปครึ่งโดยไม่มีอะไรฟ้อง)
+- worker ยังมีชีวิตไหม ตัดสินจาก `system_heartbeats` (`SELECT key, at, note FROM system_heartbeats ORDER BY at`) และแถวใน `audit_logs` ที่งานนั้นเขียน — **ไม่ใช่จากการมีหรือไม่มีบรรทัดใน log**
+
 **ขอบเขตที่ถือมาตลอด**: SELECT ได้อิสระ · เขียนเมื่อผู้ใช้สั่งเท่านั้น ทำใน `BEGIN…COMMIT` เดียว และ**ต้องแทรกแถว `audit_logs` เอง** (id เป็น `text` ไม่มี default — ใช้ `gen_random_uuid()::text`) ไม่งั้นการแก้จะมองไม่เห็นจากประวัติในแอป
 
 ---
