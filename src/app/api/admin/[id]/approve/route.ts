@@ -322,8 +322,12 @@ export async function POST(
           // id is still empty; without this CAS the later persist OVERWROTE the
           // earlier id, leaving that event on the calendar as a duplicate
           // (ops report 2026-07-02: two events per booking, created ~3s apart).
+          // COMPLETED counts as "still approved": a booking approved after its shoot day is
+          // auto-completed by the next GET /api/bookings while this event is being created —
+          // a CONFIRMED-only CAS then deleted the fresh event and left the row PENDING with no
+          // event for good (SPT-OTH-261106-02, approved 8 Nov for a 6 Nov shoot).
           const saved = await prisma.booking.updateMany({
-            where: { id: params.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: null },
+            where: { id: params.id, status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, calendarEventId: null },
             data: {
               calendarEventId,
               calendarSyncStatus: 'OK',
