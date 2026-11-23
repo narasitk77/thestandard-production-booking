@@ -44,15 +44,15 @@ type Mode = 'single' | 'mix' | 'routine'
  *
  * Suspense ครอบเพราะ useSearchParams ต้องการ — ไม่มีแล้ว build จะเตือน
  */
-export default function NewBookingClient() {
+export default function NewBookingClient({ quRule = true }: { quRule?: boolean }) {
   return (
     <Suspense fallback={<div className="max-w-5xl mx-auto px-4 py-10 text-sm text-gray-400">กำลังโหลด…</div>}>
-      <NewBookingInner />
+      <NewBookingInner quRule={quRule} />
     </Suspense>
   )
 }
 
-function NewBookingInner() {
+function NewBookingInner({ quRule }: { quRule: boolean }) {
   const params = useSearchParams()
   const wantMix = params.get('mode') === 'mix'
   const prefillBooking = params.get('booking')?.trim() || ''
@@ -133,7 +133,7 @@ function NewBookingInner() {
       ) : isConsole && mode === 'routine' ? (
         <RoutinePlanner />
       ) : (
-        <BookingWizard />
+        <BookingWizard quRule={quRule} />
       )}
     </div>
   )

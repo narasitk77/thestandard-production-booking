@@ -7,8 +7,9 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 
 const require_ = createRequire(import.meta.url)
-const { msUntilNextRun } = require_('../../../scripts/reminders-worker.js') as {
+const { msUntilNextRun, quLogPart } = require_('../../../scripts/reminders-worker.js') as {
   msUntilNextRun: (now?: Date, hourBkk?: number) => number
+  quLogPart: (q: unknown) => string
 }
 const MIN = 60_000
 
@@ -36,4 +37,18 @@ test('ไม่มีเวลาไหนของวันที่การ�
     if (msUntilNextRun(at, 9) <= MIN) short++
   }
   assert.equal(short, 1, 'มีแค่นาทีเดียวต่อวัน (08:59 BKK) — ไม่ใช่ทุกครั้งที่ deploy')
+})
+
+// รอบ 2 (23 พ.ย.) — log ต้องบอกจำนวนใบที่ไม่มีใครถูกตาม ไม่ใช่แค่ pending/emailed/failed
+test('บรรทัด log ของ QU นับ noProducerEmail / producerInactive ด้วย', () => {
+  const line = quLogPart({
+    pending: 20, emailed: 3, failed: 0, skipped: false, producersDue: 3,
+    noProducerEmail: ['AGN-1', 'AGN-2'],
+    producerInactive: [{ producerEmail: 'phantawat.s@thestandard.co', bookingCodes: ['POD-8MH-260814-01'] }],
+  })
+  assert.equal(line, ' | qu: pending=20 emailed=3 failed=0 noProducerEmail=2 producerInactive=1')
+  // sweep ล้ม → ยังบอก ERROR เหมือนเดิม ไม่พังเพราะไม่มีลิสต์
+  assert.equal(quLogPart({ error: 'boom' }),
+    ' | qu: pending=undefined emailed=undefined failed=undefined noProducerEmail=undefined producerInactive=undefined ERROR=boom')
+  assert.match(quLogPart(undefined), /pending=undefined/)
 })

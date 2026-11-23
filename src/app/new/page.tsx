@@ -3,6 +3,7 @@ import NewBookingClient from '@/app/_components/NewBookingClient'
 import { getSession } from '@/lib/session'
 import { SURVEY_KEY } from '@/lib/survey'
 import { mustAnswerSurvey } from '@/lib/survey-db'
+import { quRuleEnabled } from '@/lib/qu-ref'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,5 +17,6 @@ export default async function NewBookingPage({ searchParams }: { searchParams?: 
     for (const [k, v] of Object.entries(searchParams || {})) for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) qs.append(k, x)
     redirect(`/survey?next=${encodeURIComponent('/new' + (qs.toString() ? `?${qs}` : ''))}`)
   }
-  return <NewBookingClient />
+  // สวิตช์กฎ QU (AGENCY_REF_QU_RULE) อ่านได้ฝั่ง server เท่านั้น — ส่งให้ฟอร์มตรวจตามกฎเดียวกับ API
+  return <NewBookingClient quRule={quRuleEnabled()} />
 }

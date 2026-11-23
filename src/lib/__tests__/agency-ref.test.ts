@@ -16,7 +16,7 @@ test('ของที่เคยหลุดเข้ามาจริงต�
   }
 })
 
-test('normalize: ตัดช่องว่าง + uppercase', () => {
+test('normalize: ตัดช่องว่าง + uppercase + เติมขีดหลัง QU (รอบ 2, 23 พ.ย.: QU4862 กับ QU-4862 ต้องเป็นค่าเดียว)', () => {
   assert.equal(normalizeQuRef(' qu-4289 '), 'QU-4289')
-  assert.equal(normalizeQuRef('QU 2811/2'), 'QU2811/2')
+  assert.equal(normalizeQuRef('QU 2811/2'), 'QU-2811/2')
 })

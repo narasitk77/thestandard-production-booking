@@ -12,7 +12,7 @@ import { normalizeFreelancers, splitLegacyFreelancers, freelancerRoleLabel } fro
 import { CameraMicTag } from '../_components/CameraMicTag'
 import NumberStepper from '@/app/_components/NumberStepper'
 import BookingRentals from '@/app/_components/BookingRentals'
-import { isQuPending } from '@/lib/qu-ref'
+import { needsRealQuRef } from '@/lib/qu-ref'
 import BookingHistoryPanel from '@/app/_components/BookingHistoryPanel'
 import { calendarGuestCheck } from '@/lib/calendar-guest-check'
 // v1.35.11 — UploadSection import removed; upload now lives at /upload?bookingId=X
@@ -1265,9 +1265,10 @@ export default function AdminEditPage({ params }: { params: { id: string } }) {
             {(booking.category === 'ADVERTORIAL' || booking.agencyRef) && (
               <div>
                 <div className="text-xs text-gray-400 mb-0.5">Agency Ref</div>
-                {/* v1.183 — ตัวยึด "ยังไม่มีเลข QU" ต้องอ่านออกทันทีว่ายังไม่ใช่เลขจริง */}
-                {isQuPending(booking.agencyRef) ? (
-                  <div className="text-amber-700">⏳ ยังไม่มีเลข QU ({booking.agencyRef}) — ต้องกลับมาเติมเลขจริง</div>
+                {/* v1.183 — ตัวยึด "ยังไม่มีเลข QU" ต้องอ่านออกทันทีว่ายังไม่ใช่เลขจริง
+                    ตัวตัดสินเดียวกับบอทเตือน/หน้าใบจอง (needsRealQuRef): ว่าง ตัวยึด หรือข้อความไม่มีเลข */}
+                {needsRealQuRef(booking.agencyRef) ? (
+                  <div className="text-amber-700">⏳ ยังไม่มีเลข QU{booking.agencyRef ? ` (${booking.agencyRef})` : ''} — ต้องกลับมาเติมเลขจริง</div>
                 ) : (
                   <div className="text-gray-800">{booking.agencyRef || '—'}</div>
                 )}

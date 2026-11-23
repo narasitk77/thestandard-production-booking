@@ -30,13 +30,14 @@ test('v1.188 — ตามจี้ทุกแบบที่พิมพ์ผ
 })
 
 test('urgency: ใกล้ถ่ายภายใน 3 วัน = urgent, เลยวันถ่ายแล้ว = normal', () => {
-  assert.equal(quUrgency(day(0), NOW), 'urgent')
-  assert.equal(quUrgency(day(3), NOW), 'urgent')
-  assert.equal(quUrgency(day(4), NOW), 'normal')
-  assert.equal(quUrgency(day(30), NOW), 'normal')
+  const u = (d: Date) => quUrgency({ shootDate: d }, NOW)
+  assert.equal(u(day(0)), 'urgent')
+  assert.equal(u(day(3)), 'urgent')
+  assert.equal(u(day(4)), 'normal')
+  assert.equal(u(day(30)), 'normal')
   // ถ่ายไปแล้ว: ยังต้องได้เลข แต่ไม่มีเส้นตายกองถ่าย → ไม่เร่ง
-  assert.equal(quUrgency(day(-1), NOW), 'normal')
-  assert.equal(quUrgency(day(-60), NOW), 'normal')
+  assert.equal(u(day(-1)), 'normal')
+  assert.equal(u(day(-60)), 'normal')
 })
 
 test('ไม่เคยเตือน = เตือนทันที', () => {
@@ -49,10 +50,46 @@ test('ปกติเตือนสัปดาห์ละครั้ง', ()
   assert.equal(quReminderDue(day(-7), 'normal', NOW), true, 'ครบ 7 วันแล้วเตือน')
 })
 
-test('ใกล้ถ่ายเร่งเป็นทุกวัน', () => {
+test('ใกล้ถ่ายเร่งเป็นทุกวัน — วันละครั้งตามปฏิทินกรุงเทพ', () => {
   assert.equal(quReminderDue(day(-1), 'urgent', NOW), true)
-  const halfDayAgo = new Date(NOW.getTime() - 12 * 3_600_000)
-  assert.equal(quReminderDue(halfDayAgo, 'urgent', NOW), false, 'ยังไม่ครบวันไม่ส่งซ้ำ')
+  // NOW = 10:00 BKK · 3 ชม.ก่อน = 07:00 BKK วันเดียวกัน → วันนี้เตือนไปแล้ว ไม่ส่งซ้ำ
+  const earlierToday = new Date(NOW.getTime() - 3 * 3_600_000)
+  assert.equal(quReminderDue(earlierToday, 'urgent', NOW), false, 'วันเดียวกันไม่ส่งซ้ำ')
+  // 12 ชม.ก่อน = 22:00 BKK เมื่อวาน → วันใหม่แล้ว ส่งได้ (เดิมนับ ms จึงรอให้ครบ 24 ชม.)
+  const lastNight = new Date(NOW.getTime() - 12 * 3_600_000)
+  assert.equal(quReminderDue(lastNight, 'urgent', NOW), true, 'คนละวันกรุงเทพ = ถึงกำหนด')
+})
+
+// รอบ 2 (23 พ.ย.) — เทียบ ms ทำให้ใบเร่ง "ทุกวัน" ได้เมลวันเว้นวัน และวันถ่ายไม่เคยเร่ง
+// ตัวเลขจริงจากพรอด: WLT-MNW-261120-01 ถ่าย 20 พ.ย. ประทับ 18 พ.ย. 02:00:13.258Z แล้วไม่มีเมลอีกเลย
+test('ประทับจริงของพรอด: รอบ 09:00 วันถัดไปที่มาก่อนประทับเดิมไม่กี่ ms ต้องถึงกำหนด', () => {
+  const stamped = new Date('2026-11-18T02:00:13.258Z')
+  const nextRun = new Date('2026-11-19T02:00:12.900Z') // ครบวันยังไม่ถึง 24 ชม. 0.358 วิ
+  assert.equal(quReminderDue(stamped, 'urgent', nextRun), true)
+  // weekly ก็นับวันเหมือนกัน: 7 วันปฏิทินพอดี แม้ขาดไม่กี่วินาที
+  assert.equal(quReminderDue(stamped, 'normal', new Date('2026-11-25T02:00:12.900Z')), true)
+  assert.equal(quReminderDue(stamped, 'normal', new Date('2026-11-24T02:00:12.900Z')), false)
+})
+
+test('วันถ่ายเองเร่ง (รอบ 02:00Z ของวันถ่าย @db.Date 00:00Z)', () => {
+  const shootDate = new Date('2026-11-20T00:00:00Z')
+  assert.equal(quUrgency({ shootDate }, new Date('2026-11-20T02:00:13Z')), 'urgent')
+  assert.equal(quUrgency({ shootDate }, new Date('2026-11-21T02:00:13Z')), 'normal', 'วันถัดไป = ถ่ายจบแล้ว')
+  // 17 พ.ย. 09:00 BKK = 3 วันก่อนถ่าย → เร่ง · 16 พ.ย. = 4 วัน → ปกติ
+  assert.equal(quUrgency({ shootDate }, new Date('2026-11-17T02:00:00Z')), 'urgent')
+  assert.equal(quUrgency({ shootDate }, new Date('2026-11-16T02:00:00Z')), 'normal')
+})
+
+test('งานหลายวันเร่งจนถึงวันถ่ายวันสุดท้าย ไม่ใช่หลุดตั้งแต่วันแรก', () => {
+  const shoot = { shootDate: new Date('2026-11-18T00:00:00Z'), shootEndDate: new Date('2026-11-21T00:00:00Z') }
+  assert.equal(quUrgency(shoot, new Date('2026-11-20T02:00:00Z')), 'urgent', 'กลางงาน')
+  assert.equal(quUrgency(shoot, new Date('2026-11-21T02:00:00Z')), 'urgent', 'วันสุดท้าย')
+  assert.equal(quUrgency(shoot, new Date('2026-11-22T02:00:00Z')), 'normal', 'จบแล้ว')
+  // งานยาวที่เริ่มอีก 2 วัน → เร่ง (นับจากวันแรก ไม่ใช่วันสุดท้าย)
+  const long = { shootDate: new Date('2026-11-22T00:00:00Z'), shootEndDate: new Date('2026-12-02T00:00:00Z') }
+  assert.equal(quUrgency(long, new Date('2026-11-20T02:00:00Z')), 'urgent')
+  // producerDue ใช้ shootEndDate จากแถวด้วย: เตือนไปเมื่อวาน งานยังถ่ายอยู่ → วันนี้ต้องได้อีก
+  assert.equal(producerDue([row({ ...shoot, quRemindedAt: new Date('2026-11-19T02:00:13Z') })], new Date('2026-11-20T02:00:12Z')), true)
 })
 
 const row = (over: Partial<QuPendingBooking>): QuPendingBooking => ({

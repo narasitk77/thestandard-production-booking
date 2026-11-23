@@ -57,7 +57,7 @@ export async function findBookingsMissingQuRef(): Promise<QuPendingBooking[]> {
       category: 'ADVERTORIAL',
     },
     select: {
-      bookingCode: true, agencyRef: true, shootDate: true, status: true,
+      bookingCode: true, agencyRef: true, shootDate: true, shootEndDate: true, status: true,
       producer: true, producerEmail: true, quRemindedAt: true, projectName: true, id: true,
     },
     orderBy: { shootDate: 'asc' },

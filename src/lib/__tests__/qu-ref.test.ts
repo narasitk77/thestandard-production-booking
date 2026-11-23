@@ -2,6 +2,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   isValidQuRef, isQuPending, isAcceptableQuRef, normalizeQuRef, quRefRejectMessage, QU_PENDING, agencyRefForEdit,
 } from '../qu-ref'
@@ -122,8 +124,61 @@ test('normalize เก็บตัวยึดตามที่พิมพ์ 
   assert.equal(normalizeQuRef(' qu-4289 '), 'QU-4289')
 })
 
+// รอบ 2 (23 พ.ย.) — ใบเสนอราคาเดียวกันถูกเก็บเป็น QU4862 (AGN-261116-01, -261124-01) และ QU-4862
+// (AGN-261117-01) · ค่าใหม่ต้องลงรูปเดียว
+test('normalize เติมขีดหลัง QU ทุกส่วนของรายการ — QU4862 กับ QU-4862 เป็นค่าเดียวกัน', () => {
+  assert.equal(normalizeQuRef('QU4862'), 'QU-4862')
+  assert.equal(normalizeQuRef(' qu 4609 '), 'QU-4609')
+  assert.equal(normalizeQuRef('QU4345, qu4406'), 'QU-4345,QU-4406')
+  assert.equal(normalizeQuRef('QU-4426-V1'), 'QU-4426-V1')
+  assert.equal(normalizeQuRef('QU1234TBC'), 'QU-1234TBC')
+  // ไม่ใช่ QU+ตัวเลข = ไม่แตะ
+  for (const v of ['1234', 'QUOTE-1', 'LIFE2601', 'TBC']) assert.equal(normalizeQuRef(v), v)
+  // ทางบันทึกจริง: ใส่ไม่มีขีดแล้วได้ค่ามีขีด · ค่าเก่าที่ตกกฎยังเทียบ "ไม่เปลี่ยน" ได้เหมือนเดิม
+  assert.deepEqual(agencyRefForEdit('QU4862', null, true), { value: 'QU-4862' })
+  // ผลการตัดสินไม่เปลี่ยน: รูปไม่มีขีดยังเป็นเลขจริง / ตัวยึดยังเป็นตัวยึด
+  assert.equal(isValidQuRef('QU4862'), true)
+  assert.equal(isQuPending('QU1234'), true)
+  assert.equal(isValidQuRef('QU1234'), false)
+})
+
 test('ข้อความตีกลับต้องบอกทางออก (ใส่ 1234) ไม่ใช่แค่บอกว่าผิด', () => {
   const msg = quRefRejectMessage('LIFE2601')
   assert.ok(msg.includes('1234'), msg)
   assert.ok(msg.includes('LIFE2601'), msg)
+})
+
+// รอบ 2 (23 พ.ย.) — "ใบนี้ยังไม่มีเลข QU จริง" เคยมีสามคำตอบ: /my-bookings + /dashboard/[id] ใช้ !isValidQuRef,
+// /admin/[id] ใช้ isQuPending, บอทเตือนใช้ needsRealQuRef · ตอนนี้มีตัวเดียวใน qu-ref.ts
+test('needsRealQuRef อยู่ที่ qu-ref ตัวเดียว — qu-reminder export ตัวเดียวกัน ไม่ใช่สำเนา', async () => {
+  const ref = await import('../qu-ref')
+  const rem = await import('../qu-reminder')
+  assert.equal(rem.needsRealQuRef, ref.needsRealQuRef)
+  // เคสที่หน้าแอดมินเคยตอบต่าง: ข้อความไม่มีเลข / ว่าง = ยังไม่มีเลข (isQuPending ตอบ false ทั้งคู่)
+  for (const v of ['รอ AE แจ้งค่ะ', '', null]) {
+    assert.equal(isQuPending(v), false, String(v))
+    assert.equal(ref.needsRealQuRef(v), true, String(v))
+  }
+})
+
+test('แบนเนอร์ QU ทั้งสามหน้าใช้ needsRealQuRef ไม่ใช่ predicate ตัวอื่น', () => {
+  for (const f of ['src/app/my-bookings/page.tsx', 'src/app/dashboard/[id]/page.tsx', 'src/app/admin/[id]/page.tsx']) {
+    const src = readFileSync(join(process.cwd(), f), 'utf8')
+    assert.match(src, /import \{ needsRealQuRef \} from '@\/lib\/qu-ref'/, f)
+    assert.match(src, /needsRealQuRef\(\s*(b|booking)\.agencyRef\s*\)/, f)
+    assert.ok(!/\b(isValidQuRef|isQuPending)\b/.test(src), `${f} ยังมี predicate QU ตัวอื่น`)
+  }
+})
+
+// รอบ 2 (23 พ.ย.) — AGENCY_REF_QU_RULE=0 ปลดแค่ API: ฟอร์มจองบังคับกฎเองเสมอ (step 4 ไปต่อไม่ได้)
+// env อ่านในเบราว์เซอร์ไม่ได้ จึงต้องส่งจาก server page ลงไปถึงตัวตรวจ step 4 ครบทุกทอด
+test('สวิตช์กฎ QU ส่งจาก /new ถึงตัวตรวจ step 4 ของฟอร์มจอง', () => {
+  const read = (f: string) => readFileSync(join(process.cwd(), f), 'utf8')
+  assert.match(read('src/app/new/page.tsx'), /<NewBookingClient quRule=\{quRuleEnabled\(\)\} \/>/)
+  assert.match(read('src/app/_components/NewBookingClient.tsx'), /<BookingWizard quRule=\{quRule\} \/>/)
+  const wiz = read('src/app/_components/booking/BookingWizard.tsx')
+  assert.match(wiz, /export default function BookingWizard\(\{ quRule = true \}/)
+  assert.match(wiz, /if \(quRule && isAdvertorialBooking\) \{\s*if \(agencyRef\.trim\(\) === ''\)/)
+  // ข้อความแดงใต้ช่องก็ต้องเงียบเมื่อปิดกฎ ไม่งั้นฟอร์มบอกว่าผิดแต่ให้ผ่าน
+  assert.match(wiz, /\{quRule && agencyRef\.trim\(\) !== '' && !isAcceptableQuRef\(agencyRef\)/)
 })
