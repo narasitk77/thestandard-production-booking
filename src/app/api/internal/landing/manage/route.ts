@@ -313,8 +313,13 @@ export async function GET(request: NextRequest) {
     // r3 — but only when ops was alerted for it (new set / 48 h), not every evening; sound-only jobs never count
     const nf = !dryRun && allowed.isWorker ? await alertNoFootage(noFootage) : { list: noFootage, alerted: false }
     const worth = changed > 0 || r.createErrors > 0 || r.removeErrors > 0 || cf.errors > 0 || r.cancelledWithFiles.length > 0 || nf.alerted
-    if ((allowed.isWorker && worth) || forceReport) {
+    // maint 23 Nov 2026 — a dry run is a preview: the automatic report is the real run's only (a worker-secret dryRun=1
+    // — landing_call.py — used to mail "[Landing] … สร้าง N · ลบ M" for what it only planned, bug class 5). ?report=1
+    // still forces it, marked DRY RUN with "จะ" (would) counts.
+    if ((allowed.isWorker && !dryRun && worth) || forceReport) {
+      const would = dryRun ? 'จะ' : ''
       const text = [
+        ...(dryRun ? ['(DRY RUN — แผนเท่านั้น ยังไม่ได้สร้าง/ลบอะไรจริง)', ''] : []),
         ...(r.cancelledWithFiles.length ? [cancelledLandingText(r.cancelledWithFiles), ''] : []),
         ...(nf.list.length ? [...noFootageLines(nf.list), ''] : []),
         `Landing lifecycle — ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''}`,
@@ -326,7 +331,7 @@ export async function GET(request: NextRequest) {
         '',
         ...r.actions.slice(0, 60),
       ].join('\n')
-      try { await sendEmail({ to: reportEmail(), subject: `[Landing] ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''} — สร้าง ${r.created} · ลบ ${r.removedPastEmpty}`, text, html: text.replace(/\n/g, '<br>') }) }
+      try { await sendEmail({ to: reportEmail(), subject: `${dryRun ? '(DRY RUN) ' : ''}[Landing] ${r.targetDay}${r.targetDayEnd !== r.targetDay ? ` → ${r.targetDayEnd}` : ''} — ${would}สร้าง ${r.created} · ${would}ลบ ${r.removedPastEmpty}`, text, html: text.replace(/\n/g, '<br>') }) }
       catch (e: any) { console.error('[landing] report email failed (non-fatal):', e?.message || e) }
     }
     return NextResponse.json({ ...r, cancelledFolders: cf })
