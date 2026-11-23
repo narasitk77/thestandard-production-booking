@@ -4366,4 +4366,6 @@ problem and not a deployment problem.
   ตรวจ: กล่องมี 1,990 ไฟล์ 43.35 GB (1,420 MXF) · โฟลเดอร์ landing ว่าง 0 ไฟล์
 - footage-ready dry-run: จะแจ้ง NWS-GLF-261117-01 / KND-TMH-261117-01 / TSS-TSL-261019-01 / WLT-NGI-261116-01 · **ยังไม่ส่ง** (NWS-GLF = FINAL ไม่ส่ง · ที่เหลือรอนัท) ·
   POP-7TG-261116-01 + LIF-ECO-261118-01 ติด MEDIAPRO
+- TSS-SCI-261209-01: `locationId` ยังเป็น null จากก่อน v1.291 (กฎตัด "(TSD)" ใช้ตอนบันทึกใบเท่านั้น) → alert 18:15 ยังเขียนว่าชื่อไม่ตรง · ตั้ง `tsd-studio-2` + audit
+  `booking.location_id_backfilled` (18:38) · `location-backfill?dryRun=1` willSet 0 = ไม่มีใบอื่นค้างแบบนี้ · reconciler จะลอง Studio 2 เอง (เต็ม = CONFLICT ลองใหม่ทุก 6 ชม.)
 - รอตัดสิน: ส่งแจ้งฟุตเทจรายใบ · BK-0404 War Room 26 พ.ย. ค้างจากใบยกเลิก · TSS-SCI-261209-01 สตูดิโอเต็ม 9 ธ.ค. · CANCEL_NOTIFY_EMAIL · webhook ops · ไล่ QU 20 ใบ · ความปลอดภัย
