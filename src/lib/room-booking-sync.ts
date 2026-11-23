@@ -12,6 +12,7 @@ import {
   ownHoldCoverage, ownRoomRows, overlaps, ROOM_BOOKING_BASE_URL,
 } from './room-booking'
 import { EPISODE_ORDER } from './episode-order'
+import { UNRESOLVED_SKIPS, unresolvedRoomText } from './room-badge'
 
 /**
  * จองห้องในระบบกลางให้คิวถ่ายหนึ่งใบ — **at-most-once**
@@ -435,11 +436,17 @@ export function resyncRoomForBooking(bookingId: string, reason: string): void {
     try {
       const b = await prisma.booking.findUnique({
         where: { id: bookingId },
-        select: { roomBookingNo: true, bookingCode: true, status: true, deletedAt: true },
+        select: {
+          roomBookingNo: true, bookingCode: true, status: true, deletedAt: true,
+          roomBookingStatus: true, roomBookingError: true, locationName: true,
+        },
       })
-      // ไม่เคยจองห้องไว้ → ไม่มีอะไรต้องคืน ปล่อยให้เส้นทางจองปกติทำงาน
-      if (!b?.roomBookingNo) return
-      if (b.deletedAt || b.status === 'CANCELLED') return  // เส้นทางยกเลิกดูแลอยู่แล้ว
+      if (!b || b.deletedAt || b.status === 'CANCELLED') return  // เส้นทางยกเลิกดูแลอยู่แล้ว
+      // ไม่มีห้องให้คืน — ปกติปล่อยให้เส้นทางจองปกติ (reconcile รายชั่วโมง) ทำงาน ยกเว้นสองสถานะที่ reconcile ไม่แตะทันที
+      if (!b.roomBookingNo) {
+        await retryUnbookedNow(bookingId, b, reason)
+        return
+      }
 
       // review fix — กันซ้อนต่อใบจอง: คนกดบันทึกรัว ๆ หรือ resync ชนกับตัวคืนสภาพ
       // รายชั่วโมง จะได้ "คืนห้องสองครั้ง จองใหม่สองครั้ง" ในระบบที่ไม่มี idempotency
@@ -484,10 +491,53 @@ export function resyncRoomForBooking(bookingId: string, reason: string): void {
         entityType: 'Booking', entityId: bookingId, bookingCode: b.bookingCode,
         changes: { reason, released: r.status, rebooked: s.status, ...('bookingNo' in s ? { bookingNo: s.bookingNo } : {}), ...('message' in s ? { message: s.message } : {}) },
       })
+      // 2026-11-23 — ห้องเดิมคืนไปแล้ว แต่ตารางใหม่ประกอบเป็นห้อง/เวลาไม่ได้ = ใบนี้ไม่มีห้อง และไม่มีอะไรจองให้
+      // (TSS-SCI-261209-01: แก้สถานที่เป็น 'Studio 2 (TSD)' พิมพ์เอง → BK-0555 ถูกคืน → SKIPPED no-location เงียบทุกชั้น)
+      if (s.status === 'SKIPPED' && UNRESOLVED_SKIPS.has(s.reason)) {
+        const code = b.bookingCode || bookingId
+        const a = await alertOps(`room-lost:${code}`, `[probook] ${code} ห้องเดิมถูกคืนแล้ว แต่ตารางใหม่จองห้องไม่ได้`,
+          `🚪 ${code} ห้องเดิม${r.status === 'CANCELLED' ? ` (${r.bookingNo})` : ''} ถูกคืนแล้วหลังแก้ใบ (${reason})\n` +
+          `   แต่ตารางใหม่จองห้องไม่ได้: ${unresolvedRoomText(s.reason, b.locationName)}\n` +
+          `   ใบนี้ไม่มีห้อง — แก้ใบให้เลือกห้องจากรายการ / กรอกเวลาให้ครบ หรือจองมือที่ ${ROOM_BOOKING_BASE_URL}/booking`)
+        if (a.attempted && !a.delivered) console.error(`[room-booking] room-lost ${code}: ops alert reached no channel`)
+      }
     } catch (e: any) {
       console.error('[room-booking] resyncRoomForBooking error:', e?.message || e)
     }
   })()
+}
+
+/**
+ * 2026-11-23 — ใบที่ยังไม่มีห้องเพราะ **ห้องไม่ว่าง (CONFLICT)** หรือ **คนของงานจองมือไว้ (manual-hold)** แล้วเจ้าของแก้
+ * ห้อง/เวลา: เดิม resync ออกทันที (ไม่มีเลขให้คืน) และ reconcile ข้าม CONFLICT ที่ยังไม่ครบ 6 ชม. ⇒ ตารางใหม่ที่ว่างแล้ว
+ * ต้องรอถึง 6 ชม. ถึงจะได้ห้อง · การจองมือที่ไม่ครอบเวลาใหม่ก็ไม่มีใครรู้จนกว่า reconcile จะวนมา
+ * → ลองทันทีผ่าน syncRoomBooking (อ่านกลับก่อนยิงเสมอ ไม่จองซ้ำ และ stamp roomBookingAt ใหม่)
+ * จองสิทธิ์ด้วย UPDATE เดียวแบบเส้นหลัก (RESYNCING) — กดบันทึกรัวสองครั้ง = POST สองครั้ง = จองซ้ำ ในระบบที่ไม่มี idempotency
+ * สถานะอื่น (SKIPPED อื่น ๆ / UNKNOWN / ไม่มีสถานะ) reconcile รายชั่วโมงหยิบเองอยู่แล้ว
+ */
+async function retryUnbookedNow(
+  bookingId: string,
+  b: { bookingCode: string | null; roomBookingStatus: string | null; roomBookingError: string | null },
+  reason: string,
+): Promise<void> {
+  const retry = b.roomBookingStatus === 'CONFLICT'
+    || (b.roomBookingStatus === 'SKIPPED' && b.roomBookingError === 'skip: manual-hold')
+  if (!retry || !roomBookingEnabled()) return
+  const claimed = await prisma.booking.updateMany({
+    where: { id: bookingId, roomBookingNo: null, roomBookingStatus: b.roomBookingStatus, roomBookingError: b.roomBookingError },
+    data: { roomBookingStatus: RESYNC_MARK, roomBookingAt: new Date() },
+  })
+  if (claimed.count === 0) {
+    console.warn(`[room-booking] resync ซ้อน ${b.bookingCode} — ข้ามรอบนี้ (${reason})`)
+    return
+  }
+  const s = await syncRoomBooking(bookingId)
+  logAudit({
+    actorEmail: 'room-booking', action: 'booking.room_resynced',
+    entityType: 'Booking', entityId: bookingId, bookingCode: b.bookingCode,
+    changes: { reason, released: 'NONE', was: b.roomBookingStatus, rebooked: s.status,
+      ...('bookingNo' in s ? { bookingNo: s.bookingNo } : {}), ...('message' in s ? { message: s.message } : {}) },
+  })
 }
 
 /**
