@@ -46,8 +46,10 @@ next-env.d.ts
 # local-only test override (AUTH_DISABLED) — never commit
 docker-compose.override.yml
 
-# claude code local settings (personal, not team-shared)
-/.claude/settings.local.json
+# claude code local state (personal, not team-shared): settings.local.json, launch.json, worktrees/.
+# Nothing under .claude/ is tracked; leaving it untracked kept the nightly check's clean-tree guard
+# from pulling or committing since 2 Oct 2026.
+/.claude/
 
 # กฎเฉพาะเครื่อง (มีปลายทางบอทภายใน) — รีโปนี้ public
 CLAUDE.local.md

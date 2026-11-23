@@ -40,7 +40,12 @@ mock.module('../db', {
 mock.module('../audit', { namedExports: { logAudit: async (a: any) => { audits.push(a) } } })
 mock.module('../ops-alert', { namedExports: { alertOps: async (...a: any[]) => { alerts.push(a); return { attempted: true, delivered: true } } } })
 mock.module('../google-sheets', { namedExports: { updateBookingRow: async () => 'updated' } })
-const WANT = { startTime: '2026-11-20T13:00:00+07:00', endTime: '2026-11-20T18:00:00+07:00' }
+let repairCalls: any[] = []
+let repairImpl: () => Promise<any> = async () => ({ candidates: 0 })
+mock.module('../sheet-row-repair', {
+  namedExports: { repairMissingSheetRows: async (o: any) => { repairCalls.push(o); return repairImpl() } },
+})
+const WANT ={ startTime: '2026-11-20T13:00:00+07:00', endTime: '2026-11-20T18:00:00+07:00' }
 mock.module('../google-calendar', {
   namedExports: {
     computeEventTimes: () => WANT,
@@ -68,6 +73,7 @@ beforeEach(() => {
   event = { exists: true, attendees: ['crew@x.co', 'pro@x.co', 'copro@x.co'], htmlLink: null, start: WANT.startTime, end: WANT.endTime }
   mainRows = []; sweepRows = []; updates = []; audits = []; alerts = []; detailsCalls = []; created = []
   deleteOk = true; detailsOk = true; lastDriftAudit = null
+  repairCalls = []; repairImpl = async () => ({ candidates: 0 })
 })
 
 test('pure time drift (event moved by hand in Google) → reported, NOT reverted', async () => {
@@ -255,4 +261,26 @@ test('removeCancelledBookingEvent success resets the status only on its own FAIL
   assert.match(u.where.calendarSyncError, /ลบ event ในปฏิทินไม่สำเร็จ/)
   assert.equal(u.data.calendarSyncStatus, null)
   assert.equal(u.data.calendarEventId, null)
+})
+
+// maint 23 Nov 2026 — the Bookings-tab row repair rides this 10-minute tick (sheet-row-repair.ts)
+test('bulk tick runs the sheet-row repair with the same dryRun/actor and returns its result', async () => {
+  repairImpl = async () => ({ candidates: 1, append: [{ code: 'A-01', rowIndex: 9 }] })
+  const r = await mod.reconcileCalendarGuests({ actorEmail: 'calendar-reconcile-worker' })
+  assert.deepEqual(repairCalls, [{ dryRun: undefined, actorEmail: 'calendar-reconcile-worker' }])
+  assert.deepEqual(r.sheetRows, { candidates: 1, append: [{ code: 'A-01', rowIndex: 9 }] })
+  await mod.reconcileCalendarGuests({ dryRun: true })
+  assert.equal(repairCalls[1].dryRun, true)
+})
+
+test('a repair that throws never fails the calendar pass — logged as a route error', async () => {
+  repairImpl = async () => { throw new Error('DB down') }
+  const seen: string[] = []
+  const e = console.error
+  console.error = (...a: any[]) => { seen.push(a.join(' ')) }
+  try {
+    const r = await mod.reconcileCalendarGuests({})
+    assert.equal(r.sheetRows, undefined)
+  } finally { console.error = e }
+  assert.ok(seen.some(l => /route error: sheet-row repair threw: DB down/.test(l)), seen.join('\n'))
 })

@@ -13,6 +13,7 @@ import { updateBookingRow } from './google-sheets'
 import { bookingCalendarAttendees } from './calendar-attendees'
 import { alertOps } from './ops-alert'
 import { EPISODE_ORDER } from './episode-order'
+import { repairMissingSheetRows, type SheetRepairResult } from './sheet-row-repair'
 
 const CANCELLED_EVENT_DELETE_FAILED =
   'งานถูกยกเลิก/ลบแล้ว แต่ลบ event ในปฏิทินไม่สำเร็จ — event ยังอยู่ในปฏิทินของทุกคน · reconciler ลองลบใหม่ทุก 10 นาที'
@@ -252,6 +253,8 @@ export type ReconcileResult = {
   truncated?: boolean
   /** ใบที่ยกเลิก/ลบแล้วแต่ยังถือ event อยู่ (ลบไม่สำเร็จตอนยกเลิก) — ดู sweepCancelledEvents */
   cancelledEvents?: { found: number; deleted: number; failed: number }
+  /** Bookings-tab rows a failed create-time append left missing — see sheet-row-repair.ts */
+  sheetRows?: SheetRepairResult
 }
 
 const DEFAULT_LIMIT = 200   // v1.233 — 65 ใบเข้าเงื่อนไขวันนี้ cap 50 = 15 ใบท้ายไม่เคยถูกแตะ
@@ -527,8 +530,11 @@ async function processBooking(
       // v1.146 review fix — also re-check status/deletedAt (matches approve.ts's
       // CAS): a booking cancelled/soft-deleted while this event was being
       // created must not get the fresh event attached to it.
+      // COMPLETED counts as still approved (same as the approve route): this walk takes past-shoot
+      // CONFIRMED rows first, and a GET /api/bookings auto-completing one mid-create made the CAS
+      // miss → the fresh event was deleted and the row, now COMPLETED, was never read again.
       const saved = await prisma.booking.updateMany({
-        where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: null },
+        where: { id: booking.id, status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, calendarEventId: null },
         data: {
           calendarEventId: eventId,
           // v1.32.2 — record sync state alongside the event id so UI
@@ -612,8 +618,9 @@ async function processBooking(
       // v1.146 review fix — also re-check status/deletedAt (matches approve.ts's
       // CAS): a booking cancelled/soft-deleted mid-recreate must not get the
       // fresh event attached to it.
+      // COMPLETED still approved — see the create CAS above
       const savedRe = await prisma.booking.updateMany({
-        where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: booking.calendarEventId },
+        where: { id: booking.id, status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, calendarEventId: booking.calendarEventId },
         data: {
           calendarEventId: eventId,
           calendarSyncStatus: 'OK',
@@ -788,8 +795,9 @@ async function processBooking(
         // create/recreate paths above. A booking cancelled/soft-deleted while
         // the attendees-patch retry was in flight could get this fresh event
         // attached to it, with no cleanup path ever touching it afterward.
+        // COMPLETED still approved — see the create CAS above
         const savedPatchFail = await prisma.booking.updateMany({
-          where: { id: booking.id, status: 'CONFIRMED', deletedAt: null, calendarEventId: oldEventId },
+          where: { id: booking.id, status: { in: ['CONFIRMED', 'COMPLETED'] }, deletedAt: null, calendarEventId: oldEventId },
           data: {
             calendarEventId: eventId,
             calendarSyncStatus: 'OK',
@@ -997,6 +1005,14 @@ export async function reconcileCalendarGuests(options: {
   }
 
   await sweepCancelledEvents(result, options)
+  // Rides this tick for its cadence (10 min, in the web process that owns the append queue) — it is
+  // not a calendar job, so its own failure never fails the calendar pass. Failures alert inside it;
+  // a throw (DB down) gets a line Hermes' BAD_RE catches.
+  result.sheetRows = await repairMissingSheetRows({ dryRun: options.dryRun, actorEmail: options.actorEmail })
+    .catch((e: any) => {
+      console.error('[calendar-reconcile] route error: sheet-row repair threw:', e?.message || e)
+      return undefined
+    })
   return result
 }
 

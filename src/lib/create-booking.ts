@@ -9,7 +9,8 @@ import { resolveLocationId } from '@/lib/location-resolve'
 import { generateEpisodeId, parseEpisodeId, formatShootDateForId, progSegmentForId } from '@/lib/episode-id'
 import { normalizeBuddhistYear } from '@/lib/thai-date'
 import { getOutlet, getProgram } from '@/lib/data'
-import { appendBookingRow } from '@/lib/google-sheets'
+import { appendBookingRow, sheetsWriteConfigured, type BookingRow } from '@/lib/google-sheets'
+import { alertOps } from '@/lib/ops-alert'
 import { cleanEmailList } from '@/lib/email-list'
 import { listProjectEpisodes } from '@/lib/dashboard-episodes'
 import { logAudit } from '@/lib/audit'
@@ -512,22 +513,10 @@ export async function createBookingFromPayload(
     // Cols AE–AI (Delivered At/By, Cancel Reason, Episode Titles, Drive Box
     // ID) ride the same spread: fresh bookings carry them null → blank cells,
     // except Episode Titles which appendBookingRow joins from the episodes.
-    appendBookingRow({
+    appendNewBookingRow({
       ...booking,
       shootDate: booking.shootDate,
       createdAt: booking.createdAt,
-    }).then(rowIndex => {
-      if (rowIndex) {
-        prisma.booking.update({ where: { id: booking.id }, data: { sheetRowIndex: rowIndex } })
-          .catch(e => console.error('[sheet-append] เขียน sheetRowIndex ไม่สำเร็จ', booking.bookingCode, e?.message || e))
-      } else {
-        // v1.237 — `null` แปลว่า append ไม่สำเร็จ (โควตา/creds/หมดเวลา) และเดิม
-        // เส้นนี้เงียบสนิท: ใบจองขึ้นในแอปครบ แต่ชีทไม่มีแถว ไม่มี error ที่ไหนเลย
-        // จนกว่าจะมีคนไปนั่งเทียบชีทกับ DB ด้วยมือ (เกิดจริง 2026-09-23 หาย 12 แถว)
-        // ยังไม่ await เหมือนเดิม — แค่ต้อง **ดัง** พอให้ log scan เจอ
-        console.error('[sheet-append] ไม่ได้แถวในชีท', booking.bookingCode || booking.id,
-          '— ใบจองอยู่ใน DB แต่ไม่มีแถวในชีท ซ่อมด้วย POST /api/admin/backfill-bookings-sheet')
-      }
     }).catch(e => console.error('[sheet-append] ล้ม', booking.bookingCode || booking.id, e?.message || e))
   }
 
@@ -550,4 +539,34 @@ export async function createBookingFromPayload(
   }).catch(() => {})
 
   return { ok: true, booking }
+}
+
+/**
+ * The new booking's Bookings-tab row, not awaited by the create (a slow Sheets call must not hold the
+ * request). v1.237 made a failed append loud in the log only, and nothing retried it: 3 bookings lost
+ * their row in the 60 days to 13 Nov 2026, found by comparing sheet and DB by hand. A failure now also
+ * reaches ops, and sheet-row-repair.ts (calendar reconciler, every 10 min) appends the row once the
+ * booking is 5 minutes old.
+ */
+export async function appendNewBookingRow(booking: BookingRow): Promise<void> {
+  const code = booking.bookingCode || booking.id
+  const rowIndex = await appendBookingRow(booking).catch((e: any) => {
+    console.error('appendBookingRow threw:', e?.message || e)
+    return null
+  })
+  if (!rowIndex) return sheetAppendFailed(code)
+  await prisma.booking.update({ where: { id: booking.id }, data: { sheetRowIndex: rowIndex } })
+    .catch(e => console.error('[sheet-append] เขียน sheetRowIndex ไม่สำเร็จ', code, e?.message || e,
+      '— แถวอยู่ในชีทแล้ว sheet-row-repair จับคู่จากคอลัมน์ A ให้'))
+}
+
+async function sheetAppendFailed(code: string): Promise<void> {
+  console.error('[sheet-append] ไม่ได้แถวในชีท', code,
+    '— ใบจองอยู่ใน DB แต่ไม่มีแถวในชีท · sheet-row-repair เติมให้ในรอบ calendar-reconcile ถัดไป')
+  if (!sheetsWriteConfigured()) return // sheets are off in this process (dev / staging): no row is expected
+  await alertOps('sheet-append', `⚠️ ใบจองไม่ลงชีต Bookings — ${code}`,
+    `สร้างใบ ${code} แล้ว แต่ append แถวในแท็บ Bookings ไม่สำเร็จ (โควตา/creds/หมดเวลา — ดู log "appendBookingRow error") ` +
+    `— PMDC/Airtable ยังไม่เห็นงานนี้\n` +
+    `ระบบเติมแถวให้เองในรอบ calendar-reconcile ถัดไป (ใบที่สร้างเกิน 5 นาที · ทุก 10 นาที) ถ้าเติมไม่ได้จะเตือน "ซ่อมแถวชีต Bookings ไม่สำเร็จ" อีกที\n` +
+    `(เตือนนี้ไม่เกินหนึ่งครั้งต่อ 6 ชม. — ใบอื่นที่ล้มในช่วงเดียวกันไม่ถูกเตือนซ้ำ แต่ถูกซ่อมด้วยรอบเดียวกัน)`)
 }

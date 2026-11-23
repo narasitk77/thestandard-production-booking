@@ -106,12 +106,16 @@ export async function GET(request: NextRequest) {
     results.push({ code: p.code, plan: p.plan, ...(r.action === 'off' ? { action: 'off' } : r) })
   }
   const failed = results.filter(r => 'ok' in r && r.ok === false).length
-  logAudit({
-    actorEmail: 'mix-calendar-sync',
-    action: 'mix.calendar_sync',
-    entityType: 'MixJob',
-    entityId: 'bulk',
-    changes: { calendarId, counts, failed, results: results.slice(0, 50) },
-  })
+  // A run that only re-patched healthy events is not news: it wrote one row an hour (33% of
+  // audit_logs since 28 Sep, all MIX-004). Creates, deletes and any failure are still audited.
+  if (counts.create + counts.delete + failed > 0) {
+    logAudit({
+      actorEmail: 'mix-calendar-sync',
+      action: 'mix.calendar_sync',
+      entityType: 'MixJob',
+      entityId: 'bulk',
+      changes: { calendarId, counts, failed, results: results.slice(0, 50) },
+    })
+  }
   return answer(dryRun, { ok: failed === 0, dryRun, calendarId, calendarSummary, counts, failed, results, truncated: rows.length === LIMIT })
 }
