@@ -4349,3 +4349,21 @@ problem and not a deployment problem.
   14:21:42 ครบสามชั้น 1.289.0 in-sync · ตรวจ: env ในคอนเทนเนอร์ AUTOAPPLY=1 · POST {auto} ตอบ autoApplyEnabled:true drift [] · สคริปต์ Hermes --dry-run เงียบ
 - ⚠️ **ถอยต่ำกว่า v1.289 ต้องตั้ง `EPISODE_SYNC_AUTOAPPLY=0` ก่อน** (อิมเมจเก่าแก้เองด้วยกฎชื่อตอนอย่างเดียว)
 - ยังไม่ได้พิสูจน์บน prod: ทางเขียนอัตโนมัติ (ไม่มีคู่ให้แก้วันนี้) — ครั้งแรกคือคืนหลัง PMDC retype ครั้งถัดไป · ข้อขอปุ๊ก (ยังไม่ส่ง): ให้ ep-retype เขียน Previous IDs หลัง Lark readback
+
+## 2026-11-23 (เย็น) — v1.291.0 เมนเทนหนัก 22–23 พ.ย. (รวม v1.290.0) · DEPLOYED `sha-a7f5721` (18:14) + ซ่อมข้อมูลหลัง deploy
+นัท 22 พ.ย.: *"เชคทุกระบบ เชคฟุต เชคเมลส่งฟุต เชคเลข QU เชคระบบห้อง เมนเทนหนักๆ"* → 23 พ.ย. *"จัดได้เลย"* (deploy + ซ่อมข้อมูล + แผนฟุตเทจที่เสนอไว้)
+- deploy: `deploy.py a7f5721` · backup `backup-2026-11-23T110915.sql.gz` · จุดถอย `sha-742c671` (v1.289.0 — ถอยต่ำกว่านั้นต้องตั้ง `EPISODE_SYNC_AUTOAPPLY=0`) ·
+  ตรวจ env ในคอนเทนเนอร์: AUTOAPPLY=1 · AGENCY_REF_QU_RULE=1 · URL ห้อง = hub · worker ขึ้นครบ
+- ผลแรกบนพรอด (ตามที่ออกแบบ): ops alert 18:15 TSS-SCI-261209-01 "Studio 2 (TSD)" ไม่ตรงห้อง (วันละครั้ง) · 18:28 `nas.folder_vanished` 11 ใบ = alert ครั้งเดียว ·
+  ทั้งสองไปทางเมล (lark:false — ยังไม่มี webhook ops)
+- ชีต Bookings: backfill Pass 4 เติม AJ–AR 346 แถว error 0 (สุ่ม AP9–AP14 ตรง DB) · ซ่อม H/I/K (Call/Wrap/Location) ที่ไม่ตรง DB 39 แถว 66 ช่อง → อ่านซ้ำ diff 0
+- เลข QU ในคำอธิบาย event ปฏิทิน: ตั้งคิวดันซ้ำ 44 ใบ (audit `calendar.qu_description_repush_queued`) → reconciler ทำ 20 ใบ/รอบ (`sweepCompletedDescriptionRetries`)
+  18:25 = 21 · 18:35 = +20 · เหลือ 3 ให้รอบ 18:45 · ทุกแถว `sendUpdates:none` (ไม่ส่งเมลหาแขก)
+- Landing (ทิ้งลงถังขยะ กู้ได้ 30 วัน · manifest `footage-check/audit-2026-11-12/plan-trash-delivered.applied.20261123-182634.json`):
+  TSS-TSL-261016-01 โฟลเดอร์ซ้ำ · POP-PIV-261007-02 โฟลเดอร์ซ้ำ 615 ไฟล์ (ซาก sync storm — ทุกไฟล์มี md5 คู่ในกล่อง 48 ไฟล์) · เปลือกว่าง Walking English EP.9 ·
+  KND-TMH ยังไม่แตะ
+- PM-PMG-260916-01 (หลุดหน้าต่าง merge 45 วัน): dry-run seen 1988 / dup 0 / conflict 0 → รันจริงผ่าน `video-merge/run?code=` movedFolders 1 error 0 ·
+  ตรวจ: กล่องมี 1,990 ไฟล์ 43.35 GB (1,420 MXF) · โฟลเดอร์ landing ว่าง 0 ไฟล์
+- footage-ready dry-run: จะแจ้ง NWS-GLF-261117-01 / KND-TMH-261117-01 / TSS-TSL-261019-01 / WLT-NGI-261116-01 · **ยังไม่ส่ง** (NWS-GLF = FINAL ไม่ส่ง · ที่เหลือรอนัท) ·
+  POP-7TG-261116-01 + LIF-ECO-261118-01 ติด MEDIAPRO
+- รอตัดสิน: ส่งแจ้งฟุตเทจรายใบ · BK-0404 War Room 26 พ.ย. ค้างจากใบยกเลิก · TSS-SCI-261209-01 สตูดิโอเต็ม 9 ธ.ค. · CANCEL_NOTIFY_EMAIL · webhook ops · ไล่ QU 20 ใบ · ความปลอดภัย
