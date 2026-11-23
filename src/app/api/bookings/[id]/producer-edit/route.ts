@@ -212,6 +212,21 @@ export async function PATCH(
       }).catch(e => console.error('[producer-edit] updateBookingRow (agencyRef) error:', e?.message || e))
     }
 
+    // Call Time / Wrap Time / Location (cols H/I/K) — same rule as the admin PATCH: the
+    // row PMDC reads used to keep the create-time values after an edit. A miss is loud.
+    if (fieldChanges.callTime || fieldChanges.estimatedWrap || fieldChanges.locationName) {
+      const code = booking.bookingCode || booking.id
+      const schedCells = { callTime: booking.callTime, wrapTime: booking.estimatedWrap || '', location: booking.locationName || '' }
+      void updateBookingRow(code, schedCells).then(r => {
+        if (r === 'updated') return
+        console.error(`[producer-edit] sheet call/wrap/location write ${r} for ${code} — the Bookings row keeps the old values`)
+        logAudit({
+          actorEmail: session.email, action: 'booking.sheet_sync_failed', entityType: 'Booking',
+          entityId: booking.id, bookingCode: booking.bookingCode, changes: { result: r, fields: schedCells },
+        })
+      })
+    }
+
     if (hasChanges) {
       logAudit({
         actorEmail: session.email,

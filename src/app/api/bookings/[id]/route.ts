@@ -446,6 +446,25 @@ export async function PATCH(
       }).catch(e => console.error('updateBookingRow (gear) error:', e?.message || e))
     }
 
+    // Call Time / Wrap Time / Location (cols H/I/K) — PMDC reads this tab daily, and an edit
+    // of the time or place used to leave the row on the create-time values (38 of 411 rows
+    // since 1 Oct) while the room and calendar followed. Compared on locationName, not
+    // locationId: an off-site → off-site move keeps the same id. No sheetRowIndex gate (the
+    // row is found by col A, as the cancel write above). A miss is loud: the row is stale.
+    const schedCells = { callTime: booking.callTime, wrapTime: booking.estimatedWrap || '', location: booking.locationName || '' }
+    if (schedCells.callTime !== existing.callTime || schedCells.wrapTime !== (existing.estimatedWrap || '')
+        || schedCells.location !== (existing.locationName || '')) {
+      const code = booking.bookingCode || booking.id
+      void updateBookingRow(code, schedCells).then(r => {
+        if (r === 'updated') return
+        console.error(`[booking-patch] sheet call/wrap/location write ${r} for ${code} — the Bookings row keeps the old values`)
+        logAudit({
+          actorEmail: session.email, action: 'booking.sheet_sync_failed', entityType: 'Booking',
+          entityId: booking.id, bookingCode: booking.bookingCode, changes: { result: r, fields: schedCells },
+        })
+      })
+    }
+
     // Re-sync OT if scheduling fields changed and booking is active
     if (
       booking.status !== 'CANCELLED' && (

@@ -82,6 +82,11 @@ const COL = {
   program: 5,
   shootDate: 6,
   shootEndDate: 7,
+  // Call Time (H) / Wrap Time (I) / Location (K) — an edit of the time or place left the
+  // row on the create-time values (38 of 411 rows since 1 Oct) while PMDC reads this tab daily.
+  callTime: 8,
+  wrapTime: 9,
+  location: 11,
   episodeIds: 17,
   assignedEmails: 21,
   status: 22,
@@ -486,6 +491,10 @@ export async function updateBookingRow(bookingCode: string, fields: Partial<{
   /** v1.109 — rewrite col F/G (Shoot Date / Shoot End Date), "YYYY-MM-DD". */
   shootDate: string
   shootEndDate: string
+  /** Cols H/I/K — Call Time "HH:MM", Wrap Time "HH:MM" or '', Location as stored (locationName). */
+  callTime: string
+  wrapTime: string
+  location: string
   assignedEmails: string
   status: string
   calendarEventId: string
