@@ -19,6 +19,7 @@ let mails: any[] = []
 let failFor: Set<string> = new Set()
 let emailConfigured = true
 let mergeStarted = 0
+let alerts: { key: string; subject: string; text: string }[] = []
 
 mock.module('../db', {
   namedExports: {
@@ -65,6 +66,14 @@ mock.module('../footage-ready', {
   },
 })
 mock.module('../ingest', { namedExports: { CARD_PREFIX: 'CARD_' } })
+mock.module('../ops-alert', {
+  namedExports: {
+    alertOps: async (key: string, subject: string, text: string) => {
+      alerts.push({ key, subject, text })
+      return { attempted: true, delivered: true, discord: false, lark: false, email: true }
+    },
+  },
+})
 mock.module('../booking-merge', {
   namedExports: {
     BOOKING_MERGE_SELECT: { id: true },
@@ -99,6 +108,7 @@ beforeEach(() => {
     outlet: { code: 'TSS', name: 'TSS' }, program: { name: 'TSS', code: 'TSS' }, episodes: [],
   }
   bookingUpdates = []; loans = []; audits = []; sent = []; mails = []; failFor = new Set(); emailConfigured = true; mergeStarted = 0
+  alerts = []
 })
 
 test('notify-ready: every send fails → 502, readyNotifiedAt NOT stamped, no "notified_ready" row', async () => {
@@ -144,6 +154,75 @@ test('request-cancel: someone not on the booking can still file (prod) — audit
     await new Promise(r => setImmediate(r))
     assert.equal(mails.length, 1)
     assert.match(mails[0].text, /ไม่ได้อยู่ในรายชื่อของงานนี้/)
+    assert.deepEqual(a.changes.recipients, ['tui@x.co'])
+    assert.deepEqual(a.changes.failedRecipients, [])
+    assert.deepEqual(alerts, [], 'Tui got it — nothing for ops')
+  } finally { delete process.env.CANCEL_NOTIFY_EMAIL }
+})
+
+// 2026-11-23 — prod: CANCEL_NOTIFY_EMAIL empty + no MANAGER user ⇒ every request since 22 Oct mailed nobody, silently
+// (5 requests 18–19 Nov sat 69–100 h). Who receives it is Nat's call and unchanged; "nobody was told" is now loud.
+test('request-cancel: nobody to mail (no CANCEL_NOTIFY_EMAIL, no MANAGER) → ops alert + console.error, audit says so, reply unchanged', async (t) => {
+  delete process.env.CANCEL_NOTIFY_EMAIL
+  const errors = t.mock.method(console, 'error', () => {})
+  const res = await requestCancel(req('/api/bookings/b1/request-cancel', { reason: 'ลูกค้าเลื่อน' }), params)
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.ok, true)
+  assert.equal(body.booking.cancelRequestedBy, 'crew@x.co')
+  assert.deepEqual(Object.keys(body).sort(), ['booking', 'ok'], 'the user sees the same reply as before')
+  assert.equal(mails.length, 0)
+  assert.equal(alerts.length, 1)
+  assert.equal(alerts[0].key, 'cancel-request-unnotified')
+  assert.match(alerts[0].subject, /TSS-TSS-261108-01/)
+  assert.match(alerts[0].text, /CANCEL_NOTIFY_EMAIL ว่าง/)
+  assert.match(alerts[0].text, /เหตุผล: ลูกค้าเลื่อน/, 'the alert carries the request itself, so it can be acted on')
+  assert.ok(errors.mock.calls.some(c => /TSS-TSS-261108-01.*ไม่ถึงใครเลย/.test(String(c.arguments[0]))))
+  const a = audits.find(x => x.action === 'booking.cancel_requested')
+  assert.deepEqual(a.changes.recipients, [])
+  assert.deepEqual(a.changes.failedRecipients, [])
+})
+
+test('request-cancel: every recipient fails → ops alert naming them, audit row lists them as failed', async (t) => {
+  process.env.CANCEL_NOTIFY_EMAIL = 'tui@x.co, backup@x.co'
+  t.mock.method(console, 'error', () => {})
+  try {
+    failFor = new Set(['tui@x.co', 'backup@x.co'])
+    const res = await requestCancel(req('/api/bookings/b1/request-cancel', { reason: 'x' }), params)
+    assert.equal(res.status, 200)
+    assert.equal((await res.json()).ok, true)
+    assert.equal(alerts.length, 1)
+    assert.equal(alerts[0].key, 'cancel-request-unnotified')
+    assert.match(alerts[0].text, /ส่งไม่สำเร็จทุกคน: tui@x\.co, backup@x\.co/)
+    const a = audits.find(x => x.action === 'booking.cancel_requested')
+    assert.deepEqual(a.changes.recipients, ['tui@x.co', 'backup@x.co'])
+    assert.deepEqual(a.changes.failedRecipients, ['tui@x.co', 'backup@x.co'])
+  } finally { delete process.env.CANCEL_NOTIFY_EMAIL }
+})
+
+test('request-cancel: email provider not configured → counts as nobody told (alert), every recipient recorded as failed', async (t) => {
+  process.env.CANCEL_NOTIFY_EMAIL = 'tui@x.co'
+  t.mock.method(console, 'error', () => {})
+  t.mock.method(console, 'warn', () => {})
+  try {
+    emailConfigured = false
+    assert.equal((await requestCancel(req('/api/bookings/b1/request-cancel', { reason: 'x' }), params)).status, 200)
+    assert.equal(alerts.length, 1)
+    assert.match(alerts[0].text, /ยังไม่ได้ตั้งผู้ให้บริการอีเมล/)
+    const a = audits.find(x => x.action === 'booking.cancel_requested')
+    assert.deepEqual(a.changes.failedRecipients, ['tui@x.co'])
+  } finally { delete process.env.CANCEL_NOTIFY_EMAIL }
+})
+
+test('request-cancel: one of two reached → no ops alert (someone was told), audit names the one who missed it', async (t) => {
+  process.env.CANCEL_NOTIFY_EMAIL = 'tui@x.co,backup@x.co'
+  t.mock.method(console, 'error', () => {})
+  try {
+    failFor = new Set(['backup@x.co'])
+    assert.equal((await requestCancel(req('/api/bookings/b1/request-cancel', { reason: 'x' }), params)).status, 200)
+    assert.deepEqual(sent, ['tui@x.co'])
+    assert.deepEqual(alerts, [])
+    assert.deepEqual(audits.find(x => x.action === 'booking.cancel_requested').changes.failedRecipients, ['backup@x.co'])
   } finally { delete process.env.CANCEL_NOTIFY_EMAIL }
 })
 

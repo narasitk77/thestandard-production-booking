@@ -297,11 +297,20 @@ export async function notifyEmailDigest(subject: string, text: string): Promise<
  * message per address so recipients aren't exposed to each other in a flat To:.
  */
 export async function notifyEmail(to: string | string[], subject: string, text: string): Promise<boolean> {
+  return (await notifyEmailEach(to, subject, text)).sent.length > 0
+}
+
+/**
+ * notifyEmail, but says WHO: `sent` = addresses the provider accepted, `failed` = every address that did not get
+ * it — all of them when no email provider is configured, so a caller that records `failed` never writes an empty
+ * list for a mail that never left (class 1). Empty input → both empty. Never throws.
+ */
+export async function notifyEmailEach(to: string | string[], subject: string, text: string): Promise<{ sent: string[]; failed: string[] }> {
   const list = (Array.isArray(to) ? to : [to]).map(s => s.trim()).filter(Boolean)
-  if (!list.length) return false
+  if (!list.length) return { sent: [], failed: [] }
   if (!isEmailConfigured()) {
     console.warn('[notify] email skipped — no non-interactive email provider configured (SMTP/Resend/SendGrid).')
-    return false
+    return { sent: [], failed: list }
   }
   const results = await Promise.allSettled(list.map(addr => sendEmail({ to: [addr], subject, text })))
   // sendEmail THROWS on terminal failure (it never resolves a failure value),
@@ -312,7 +321,10 @@ export async function notifyEmail(to: string | string[], subject: string, text: 
       console.error('[notify] email to', list[i], 'failed:', (r.reason as any)?.message || r.reason)
     }
   })
-  return results.some(r => r.status === 'fulfilled')
+  return {
+    sent: list.filter((_, i) => results[i].status === 'fulfilled'),
+    failed: list.filter((_, i) => results[i].status === 'rejected'),
+  }
 }
 
 /**

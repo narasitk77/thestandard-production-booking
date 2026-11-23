@@ -4,7 +4,9 @@ import { getSession } from '@/lib/session'
 import { canViewBooking } from '@/lib/booking-access'
 import { isMyBooking } from '@/lib/my-bookings-scope'
 import { logAudit } from '@/lib/audit'
-import { sendEmail, isEmailConfigured } from '@/lib/email'
+import { isEmailConfigured } from '@/lib/email'
+import { notifyEmailEach } from '@/lib/notify'
+import { alertOps } from '@/lib/ops-alert'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +22,7 @@ async function notifyEmails(): Promise<string[]> {
  * POST /api/bookings/[id]/request-cancel  { reason }
  * Someone asks to cancel — this does NOT cancel the booking, it flags it
  * (cancelRequestedAt) so staff/Tui review it in the "ขอยกเลิก" tab. Emails the
- * notify list. Reason is required.
+ * notify list; a request that mailed nobody raises an ops alert. Reason is required.
  *
  * Who may file: any signed-in user (canViewBooking — prod behaviour since v1.152).
  * Limiting it to people on the booking is Nat's decision, not made yet. Until then
@@ -60,29 +62,47 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const previous = booking.cancelRequestedAt
       ? { reason: booking.cancelReason, by: booking.cancelRequestedBy, at: booking.cancelRequestedAt }
       : null
+
+    // Notify Tui / managers — never blocks the request, but never silent either.
+    // 2026-11-23: on prod CANCEL_NOTIFY_EMAIL was empty and there is no MANAGER user, so every request since
+    // (at least) 22 Oct mailed nobody, with no log line — `if (to.length)` skipped quietly and allSettled threw the
+    // results away. Who receives it is unchanged (Nat's decision); what changed is that "nobody was told" is now
+    // an ops alert, and the audit row says who was mailed (recipients) and who was not (failedRecipients).
+    const code = booking.bookingCode || booking.id
+    const date = booking.shootDate ? new Date(booking.shootDate).toISOString().slice(0, 10) : '—'
+    const link = process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL.replace(/\/$/, '')}/admin?cancel=${booking.id}` : ''
+    const subject = `[ขอยกเลิกงาน] ${code} — ${booking.outlet.code} ${booking.program.name}`
+    const who = onBooking ? '' : `\n⚠️ ผู้ขอไม่ได้อยู่ในรายชื่อของงานนี้ (ไม่ใช่ผู้จอง / Producer / Co-Producer / ทีมที่ได้รับมอบหมาย) — ตรวจกับ Producer ก่อนยกเลิกจริง\n`
+    const replaced = previous ? `\n(แทนคำขอเดิมของ ${previous.by || '—'}: ${previous.reason || '—'})\n` : ''
+    const text = `${session.email} ขอยกเลิกงาน\n${who}${replaced}\nงาน: ${code} (${booking.outlet.name} · ${booking.program.name})\nวันถ่าย: ${date} ${booking.callTime}\nProducer: ${booking.producer}\nสถานะปัจจุบัน: ${booking.status}\n\nเหตุผล: ${reason}\n${link ? `\nเปิดดู: ${link}` : ''}`
+    let to: string[] = []
+    let mail: { sent: string[]; failed: string[] } = { sent: [], failed: [] }
+    let why = ''
+    try {
+      to = await notifyEmails()
+      // one message per recipient — don't expose the manager list in a flat To:
+      mail = await notifyEmailEach(to, subject, text)
+    } catch (e: any) {
+      why = `หาผู้รับไม่ได้: ${e?.message || e}`
+    }
+    if (!mail.sent.length) {
+      why ||= !to.length ? 'ไม่มีผู้รับ — CANCEL_NOTIFY_EMAIL ว่าง และไม่มีผู้ใช้ role MANAGER ที่ active'
+        : !isEmailConfigured() ? 'ยังไม่ได้ตั้งผู้ให้บริการอีเมล (SMTP/Resend/SendGrid)'
+        : `ส่งไม่สำเร็จทุกคน: ${mail.failed.join(', ')}`
+      console.error(`[request-cancel] ${code}: เมลแจ้งขอยกเลิกไม่ถึงใครเลย — ${why}`)
+      await alertOps('cancel-request-unnotified', `คำขอยกเลิกงานไม่ถึงผู้ประสานงาน — ${code}`,
+        `${code}: เมลแจ้ง "ขอยกเลิกงาน" ไม่ถึงใครเลย — ${why}\n`
+        + 'คำขอถูกบันทึกแล้วและอยู่ในแท็บ "ขอยกเลิก" ที่ /admin แต่ไม่มีใครได้เมล — ต้องมีคนเปิดดูเอง'
+        + ' (เตือนนี้ไม่ซ้ำภายใน 6 ชม. — คำขอถัดไปในช่วงนั้นดูได้ในแท็บเดียวกัน)\n\n' + text)
+    }
     logAudit({
       actorEmail: session.email, action: 'booking.cancel_requested', entityType: 'Booking', entityId: booking.id,
       bookingCode: booking.bookingCode,
-      changes: { reason, requestedBy: session.email, onBooking, ...(previous ? { replaced: previous } : {}) },
+      changes: {
+        reason, requestedBy: session.email, onBooking, ...(previous ? { replaced: previous } : {}),
+        recipients: to, failedRecipients: mail.failed,
+      },
     })
-
-    // Notify Tui / managers — best-effort, never block the request.
-    try {
-      if (isEmailConfigured()) {
-        const to = await notifyEmails()
-        if (to.length) {
-          const code = booking.bookingCode || booking.id
-          const date = booking.shootDate ? new Date(booking.shootDate).toISOString().slice(0, 10) : '—'
-          const link = process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL.replace(/\/$/, '')}/admin?cancel=${booking.id}` : ''
-          const subject = `[ขอยกเลิกงาน] ${code} — ${booking.outlet.code} ${booking.program.name}`
-          const who = onBooking ? '' : `\n⚠️ ผู้ขอไม่ได้อยู่ในรายชื่อของงานนี้ (ไม่ใช่ผู้จอง / Producer / Co-Producer / ทีมที่ได้รับมอบหมาย) — ตรวจกับ Producer ก่อนยกเลิกจริง\n`
-          const replaced = previous ? `\n(แทนคำขอเดิมของ ${previous.by || '—'}: ${previous.reason || '—'})\n` : ''
-          const text = `${session.email} ขอยกเลิกงาน\n${who}${replaced}\nงาน: ${code} (${booking.outlet.name} · ${booking.program.name})\nวันถ่าย: ${date} ${booking.callTime}\nProducer: ${booking.producer}\nสถานะปัจจุบัน: ${booking.status}\n\nเหตุผล: ${reason}\n${link ? `\nเปิดดู: ${link}` : ''}`
-          // one message per recipient — don't expose the manager list in a flat To:
-          await Promise.allSettled(to.map(addr => sendEmail({ to: [addr], subject, text })))
-        }
-      }
-    } catch (e) { console.error('request-cancel: email failed (continuing):', e) }
 
     return NextResponse.json({ ok: true, booking: updated })
   } catch (e: any) {
