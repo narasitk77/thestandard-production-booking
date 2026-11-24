@@ -4369,3 +4369,9 @@ problem and not a deployment problem.
 - TSS-SCI-261209-01: `locationId` ยังเป็น null จากก่อน v1.291 (กฎตัด "(TSD)" ใช้ตอนบันทึกใบเท่านั้น) → alert 18:15 ยังเขียนว่าชื่อไม่ตรง · ตั้ง `tsd-studio-2` + audit
   `booking.location_id_backfilled` (18:38) · `location-backfill?dryRun=1` willSet 0 = ไม่มีใบอื่นค้างแบบนี้ · reconciler จะลอง Studio 2 เอง (เต็ม = CONFLICT ลองใหม่ทุก 6 ชม.)
 - รอตัดสิน: ส่งแจ้งฟุตเทจรายใบ · BK-0404 War Room 26 พ.ย. ค้างจากใบยกเลิก · TSS-SCI-261209-01 สตูดิโอเต็ม 9 ธ.ค. · CANCEL_NOTIFY_EMAIL · webhook ops · ไล่ QU 20 ใบ · ความปลอดภัย
+
+## 2026-11-24 07:39 — ส่งแจ้ง Footage พร้อม 3 ใบที่หลุดหน้าต่าง (นัท "go")
+- dry-run `footage-ready/run?dryRun=1&codes=KND-TMH-261117-01,WLT-NGI-261116-01,TSS-TSL-261019-01` → notified 3 · error 0 → รันจริง notified 3 · error 0 ·
+  audit `booking.auto_notified_ready` 3 แถว `emailError: null` · KND-TMH nasParked: ไฟล์ค้าง NAS 100 ไฟล์อยู่บน Drive ครบ (ชื่อ+ขนาด)
+- ไม่ส่ง: NWS-GLF-261117-01 (FINAL) · POP-7TG-261116-01 / LIF-ECO-261118-01 ยังติด MEDIAPRO
+- TSS-SCI-261209-01 หลังตั้ง locationId: reconciler ลอง Studio 2 แล้ว 19:14 / 01:14 / 07:14 = conflict ("ห้องนี้ถูกจองในช่วงเวลาดังกล่าวแล้ว") · ลองต่อทุก 6 ชม.
